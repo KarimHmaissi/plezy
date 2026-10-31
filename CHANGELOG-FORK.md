@@ -19,7 +19,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 
 ## 2026-10-31
 
-### Trakt Lists in Explore — `COMMIT`
+### Trakt Lists in Explore — `4061ed3`
 - Explore's source selector gains **Trakt Lists** next to Trakt and Plex.
 - Top rows are live Trakt charts: **Box Office**, **Most Watched Movies /
   Shows This Week**, **Most Anticipated Movies / Shows**.
