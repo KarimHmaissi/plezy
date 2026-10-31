@@ -6,6 +6,34 @@
 #include "mpv/display_mode_manager.h"
 #include "utils.h"
 
+#include <string>
+
+namespace {
+
+// The NVIDIA SHIELD Remote (VID 0955 / PID 7217) pairs over Bluetooth as a bare
+// 16-button HID gamepad. SDL ships no mapping for it, so universal_gamepad never
+// reports it and the remote does nothing. SDL numbers its buttons in reverse
+// bit order; indices below were captured from SDL itself. Volume (b7/b6) stays
+// unmapped. On Android TV the remote sends native D-pad keys, so this is
+// Windows-only. Prepended: SDL lets later lines replace earlier ones for the
+// same GUID, so a user-supplied SDL_GAMECONTROLLERCONFIG still wins.
+void RegisterShieldRemoteGamepadMapping() {
+  constexpr wchar_t kVar[] = L"SDL_GAMECONTROLLERCONFIG";
+  std::wstring config =
+      L"03000000550900001772000000000000,NVIDIA SHIELD Remote,"
+      L"a:b8,b:b15,guide:b14,start:b5,dpup:b12,dpdown:b11,dpleft:b10,dpright:b9,"
+      L"platform:Windows,";
+  const DWORD len = ::GetEnvironmentVariableW(kVar, nullptr, 0);
+  if (len > 0) {
+    std::wstring existing(len - 1, L'\0');
+    ::GetEnvironmentVariableW(kVar, existing.data(), len);
+    config += L"\n" + existing;
+  }
+  ::SetEnvironmentVariableW(kVar, config.c_str());
+}
+
+}  // namespace
+
 int APIENTRY
 wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t* command_line, _In_ int show_command) {
   // Plezy requires the bundled flutter-plezy engine, which presents the Flutter
@@ -15,6 +43,7 @@ wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t* command
   // hack, and min/max animations are native. Must be set before the engine is
   // created. (On a stock engine the flag is a no-op and compositing breaks.)
   ::SetEnvironmentVariableW(L"FLUTTER_WINDOWS_DCOMP", L"1");
+  RegisterShieldRemoteGamepadMapping();
 
   HANDLE mutex = CreateMutex(nullptr, TRUE, L"com.edde746.Plezy.SingleInstance");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
