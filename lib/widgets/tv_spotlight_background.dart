@@ -34,6 +34,10 @@ class TvSpotlightBackground extends StatelessWidget {
   final String? Function(String? artworkPath)? localArtworkPathResolver;
   final bool allowNetwork;
 
+  /// A short info strip for when an expanded rail takes most of the screen:
+  /// the summary is cut to two lines and the block glides to its new bounds.
+  final bool condensed;
+
   /// Optional caller-owned fact appended to the existing metadata line.
   final Widget? metadataTrailing;
 
@@ -49,6 +53,7 @@ class TvSpotlightBackground extends StatelessWidget {
     this.showInfo = true,
     this.localArtworkPathResolver,
     this.allowNetwork = true,
+    this.condensed = false,
     this.metadataTrailing,
   });
 
@@ -101,7 +106,9 @@ class TvSpotlightBackground extends StatelessWidget {
               ),
             ),
             if (media != null && showInfo)
-              Positioned(
+              AnimatedPositioned(
+                duration: DevicePerformance.reducedDuration(const Duration(milliseconds: 280)),
+                curve: Curves.easeOutCubic,
                 left: contentLeft ?? TvLayoutConstants.horizontalInset,
                 right: MediaQuery.sizeOf(context).width * 0.43,
                 top: contentTop,
@@ -203,7 +210,7 @@ class TvSpotlightBackground extends StatelessWidget {
           SizedBox(height: _sectionGap(scale)),
           Text(
             summary,
-            maxLines: compact ? 3 : 4,
+            maxLines: condensed ? 2 : (compact ? 3 : 4),
             overflow: .ellipsis,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colorScheme.onSurface.withValues(alpha: 0.78),

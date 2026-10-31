@@ -402,6 +402,14 @@ class TvBrowseRail extends StatefulWidget {
   /// itself, so sidebar flips never rebuild the rail — only the bleed layer.
   final double? backgroundBleedLeft;
 
+  /// When set, the rail grows up to this distance from the top of the screen
+  /// once focus leaves the first hub, so several rows show at once beneath a
+  /// condensed spotlight. Null keeps the single-row viewport.
+  final double? expandedTop;
+
+  /// Reports when the rail enters or leaves the [expandedTop] layout.
+  final ValueChanged<bool>? onExpandedChanged;
+
   const TvBrowseRail({
     super.key,
     required this.hubs,
@@ -432,6 +440,8 @@ class TvBrowseRail extends StatefulWidget {
     this.widePosterScaleForHub,
     this.showTitleImpliedForHub,
     this.backgroundBleedLeft,
+    this.expandedTop,
+    this.onExpandedChanged,
   });
 
   @override
@@ -766,6 +776,26 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
     final hub = _activeHub;
     if (hub == null) return;
     widget.onActiveHubChanged?.call(hub, _hubIndex);
+    _syncExpanded();
+  }
+
+  bool _expanded = false;
+
+  /// Card size in the expanded layout, relative to the single-row layout;
+  /// 0.82 shows about two and a half rows on a 16:9 TV.
+  static const _expandedPosterScale = 0.82;
+
+  bool get _wantsExpanded => widget.expandedTop != null && _hubIndex > 0;
+
+  void _syncExpanded() {
+    final expanded = _wantsExpanded;
+    if (expanded == _expanded) return;
+    setState(() => _expanded = expanded);
+    widget.onExpandedChanged?.call(expanded);
+    // Section heights and card widths change with the layout; re-align once
+    // the new offsets are built rather than finishing a glide to stale ones.
+    _scrollActiveHubToTop();
+    _scrollToItemAfterLayout(animate: false);
   }
 
   bool _selectInitialHubIfPossible() {
@@ -1256,8 +1286,10 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
           final fullCardLayout = svc.read(SettingsService.tvFullCardLayout);
           final gridSpacing = svc.read(SettingsService.gridSpacing);
           final modes = [for (final hub in widget.hubs) widget.episodePosterModeForHub?.call(hub) ?? episodePosterMode];
+          final expandedScale = _expanded ? _expandedPosterScale : 1.0;
           final wideScales = [
-            for (final hub in widget.hubs) widget.widePosterScaleForHub?.call(hub) ?? widget.widePosterScale,
+            for (final hub in widget.hubs)
+              (widget.widePosterScaleForHub?.call(hub) ?? widget.widePosterScale) * expandedScale,
           ];
           final metricsByHub = [
             for (var i = 0; i < widget.hubs.length; i++)
@@ -1269,7 +1301,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
                 scale: scale,
                 fullCardLayout: fullCardLayout,
                 gridSpacing: gridSpacing,
-                tallPosterScale: widget.tallPosterScale,
+                tallPosterScale: widget.tallPosterScale * expandedScale,
                 widePosterScale: wideScales[i],
                 hasLeading: _hasLeadingFor(widget.hubs[i]),
               ),
@@ -1291,12 +1323,27 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
           for (final height in sectionHeights) {
             if (height > viewportSectionHeight) viewportSectionHeight = height;
           }
-          final viewportHeight = TvBrowseRailLayout.viewportHeightFor(
+          final singleRowViewportHeight = TvBrowseRailLayout.viewportHeightFor(
             hubCount: widget.hubs.length,
             scale: scale,
             sectionHeight: viewportSectionHeight,
           );
-          final bottomPadding = (viewportHeight - sectionHeights.last).clamp(0.0, double.infinity).toDouble();
+          final expandedTop = widget.expandedTop;
+          final viewportHeight = _expanded && expandedTop != null
+              ? math.max(
+                  singleRowViewportHeight,
+                  MediaQuery.sizeOf(context).height -
+                      expandedTop -
+                      TvBrowseRailLayout.railTopPaddingForScale(scale) -
+                      TvBrowseRailLayout.railBottomPaddingForScale(scale),
+                )
+              : singleRowViewportHeight;
+          // Single-row: pad so even the last hub can scroll to the top. Expanded:
+          // stop at the content end so the final rows fill the viewport with the
+          // ones above them instead of leaving blank space below.
+          final bottomPadding = _expanded
+              ? 0.0
+              : (viewportHeight - sectionHeights.last).clamp(0.0, double.infinity).toDouble();
           _sectionMaxScrollExtent = (nextOffset + bottomPadding - viewportHeight)
               .clamp(0.0, double.infinity)
               .toDouble();

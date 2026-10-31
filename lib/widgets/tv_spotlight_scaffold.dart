@@ -70,6 +70,7 @@ class TvSpotlightScaffold extends StatelessWidget {
     required this.resolveClient,
     required this.foreground,
     this.hideSpoilers,
+    this.condensedListenable,
   });
 
   final List<MediaHub> hubs;
@@ -79,8 +80,30 @@ class TvSpotlightScaffold extends StatelessWidget {
   final Widget foreground;
   final bool? hideSpoilers;
 
+  /// While true, the spotlight info shrinks to a strip under the toolbar so an
+  /// expanded rail (see [TvBrowseRail.expandedTop] and [condensedRailTopFor])
+  /// can show several rows below it.
+  final ValueListenable<bool>? condensedListenable;
+
+  static double _spotlightTopFor(Size size) {
+    final scale = TvLayoutConstants.scaleForSize(size);
+    return (size.height * 0.075).clamp(64.0 * scale, 120.0 * scale).toDouble();
+  }
+
+  /// Where an expanded rail starts: just below the condensed spotlight strip.
+  static double condensedRailTopFor(Size size) => _spotlightTopFor(size) + (size.height * 0.2);
+
   @override
   Widget build(BuildContext context) {
+    final condensed = condensedListenable;
+    if (condensed == null) return _build(context, condensed: false);
+    return ValueListenableBuilder<bool>(
+      valueListenable: condensed,
+      builder: (context, isCondensed, _) => _build(context, condensed: isCondensed),
+    );
+  }
+
+  Widget _build(BuildContext context, {required bool condensed}) {
     final size = MediaQuery.sizeOf(context);
     final settings = SettingsService.instance;
     final scale = TvLayoutConstants.scaleForSize(size);
@@ -98,14 +121,18 @@ class TvSpotlightScaffold extends StatelessWidget {
             tallPosterScale: TvBrowseRailLayout.compactTallPosterScale,
             widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
           );
-    final spotlightTop = (size.height * 0.075).clamp(64.0 * scale, 120.0 * scale).toDouble();
+    final spotlightTop = _spotlightTopFor(size);
     final minimumSpotlightBottom = railHeight + (8 * scale);
     final baseSpotlightBottom = (size.height * 0.48).clamp(160.0, 820.0).toDouble();
     final desiredSpotlightBottom = minimumSpotlightBottom > baseSpotlightBottom
         ? minimumSpotlightBottom
         : baseSpotlightBottom;
     final maxSpotlightBottom = (size.height - spotlightTop - (96 * scale)).clamp(0.0, double.infinity).toDouble();
-    final spotlightBottom = desiredSpotlightBottom > maxSpotlightBottom ? maxSpotlightBottom : desiredSpotlightBottom;
+    final spotlightBottom = condensed
+        ? size.height - condensedRailTopFor(size) + (8 * scale)
+        : desiredSpotlightBottom > maxSpotlightBottom
+        ? maxSpotlightBottom
+        : desiredSpotlightBottom;
     final spotlightLeft = (24 * scale).clamp(18.0, 40.0).toDouble();
 
     return Material(
@@ -132,6 +159,7 @@ class TvSpotlightScaffold extends StatelessWidget {
                         contentBottom: spotlightBottom,
                         contentLeft: spotlightLeft + foregroundLeft,
                         targetWidthPx: (size.width * MediaQuery.devicePixelRatioOf(context)).ceil(),
+                        condensed: condensed,
                       );
                     },
                   ),
@@ -157,6 +185,7 @@ class _CatalogSpotlightBackground extends StatefulWidget {
     required this.contentBottom,
     required this.contentLeft,
     required this.targetWidthPx,
+    this.condensed = false,
   });
 
   final MediaItem? item;
@@ -166,6 +195,7 @@ class _CatalogSpotlightBackground extends StatefulWidget {
   final double contentBottom;
   final double contentLeft;
   final int targetWidthPx;
+  final bool condensed;
 
   @override
   State<_CatalogSpotlightBackground> createState() => _CatalogSpotlightBackgroundState();
@@ -259,6 +289,7 @@ class _CatalogSpotlightBackgroundState extends State<_CatalogSpotlightBackground
       contentBottom: widget.contentBottom,
       contentLeft: widget.contentLeft,
       compact: true,
+      condensed: widget.condensed,
       metadataTrailing: _buildNextEpisodeMetadata(context),
     );
     if (accentColor == null) return background;

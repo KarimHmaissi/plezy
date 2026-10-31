@@ -103,6 +103,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   bool _isAutoScrollPaused = false;
   bool _heroFocusPausedAutoScroll = false;
   final TvSpotlightController _spotlight = TvSpotlightController();
+
+  /// TV: true once focus leaves the first hub, so the rail shows several rows
+  /// under a condensed spotlight instead of one row under the full hero.
+  final ValueNotifier<bool> _tvRowsExpanded = ValueNotifier(false);
   bool _isTabVisible = true;
 
   bool _initialLoadComplete = false;
@@ -468,6 +472,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();
     _spotlight.dispose();
+    _tvRowsExpanded.dispose();
     _indicatorProgress.dispose();
     _heroIndex.dispose();
     _heroController.dispose();
@@ -1075,10 +1080,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // geometry) hand Element.updateChild the identical widget instance and the
   // whole rail subtree is skipped. Rebuilt only when its actual inputs change.
   TvBrowseRail? _tvBrowseRailWidget;
-  (List<MediaHub>, bool)? _tvBrowseRailWidgetKey;
+  (List<MediaHub>, bool, Size)? _tvBrowseRailWidgetKey;
 
   Widget _cachedTvBrowseRail(List<MediaHub> browseHubs, {required bool showServerName}) {
-    final key = (browseHubs, showServerName);
+    final key = (browseHubs, showServerName, MediaQuery.sizeOf(context));
     if (_tvBrowseRailWidget != null && key == _tvBrowseRailWidgetKey) return _tvBrowseRailWidget!;
     _tvBrowseRailWidgetKey = key;
     return _tvBrowseRailWidget = TvBrowseRail(
@@ -1100,6 +1105,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       onNavigateToSidebar: _navigateToSidebar,
       tallPosterScale: TvBrowseRailLayout.compactTallPosterScale,
       widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
+      expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
+      onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
     );
   }
 
@@ -1131,6 +1138,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       resolveSpotlight: () => _spotlight.resolve(browseHubs),
       resolveClient: _getMediaClientForItem,
       hideSpoilers: hideSpoilers,
+      condensedListenable: _tvRowsExpanded,
       foreground: Stack(
         fit: StackFit.expand,
         clipBehavior: Clip.none,

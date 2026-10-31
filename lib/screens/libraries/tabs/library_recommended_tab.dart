@@ -53,6 +53,7 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryR
   final Map<String, GlobalKey<HubSectionState>> _hubKeysByIdentity = {};
   final _tvBrowseRailKey = GlobalKey<TvBrowseRailState>();
   final TvSpotlightController _spotlight = TvSpotlightController();
+  final ValueNotifier<bool> _tvRowsExpanded = ValueNotifier(false);
   HubFocusMemory _hubFocusMemory = HubFocusMemory();
 
   void _setSpotlightItem(MediaItem item) => _spotlight.select(item);
@@ -69,6 +70,7 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryR
   @override
   void dispose() {
     _spotlight.dispose();
+    _tvRowsExpanded.dispose();
     super.dispose();
   }
 
@@ -332,6 +334,7 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryR
       resolveSpotlight: () => _spotlight.resolve(tvHubs),
       resolveClient: (spotlight) =>
           context.tryGetMediaClientForServer(serverIdOrNull(spotlight?.serverId ?? widget.library.serverId)),
+      condensedListenable: _tvRowsExpanded,
       foreground: tvHubs.isEmpty
           ? const SizedBox.shrink()
           : Positioned(
@@ -353,6 +356,8 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryR
                 onBack: widget.onBack,
                 tallPosterScale: TvBrowseRailLayout.compactTallPosterScale,
                 widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
+                expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
+                onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
               ),
             ),
     );

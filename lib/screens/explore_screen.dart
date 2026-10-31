@@ -74,6 +74,7 @@ class ExploreScreenState extends State<ExploreScreen>
   final _tvBrowseRailKey = GlobalKey<TvBrowseRailState>();
   final _hubFocusMemory = HubFocusMemory();
   final TvSpotlightController _spotlight = TvSpotlightController();
+  final ValueNotifier<bool> _tvRowsExpanded = ValueNotifier(false);
 
   @override
   String get searchDebugLabel => 'ExploreSearch';
@@ -144,6 +145,7 @@ class ExploreScreenState extends State<ExploreScreen>
   void dispose() {
     _sources.removeListener(_onActiveSourceChanged);
     _spotlight.dispose();
+    _tvRowsExpanded.dispose();
     super.dispose();
   }
 
@@ -505,6 +507,7 @@ class ExploreScreenState extends State<ExploreScreen>
       spotlightListenable: _spotlight,
       resolveSpotlight: () => _spotlight.resolve(tvHubs),
       resolveClient: (spotlight) => context.tryGetMediaClientForServer(serverIdOrNull(spotlight?.serverId)),
+      condensedListenable: _tvRowsExpanded,
       foreground: Stack(
         fit: StackFit.expand,
         clipBehavior: Clip.none,
@@ -546,6 +549,8 @@ class ExploreScreenState extends State<ExploreScreen>
                 onBack: _navigateToSidebar,
                 tallPosterScale: TvBrowseRailLayout.compactTallPosterScale,
                 widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
+                expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
+                onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
               ),
             ),
           TvToolbarOverlay(child: _buildTvToolbar(sources)),

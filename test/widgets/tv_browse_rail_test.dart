@@ -1236,6 +1236,68 @@ void main() {
     expect(secondArtworkDim.value, 0);
   });
 
+  testWidgets('expandedTop grows the rail past the first hub and shrinks it back', (tester) async {
+    final serverManager = MultiServerManager();
+    MediaHub hub(int i) => MediaHub(
+      id: 'hub_$i',
+      title: 'Hub $i',
+      type: 'movie',
+      items: [testMediaItem(id: 'movie_$i', backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Movie $i')],
+      size: 1,
+    );
+    final expandedReports = <bool>[];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<MultiServerProvider>(
+        create: (_) => testMultiServerProvider(serverManager),
+        child: MaterialApp(
+          theme: monoTheme(MonoPalette.dark),
+          home: Scaffold(
+            body: Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: TvBrowseRail(
+                    focusMemory: focusMemory,
+                    hubs: [for (var i = 0; i < 4; i++) hub(i)],
+                    iconForHub: (_, _) => Icons.movie_rounded,
+                    expandedTop: 200,
+                    onExpandedChanged: expandedReports.add,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    tester.state<TvBrowseRailState>(find.byType(TvBrowseRail)).requestFocus();
+    await tester.pumpAndSettle();
+
+    double railHeight() => tester.getSize(find.byType(TvBrowseRail)).height;
+    final singleRowHeight = railHeight();
+    final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    expect(expandedReports, isEmpty);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+
+    expect(expandedReports, [true]);
+    expect(railHeight(), greaterThan(singleRowHeight));
+    expect(railHeight(), closeTo(screenHeight - 200, 0.5));
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
+
+    expect(expandedReports, [true, false]);
+    expect(railHeight(), singleRowHeight);
+  });
+
   testWidgets('selects preferred hub when hubs are inserted asynchronously', (tester) async {
     final activeHubIds = <String>[];
 
