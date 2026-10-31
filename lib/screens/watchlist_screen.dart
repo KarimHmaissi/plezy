@@ -62,6 +62,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
   /// burst before refetching.
   static const Duration _mutationRefreshDelay = Duration(seconds: 1);
 
+  /// A genre needs at least this many titles for its own shelf; smaller ones
+  /// fold into "Other Films" / "Other TV".
+  static const int _minGenreShelfSize = 6;
+
   late CatalogSourcesProvider _sources;
   CatalogSource? _source;
   WatchlistSplit _split = (films: const [], tv: const []);
@@ -172,7 +176,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
       );
       unawaited(cache.save());
       if (!mounted || generation != _generation) return;
-      setState(() => _genreGroups = groupWatchlistByGenre(split, (item) => genres[item]));
+      setState(
+        () => _genreGroups = groupWatchlistByGenre(split, (item) => genres[item], minGroupSize: _minGenreShelfSize),
+      );
     } catch (e) {
       appLogger.w('Watchlist: genre grouping failed', error: e);
     }

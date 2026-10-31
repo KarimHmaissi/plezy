@@ -81,6 +81,22 @@ void main() {
       expect(placed.toSet(), hasLength(items.length));
     });
 
+    test('with a minimum of 6, a 5-title genre folds into Other and a 6-title genre keeps its shelf', () {
+      final split = splitWatchlist([
+        for (var i = 0; i < 6; i++) _item('Action $i', MediaKind.movie, plex: 'a$i'),
+        for (var i = 0; i < 5; i++) _item('Horror $i', MediaKind.movie, plex: 'h$i'),
+        for (var i = 0; i < 5; i++) _item('Drama $i', MediaKind.show, plex: 'd$i'),
+      ]);
+      List<String>? byPrefix(CatalogItem item) => [item.title.split(' ').first];
+
+      final groups = groupWatchlistByGenre(split, byPrefix, minGroupSize: 6);
+
+      expect(
+        [for (final g in groups) '${g.films ? 'Films' : 'TV'} ${g.genre ?? 'Other'} (${g.items.length})'],
+        ['Films Action (6)', 'Films Other (5)', 'TV Other (5)'],
+      );
+    });
+
     test('ties are ordered alphabetically', () {
       final split = splitWatchlist([
         _item('Heat', MediaKind.movie, plex: 'h'),
