@@ -51,7 +51,7 @@ Details of each are in the dated entries below.
 
 ## 2026-10-31
 
-### Home builder — `HASH`
+### Home builder — `9b965fbc8`
 Replaces the first "Pin to Home" version below, after Karim's feedback.
 - **Home shows only the rows you add, in your order.** Existing pins carried
   over: Continue Watching, Pick back up, then the pinned rows. Server rows are
