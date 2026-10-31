@@ -2042,6 +2042,12 @@ class FormFactorScale extends StatelessWidget {
 
   static const double _appleTvScale = 2.0;
 
+  /// Logical height Android TV gives apps on the NVIDIA Shield: a 1080p UI at
+  /// xhdpi (2×), i.e. a 960×540 canvas at 16:9, upscaled to the TV. Desktop
+  /// builds in TV mode lay out on the same canvas so the PC previews what the
+  /// Shield actually draws instead of a denser, smaller-looking layout.
+  static const double shieldLogicalHeight = 540;
+
   @override
   Widget build(BuildContext context) {
     final child = this.child;
@@ -2051,6 +2057,12 @@ class FormFactorScale extends StatelessWidget {
     // behavior and overscan handling remain unchanged.
     if (PlatformDetector.isAppleTV()) {
       return _scaledSurface(child: child, scale: _appleTvScale, zeroInsets: true);
+    }
+    if (PlatformDetector.isDesktopOS() && PlatformDetector.isTV()) {
+      return LayoutBuilder(
+        builder: (context, constraints) =>
+            _scaledSurface(child: child, scale: constraints.maxHeight / shieldLogicalHeight, zeroInsets: true),
+      );
     }
     if (!PlatformDetector.isAutomotive()) return child;
 

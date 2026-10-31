@@ -121,6 +121,34 @@ void main() {
     expect(effectiveDevicePixelRatio, 0.75);
   });
 
+  testWidgets('desktop in TV mode lays out on the Shield canvas', (tester) async {
+    // The Apple TV override short-circuits isTVSync; clear it so force-TV counts.
+    TvDetectionService.debugSetAppleTVOverride(null);
+    await TvDetectionService.getInstance();
+    TvDetectionService.setForceTVSync(true);
+    addTearDown(() => TvDetectionService.setForceTVSync(false));
+    // A 4K screen at 250% Windows scaling: 1536x864 logical.
+    tester.view.physicalSize = const Size(3840, 2160);
+    tester.view.devicePixelRatio = 2.5;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var effectiveSize = Size.zero;
+    var effectiveDevicePixelRatio = 0.0;
+    await _pumpScaleHarness(
+      tester,
+      onMediaQuery: (data) {
+        effectiveSize = data.size;
+        effectiveDevicePixelRatio = data.devicePixelRatio;
+      },
+    );
+
+    expect(PlatformDetector.isDesktopOS(), isTrue);
+    expect(effectiveSize.height, closeTo(app.FormFactorScale.shieldLogicalHeight, 0.001));
+    expect(effectiveSize.width, closeTo(960, 0.001));
+    expect(effectiveDevicePixelRatio, closeTo(4.0, 0.001));
+  });
+
   testWidgets('automotive root keeps every route beside a side system bar', (tester) async {
     _configureCarViewport(tester);
     // A 72px car system bar on the left, as CarSystemUI's left bar provides it.
