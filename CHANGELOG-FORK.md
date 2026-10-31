@@ -1,0 +1,57 @@
+# Shield Experience — fork changelog
+
+Features and changes in [KarimHmaissi/plezy](https://github.com/KarimHmaissi/plezy)
+on top of upstream [edde746/plezy](https://github.com/edde746/plezy). The target
+is the NVIDIA Shield (Android TV); development happens on a Windows PC in TV
+mode. Newest first. Each entry lists its commit(s) on `dev`.
+
+## 2026-10-31
+
+### Comfort shows and Random episode — `a7bbf5a`
+- New **Comfort** tab (sofa icon, shown when Trakt is connected) listing the
+  shows on the user's private Trakt list "Comfort Shows" (`comfort-shows`;
+  reused if it exists, created otherwise).
+- **Random episode** gives every show in the mix an equal chance, then picks a
+  random episode from the user's Plex servers. It skips specials and avoids
+  episodes watched in the last 30 days (unless nothing else is left). Shows not
+  on any server are skipped.
+- Shows the pick first (Play / Pick again) by default; **Play immediately** in
+  Configure skips that (per device).
+- **Configure**: per-show in/out-of-the-mix switches, Add a show (Trakt
+  search), Remove. In/out state syncs across devices via one appended line in
+  the Trakt list's description (`[plezy:paused=trakt:…]`); other description
+  text is preserved.
+- Every TV show's detail page gets a dice **Random episode** button that plays
+  a random episode of that show immediately.
+
+### PC previews the Shield's real layout — `911f99b`
+- In TV mode on desktop, the app lays out on the Shield's 960×540 logical
+  canvas (Android TV 1080p at 2×) and scales up to fill the screen, so what the
+  PC shows matches the Shield. Android and the Shield build are unchanged.
+
+### Watchlist page — `4084400`, `65921eb`, `8c9f382`
+- New **Watchlist** tab (bookmark icon) showing the whole watchlist of the
+  active catalog source (Plex for this profile).
+- Grouped into genre rows: Films first, then TV, biggest genre first; each title
+  under its primary genre once. Genres with 5 or fewer titles fold into
+  "Other Films" / "Other TV".
+- Genres are looked up automatically for every title at load time (Plex's
+  watchlist listing omits them) and cached for 7 days; new titles always fetch.
+- Selecting a title opens its detail page with where it's available to play.
+
+### Netflix-style home rows — `0947a35`, `07e865e`
+- Below the first row, the hero shrinks to a slim info strip and several rows
+  show at once with slightly smaller cards (90%); the first row keeps the full
+  hero. Applies to Home, Explore and libraries' Recommended tab.
+- The background only switches after resting on a card for 0.4 s (no flashing
+  while scrolling), and in the multi-row view the artwork fades out below the
+  info strip.
+
+### Libraries at the bottom of the side nav — `75dc9b1`
+- A long library list no longer pushes Explore, Search, Settings and the rest
+  off screen; D-pad order matches.
+
+### NVIDIA Shield remote on Windows — `3566fe0`
+- The Shield remote, paired to the PC over Bluetooth, is registered as an SDL
+  gamepad (D-pad, OK, Back, Home, Play/Pause) so it navigates the app.
+  Windows-only.
