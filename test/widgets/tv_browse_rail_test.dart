@@ -1,4 +1,5 @@
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -831,6 +832,72 @@ void main() {
 
     // The newly focused hub's card still carries the overlay glow.
     expect(find.byType(CompositedTransformFollower), findsOneWidget);
+  });
+
+  testWidgets('a parked mouse does not pull focus when D-pad moves a new row under it', (tester) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(1280, 720);
+    addTearDown(() {
+      TvDetectionService.debugSetAppleTVOverride(null);
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+
+    final serverManager = MultiServerManager();
+    MediaHub hub(String prefix) => MediaHub(
+      id: 'hub_$prefix',
+      title: 'Hub $prefix',
+      type: 'movie',
+      items: [
+        for (var i = 0; i < 6; i++)
+          testMediaItem(id: '$prefix$i', backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Movie $prefix$i'),
+      ],
+      size: 6,
+    );
+    final focused = <String>[];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<MultiServerProvider>(
+        create: (_) => testMultiServerProvider(serverManager),
+        child: InputModeTracker(
+          child: MaterialApp(
+            theme: monoTheme(MonoPalette.dark),
+            home: Scaffold(
+              body: SizedBox(
+                width: 1280,
+                height: 720,
+                child: TvBrowseRail(
+                  focusMemory: focusMemory,
+                  hubs: [hub('a'), hub('b'), hub('c')],
+                  autofocus: true,
+                  iconForHub: (_, _) => Icons.movie_rounded,
+                  onFocusedItemChanged: (item) => focused.add(item.id),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Park the mouse over the fourth card of the first row, then drive the
+    // rail with the D-pad only.
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: tester.getCenter(find.byType(MediaCard).at(3)));
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    // Each new row starts at its first card, whatever slid under the pointer.
+    expect(focused.last, 'c0');
+    expect(focused, isNot(contains('b3')));
+    expect(focused, isNot(contains('c3')));
   });
 
   testWidgets('glow stays hidden while the rail animates an UP hub move, returns after settling', (tester) async {

@@ -51,6 +51,16 @@ Details of each are in the dated entries below.
 
 ## 2026-10-31
 
+### Fix: cursor jumping to the 4th card when changing rows — `HASH`
+- On the PC, the mouse pointer sits idle in the middle of the screen. When the
+  remote moved to a new row, that row slid under the pointer and Flutter
+  counted it as the mouse "entering" the card underneath (usually the 4th),
+  so focus jumped there and the row remembered it. Rows now only follow the
+  mouse while it's actually being moved; with the remote or arrow keys a new
+  row starts on its first card, and a row you've visited returns to where
+  you left it. Affected every rail (Home, Explore, libraries). The Shield has
+  no mouse, so it never happened there.
+
 ### Home builder — `9b965fbc8`
 Replaces the first "Pin to Home" version below, after Karim's feedback.
 - **Home shows only the rows you add, in your order.** Existing pins carried

@@ -34,6 +34,7 @@ import 'focus_builders.dart';
 import 'horizontal_scroll_with_arrows.dart';
 import 'listenable_selector.dart';
 import 'media_card.dart';
+import '../focus/input_mode_tracker.dart';
 import 'media_context_menu.dart';
 import 'optimized_media_image.dart';
 import 'rasterized_gradient.dart';
@@ -1050,6 +1051,10 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   }
 
   void _setHoveredItem(MediaHub hub, int index) {
+    // A row sliding under a mouse that hasn't moved also "enters" a card (a
+    // parked pointer on desktop would otherwise pull D-pad focus to whatever
+    // card lands under it). Follow the mouse only while it is in use.
+    if (InputModeTracker.currentMode == InputMode.keyboard) return;
     final active = _activeHub;
     if (active == null || _hubKey(active) != _hubKey(hub) || _itemAtSlot(hub, index) == null || _itemIndex == index) {
       return;
