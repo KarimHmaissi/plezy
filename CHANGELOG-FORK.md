@@ -21,9 +21,9 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 
 ### Smarter Continue Watching — `7bae2cf`
 - Home's Continue Watching splits in two: **Continue Watching** (touched in
-  the last 30 days) stays at the top, and **Pick back up** (older) sits further
-  down Home. Most recent first in both; Remove from Continue Watching works
-  in both.
+  the last 30 days) stays at the top, and **Pick back up** (older) sits
+  directly under it as the second row (hidden when empty). Most recent first
+  in both; Remove from Continue Watching works in both.
 - A show's age is when it was last watched; a new episode of a show you'd
   caught up on stays in the top row however long ago you last watched.
 - Accidental starts (under 3 minutes in) and films 90%+ watched are hidden

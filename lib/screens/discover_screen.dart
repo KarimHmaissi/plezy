@@ -197,10 +197,6 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   List<MediaHub>? _tvBrowseHubsCache;
   (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int)? _tvBrowseHubsCacheKey;
 
-  /// Where the "Pick back up" row sits among the backend hubs on TV: further
-  /// down Home, after this many of them.
-  static const int _pickBackUpAfterHubs = 2;
-
   List<MediaHub> get _tvBrowseHubs {
     final staleDays = context.settingsRead(SettingsService.continueWatchingStaleDays);
     final key = (_onDeck, _hubs, _hasMoreContinueWatching, t.discover.continueWatching, _comfortTitles, staleDays);
@@ -211,13 +207,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       staleAfter: Duration(days: staleDays),
       excludedShowTitles: _comfortTitles,
     );
-    final backendHubs = _hubs.where((hub) => hub.items.isNotEmpty).toList();
-    final insertAt = backendHubs.length < _pickBackUpAfterHubs ? backendHubs.length : _pickBackUpAfterHubs;
+    // Pick back up sits directly under Continue Watching, ahead of the
+    // backend hubs.
     final hubs = <MediaHub>[
       if (split.fresh.isNotEmpty) _continueWatchingHubFor(split.fresh),
-      ...backendHubs.take(insertAt),
       if (split.pickBackUp.isNotEmpty) _pickBackUpHubFor(split.pickBackUp),
-      ...backendHubs.skip(insertAt),
+      ..._hubs.where((hub) => hub.items.isNotEmpty),
     ];
     _tvBrowseHubsCache = hubs;
     _tvBrowseHubsCacheKey = key;
