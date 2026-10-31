@@ -782,8 +782,8 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   bool _expanded = false;
 
   /// Card size in the expanded layout, relative to the single-row layout;
-  /// 0.82 shows about two and a half rows on a 16:9 TV.
-  static const _expandedPosterScale = 0.82;
+  /// 0.9 shows about two rows plus the next row's title on a 16:9 TV.
+  static const _expandedPosterScale = 0.9;
 
   bool get _wantsExpanded => widget.expandedTop != null && _hubIndex > 0;
 

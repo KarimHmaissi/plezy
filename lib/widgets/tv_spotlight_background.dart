@@ -35,8 +35,13 @@ class TvSpotlightBackground extends StatelessWidget {
   final bool allowNetwork;
 
   /// A short info strip for when an expanded rail takes most of the screen:
-  /// the summary is cut to two lines and the block glides to its new bounds.
+  /// the summary is cut to two lines, the block glides to its new bounds, and
+  /// the artwork fades out below it so the rows sit on a calm background.
   final bool condensed;
+
+  /// Fraction of the screen height where the condensed artwork has fully
+  /// faded into the scaffold background.
+  static const condensedFadeEnd = 0.42;
 
   /// Optional caller-owned fact appended to the existing metadata line.
   final Widget? metadataTrailing;
@@ -104,6 +109,22 @@ class TvSpotlightBackground extends StatelessWidget {
                 colors: [Colors.black.withValues(alpha: 0.45), Colors.transparent, bgColor.withValues(alpha: 0.96)],
                 stops: const [0.0, 0.38, 1.0],
               ),
+            ),
+            AnimatedSwitcher(
+              duration: DevicePerformance.reducedDuration(const Duration(milliseconds: 280)),
+              layoutBuilder: (currentChild, previousChildren) =>
+                  Stack(fit: StackFit.expand, children: [...previousChildren, ?currentChild]),
+              child: condensed
+                  ? RasterizedGradient(
+                      key: const ValueKey('condensed_fade'),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, bgColor.withValues(alpha: 0.7), bgColor],
+                        stops: const [0.0, condensedFadeEnd * 0.6, condensedFadeEnd],
+                      ),
+                    )
+                  : const SizedBox.shrink(),
             ),
             if (media != null && showInfo)
               AnimatedPositioned(

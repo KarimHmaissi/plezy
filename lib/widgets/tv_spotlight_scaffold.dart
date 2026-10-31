@@ -16,7 +16,12 @@ import 'tv_browse_rail.dart';
 import 'tv_spotlight_background.dart';
 
 class TvSpotlightController extends ValueNotifier<MediaItem?> {
-  TvSpotlightController({Duration settleDelay = const Duration(milliseconds: 150)})
+  /// How long focus must rest on an item before the spotlight (artwork and
+  /// info) switches to it, so fast D-pad scrolling doesn't flash every
+  /// backdrop it passes.
+  static const defaultSettleDelay = Duration(milliseconds: 400);
+
+  TvSpotlightController({Duration settleDelay = defaultSettleDelay})
     : _settleDelay = settleDelay,
       _debouncer = Debouncer(settleDelay),
       super(null);
