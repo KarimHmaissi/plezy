@@ -19,7 +19,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 
 ## 2026-10-31
 
-### Smarter Continue Watching — `COMMIT`
+### Smarter Continue Watching — `7bae2cf`
 - Home's Continue Watching splits in two: **Continue Watching** (touched in
   the last 30 days) stays at the top, and **Pick back up** (older) sits further
   down Home. Most recent first in both; Remove from Continue Watching works
