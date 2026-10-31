@@ -25,6 +25,7 @@ import '../services/catalog/plex_catalog_source.dart';
 import '../services/catalog/seerr_catalog_source.dart';
 import '../services/catalog/simkl_catalog_source.dart';
 import '../services/catalog/trakt_catalog_source.dart';
+import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/trackers/future_coalescer.dart';
 import '../services/plex_discover_client.dart';
 import '../services/seerr/seerr_client.dart';
@@ -140,6 +141,7 @@ class CatalogSourcesProvider extends ChangeNotifier with DisposableChangeNotifie
 
   List<CatalogSource> get connectedSources => [
     ?_trakt.source,
+    ?_traktListsSource,
     ?_mal.source,
     ?_anilist.source,
     ?_simkl.source,
@@ -149,6 +151,17 @@ class CatalogSourcesProvider extends ChangeNotifier with DisposableChangeNotifie
   ];
 
   bool get hasAnySource => connectedSources.isNotEmpty;
+
+  /// Explore's "Trakt Lists" source, derived from (and sharing the client and
+  /// watchlist state of) the Trakt source. Cached per Trakt source so its
+  /// identity stays stable while Trakt stays connected.
+  TraktListsCatalogSource? _traktLists;
+  TraktListsCatalogSource? get _traktListsSource {
+    final trakt = _trakt.source;
+    if (trakt == null) return _traktLists = null;
+    if (!identical(_traktLists?.trakt, trakt)) _traktLists = TraktListsCatalogSource(trakt);
+    return _traktLists;
+  }
 
   /// The connected Seerr source, for the request surfaces (detail-screen
   /// Request action and sheet) that need Seerr's client beyond the

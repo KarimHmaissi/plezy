@@ -190,6 +190,71 @@ class TraktClient implements DisposableTrackerClient {
 
   Future<void> removeFromWatchlist(Map<String, dynamic> body) => _request('POST', '/sync/watchlist/remove', body: body);
 
+  /// `GET /movies/boxoffice`: this weekend's top 10, as `{revenue, movie}`.
+  Future<List<TraktCatalogEntry>> getBoxOffice() async {
+    final res = await _requestResponse('GET', '/movies/boxoffice?$_catalogExtended');
+    return _decodeEntries(res.body);
+  }
+
+  /// `GET /{type}/watched/{period}`: most watched (unique viewers), as
+  /// `{watcher_count, ..., movie|show}`.
+  Future<TrackerPage<TraktCatalogEntry>> getMostWatched(
+    TraktCatalogType type, {
+    String period = 'weekly',
+    int page = 1,
+    int limit = 25,
+  }) async {
+    final res = await _requestResponse(
+      'GET',
+      '/${type.name}/watched/$period?$_catalogExtended&page=$page&limit=$limit',
+    );
+    return TrackerPage.fromResponse(res, _decodeEntries(res.body));
+  }
+
+  /// `GET /{type}/anticipated`: most-listed upcoming titles, as
+  /// `{list_count, movie|show}`.
+  Future<TrackerPage<TraktCatalogEntry>> getAnticipated(TraktCatalogType type, {int page = 1, int limit = 25}) async {
+    final res = await _requestResponse('GET', '/${type.name}/anticipated?$_catalogExtended&page=$page&limit=$limit');
+    return TrackerPage.fromResponse(res, _decodeEntries(res.body));
+  }
+
+  /// Lists the user has liked, most recently liked first.
+  Future<List<TraktUserList>> getLikedLists({int limit = 100}) async {
+    final res = await _request('GET', '/users/likes/lists?limit=$limit');
+    return _decodeListWrappers(res);
+  }
+
+  /// Public lists by recent likes (`trending`) or all-time likes (`popular`).
+  Future<List<TraktUserList>> getPublicLists({required bool trending, int limit = 25}) async {
+    final res = await _request('GET', '/lists/${trending ? 'trending' : 'popular'}?limit=$limit');
+    return _decodeListWrappers(res);
+  }
+
+  /// Items on any list the user can see (their own, or anyone's public list),
+  /// in list order. [user] is the owner's slug (`me` for the signed-in user).
+  Future<TrackerPage<TraktCatalogEntry>> getListItems(String user, int listId, {int page = 1, int limit = 50}) async {
+    final res = await _requestResponse(
+      'GET',
+      '/users/${Uri.encodeComponent(user)}/lists/$listId/items?$_catalogExtended&page=$page&limit=$limit',
+    );
+    return TrackerPage.fromResponse(res, _decodeEntries(res.body));
+  }
+
+  Future<void> likeList(String user, int listId) =>
+      _request('POST', '/users/${Uri.encodeComponent(user)}/lists/$listId/like', allowStatuses: const {200, 201, 204});
+
+  Future<void> unlikeList(String user, int listId) =>
+      _request('DELETE', '/users/${Uri.encodeComponent(user)}/lists/$listId/like', allowStatuses: const {200, 204});
+
+  /// `{..., list: {...}}` wrappers (likes, trending, popular) to lists.
+  static List<TraktUserList> _decodeListWrappers(Object? raw) {
+    if (raw is! List) return const [];
+    return [
+      for (final entry in raw.whereType<Map<String, dynamic>>())
+        if (entry['list'] case final Map<String, dynamic> list) ?TraktUserList.fromJson(list),
+    ];
+  }
+
   /// The signed-in user's personal lists.
   Future<List<TraktUserList>> getMyLists() async {
     final res = await _request('GET', '/users/me/lists');

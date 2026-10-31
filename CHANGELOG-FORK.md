@@ -19,6 +19,19 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 
 ## 2026-10-31
 
+### Trakt Lists in Explore — `COMMIT`
+- Explore's source selector gains **Trakt Lists** next to Trakt and Plex.
+- Top rows are live Trakt charts: **Box Office**, **Most Watched Movies /
+  Shows This Week**, **Most Anticipated Movies / Shows**.
+- Then every list you've **liked on Trakt** (newest like first), then your own
+  lists (except Comfort Shows). Like a list on trakt.tv from any device and it
+  appears as a row. Rows load 50 titles with View all; seasons and episodes in
+  a list show as their show.
+- **Discover lists** (toolbar icon): trending and popular public Trakt lists;
+  open one to browse it and press **Like list** right from the TV.
+- Trakt smart lists / saved filters: the API answers on the free account but
+  returned none for this account, so they aren't shown yet.
+
 ### Smarter Continue Watching — `7bae2cf`
 - Home's Continue Watching splits in two: **Continue Watching** (touched in
   the last 30 days) stays at the top, and **Pick back up** (older) sits

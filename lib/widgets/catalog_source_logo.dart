@@ -9,7 +9,7 @@ import '../models/catalog/catalog_item.dart';
 /// scores on the ratings rows. The marks draw in `currentColor`.
 String catalogSourceLogoAsset(CatalogSourceId id) => switch (id) {
   CatalogSourceId.plex => 'assets/plex_chevron.svg',
-  CatalogSourceId.trakt => 'assets/trakt_circlemark.svg',
+  CatalogSourceId.trakt || CatalogSourceId.traktLists => 'assets/trakt_circlemark.svg',
   CatalogSourceId.mal => 'assets/mal_mark.svg',
   CatalogSourceId.anilist => 'assets/anilist_mark.svg',
   CatalogSourceId.simkl => 'assets/simkl_mark.svg',

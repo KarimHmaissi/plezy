@@ -1479,6 +1479,20 @@
     "noSourceMessage": "Connect Plex, Trakt or another watchlist service in Settings"
   },
   "explore": {
+    "traktLists": {
+      "boxOffice": "Box Office",
+      "mostWatchedMovies": "Most Watched Movies This Week",
+      "mostWatchedShows": "Most Watched Shows This Week",
+      "anticipatedMovies": "Most Anticipated Movies",
+      "anticipatedShows": "Most Anticipated Shows",
+      "discoverLists": "Discover lists",
+      "trendingLists": "Trending lists",
+      "popularLists": "Popular lists",
+      "listByUser": "by ${user} · ${count} items",
+      "like": "Like list",
+      "liked": "Liked",
+      "likeFailed": "Couldn't update the like on Trakt"
+    },
     "title": "Explore",
     "selectSource": "Select source",
     "rows": {

@@ -3919,6 +3919,7 @@ class Translations$explore$en {
 	final Translations _root; // ignore: unused_field
 
 	// Translations
+	late final Translations$explore$traktLists$en traktLists = Translations$explore$traktLists$en.internal(_root);
 
 	/// en: 'Explore'
 	String get title => 'Explore';
@@ -7099,6 +7100,51 @@ class Translations$libraries$advancedFilters$en {
 	String get dateOlderThanYear => 'Older than a year';
 }
 
+// Path: explore.traktLists
+class Translations$explore$traktLists$en {
+	Translations$explore$traktLists$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Box Office'
+	String get boxOffice => 'Box Office';
+
+	/// en: 'Most Watched Movies This Week'
+	String get mostWatchedMovies => 'Most Watched Movies This Week';
+
+	/// en: 'Most Watched Shows This Week'
+	String get mostWatchedShows => 'Most Watched Shows This Week';
+
+	/// en: 'Most Anticipated Movies'
+	String get anticipatedMovies => 'Most Anticipated Movies';
+
+	/// en: 'Most Anticipated Shows'
+	String get anticipatedShows => 'Most Anticipated Shows';
+
+	/// en: 'Discover lists'
+	String get discoverLists => 'Discover lists';
+
+	/// en: 'Trending lists'
+	String get trendingLists => 'Trending lists';
+
+	/// en: 'Popular lists'
+	String get popularLists => 'Popular lists';
+
+	/// en: 'by ${user} · ${count} items'
+	String listByUser({required Object user, required Object count}) => 'by ${user} · ${count} items';
+
+	/// en: 'Like list'
+	String get like => 'Like list';
+
+	/// en: 'Liked'
+	String get liked => 'Liked';
+
+	/// en: 'Couldn't update the like on Trakt'
+	String get likeFailed => 'Couldn\'t update the like on Trakt';
+}
+
 // Path: explore.rows
 class Translations$explore$rows$en {
 	Translations$explore$rows$en.internal(this._root);
@@ -9594,6 +9640,18 @@ extension on Translations {
 			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
 			'watchlist.noSourceTitle' => 'No watchlist connected',
 			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
+			'explore.traktLists.boxOffice' => 'Box Office',
+			'explore.traktLists.mostWatchedMovies' => 'Most Watched Movies This Week',
+			'explore.traktLists.mostWatchedShows' => 'Most Watched Shows This Week',
+			'explore.traktLists.anticipatedMovies' => 'Most Anticipated Movies',
+			'explore.traktLists.anticipatedShows' => 'Most Anticipated Shows',
+			'explore.traktLists.discoverLists' => 'Discover lists',
+			'explore.traktLists.trendingLists' => 'Trending lists',
+			'explore.traktLists.popularLists' => 'Popular lists',
+			'explore.traktLists.listByUser' => ({required Object user, required Object count}) => 'by ${user} · ${count} items',
+			'explore.traktLists.like' => 'Like list',
+			'explore.traktLists.liked' => 'Liked',
+			'explore.traktLists.likeFailed' => 'Couldn\'t update the like on Trakt',
 			'explore.title' => 'Explore',
 			'explore.selectSource' => 'Select source',
 			'explore.rows.watchlist' => 'Watchlist',
@@ -9769,6 +9827,8 @@ extension on Translations {
 			'liveTv.evening' => 'Evening',
 			'liveTv.lateNight' => 'Late Night',
 			'liveTv.whatsOn' => 'What\'s On',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.watchChannel' => 'Watch Channel',
 			'liveTv.favorites' => 'Favorites',
 			'liveTv.reorderFavorites' => 'Reorder Favorites',
@@ -9781,8 +9841,6 @@ extension on Translations {
 			'liveTv.watchFromStart' => ({required Object minutes}) => 'Watch from start (${minutes} min ago)',
 			'liveTv.watchLive' => 'Watch Live',
 			'liveTv.goToLive' => 'Go to Live',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.record' => 'Record',
 			'liveTv.recordEpisode' => 'Record Episode',
 			'liveTv.recordSeries' => 'Record Series',
@@ -10283,6 +10341,8 @@ extension on Translations {
 			'videoSettings.audioOutputDolbyAtmos' => 'Dolby Atmos',
 			'videoSettings.audioOutputDolbyAudio' => 'Dolby Audio',
 			'videoSettings.audioOutputSurround' => 'Surround',
+			_ => null,
+		} ?? switch (path) {
 			'videoSettings.audioOutputSpatial' => 'Spatial Audio',
 			'videoSettings.audioOutputStereo' => 'Stereo',
 			'videoSettings.audioNormalization' => 'Normalize Loudness',
@@ -10295,8 +10355,6 @@ extension on Translations {
 			'performanceOverlay.rawDecoder' => 'Raw Decoder',
 			'performanceOverlay.tunneling' => 'Tunneling',
 			'performanceOverlay.passthrough' => 'Passthrough',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.aspect' => 'Aspect',
 			'performanceOverlay.rotation' => 'Rotation',
 			'performanceOverlay.dvSource' => 'DV Source',

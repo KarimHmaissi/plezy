@@ -19,6 +19,7 @@ import '../navigation/main_screen_scope.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/explore_provider.dart';
 import '../services/catalog/catalog_source.dart';
+import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/settings_service.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
@@ -36,6 +37,7 @@ import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
 import 'catalog_search_screen.dart';
+import 'trakt_discover_lists_screen.dart';
 import 'libraries/state_messages.dart';
 
 /// The Explore tab: watchlist + discover rows from the active external
@@ -316,6 +318,12 @@ class ExploreScreenState extends State<ExploreScreen>
           key: _actionBarKey,
           onNavigateDown: searchFocusNode.requestFocus,
           actions: [
+            if (sources.activeSource case final TraktListsCatalogSource lists)
+              FocusableAction(
+                icon: Symbols.travel_explore_rounded,
+                tooltip: t.explore.traktLists.discoverLists,
+                onPressed: () => unawaited(_openDiscoverLists(lists)),
+              ),
             FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
           ],
         ),
@@ -442,6 +450,14 @@ class ExploreScreenState extends State<ExploreScreen>
     });
   }
 
+  /// Browse public Trakt lists; reload the rows when a like changed.
+  Future<void> _openDiscoverLists(TraktListsCatalogSource source) async {
+    final changed = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => TraktDiscoverListsScreen(source: source)));
+    if (changed == true && mounted) unawaited(_explore.load());
+  }
+
   ExploreRowHub? _rowForHub(MediaHub hub) {
     for (final rowHub in _explore.rowHubs) {
       if (rowHub.hub.id == hub.id) return rowHub;
@@ -477,6 +493,13 @@ class ExploreScreenState extends State<ExploreScreen>
                     anchorAlignment: AppMenuAnchorAlignment.end,
                     parentOwnsFocus: true,
                   ),
+                ),
+              if (active is TraktListsCatalogSource)
+                FocusableAction(
+                  icon: Symbols.travel_explore_rounded,
+                  iconColor: foregroundColor,
+                  tooltip: t.explore.traktLists.discoverLists,
+                  onPressed: () => unawaited(_openDiscoverLists(active)),
                 ),
               if (active != null)
                 FocusableAction(

@@ -33,6 +33,12 @@ class TraktCatalogSource with CatalogWatchlistMachinery implements CatalogSource
   List<CatalogItem> showsFromListEntries(List<TraktCatalogEntry> entries) =>
       _fromEntries(entries, kind: MediaKind.show);
 
+  /// Wrapped entries (lists, charts) as catalog items. [kind] fixes the kind
+  /// for single-type endpoints; otherwise each entry's `type` decides, and
+  /// seasons/episodes are skipped.
+  List<CatalogItem> itemsFromEntries(List<TraktCatalogEntry> entries, {MediaKind? kind}) =>
+      _fromEntries(entries, kind: kind);
+
   @override
   String get watchlistLogLabel => 'Trakt: watchlist';
 
