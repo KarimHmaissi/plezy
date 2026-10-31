@@ -539,12 +539,16 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Libraries -> Search. The Movies row is skipped while collapsed.
-    await _press(tester, LogicalKeyboardKey.arrowDown);
-    await _press(tester, LogicalKeyboardKey.arrowDown);
-    await _press(tester, LogicalKeyboardKey.enter);
+    // Home -> Search -> Downloads -> Settings -> Libraries (last section).
+    for (var i = 0; i < 4; i++) {
+      await _press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    expect(sideNavKey.currentState!.lastFocusedKey, 'libraries');
 
-    expect(selectedTab, NavigationTabId.search);
+    // The Movies row is skipped while collapsed.
+    await _press(tester, LogicalKeyboardKey.arrowDown);
+    expect(sideNavKey.currentState!.lastFocusedKey, isNot(startsWith('library:')));
+    expect(selectedTab, isNull);
   });
 
   testWidgets('collapsed rail with expanded Libraries skips focus-excluded library rows', (tester) async {
@@ -602,13 +606,17 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Libraries -> Search. The Movies row stays out of D-pad order
-    // while the rail is collapsed, so DOWN lands on the next real row.
-    await _press(tester, LogicalKeyboardKey.arrowDown);
-    await _press(tester, LogicalKeyboardKey.arrowDown);
-    await _press(tester, LogicalKeyboardKey.enter);
+    // Home -> Search -> Downloads -> Settings -> Libraries (last section).
+    for (var i = 0; i < 4; i++) {
+      await _press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    expect(sideNavKey.currentState!.lastFocusedKey, 'libraries');
 
-    expect(selectedTab, NavigationTabId.search);
+    // The Movies row stays out of D-pad order while the rail is collapsed,
+    // so DOWN never lands on it.
+    await _press(tester, LogicalKeyboardKey.arrowDown);
+    expect(sideNavKey.currentState!.lastFocusedKey, isNot(startsWith('library:')));
+    expect(selectedTab, isNull);
   });
 
   testWidgets('hover expands the rail as an overlay and collapses on exit', (tester) async {
@@ -677,6 +685,8 @@ void main() {
     expect(tester.getSize(rail).width, SideNavigationRailState.expandedWidth);
 
     await gesture.moveTo(tester.getBottomRight(rail) + const Offset(100, -10));
+    // Collapse runs on a short timer after the pointer leaves.
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 
     expect(tester.getSize(rail).width, SideNavigationRailState.collapsedWidth);
@@ -707,6 +717,8 @@ void main() {
     expect(scrimReports.last, isTrue);
 
     await gesture.moveTo(tester.getBottomRight(rail) + const Offset(100, -10));
+    // Collapse runs on a short timer after the pointer leaves.
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(scrimReports.last, isFalse);
   });
@@ -737,6 +749,8 @@ void main() {
     expect(_railSurfaceOpacity(tester).opacity, 1.0);
 
     await gesture.moveTo(tester.getBottomRight(rail) + const Offset(100, -10));
+    // Collapse runs on a short timer after the pointer leaves.
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 
     expect(tester.getSize(rail).width, SideNavigationRailState.tvCollapsedWidth);
@@ -824,8 +838,7 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Libraries -> Search -> Settings. Downloads is hidden on Apple TV.
-    await _press(tester, LogicalKeyboardKey.arrowDown);
+    // Home -> Search -> Settings. Downloads is hidden on Apple TV.
     await _press(tester, LogicalKeyboardKey.arrowDown);
     await _press(tester, LogicalKeyboardKey.arrowDown);
     await _press(tester, LogicalKeyboardKey.enter);
@@ -900,8 +913,9 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Libraries -> Server A header -> visible A -> Server B header -> visible B -> Hidden Libraries.
-    for (var i = 0; i < 6; i++) {
+    // Home -> Search -> Downloads -> Settings -> Libraries -> Server A header
+    // -> visible A -> Server B header -> visible B -> Hidden Libraries.
+    for (var i = 0; i < 9; i++) {
       await _press(tester, LogicalKeyboardKey.arrowDown);
     }
     await _press(tester, LogicalKeyboardKey.enter);

@@ -765,6 +765,13 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
       if (!widget.isOfflineMode) ...[
         _kHome,
         if (hasNowPlaying) _kNowPlaying,
+        if (hasLiveTv) 'liveTv',
+        if (hasExplore) _kExplore,
+        _kSearch,
+      ],
+      if (_showDownloads) _kDownloads,
+      _kSettings,
+      if (!widget.isOfflineMode) ...[
         _kLibraries,
         // Library rows render inside ExcludeFocus(excluding: !_librariesExpanded
         // || isCollapsed); keep the D-pad order in lockstep with that render
@@ -776,12 +783,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
             if (_hiddenLibrariesExpanded) ..._focusKeysForLibraryRows(hiddenRows),
           ],
         ],
-        if (hasLiveTv) 'liveTv',
-        if (hasExplore) _kExplore,
-        _kSearch,
       ],
-      if (_showDownloads) _kDownloads,
-      _kSettings,
       if (_showFullscreenToggle) _kFullscreen,
     ];
   }
@@ -1033,14 +1035,6 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
                                         _buildNowPlayingItem(nowPlayingTrack, musicService, isCollapsed: isCollapsed),
                                         const SizedBox(height: _itemGap),
                                       ],
-                                      _buildLibrariesSection(
-                                        visibleRows,
-                                        hiddenRows,
-                                        hiddenLibraries.length,
-                                        t,
-                                        isCollapsed: isCollapsed,
-                                      ),
-                                      const SizedBox(height: _itemGap),
                                       if (context.watch<MultiServerProvider>().hasLiveTv) ...[
                                         _buildNavItem(
                                           icon: Symbols.live_tv_rounded,
@@ -1099,6 +1093,18 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
                                       focusNode: _focusTracker.get(_kSettings),
                                       isCollapsed: isCollapsed,
                                     ),
+                                    // Libraries last: a long library list must not push the
+                                    // fixed destinations off screen.
+                                    if (!widget.isOfflineMode) ...[
+                                      const SizedBox(height: _itemGap),
+                                      _buildLibrariesSection(
+                                        visibleRows,
+                                        hiddenRows,
+                                        hiddenLibraries.length,
+                                        t,
+                                        isCollapsed: isCollapsed,
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
