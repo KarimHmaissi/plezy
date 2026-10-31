@@ -6,8 +6,10 @@ import 'package:http/http.dart' as http;
 import '../../../models/trakt/trakt_cast_entry.dart';
 import '../../../models/trakt/trakt_catalog_entry.dart';
 import '../../../models/trakt/trakt_catalog_media.dart';
+import '../../../models/trakt/trakt_ids.dart';
 import '../../../models/trakt/trakt_scrobble_request.dart';
 import '../../../models/trakt/trakt_user.dart';
+import '../../../models/trakt/trakt_user_list.dart';
 import '../../../utils/app_logger.dart';
 import '../../../utils/json_utils.dart';
 import '../future_coalescer.dart';
@@ -187,6 +189,55 @@ class TraktClient implements DisposableTrackerClient {
       _request('POST', '/sync/watchlist', body: body, allowStatuses: const {200, 201});
 
   Future<void> removeFromWatchlist(Map<String, dynamic> body) => _request('POST', '/sync/watchlist/remove', body: body);
+
+  /// The signed-in user's personal lists.
+  Future<List<TraktUserList>> getMyLists() async {
+    final res = await _request('GET', '/users/me/lists');
+    if (res is! List) return const [];
+    return [for (final raw in res.whereType<Map<String, dynamic>>()) ?TraktUserList.fromJson(raw)];
+  }
+
+  /// Create a private personal list.
+  Future<TraktUserList?> createMyList(String name, {String? description}) async {
+    final res = await _request(
+      'POST',
+      '/users/me/lists',
+      body: {'name': name, 'description': ?description, 'privacy': 'private'},
+      allowStatuses: const {200, 201},
+    );
+    return res is Map<String, dynamic> ? TraktUserList.fromJson(res) : null;
+  }
+
+  /// Replace a personal list's description.
+  Future<void> updateMyListDescription(int listId, String description) =>
+      _request('PUT', '/users/me/lists/$listId', body: {'description': description});
+
+  /// The shows on a personal list, in list order.
+  Future<List<TraktCatalogEntry>> getMyListShows(int listId) async {
+    final res = await _requestResponse('GET', '/users/me/lists/$listId/items/shows?$_catalogExtended');
+    return _decodeEntries(res.body);
+  }
+
+  Future<void> addShowsToMyList(int listId, List<TraktIds> shows) => _request(
+    'POST',
+    '/users/me/lists/$listId/items',
+    body: {
+      'shows': [
+        for (final ids in shows) {'ids': ids.toJson()},
+      ],
+    },
+    allowStatuses: const {200, 201},
+  );
+
+  Future<void> removeShowsFromMyList(int listId, List<TraktIds> shows) => _request(
+    'POST',
+    '/users/me/lists/$listId/items/remove',
+    body: {
+      'shows': [
+        for (final ids in shows) {'ids': ids.toJson()},
+      ],
+    },
+  );
 
   static List<TraktCastEntry> _decodePeopleEntries(Object? raw) {
     if (raw is! List) return const [];

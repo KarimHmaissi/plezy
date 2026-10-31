@@ -6,7 +6,7 @@ import '../i18n/strings.g.dart';
 import '../utils/platform_detector.dart';
 
 /// Navigation tab identifiers
-enum NavigationTabId { discover, explore, watchlist, libraries, liveTv, search, downloads, settings }
+enum NavigationTabId { discover, explore, watchlist, comfort, libraries, liveTv, search, downloads, settings }
 
 /// Represents a navigation tab with its configuration
 class NavigationTab {
@@ -46,12 +46,14 @@ class NavigationTab {
     bool hasLiveTv = false,
     bool hasExplore = false,
     bool hasWatchlist = false,
+    bool hasComfort = false,
   }) {
     return allNavigationTabs.where((tab) {
       if (isOffline && tab.onlineOnly) return false;
       if (tab.id == NavigationTabId.liveTv && !hasLiveTv) return false;
       if (tab.id == NavigationTabId.explore && !hasExplore) return false;
       if (tab.id == NavigationTabId.watchlist && !hasWatchlist) return false;
+      if (tab.id == NavigationTabId.comfort && !hasComfort) return false;
       if (tab.id == NavigationTabId.downloads && PlatformDetector.isAppleTV()) return false;
       return true;
     }).toList();
@@ -67,6 +69,7 @@ class NavigationTab {
     required bool hasLiveTv,
     bool hasExplore = false,
     bool hasWatchlist = false,
+    bool hasComfort = false,
     required NavigationTabId? preferredStartup,
   }) {
     final tabs = getVisibleTabs(
@@ -74,6 +77,7 @@ class NavigationTab {
       hasLiveTv: hasLiveTv,
       hasExplore: hasExplore,
       hasWatchlist: hasWatchlist,
+      hasComfort: hasComfort,
     );
     if (isOffline && tabs.any((t) => t.id == NavigationTabId.downloads)) {
       return NavigationTabId.downloads;
@@ -100,6 +104,7 @@ const startupSectionTabs = [
 String _getHomeLabel() => t.common.home;
 String _getExploreLabel() => t.navigation.explore;
 String _getWatchlistLabel() => t.navigation.watchlist;
+String _getComfortLabel() => t.navigation.comfort;
 String _getLibrariesLabel() => t.navigation.libraries;
 String _getLiveTvLabel() => t.navigation.liveTv;
 String _getSearchLabel() => t.common.search;
@@ -127,6 +132,12 @@ const allNavigationTabs = [
     onlineOnly: true,
     icon: Symbols.bookmark_rounded,
     getLabel: _getWatchlistLabel,
+  ),
+  NavigationTab(
+    id: NavigationTabId.comfort,
+    onlineOnly: true,
+    icon: Symbols.weekend_rounded,
+    getLabel: _getComfortLabel,
   ),
   NavigationTab(id: NavigationTabId.search, onlineOnly: true, icon: Symbols.search_rounded, getLabel: _getSearchLabel),
   NavigationTab(

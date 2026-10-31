@@ -33,6 +33,7 @@ import '../utils/provider_extensions.dart';
 import '../utils/plex_season_display.dart';
 import '../media/media_item.dart';
 import '../media/episode_collection.dart';
+import '../services/comfort/comfort_picker.dart';
 import '../media/media_item_types.dart';
 import '../media/media_kind.dart';
 import '../media/media_source_info.dart';
@@ -3425,6 +3426,41 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (result is PlayQueueSuccess && mounted) {
       unawaited(_refreshWatchState());
     }
+  }
+
+  /// Play one random episode of a show from its server, skipping specials
+  /// and (where possible) episodes watched in the last month.
+  Future<void> _handleRandomEpisode(BuildContext context, MediaItem metadata) async {
+    if (!_canUseDetail) return;
+    if (widget.isOffline) {
+      showErrorSnackBar(context, t.mediaMenu.shuffleNotAvailableOffline);
+      return;
+    }
+    final client = context.getMediaClientForItemOrNull(metadata);
+    if (client == null) return;
+    final ComfortPick<MediaItem, MediaItem>? pick;
+    try {
+      pick = await pickComfortEpisode<MediaItem, MediaItem>(
+        shows: [metadata],
+        episodesFor: (show) async {
+          final episodes = <MediaItem>[];
+          await collectEpisodes(client, show.id, unwatchedOnly: false, out: episodes, includeSpecials: false);
+          return episodes;
+        },
+        isRecentlyWatched: (episode) => watchedWithin(episode.lastViewedAt, comfortRecentlyWatchedWindow),
+      );
+    } catch (e) {
+      appLogger.w('Random episode failed', error: e);
+      if (context.mounted) showErrorSnackBar(context, t.comfort.noEpisodes);
+      return;
+    }
+    if (!context.mounted) return;
+    if (pick == null) {
+      showErrorSnackBar(context, t.comfort.noEpisodes);
+      return;
+    }
+    await navigateToVideoPlayer(context, metadata: pick.episode);
+    if (mounted) unawaited(_refreshWatchState());
   }
 
   @override

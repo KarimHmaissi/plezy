@@ -15,6 +15,7 @@ import '../focus/input_mode_tracker.dart';
 import '../media/media_item.dart';
 import '../media/media_library.dart';
 import '../mixins/mounted_set_state_mixin.dart';
+import '../models/catalog/catalog_item.dart' show CatalogSourceId;
 import '../navigation/navigation_tabs.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/hidden_libraries_provider.dart';
@@ -469,6 +470,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
   static const _kHome = 'home';
   static const _kExplore = 'explore';
   static const _kWatchlist = 'watchlist';
+  static const _kComfort = 'comfort';
   static const _kNowPlaying = 'nowPlaying';
   static const _kLibraries = 'libraries';
   static const _kSearch = 'search';
@@ -629,6 +631,8 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
         return _kExplore;
       case NavigationTabId.watchlist:
         return _kWatchlist;
+      case NavigationTabId.comfort:
+        return _kComfort;
       case NavigationTabId.libraries:
         final libKey = widget.selectedLibraryKey;
         if (libKey != null && _librariesExpanded) {
@@ -681,6 +685,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     required bool hasNowPlaying,
     required bool hasExplore,
     required bool hasWatchlist,
+    required bool hasComfort,
   }) {
     return {
       _kHome,
@@ -688,6 +693,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
       _kLibraries,
       if (hasExplore) _kExplore,
       if (hasWatchlist) _kWatchlist,
+      if (hasComfort) _kComfort,
       _kSearch,
       if (_showDownloads) _kDownloads,
       _kSettings,
@@ -764,6 +770,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     required bool hasNowPlaying,
     required bool hasExplore,
     required bool hasWatchlist,
+    required bool hasComfort,
     required bool isCollapsed,
   }) {
     return [
@@ -774,6 +781,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
         if (hasLiveTv) 'liveTv',
         if (hasExplore) _kExplore,
         if (hasWatchlist) _kWatchlist,
+        if (hasComfort) _kComfort,
         _kSearch,
       ],
       if (_showDownloads) _kDownloads,
@@ -895,6 +903,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     final catalogSources = context.watch<CatalogSourcesProvider?>();
     final hasExploreSource = catalogSources?.hasAnySource ?? false;
     final hasWatchlist = catalogSources?.watchlistCapableSources.isNotEmpty ?? false;
+    final hasComfort = catalogSources?.connectedSources.any((source) => source.id == CatalogSourceId.trakt) ?? false;
     // Nullable watch: rail tests (and any host without the profile session
     // scope) simply never show the Now Playing item. TV-only — it is the
     // way back into the now-playing screen there; desktop already has the
@@ -939,6 +948,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
             hasNowPlaying: nowPlayingTrack != null,
             hasExplore: hasExplore,
             hasWatchlist: hasWatchlist,
+            hasComfort: hasComfort,
           ),
         );
         final focusOrder = _buildFocusOrder(
@@ -949,6 +959,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
           hasNowPlaying: nowPlayingTrack != null,
           hasExplore: hasExplore,
           hasWatchlist: hasWatchlist,
+          hasComfort: hasComfort,
           isCollapsed: isCollapsed,
         );
         _debugAssertUniqueFocusOrder(focusOrder);
@@ -1078,6 +1089,18 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
                                           isSelected: widget.selectedTab == NavigationTabId.watchlist,
                                           onTap: () => widget.onDestinationSelected(NavigationTabId.watchlist),
                                           focusNode: _focusTracker.get(_kWatchlist),
+                                          isCollapsed: isCollapsed,
+                                        ),
+                                        const SizedBox(height: _itemGap),
+                                      ],
+                                      if (hasComfort) ...[
+                                        _buildNavItem(
+                                          icon: Symbols.weekend_rounded,
+                                          selectedIcon: Symbols.weekend_rounded,
+                                          label: Translations.of(context).navigation.comfort,
+                                          isSelected: widget.selectedTab == NavigationTabId.comfort,
+                                          onTap: () => widget.onDestinationSelected(NavigationTabId.comfort),
+                                          focusNode: _focusTracker.get(_kComfort),
                                           isCollapsed: isCollapsed,
                                         ),
                                         const SizedBox(height: _itemGap),

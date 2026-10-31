@@ -292,6 +292,19 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
           )
         : null;
 
+    final randomEpisodeAction = metadata.isShow
+        ? FocusableAction(
+            debugLabel: 'detail_random_episode',
+            onPressed: () => unawaited(_handleRandomEpisode(context, metadata)),
+            builder: (context, state) => iconActionButton(
+              state,
+              onPressed: () => unawaited(_handleRandomEpisode(context, metadata)),
+              icon: const AppIcon(Symbols.casino_rounded, fill: 1),
+              tooltip: t.comfort.randomEpisode,
+            ),
+          )
+        : null;
+
     final downloadAction = !widget.isOffline && !PlatformDetector.isAppleTV()
         ? FocusableAction(
             debugLabel: 'detail_download',
@@ -362,6 +375,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
       ?versionAction,
       ?trailerAction,
       ?shuffleAction,
+      ?randomEpisodeAction,
       ?downloadAction,
       watchedAction,
       ?watchlistAction,

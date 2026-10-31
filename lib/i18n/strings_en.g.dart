@@ -75,6 +75,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$startup$en startup = Translations$startup$en.internal(_root);
 	late final Translations$licenses$en licenses = Translations$licenses$en.internal(_root);
 	late final Translations$navigation$en navigation = Translations$navigation$en.internal(_root);
+	late final Translations$comfort$en comfort = Translations$comfort$en.internal(_root);
 	late final Translations$watchlist$en watchlist = Translations$watchlist$en.internal(_root);
 	late final Translations$explore$en explore = Translations$explore$en.internal(_root);
 	late final Translations$liveTv$en liveTv = Translations$liveTv$en.internal(_root);
@@ -3780,6 +3781,93 @@ class Translations$navigation$en {
 
 	/// en: 'Watchlist'
 	String get watchlist => 'Watchlist';
+
+	/// en: 'Comfort'
+	String get comfort => 'Comfort';
+}
+
+// Path: comfort
+class Translations$comfort$en {
+	Translations$comfort$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Random episode'
+	String get randomEpisode => 'Random episode';
+
+	/// en: 'Configure'
+	String get configure => 'Configure';
+
+	/// en: 'In the mix'
+	String get inTheMix => 'In the mix';
+
+	/// en: 'Paused'
+	String get paused => 'Paused';
+
+	/// en: 'No comfort shows yet'
+	String get emptyTitle => 'No comfort shows yet';
+
+	/// en: 'Add shows in Configure, or to your "Comfort Shows" list on Trakt'
+	String get emptyMessage => 'Add shows in Configure, or to your "Comfort Shows" list on Trakt';
+
+	/// en: 'Trakt not connected'
+	String get notConnectedTitle => 'Trakt not connected';
+
+	/// en: 'Comfort shows live in a Trakt list. Connect Trakt in Settings to use them'
+	String get notConnectedMessage => 'Comfort shows live in a Trakt list. Connect Trakt in Settings to use them';
+
+	/// en: 'Couldn't load your Comfort Shows list from Trakt'
+	String get loadFailed => 'Couldn\'t load your Comfort Shows list from Trakt';
+
+	/// en: 'Couldn't update your Comfort Shows list'
+	String get updateFailed => 'Couldn\'t update your Comfort Shows list';
+
+	/// en: 'Picking an episode…'
+	String get picking => 'Picking an episode…';
+
+	/// en: 'None of the shows in the mix are on your servers'
+	String get nothingToPlay => 'None of the shows in the mix are on your servers';
+
+	/// en: 'No episodes of this show are on your server'
+	String get noEpisodes => 'No episodes of this show are on your server';
+
+	/// en: 'Every show is paused. Turn some on in Configure'
+	String get allPaused => 'Every show is paused. Turn some on in Configure';
+
+	/// en: 'Play'
+	String get play => 'Play';
+
+	/// en: 'Pick again'
+	String get pickAgain => 'Pick again';
+
+	/// en: 'S${season} E${episode}'
+	String episodeLabel({required Object season, required Object episode}) => 'S${season} E${episode}';
+
+	/// en: 'Play immediately'
+	String get playImmediately => 'Play immediately';
+
+	/// en: 'Start the random episode straight away instead of showing the pick first'
+	String get playImmediatelyDescription => 'Start the random episode straight away instead of showing the pick first';
+
+	/// en: 'Shows in the mix'
+	String get showsSection => 'Shows in the mix';
+
+	/// en: 'Turn a show off to leave it out of the random pick. Synced through your Trakt list'
+	String get showsSectionDescription => 'Turn a show off to leave it out of the random pick. Synced through your Trakt list';
+
+	/// en: 'Add a show'
+	String get addShow => 'Add a show';
+
+	/// en: 'Search Trakt for a show'
+	String get searchHint => 'Search Trakt for a show';
+
+	/// en: 'Remove'
+	String get remove => 'Remove';
+
+	/// en: 'Added ${title}'
+	String added({required Object title}) => 'Added ${title}';
 }
 
 // Path: watchlist
@@ -9466,6 +9554,32 @@ extension on Translations {
 			'navigation.liveTv' => 'Live TV',
 			'navigation.explore' => 'Explore',
 			'navigation.watchlist' => 'Watchlist',
+			'navigation.comfort' => 'Comfort',
+			'comfort.randomEpisode' => 'Random episode',
+			'comfort.configure' => 'Configure',
+			'comfort.inTheMix' => 'In the mix',
+			'comfort.paused' => 'Paused',
+			'comfort.emptyTitle' => 'No comfort shows yet',
+			'comfort.emptyMessage' => 'Add shows in Configure, or to your "Comfort Shows" list on Trakt',
+			'comfort.notConnectedTitle' => 'Trakt not connected',
+			'comfort.notConnectedMessage' => 'Comfort shows live in a Trakt list. Connect Trakt in Settings to use them',
+			'comfort.loadFailed' => 'Couldn\'t load your Comfort Shows list from Trakt',
+			'comfort.updateFailed' => 'Couldn\'t update your Comfort Shows list',
+			'comfort.picking' => 'Picking an episode…',
+			'comfort.nothingToPlay' => 'None of the shows in the mix are on your servers',
+			'comfort.noEpisodes' => 'No episodes of this show are on your server',
+			'comfort.allPaused' => 'Every show is paused. Turn some on in Configure',
+			'comfort.play' => 'Play',
+			'comfort.pickAgain' => 'Pick again',
+			'comfort.episodeLabel' => ({required Object season, required Object episode}) => 'S${season} E${episode}',
+			'comfort.playImmediately' => 'Play immediately',
+			'comfort.playImmediatelyDescription' => 'Start the random episode straight away instead of showing the pick first',
+			'comfort.showsSection' => 'Shows in the mix',
+			'comfort.showsSectionDescription' => 'Turn a show off to leave it out of the random pick. Synced through your Trakt list',
+			'comfort.addShow' => 'Add a show',
+			'comfort.searchHint' => 'Search Trakt for a show',
+			'comfort.remove' => 'Remove',
+			'comfort.added' => ({required Object title}) => 'Added ${title}',
 			'watchlist.films' => 'Films',
 			'watchlist.tv' => 'TV',
 			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
@@ -9664,6 +9778,8 @@ extension on Translations {
 			'liveTv.watchLive' => 'Watch Live',
 			'liveTv.goToLive' => 'Go to Live',
 			'liveTv.record' => 'Record',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.recordEpisode' => 'Record Episode',
 			'liveTv.recordSeries' => 'Record Series',
 			'liveTv.recordOptions' => 'Record Options',
@@ -9690,8 +9806,6 @@ extension on Translations {
 			'liveTv.processRecordingRules' => 'Re-evaluate rules',
 			'liveTv.recordingInProgress' => 'Recording now',
 			'liveTv.recordingsCount' => ({required Object count}) => '${count} scheduled',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.editRule' => 'Edit rule',
 			'liveTv.editRuleAction' => 'Edit',
 			'liveTv.recordingRuleUpdated' => 'Recording rule updated',
@@ -10178,6 +10292,8 @@ extension on Translations {
 			'performanceOverlay.tunneling' => 'Tunneling',
 			'performanceOverlay.passthrough' => 'Passthrough',
 			'performanceOverlay.aspect' => 'Aspect',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.rotation' => 'Rotation',
 			'performanceOverlay.dvSource' => 'DV Source',
 			'performanceOverlay.dvPath' => 'DV Path',
@@ -10204,8 +10320,6 @@ extension on Translations {
 			'performanceOverlay.dvSampleAverage' => 'DV Sample Avg',
 			'performanceOverlay.maxLuma' => 'Max Luma',
 			'performanceOverlay.minLuma' => 'Min Luma',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.maxCll' => 'MaxCLL',
 			'performanceOverlay.maxFall' => 'MaxFALL',
 			'performanceOverlay.cacheUsed' => 'Cache Used',

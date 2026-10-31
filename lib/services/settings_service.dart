@@ -992,6 +992,10 @@ class SettingsService extends BaseSharedPreferencesService {
     defaultValueProvider: PlatformDetector.isDesktopOS,
   );
   static const startInFullscreen = BoolPref('start_in_fullscreen');
+
+  /// Comfort shows: play a random episode straight away instead of showing
+  /// the pick first.
+  static const comfortPlayImmediately = BoolPref('comfort_play_immediately');
   static const exitFullscreenOnPlayerClose = BoolPref('exit_fullscreen_on_player_close');
 
   static const playbackBufferTier = EnumPref<PlaybackBufferTier>(
@@ -1605,6 +1609,7 @@ class SettingsService extends BaseSharedPreferencesService {
     displaySwitchDelay,
     enableCompanionRemoteServer,
     startInFullscreen,
+    comfortPlayImmediately,
     exitFullscreenOnPlayerClose,
   ];
 

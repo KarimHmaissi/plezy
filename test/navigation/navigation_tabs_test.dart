@@ -92,5 +92,18 @@ void main() {
       final offline = NavigationTab.getVisibleTabs(isOffline: true, hasWatchlist: true);
       expect(offline.map((tab) => tab.id), isNot(contains(NavigationTabId.watchlist)));
     });
+
+    test('shows Comfort only with Trakt connected, after Watchlist', () {
+      final without = NavigationTab.getVisibleTabs(isOffline: false, hasWatchlist: true);
+      expect(without.map((tab) => tab.id), isNot(contains(NavigationTabId.comfort)));
+
+      final ids = NavigationTab.getVisibleTabs(
+        isOffline: false,
+        hasWatchlist: true,
+        hasComfort: true,
+      ).map((tab) => tab.id).toList();
+      expect(ids.indexOf(NavigationTabId.comfort), ids.indexOf(NavigationTabId.watchlist) + 1);
+      expect(ids.indexOf(NavigationTabId.comfort), ids.indexOf(NavigationTabId.search) - 1);
+    });
   });
 }

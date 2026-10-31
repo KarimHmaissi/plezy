@@ -26,6 +26,13 @@ class TraktCatalogSource with CatalogWatchlistMachinery implements CatalogSource
 
   TraktCatalogSource(this._client);
 
+  /// The wrapped client, for features beyond [CatalogSource] (personal lists).
+  TraktClient get client => _client;
+
+  /// Personal-list show entries as catalog items, in list order.
+  List<CatalogItem> showsFromListEntries(List<TraktCatalogEntry> entries) =>
+      _fromEntries(entries, kind: MediaKind.show);
+
   @override
   String get watchlistLogLabel => 'Trakt: watchlist';
 

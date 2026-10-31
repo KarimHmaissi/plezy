@@ -30,6 +30,7 @@ import '../mixins/mounted_set_state_mixin.dart';
 import '../mixins/refreshable.dart';
 import '../widgets/overlay_sheet.dart';
 import '../mixins/tab_visibility_aware.dart';
+import '../models/catalog/catalog_item.dart' show CatalogSourceId;
 import '../navigation/navigation_tabs.dart';
 import '../navigation/profile_navigation_scope.dart';
 import '../navigation/settings_shortcut.dart';
@@ -73,6 +74,7 @@ import 'libraries/library_quick_picker_sheet.dart';
 import 'libraries/libraries_screen.dart';
 import 'livetv/live_tv_screen.dart';
 import 'search_screen.dart';
+import 'comfort_screen.dart';
 import 'watchlist_screen.dart';
 import 'downloads/downloads_screen.dart';
 import 'settings/settings_screen.dart';
@@ -419,6 +421,7 @@ class _MainScreenState extends State<MainScreen>
   bool _lastHasLiveTv = false;
   bool _lastHasExplore = false;
   bool _lastHasWatchlist = false;
+  bool _lastHasComfort = false;
 
   /// Whether a reconnection attempt is in progress
   bool _isReconnecting = false;
@@ -543,9 +546,11 @@ class _MainScreenState extends State<MainScreen>
       final catalogSources = context.read<CatalogSourcesProvider>();
       _lastHasExplore = catalogSources.hasAnySource && _showExploreTabSetting;
       _lastHasWatchlist = catalogSources.watchlistCapableSources.isNotEmpty;
+      _lastHasComfort = _hasTrakt(catalogSources);
     } catch (_) {
       _lastHasExplore = false;
       _lastHasWatchlist = false;
+      _lastHasComfort = false;
     }
     // Re-evaluate Explore tab visibility when the appearance toggle flips
     // mid-session; the catalog-sources listener covers source changes.
@@ -1208,6 +1213,7 @@ class _MainScreenState extends State<MainScreen>
       NavigationTabId.discover => DiscoverScreen(key: _screenKeys[tab]),
       NavigationTabId.explore => ExploreScreen(key: _screenKeys[tab]),
       NavigationTabId.watchlist => WatchlistScreen(key: _screenKeys[tab]),
+      NavigationTabId.comfort => ComfortScreen(key: _screenKeys[tab]),
       NavigationTabId.libraries => LibrariesScreen(
         key: _screenKeys[tab],
         onLibraryOrderChanged: _onLibraryOrderChanged,
@@ -1233,6 +1239,7 @@ class _MainScreenState extends State<MainScreen>
     hasLiveTv: _hasLiveTv,
     hasExplore: _lastHasExplore,
     hasWatchlist: _lastHasWatchlist,
+    hasComfort: _lastHasComfort,
     preferredStartup: SettingsService.instanceOrNull?.read(SettingsService.startupSection),
   );
 
@@ -1314,14 +1321,21 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
+  /// Comfort shows live in a Trakt list, so the tab needs Trakt connected.
+  static bool _hasTrakt(CatalogSourcesProvider sources) =>
+      sources.connectedSources.any((source) => source.id == CatalogSourceId.trakt);
+
   bool get _showExploreTabSetting => SettingsService.instanceOrNull?.read(SettingsService.showExploreTab) ?? true;
 
   void _handleCatalogSourcesChanged() {
     final hasExplore = (_catalogSourcesProvider?.hasAnySource ?? false) && _showExploreTabSetting;
     final hasWatchlist = _catalogSourcesProvider?.watchlistCapableSources.isNotEmpty ?? false;
-    if (hasExplore == _lastHasExplore && hasWatchlist == _lastHasWatchlist) return;
+    final catalogSources = _catalogSourcesProvider;
+    final hasComfort = catalogSources != null && _hasTrakt(catalogSources);
+    if (hasExplore == _lastHasExplore && hasWatchlist == _lastHasWatchlist && hasComfort == _lastHasComfort) return;
     _lastHasExplore = hasExplore;
     _lastHasWatchlist = hasWatchlist;
+    _lastHasComfort = hasComfort;
 
     _handleTabAvailabilityChanged();
     _applyPendingStartupTab();
@@ -1917,6 +1931,7 @@ class _MainScreenState extends State<MainScreen>
       hasLiveTv: _hasLiveTv,
       hasExplore: _lastHasExplore,
       hasWatchlist: _lastHasWatchlist,
+      hasComfort: _lastHasComfort,
     );
   }
 
