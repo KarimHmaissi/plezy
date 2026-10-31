@@ -5,17 +5,47 @@ on top of upstream [edde746/plezy](https://github.com/edde746/plezy). The target
 is the NVIDIA Shield (Android TV); development happens on a Windows PC in TV
 mode. Newest first. Each entry lists its commit(s) on `dev`.
 
-## Planned (not built yet)
+## Done so far
 
-### AI helper
-- A new nav item where you send a voice command or typed request ("something
-  light and funny, under 30 minutes") and get back a list of suggestions from
-  your libraries, each with its reasoning.
+- [x] Shield remote works on the Windows PC
+- [x] Libraries at the bottom of the side nav
+- [x] Netflix-style multi-row home, calmer backdrop
+- [x] Watchlist page with genre rows (6+ titles per genre)
+- [x] PC previews the Shield's real 960×540 layout
+- [x] Comfort shows + Random episode (and a dice button on every show)
+- [x] Smarter Continue Watching: Continue Watching + Pick back up, older
+      on-deck films, 1-year cut-off
+- [x] Trakt Lists in Explore: charts, liked lists, Discover lists
 
-### Continue Watching from Trakt progress (phase 2)
-- Use Trakt watch progress so "next up" is right even for episodes watched
-  outside these Plex servers (other apps, devices), and so very old shows
-  beyond Plex's On Deck window can still appear in "Pick back up".
+Details of each are in the dated entries below.
+
+## Backlog (not built yet)
+
+### Features
+- **AI helper** — a new nav item where you send a voice command or typed
+  request ("something light and funny, under 30 minutes") and get back a list
+  of suggestions from your libraries, each with its reasoning.
+- **Continue Watching from Trakt progress (phase 2)** — use Trakt watch
+  progress so "next up" is right even for episodes watched outside these Plex
+  servers, and so old shows beyond Plex's On Deck window can appear in "Pick
+  back up".
+- **Pin a Trakt list to Home** — give a favourite list its own Home row.
+- **Trakt smart lists / saved filters as rows** — the API works on the free
+  account; add rows once there are some to show.
+- **"On your server" badge** on Watchlist and Explore cards, so you can see at
+  a glance what's playable without opening the detail page.
+- **Multi-row view on show and movie detail pages** (they still use the
+  single-row layout).
+- **Shield remote volume buttons on Windows** (currently unmapped).
+
+### Shield & infrastructure
+- **Run it on the real Shield** — confirm the layout (`adb shell wm density` /
+  `wm size`, expected 320 and 1920x1080) and check playback and the remote.
+- **Deployment pipeline to the Shield** — build and push changes from the PC
+  to the Shield over adb, with hot reload where possible (the project's
+  original goal).
+- **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
+  consider registering our own Trakt app instead of upstream's.
 
 ## 2026-10-31
 
