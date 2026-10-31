@@ -1683,7 +1683,39 @@ class PlexClient
       }
       result.add(item);
     }
+    await _addOlderOnDeckItems(result);
     return _backfillMissingLogos(result);
+  }
+
+  /// The Continue Watching hub hides anything older than the server's
+  /// OnDeckWindow (about 16 weeks), but `/library/onDeck` still lists those
+  /// in-progress items — on a live account, a dozen half-watched films last
+  /// touched months ago. Append the ones the hub left out (same item, or an
+  /// episode of a show the hub already has, is skipped) so Home's "Pick back
+  /// up" row can show them. Best-effort: a failure keeps the hub's items.
+  Future<void> _addOlderOnDeckItems(List<PlexMetadataDto> result) async {
+    try {
+      final response = await _getWithFailover(
+        '/library/onDeck',
+        queryParameters: {'X-Plex-Container-Start': 0, 'X-Plex-Container-Size': 100, 'includeGuids': 1},
+        allowEndpointFailover: false,
+      );
+      final seenKeys = {for (final item in result) item.ratingKey};
+      final seenShows = {
+        for (final item in result)
+          if (item.type?.toLowerCase() == 'episode' && item.grandparentRatingKey != null) item.grandparentRatingKey,
+      };
+      for (final item in _extractMetadataList(response)) {
+        if (seenKeys.contains(item.ratingKey)) continue;
+        final isEpisode = item.type?.toLowerCase() == 'episode';
+        if (isEpisode && seenShows.contains(item.grandparentRatingKey)) continue;
+        result.add(item);
+        seenKeys.add(item.ratingKey);
+        if (isEpisode && item.grandparentRatingKey != null) seenShows.add(item.grandparentRatingKey);
+      }
+    } catch (e) {
+      appLogger.d('Plex: /library/onDeck top-up failed', error: e);
+    }
   }
 
   /// Some PMS versions (before the ~1.43 hub refresh) omit the show's

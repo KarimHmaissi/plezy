@@ -1000,6 +1000,10 @@ class SettingsService extends BaseSharedPreferencesService {
   /// Continue Watching items untouched for longer than this many days move to
   /// the "Pick back up" row.
   static const continueWatchingStaleDays = IntPref('continue_watching_stale_days', defaultValue: 30);
+
+  /// Continue Watching items untouched for longer than this many days are
+  /// hidden from Home altogether.
+  static const continueWatchingMaxAgeDays = IntPref('continue_watching_max_age_days', defaultValue: 365);
   static const exitFullscreenOnPlayerClose = BoolPref('exit_fullscreen_on_player_close');
 
   static const playbackBufferTier = EnumPref<PlaybackBufferTier>(
@@ -1615,6 +1619,7 @@ class SettingsService extends BaseSharedPreferencesService {
     startInFullscreen,
     comfortPlayImmediately,
     continueWatchingStaleDays,
+    continueWatchingMaxAgeDays,
     exitFullscreenOnPlayerClose,
   ];
 

@@ -97,6 +97,16 @@ void main() {
       expect(_names(split.pickBackUp), ['The Orville']);
     });
 
+    test('drops items older than the 365-day limit but keeps new episodes', () {
+      final split = classifyContinueWatching([
+        _movie('Iron Man', offsetMs: 3866495, lastViewedDaysAgo: 354),
+        _movie('Avengers: Endgame', offsetMs: 1372999, lastViewedDaysAgo: 683),
+        _episode('Old Show', lastViewedDaysAgo: 500, addedDaysAgo: 2),
+      ], now: _now);
+      expect(_names(split.fresh), ['Old Show']);
+      expect(_names(split.pickBackUp), ['Iron Man']);
+    });
+
     test('an item with no timestamps stays in the main row', () {
       final undated = testMediaItem(id: 'x', kind: MediaKind.movie, title: 'Undated');
       final split = classifyContinueWatching([undated], now: _now);

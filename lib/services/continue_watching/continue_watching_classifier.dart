@@ -22,6 +22,8 @@ const double continueWatchingFilmFinished = 0.9;
 /// - Accidental starts (under [continueWatchingAccidentalStart] in) and films
 ///   past [continueWatchingFilmFinished] are dropped. Hidden client-side only;
 ///   nothing is marked watched.
+/// - Items last touched more than [maxAge] ago are dropped entirely (a new
+///   episode of a caught-up show is still kept).
 /// - Episodes of shows in [excludedShowTitles] (normalised with
 ///   [normalizeShowTitle]) are dropped — the Comfort tab covers those.
 ///
@@ -30,11 +32,13 @@ ContinueWatchingSplit classifyContinueWatching(
   List<MediaItem> items, {
   required DateTime now,
   Duration staleAfter = const Duration(days: 30),
+  Duration maxAge = const Duration(days: 365),
   Set<String> excludedShowTitles = const {},
 }) {
   final fresh = <MediaItem>[];
   final pickBackUp = <MediaItem>[];
   final cutoff = now.subtract(staleAfter).millisecondsSinceEpoch ~/ 1000;
+  final oldest = now.subtract(maxAge).millisecondsSinceEpoch ~/ 1000;
   for (final item in items) {
     if (excludedShowTitles.isNotEmpty &&
         item.kind == MediaKind.episode &&
@@ -53,6 +57,7 @@ ContinueWatchingSplit classifyContinueWatching(
     final isNewEpisode =
         item.kind == MediaKind.episode && !started && added != null && lastViewed != null && added > lastViewed;
     final activity = lastViewed ?? added;
+    if (!isNewEpisode && activity != null && activity < oldest) continue;
     // No timestamps at all is no evidence of age: keep it in the main row.
     if (isNewEpisode || activity == null || activity >= cutoff) {
       fresh.add(item);

@@ -195,16 +195,26 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // rebuilds hand TvBrowseRail the same hubs list and its didUpdateWidget
   // fast path — and the cached rail widget below — kick in.
   List<MediaHub>? _tvBrowseHubsCache;
-  (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int)? _tvBrowseHubsCacheKey;
+  (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int, int)? _tvBrowseHubsCacheKey;
 
   List<MediaHub> get _tvBrowseHubs {
     final staleDays = context.settingsRead(SettingsService.continueWatchingStaleDays);
-    final key = (_onDeck, _hubs, _hasMoreContinueWatching, t.discover.continueWatching, _comfortTitles, staleDays);
+    final maxAgeDays = context.settingsRead(SettingsService.continueWatchingMaxAgeDays);
+    final key = (
+      _onDeck,
+      _hubs,
+      _hasMoreContinueWatching,
+      t.discover.continueWatching,
+      _comfortTitles,
+      staleDays,
+      maxAgeDays,
+    );
     if (_tvBrowseHubsCache != null && key == _tvBrowseHubsCacheKey) return _tvBrowseHubsCache!;
     final split = classifyContinueWatching(
       _onDeck,
       now: DateTime.now(),
       staleAfter: Duration(days: staleDays),
+      maxAge: Duration(days: maxAgeDays),
       excludedShowTitles: _comfortTitles,
     );
     // Pick back up sits directly under Continue Watching, ahead of the

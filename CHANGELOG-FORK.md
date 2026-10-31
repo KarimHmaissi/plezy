@@ -31,6 +31,11 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - Shows on the Comfort list are left out of both rows.
 - Per-server fetch raised from 20 to 60 items. The cut-off is a setting
   (`continue_watching_stale_days`, default 30).
+- Plex's Continue Watching hub hides anything older than the server's On Deck
+  window (~16 weeks), so Plezy also reads each server's `/library/onDeck` and
+  adds what the hub left out (on Karim's servers: a dozen half-watched films).
+  Anything last touched more than a year ago is hidden
+  (`continue_watching_max_age_days`, default 365). — `COMMIT`
 
 ### Comfort shows and Random episode — `a7bbf5a`
 - New **Comfort** tab (sofa icon, shown when Trakt is connected) listing the
