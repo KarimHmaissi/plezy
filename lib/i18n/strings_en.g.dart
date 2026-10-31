@@ -3796,6 +3796,18 @@ class Translations$watchlist$en {
 	/// en: 'TV'
 	String get tv => 'TV';
 
+	/// en: '${genre} Films'
+	String genreFilms({required Object genre}) => '${genre} Films';
+
+	/// en: '${genre} TV'
+	String genreTv({required Object genre}) => '${genre} TV';
+
+	/// en: 'Other Films'
+	String get otherFilms => 'Other Films';
+
+	/// en: 'Other TV'
+	String get otherTv => 'Other TV';
+
 	/// en: 'Your watchlist is empty'
 	String get emptyTitle => 'Your watchlist is empty';
 
@@ -9456,6 +9468,10 @@ extension on Translations {
 			'navigation.watchlist' => 'Watchlist',
 			'watchlist.films' => 'Films',
 			'watchlist.tv' => 'TV',
+			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
+			'watchlist.genreTv' => ({required Object genre}) => '${genre} TV',
+			'watchlist.otherFilms' => 'Other Films',
+			'watchlist.otherTv' => 'Other TV',
 			'watchlist.emptyTitle' => 'Your watchlist is empty',
 			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
 			'watchlist.noSourceTitle' => 'No watchlist connected',
@@ -9674,12 +9690,12 @@ extension on Translations {
 			'liveTv.processRecordingRules' => 'Re-evaluate rules',
 			'liveTv.recordingInProgress' => 'Recording now',
 			'liveTv.recordingsCount' => ({required Object count}) => '${count} scheduled',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.editRule' => 'Edit rule',
 			'liveTv.editRuleAction' => 'Edit',
 			'liveTv.recordingRuleUpdated' => 'Recording rule updated',
 			'liveTv.guideReloadRequested' => 'Guide refresh requested',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.guideReloadFailed' => 'Couldn\'t refresh the guide',
 			'liveTv.rulesProcessRequested' => 'Rule re-evaluation requested',
 			'liveTv.rulesProcessFailed' => 'Couldn\'t re-evaluate recording rules',
@@ -10188,12 +10204,12 @@ extension on Translations {
 			'performanceOverlay.dvSampleAverage' => 'DV Sample Avg',
 			'performanceOverlay.maxLuma' => 'Max Luma',
 			'performanceOverlay.minLuma' => 'Min Luma',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.maxCll' => 'MaxCLL',
 			'performanceOverlay.maxFall' => 'MaxFALL',
 			'performanceOverlay.cacheUsed' => 'Cache Used',
 			'performanceOverlay.cacheLimit' => 'Cache Limit',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.speed' => 'Speed',
 			'performanceOverlay.player' => 'Player',
 			'performanceOverlay.playMethod' => 'Play Method',

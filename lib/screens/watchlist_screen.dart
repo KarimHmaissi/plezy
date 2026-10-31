@@ -17,6 +17,7 @@ import '../models/catalog/catalog_item.dart';
 import '../navigation/main_screen_scope.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../services/catalog/catalog_source.dart';
+import '../services/catalog/watchlist_genres.dart';
 import '../services/catalog/watchlist_split.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
@@ -30,7 +31,12 @@ import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
 import 'libraries/state_messages.dart';
 
-/// The Watchlist tab: the user's catalog watchlist split into Films and TV.
+/// The Watchlist tab: the user's catalog watchlist as genre shelves, Films
+/// first, then TV.
+///
+/// Genres are looked up automatically for every title at load time (see
+/// [resolveWatchlistGenres]); until they arrive the page shows plain Films
+/// and TV shelves.
 ///
 /// Reads the watchlist of Explore's active source when it has one, otherwise
 /// the first connected source that does (see
@@ -59,6 +65,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
   late CatalogSourcesProvider _sources;
   CatalogSource? _source;
   WatchlistSplit _split = (films: const [], tv: const []);
+
+  /// Genre shelves for [_split], or null until genres have been resolved.
+  List<WatchlistGenreGroup>? _genreGroups;
   bool _loading = false;
   bool _loaded = false;
   Object? _error;
@@ -71,7 +80,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
   final _hubFocusMemory = HubFocusMemory();
   final TvSpotlightController _spotlight = TvSpotlightController();
   final ValueNotifier<bool> _tvRowsExpanded = ValueNotifier(false);
-  final List<GlobalKey<HubSectionState>> _hubKeys = [GlobalKey(), GlobalKey()];
+  final List<GlobalKey<HubSectionState>> _hubKeys = [GlobalKey()];
 
   @override
   void initState() {
@@ -105,6 +114,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     _source?.watchlistChanges.addListener(_onWatchlistChanged);
     _generation++;
     _split = (films: const [], tv: const []);
+    _genreGroups = null;
     _loaded = false;
     _error = null;
     _loadedAt = null;
@@ -134,11 +144,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
         if (page == _maxPages) appLogger.w('Watchlist: truncated at ${items.length} items ($page pages)');
       }
       if (!mounted || generation != _generation) return;
+      final split = splitWatchlist(items);
       setState(() {
-        _split = splitWatchlist(items);
+        _split = split;
         _loaded = true;
         _loadedAt = DateTime.now();
       });
+      unawaited(_groupByGenre(source, split, generation));
     } catch (e) {
       appLogger.w('Watchlist: ${source.id.name} load failed', error: e);
       if (!mounted || generation != _generation) return;
@@ -147,6 +159,22 @@ class WatchlistScreenState extends State<WatchlistScreen>
       setState(() => _error = e);
     } finally {
       if (mounted && generation == _generation) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _groupByGenre(CatalogSource source, WatchlistSplit split, int generation) async {
+    try {
+      final cache = await WatchlistGenreCache.load();
+      final genres = await resolveWatchlistGenres(
+        [...split.films, ...split.tv],
+        lookup: source is CatalogGenreLookup ? source as CatalogGenreLookup : null,
+        cache: cache,
+      );
+      unawaited(cache.save());
+      if (!mounted || generation != _generation) return;
+      setState(() => _genreGroups = groupWatchlistByGenre(split, (item) => genres[item]));
+    } catch (e) {
+      appLogger.w('Watchlist: genre grouping failed', error: e);
     }
   }
 
@@ -191,14 +219,26 @@ class WatchlistScreenState extends State<WatchlistScreen>
       items: [for (final item in items) item.toMediaItem()],
       size: items.length,
     );
+    final groups = _genreGroups;
+    if (groups == null) {
+      return [
+        if (_split.films.isNotEmpty) hub('films', t.watchlist.films, _split.films),
+        if (_split.tv.isNotEmpty) hub('tv', t.watchlist.tv, _split.tv),
+      ];
+    }
     return [
-      if (_split.films.isNotEmpty) hub('films', t.watchlist.films, _split.films),
-      if (_split.tv.isNotEmpty) hub('tv', t.watchlist.tv, _split.tv),
+      for (final group in groups)
+        hub('${group.films ? 'films' : 'tv'}.${group.genre ?? 'other'}', switch ((group.films, group.genre)) {
+          (true, final String genre) => t.watchlist.genreFilms(genre: genre),
+          (false, final String genre) => t.watchlist.genreTv(genre: genre),
+          (true, null) => t.watchlist.otherFilms,
+          (false, null) => t.watchlist.otherTv,
+        }, group.items),
     ];
   }
 
   static IconData _iconFor(MediaHub hub) =>
-      hub.identifier == 'watchlist.films' ? Symbols.movie_rounded : Symbols.tv_rounded;
+      hub.identifier?.startsWith('watchlist.films') ?? false ? Symbols.movie_rounded : Symbols.tv_rounded;
 
   void _setSpotlightItem(MediaItem item) => _spotlight.select(item);
 
@@ -307,6 +347,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   Widget _buildDesktopContent(List<MediaHub> hubs) {
     final message = _buildStateMessage();
+    while (_hubKeys.length < hubs.length) {
+      _hubKeys.add(GlobalKey());
+    }
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: _load,

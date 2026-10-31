@@ -15,7 +15,7 @@ import 'catalog_watchlist_machinery.dart';
 /// [CatalogSource] backed by the active Plex profile's universal watchlist
 /// and Discover's Home shelves (what Plex's own web client shows on its
 /// Home ▸ Trending tab).
-class PlexCatalogSource with CatalogWatchlistMachinery implements CatalogSource, CatalogHubSource {
+class PlexCatalogSource with CatalogWatchlistMachinery implements CatalogSource, CatalogHubSource, CatalogGenreLookup {
   final PlexDiscoverClient _client;
   final bool includeImageVariants;
   final Map<String, String> _hubKeys = {};
@@ -157,6 +157,14 @@ class PlexCatalogSource with CatalogWatchlistMachinery implements CatalogSource,
             ],
       related: _fromMetadata(relatedMetadata).take(safeRelatedLimit).toList(),
     );
+  }
+
+  @override
+  Future<List<String>?> fetchGenres(CatalogItem item) async {
+    final ratingKey = item.ids.plex;
+    if (ratingKey == null || ratingKey.isEmpty) return null;
+    final metadata = await _client.getMetadata(ratingKey);
+    return _tagsFor(metadata?['Genre']) ?? const [];
   }
 
   Future<Map<String, dynamic>?> _loadDetailMetadata(String ratingKey) async {

@@ -1440,6 +1440,10 @@
   "watchlist": {
     "films": "Films",
     "tv": "TV",
+    "genreFilms": "${genre} Films",
+    "genreTv": "${genre} TV",
+    "otherFilms": "Other Films",
+    "otherTv": "Other TV",
     "emptyTitle": "Your watchlist is empty",
     "emptyMessage": "Titles you add to your ${source} watchlist appear here",
     "noSourceTitle": "No watchlist connected",

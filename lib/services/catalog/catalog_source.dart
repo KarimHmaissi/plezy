@@ -151,6 +151,16 @@ abstract interface class CatalogHubSource {
   Future<CatalogPage> fetchHub(String id, {int page = 1, int limit = 25});
 }
 
+/// Optional capability for catalog providers whose list responses omit
+/// genres (Plex's watchlist listing carries no Genre tags), so the Watchlist
+/// page can look them up per title.
+abstract interface class CatalogGenreLookup {
+  /// The title's genres in the provider's order — empty when it has none —
+  /// or null when the provider cannot look it up (no provider id). Request
+  /// failures throw.
+  Future<List<String>?> fetchGenres(CatalogItem item);
+}
+
 /// Optional capability for catalog providers that publish community scores
 /// for a title: their own, and any other sites' they report (MDBList carries
 /// Rotten Tomatoes, IMDb, TMDB, Metacritic, Letterboxd, Trakt and MyAnimeList;
