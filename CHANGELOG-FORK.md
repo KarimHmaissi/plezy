@@ -50,7 +50,7 @@ Details of each are in the dated entries below.
 
 ## 2026-10-31
 
-### Pin to Home and Home rows — `HASH`
+### Pin to Home and Home rows — `fba532f55`
 - Hold OK (long-press) on any card in an Explore ▸ Trakt Lists row for
   **Pin to Home** / **Unpin from Home**. Public lists opened from Discover
   lists have a **Pin to Home** button next to Like list.
