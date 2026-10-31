@@ -35,7 +35,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
   window (~16 weeks), so Plezy also reads each server's `/library/onDeck` and
   adds what the hub left out (on Karim's servers: a dozen half-watched films).
   Anything last touched more than a year ago is hidden
-  (`continue_watching_max_age_days`, default 365). — `COMMIT`
+  (`continue_watching_max_age_days`, default 365). — `aab28d0`
 
 ### Comfort shows and Random episode — `a7bbf5a`
 - New **Comfort** tab (sofa icon, shown when Trakt is connected) listing the
