@@ -51,7 +51,7 @@ Details of each are in the dated entries below.
 
 ## 2026-10-31
 
-### Fix: cursor jumping to the 4th card when changing rows — `HASH`
+### Fix: cursor jumping to the 4th card when changing rows — `7f238ca0c`
 - On the PC, the mouse pointer sits idle in the middle of the screen. When the
   remote moved to a new row, that row slid under the pointer and Flutter
   counted it as the mouse "entering" the card underneath (usually the 4th),
