@@ -5,6 +5,13 @@ on top of upstream [edde746/plezy](https://github.com/edde746/plezy). The target
 is the NVIDIA Shield (Android TV); development happens on a Windows PC in TV
 mode. Newest first. Each entry lists its commit(s) on `dev`.
 
+## Planned (not built yet)
+
+### AI helper
+- A new nav item where you send a voice command or typed request ("something
+  light and funny, under 30 minutes") and get back a list of suggestions from
+  your libraries, each with its reasoning.
+
 ## 2026-10-31
 
 ### Comfort shows and Random episode — `a7bbf5a`
