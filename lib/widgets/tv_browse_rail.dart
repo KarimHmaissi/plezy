@@ -410,6 +410,10 @@ class TvBrowseRail extends StatefulWidget {
   /// Reports when the rail enters or leaves the [expandedTop] layout.
   final ValueChanged<bool>? onExpandedChanged;
 
+  /// Row-wide actions (e.g. Pin to Home) appended to the long-press menu of
+  /// every card in [hub].
+  final List<MediaMenuExtraEntry> Function(MediaHub hub)? rowMenuEntriesForHub;
+
   const TvBrowseRail({
     super.key,
     required this.hubs,
@@ -442,6 +446,7 @@ class TvBrowseRail extends StatefulWidget {
     this.backgroundBleedLeft,
     this.expandedTop,
     this.onExpandedChanged,
+    this.rowMenuEntriesForHub,
   });
 
   @override
@@ -1688,7 +1693,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
             rightOverflow: rightOverflow,
             verticalOverflow: metrics.focusExtra,
           ),
-          child: rail,
+          child: RowMenuEntries(entries: widget.rowMenuEntriesForHub?.call(hub) ?? const [], child: rail),
         ),
       ),
     );

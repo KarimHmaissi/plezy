@@ -229,6 +229,22 @@ class MediaMenuExtraEntry {
   const MediaMenuExtraEntry({required this.icon, required this.label, required this.onSelected});
 }
 
+/// Entries that apply to a whole row (e.g. "Pin to Home"), provided by the
+/// row around its cards and appended to every card's menu in it — server
+/// items and catalog items alike. Read when a menu opens, so memoized cards
+/// always see the row's current entries.
+class RowMenuEntries extends InheritedWidget {
+  final List<MediaMenuExtraEntry> entries;
+
+  const RowMenuEntries({super.key, required this.entries, required super.child});
+
+  static List<MediaMenuExtraEntry> of(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<RowMenuEntries>()?.entries ?? const [];
+
+  @override
+  bool updateShouldNotify(RowMenuEntries oldWidget) => false;
+}
+
 class MediaContextMenu extends StatefulWidget {
   /// Either a [MediaItem] or a [MediaPlaylist]. Typed as [Object] because
   /// Dart has no nominal union type — guarded at runtime via the
@@ -281,6 +297,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
   bool _isContextMenuOpen = false;
 
   bool get isContextMenuOpen => _isContextMenuOpen;
+
+  /// The extra entries offered by the open menu, in display order.
+  List<MediaMenuExtraEntry> _openExtras = const [];
 
   void _notifyRefresh(MediaItem source) {
     if (!mounted) return;
@@ -415,8 +434,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         : menu.isCollection || menu.isPlaylist
         ? _buildListMenuActions(context, menu)
         : _buildItemMenuActions(context, menu);
-    for (var i = 0; i < widget.extraEntries.length; i++) {
-      final entry = widget.extraEntries[i];
+    final extras = _openExtras = [...widget.extraEntries, ...RowMenuEntries.of(this.context)];
+    for (var i = 0; i < extras.length; i++) {
+      final entry = extras[i];
       menuActions.add(_MenuAction(value: 'extra_$i', icon: entry.icon, label: entry.label));
     }
 
@@ -823,8 +843,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     // Caller-supplied extra entries dispatch straight to their callback.
     if (selected != null && selected.startsWith('extra_')) {
       final index = int.tryParse(selected.substring('extra_'.length));
-      if (index != null && index >= 0 && index < widget.extraEntries.length) {
-        widget.extraEntries[index].onSelected();
+      final extras = _openExtras;
+      if (index != null && index >= 0 && index < extras.length) {
+        extras[index].onSelected();
       }
       return;
     }

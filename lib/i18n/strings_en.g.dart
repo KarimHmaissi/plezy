@@ -65,6 +65,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$profiles$en profiles = Translations$profiles$en.internal(_root);
 	late final Translations$connections$en connections = Translations$connections$en.internal(_root);
 	late final Translations$accountPreferences$en accountPreferences = Translations$accountPreferences$en.internal(_root);
+	late final Translations$homeRows$en homeRows = Translations$homeRows$en.internal(_root);
 	late final Translations$discover$en discover = Translations$discover$en.internal(_root);
 	late final Translations$errors$en errors = Translations$errors$en.internal(_root);
 	late final Translations$libraries$en libraries = Translations$libraries$en.internal(_root);
@@ -3251,6 +3252,78 @@ class Translations$accountPreferences$en {
 	String get mediaReviewsVisibility => 'Ratings & reviews';
 
 	late final Translations$accountPreferences$mediaReviewsOptions$en mediaReviewsOptions = Translations$accountPreferences$mediaReviewsOptions$en.internal(_root);
+}
+
+// Path: homeRows
+class Translations$homeRows$en {
+	Translations$homeRows$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Home rows'
+	String get title => 'Home rows';
+
+	/// en: 'Pin to Home'
+	String get pinToHome => 'Pin to Home';
+
+	/// en: 'Unpin from Home'
+	String get unpinFromHome => 'Unpin from Home';
+
+	/// en: 'Remove row from Home'
+	String get removeRowFromHome => 'Remove row from Home';
+
+	/// en: 'Remove row'
+	String get removeRow => 'Remove row';
+
+	/// en: 'Manage Home rows'
+	String get manageHomeRows => 'Manage Home rows';
+
+	/// en: 'Pinned ${title} to Home'
+	String pinned({required Object title}) => 'Pinned ${title} to Home';
+
+	/// en: 'Unpinned ${title} from Home'
+	String unpinned({required Object title}) => 'Unpinned ${title} from Home';
+
+	/// en: 'Removed ${title} from Home'
+	String hidden({required Object title}) => 'Removed ${title} from Home';
+
+	/// en: '${title} is back on Home'
+	String restored({required Object title}) => '${title} is back on Home';
+
+	/// en: 'Couldn't save Home rows to Trakt'
+	String get saveFailed => 'Couldn\'t save Home rows to Trakt';
+
+	/// en: 'Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can't be created'
+	String listLimitReached({required Object limit}) => 'Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can\'t be created';
+
+	/// en: 'Remove ${title} from Home?'
+	String hideContinueWatchingTitle({required Object title}) => 'Remove ${title} from Home?';
+
+	/// en: 'You won't see what you're in the middle of on Home. You can bring it back from Manage Home rows.'
+	String get hideContinueWatchingMessage => 'You won\'t see what you\'re in the middle of on Home. You can bring it back from Manage Home rows.';
+
+	/// en: 'Pinned to Home'
+	String get pinnedSection => 'Pinned to Home';
+
+	/// en: 'Trakt charts'
+	String get chartsSection => 'Trakt charts';
+
+	/// en: 'Your Trakt lists'
+	String get listsSection => 'Your Trakt lists';
+
+	/// en: 'Hidden rows'
+	String get hiddenSection => 'Hidden rows';
+
+	/// en: 'No hidden rows'
+	String get noHiddenRows => 'No hidden rows';
+
+	/// en: 'Show on Home again'
+	String get restore => 'Show on Home again';
+
+	/// en: 'Saved to the private Trakt list "Plezy" so every device shows the same Home.'
+	String get syncedNote => 'Saved to the private Trakt list "Plezy" so every device shows the same Home.';
 }
 
 // Path: discover
@@ -7143,6 +7216,12 @@ class Translations$explore$traktLists$en {
 
 	/// en: 'Couldn't update the like on Trakt'
 	String get likeFailed => 'Couldn\'t update the like on Trakt';
+
+	/// en: 'Pin to Home'
+	String get pin => 'Pin to Home';
+
+	/// en: 'Pinned'
+	String get pinned => 'Pinned';
 }
 
 // Path: explore.rows
@@ -9383,6 +9462,27 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.usersOnly' => 'Users only',
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
+			'homeRows.title' => 'Home rows',
+			'homeRows.pinToHome' => 'Pin to Home',
+			'homeRows.unpinFromHome' => 'Unpin from Home',
+			'homeRows.removeRowFromHome' => 'Remove row from Home',
+			'homeRows.removeRow' => 'Remove row',
+			'homeRows.manageHomeRows' => 'Manage Home rows',
+			'homeRows.pinned' => ({required Object title}) => 'Pinned ${title} to Home',
+			'homeRows.unpinned' => ({required Object title}) => 'Unpinned ${title} from Home',
+			'homeRows.hidden' => ({required Object title}) => 'Removed ${title} from Home',
+			'homeRows.restored' => ({required Object title}) => '${title} is back on Home',
+			'homeRows.saveFailed' => 'Couldn\'t save Home rows to Trakt',
+			'homeRows.listLimitReached' => ({required Object limit}) => 'Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can\'t be created',
+			'homeRows.hideContinueWatchingTitle' => ({required Object title}) => 'Remove ${title} from Home?',
+			'homeRows.hideContinueWatchingMessage' => 'You won\'t see what you\'re in the middle of on Home. You can bring it back from Manage Home rows.',
+			'homeRows.pinnedSection' => 'Pinned to Home',
+			'homeRows.chartsSection' => 'Trakt charts',
+			'homeRows.listsSection' => 'Your Trakt lists',
+			'homeRows.hiddenSection' => 'Hidden rows',
+			'homeRows.noHiddenRows' => 'No hidden rows',
+			'homeRows.restore' => 'Show on Home again',
+			'homeRows.syncedNote' => 'Saved to the private Trakt list "Plezy" so every device shows the same Home.',
 			'discover.title' => 'Discover',
 			'discover.noContentAvailable' => 'No content available',
 			'discover.addMediaToLibraries' => 'Add some media to your libraries',
@@ -9652,6 +9752,8 @@ extension on Translations {
 			'explore.traktLists.like' => 'Like list',
 			'explore.traktLists.liked' => 'Liked',
 			'explore.traktLists.likeFailed' => 'Couldn\'t update the like on Trakt',
+			'explore.traktLists.pin' => 'Pin to Home',
+			'explore.traktLists.pinned' => 'Pinned',
 			'explore.title' => 'Explore',
 			'explore.selectSource' => 'Select source',
 			'explore.rows.watchlist' => 'Watchlist',
@@ -9804,6 +9906,8 @@ extension on Translations {
 			'liveTv.serverNotConnected' => 'Live TV server is not connected.',
 			'liveTv.noPrograms' => 'No program data available',
 			'liveTv.liveStreamFailed' => 'Live stream failed',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.unknownProgram' => 'Unknown Program',
 			'liveTv.unknownHub' => 'Unknown',
 			'liveTv.unknownError' => 'Unknown error',
@@ -9827,8 +9931,6 @@ extension on Translations {
 			'liveTv.evening' => 'Evening',
 			'liveTv.lateNight' => 'Late Night',
 			'liveTv.whatsOn' => 'What\'s On',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.watchChannel' => 'Watch Channel',
 			'liveTv.favorites' => 'Favorites',
 			'liveTv.reorderFavorites' => 'Reorder Favorites',
@@ -10318,6 +10420,8 @@ extension on Translations {
 			'companionRemote.errors.commandFailed' => ({required Object error}) => 'Failed to send remote command: ${error}',
 			'companionRemote.errors.joinTimedOut' => 'Timed out joining session',
 			'companionRemote.errors.failedToConnectAnyAddress' => 'Failed to connect to any address',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.errors.connectionLostAfterAttempts' => ({required Object attempts}) => 'Connection lost after ${attempts} attempts',
 			'companionRemote.errors.connectionLost' => 'Connection lost',
 			'companionRemote.closedBeforeAuth' => 'The connection closed before authentication',
@@ -10341,8 +10445,6 @@ extension on Translations {
 			'videoSettings.audioOutputDolbyAtmos' => 'Dolby Atmos',
 			'videoSettings.audioOutputDolbyAudio' => 'Dolby Audio',
 			'videoSettings.audioOutputSurround' => 'Surround',
-			_ => null,
-		} ?? switch (path) {
 			'videoSettings.audioOutputSpatial' => 'Spatial Audio',
 			'videoSettings.audioOutputStereo' => 'Stereo',
 			'videoSettings.audioNormalization' => 'Normalize Loudness',

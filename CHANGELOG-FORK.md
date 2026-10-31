@@ -16,6 +16,8 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] Smarter Continue Watching: Continue Watching + Pick back up, older
       on-deck films, 1-year cut-off
 - [x] Trakt Lists in Explore: charts, liked lists, Discover lists
+- [x] Pin any Trakt list or chart to Home; remove any Home row (synced via
+      Trakt)
 
 Details of each are in the dated entries below.
 
@@ -29,7 +31,6 @@ Details of each are in the dated entries below.
   progress so "next up" is right even for episodes watched outside these Plex
   servers, and so old shows beyond Plex's On Deck window can appear in "Pick
   back up".
-- **Pin a Trakt list to Home** — give a favourite list its own Home row.
 - **Trakt smart lists / saved filters as rows** — the API works on the free
   account; add rows once there are some to show.
 - **"On your server" badge** on Watchlist and Explore cards, so you can see at
@@ -48,6 +49,28 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-10-31
+
+### Pin to Home and Home rows — `HASH`
+- Hold OK (long-press) on any card in an Explore ▸ Trakt Lists row for
+  **Pin to Home** / **Unpin from Home**. Public lists opened from Discover
+  lists have a **Pin to Home** button next to Like list.
+- Pinned rows appear on Home after Continue Watching and Pick back up, in pin
+  order. Charts refresh every time Home loads.
+- Any other Home row (Plex hubs like Recently Added or Trending, Continue
+  Watching, Pick back up) can be dropped with **Remove row from Home** in the
+  same long-press menu. Removing Continue Watching asks first.
+- **Manage Home rows** (in the long-press menu, and the pin icon in Explore ▸
+  Trakt Lists): switches for every chart and Trakt list, anything else
+  pinned, and **Hidden rows**, each with "Show on Home again".
+- Stored in the description of one private Trakt list, **Plezy** (created on
+  the first change), so every device shows the same Home. A local copy keeps
+  Home instant and working offline. The format is compact
+  (`Plezy app settings [plezy:home=bo,41][plezy:hide=cw,…]`). A 65,000-
+  character description stored intact, which allows thousands of rows, so
+  pins are effectively unlimited. The list's items are free for the future
+  Shortlist.
+- If the account were at its Trakt list limit, Plezy says so instead of
+  creating the list.
 
 ### Trakt Lists in Explore — `4061ed3`
 - Explore's source selector gains **Trakt Lists** next to Trakt and Plex.

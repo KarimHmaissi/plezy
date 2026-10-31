@@ -32,6 +32,7 @@ import '../widgets/hub_section.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
 import '../widgets/loading_indicator_box.dart';
+import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 import '../widgets/profile_switching_overlay.dart';
 import 'profile/profile_switch_screen.dart';
 import 'profile/profile_teardown.dart';
@@ -40,7 +41,9 @@ import '../profiles/profile.dart';
 import '../profiles/profile_activation.dart';
 import '../profiles/profile_avatar.dart';
 import '../providers/catalog_sources_provider.dart';
+import '../services/catalog/home_pins.dart';
 import '../services/catalog/trakt_catalog_source.dart';
+import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/comfort/comfort_shows_controller.dart';
 import '../services/continue_watching/continue_watching_classifier.dart';
 import '../services/settings_service.dart';
@@ -65,6 +68,7 @@ import '../utils/tone_mapped_logo_image.dart';
 import '../theme/mono_tokens.dart';
 import 'libraries/content_state_builder.dart';
 import 'libraries/state_messages.dart';
+import 'home_rows_screen.dart';
 import 'main_screen.dart';
 import '../navigation/settings_shortcut.dart';
 import '../watch_together/watch_together.dart';
@@ -139,6 +143,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   TraktCatalogSource? _comfortSource;
   static const Duration _comfortTitlesStaleAfter = Duration(minutes: 5);
 
+  /// Rows pinned to Home (see [HomePinsController]) and the fetched rows,
+  /// keyed by pinned hub id. Charts refetch on every Home load.
+  TraktListsCatalogSource? _listsSource;
+  HomePinsController? get _homePins => _listsSource?.pins;
+  Map<String, MediaHub> _pinnedHubs = const {};
+  final Set<String> _pinnedHubsLoading = {};
+
   late FocusNode _heroFocusNode;
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
   final _serverActivitiesButtonKey = GlobalKey<ServerActivitiesButtonState>();
@@ -195,7 +206,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // rebuilds hand TvBrowseRail the same hubs list and its didUpdateWidget
   // fast path — and the cached rail widget below — kick in.
   List<MediaHub>? _tvBrowseHubsCache;
-  (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int, int)? _tvBrowseHubsCacheKey;
+  (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int, int, Map<String, MediaHub>, String)?
+  _tvBrowseHubsCacheKey;
 
   List<MediaHub> get _tvBrowseHubs {
     final staleDays = context.settingsRead(SettingsService.continueWatchingStaleDays);
@@ -208,6 +220,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       _comfortTitles,
       staleDays,
       maxAgeDays,
+      _pinnedHubs,
+      _homeLayoutSignature,
     );
     if (_tvBrowseHubsCache != null && key == _tvBrowseHubsCacheKey) return _tvBrowseHubsCache!;
     final split = classifyContinueWatching(
@@ -217,16 +231,149 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       maxAge: Duration(days: maxAgeDays),
       excludedShowTitles: _comfortTitles,
     );
-    // Pick back up sits directly under Continue Watching, ahead of the
-    // backend hubs.
+    // Pick back up sits directly under Continue Watching, then the rows the
+    // user pinned (in pin order), then the backend hubs. Hidden rows drop out.
+    final pins = _homePins;
     final hubs = <MediaHub>[
       if (split.fresh.isNotEmpty) _continueWatchingHubFor(split.fresh),
       if (split.pickBackUp.isNotEmpty) _pickBackUpHubFor(split.pickBackUp),
+      for (final pin in pins?.pins ?? const <HomeRow>[])
+        if (_pinnedHubs[pin.id] case final hub? when hub.items.isNotEmpty) hub,
       ..._hubs.where((hub) => hub.items.isNotEmpty),
-    ];
+    ].where((hub) => pins == null || _isPinnedHub(hub) || !pins.isHidden(_hiddenKeyFor(hub))).toList();
     _tvBrowseHubsCache = hubs;
     _tvBrowseHubsCacheKey = key;
     return hubs;
+  }
+
+  /// Changes whenever the pinned or hidden rows do.
+  String get _homeLayoutSignature {
+    final pins = _homePins;
+    if (pins == null) return '';
+    return '${pins.pins.map((p) => p.id).join(',')}|${pins.hidden.map((h) => h.id).join(',')}';
+  }
+
+  static const String _pinnedHubPrefix = 'pinned:';
+
+  bool _isPinnedHub(MediaHub hub) => hub.id.startsWith(_pinnedHubPrefix);
+
+  /// The key a Home row is hidden by; split library hubs hide per library.
+  String _hiddenKeyFor(MediaHub hub) {
+    final key = homeRowKey(identifier: hub.identifier, id: hub.id);
+    return hub.libraryId == null ? key : '$key@${hub.libraryId}';
+  }
+
+  void _onHomePinsChanged() {
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_loadPinnedHubs());
+  }
+
+  /// Fetch pinned rows Home doesn't have yet, or all of them on [refresh]
+  /// (charts move), each on its own so one failing row never hides the rest.
+  Future<void> _loadPinnedHubs({bool refresh = false}) async {
+    final source = _listsSource;
+    final pins = source?.pins;
+    if (source == null || pins == null) return;
+    final wanted = [
+      for (final pin in pins.pins)
+        if ((refresh || !_pinnedHubs.containsKey(pin.id)) && !_pinnedHubsLoading.contains(pin.id)) pin,
+    ];
+    final stale = _pinnedHubs.keys.where((id) => !pins.isPinned(id)).toList();
+    if (stale.isNotEmpty) {
+      setState(
+        () => _pinnedHubs = {
+          for (final entry in _pinnedHubs.entries)
+            if (!stale.contains(entry.key)) entry.key: entry.value,
+        },
+      );
+    }
+    await Future.wait([
+      for (final pin in wanted)
+        () async {
+          _pinnedHubsLoading.add(pin.id);
+          try {
+            final page = await source.fetchHub(pin.id, limit: TraktListsCatalogSource.rowItemLimit);
+            if (!mounted || !identical(_listsSource, source) || !pins.isPinned(pin.id)) return;
+            final hub = MediaHub(
+              id: '$_pinnedHubPrefix${pin.id}',
+              identifier: '$_pinnedHubPrefix${pin.id}',
+              title: pins.titleFor(pin.id),
+              type: 'mixed',
+              items: [for (final item in page.items) item.toMediaItem()],
+              size: page.items.length,
+            );
+            setState(() => _pinnedHubs = {..._pinnedHubs, pin.id: hub});
+          } catch (e) {
+            appLogger.w('Home: pinned row ${pin.id} failed', error: e);
+          } finally {
+            _pinnedHubsLoading.remove(pin.id);
+          }
+        }(),
+    ]);
+  }
+
+  /// Row actions in each Home row's long-press menu: unpin a pinned row,
+  /// remove any other row, and manage the pinned and hidden rows.
+  List<MediaMenuExtraEntry> _rowMenuEntriesFor(MediaHub hub) {
+    final pins = _homePins;
+    if (pins == null) return const [];
+    return [
+      if (_isPinnedHub(hub))
+        MediaMenuExtraEntry(
+          icon: Symbols.keep_off_rounded,
+          label: t.homeRows.unpinFromHome,
+          onSelected: () => unawaited(_unpinRow(hub)),
+        )
+      else
+        MediaMenuExtraEntry(
+          icon: Symbols.visibility_off_rounded,
+          label: t.homeRows.removeRowFromHome,
+          onSelected: () => unawaited(_hideRow(hub)),
+        ),
+      MediaMenuExtraEntry(icon: Symbols.tune_rounded, label: t.homeRows.manageHomeRows, onSelected: _openHomeRows),
+    ];
+  }
+
+  Future<void> _unpinRow(MediaHub hub) async {
+    final pins = _homePins;
+    if (pins == null) return;
+    final id = hub.id.substring(_pinnedHubPrefix.length);
+    try {
+      await pins.setPinned(id, hub.title, false);
+      if (mounted) showSuccessSnackBar(context, t.homeRows.unpinned(title: hub.title));
+    } catch (e) {
+      appLogger.w('Home: unpin failed', error: e);
+      if (mounted) showErrorSnackBar(context, t.homeRows.saveFailed);
+    }
+  }
+
+  Future<void> _hideRow(MediaHub hub) async {
+    final pins = _homePins;
+    if (pins == null) return;
+    if (hub.isContinueWatchingHub) {
+      final confirmed = await showConfirmDialog(
+        context,
+        title: t.homeRows.hideContinueWatchingTitle(title: hub.title),
+        message: t.homeRows.hideContinueWatchingMessage,
+        confirmText: t.homeRows.removeRow,
+        isDestructive: true,
+      );
+      if (!confirmed || !mounted) return;
+    }
+    try {
+      await pins.setHidden(_hiddenKeyFor(hub), hub.title, true);
+      if (mounted) showSuccessSnackBar(context, t.homeRows.hidden(title: hub.title));
+    } catch (e) {
+      appLogger.w('Home: hide row failed', error: e);
+      if (mounted) showErrorSnackBar(context, homeRowsSaveError(e));
+    }
+  }
+
+  void _openHomeRows() {
+    final source = _listsSource;
+    if (source == null) return;
+    unawaited(Navigator.of(context).push(MaterialPageRoute(builder: (_) => HomeRowsScreen(source: source))));
   }
 
   MediaHub _continueWatchingHubFor(List<MediaItem> items) => MediaHub(
@@ -418,6 +565,18 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   void _onCatalogSourcesChanged() {
+    final lists = _catalogSources?.connectedSources.whereType<TraktListsCatalogSource>().firstOrNull;
+    if (!identical(lists, _listsSource)) {
+      _listsSource?.pins.removeListener(_onHomePinsChanged);
+      _listsSource = lists;
+      _pinnedHubs = const {};
+      if (lists != null) {
+        lists.pins.addListener(_onHomePinsChanged);
+        unawaited(lists.pins.ensureLoaded(refresh: true));
+        unawaited(_loadPinnedHubs());
+      }
+      if (mounted) setState(() {});
+    }
     final source = _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
     if (identical(source, _comfortSource) && _comfortTitlesLoadedAt != null) return;
     _comfortSource = source;
@@ -473,6 +632,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         if (isNewLoad || heroOutOfBounds) _heroIndex.value = 0;
         _updateHubKeys();
       });
+    }
+    if (isNewLoad) {
+      // Pick up changes made on another device, and keep charts current.
+      unawaited(_homePins?.ensureLoaded(refresh: true));
+      unawaited(_loadPinnedHubs(refresh: true));
     }
     _applyPendingTvBrowseRailFocus();
 
@@ -553,6 +717,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void dispose() {
     _discover.removeListener(_onDiscoverChanged);
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
+    _listsSource?.pins.removeListener(_onHomePinsChanged);
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();
@@ -1169,10 +1334,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // geometry) hand Element.updateChild the identical widget instance and the
   // whole rail subtree is skipped. Rebuilt only when its actual inputs change.
   TvBrowseRail? _tvBrowseRailWidget;
-  (List<MediaHub>, bool, Size)? _tvBrowseRailWidgetKey;
+  (List<MediaHub>, bool, Size, TraktListsCatalogSource?)? _tvBrowseRailWidgetKey;
 
   Widget _cachedTvBrowseRail(List<MediaHub> browseHubs, {required bool showServerName}) {
-    final key = (browseHubs, showServerName, MediaQuery.sizeOf(context));
+    final key = (browseHubs, showServerName, MediaQuery.sizeOf(context), _listsSource);
     if (_tvBrowseRailWidget != null && key == _tvBrowseRailWidgetKey) return _tvBrowseRailWidget!;
     _tvBrowseRailWidgetKey = key;
     return _tvBrowseRailWidget = TvBrowseRail(
@@ -1196,6 +1361,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
       expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
       onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
+      rowMenuEntriesForHub: _rowMenuEntriesFor,
     );
   }
 

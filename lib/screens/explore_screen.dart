@@ -22,7 +22,9 @@ import '../services/catalog/catalog_source.dart';
 import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/settings_service.dart';
 import '../utils/platform_detector.dart';
+import '../utils/app_logger.dart';
 import '../utils/provider_extensions.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/catalog_source_logo.dart';
@@ -31,12 +33,14 @@ import '../widgets/hub_section.dart';
 import '../widgets/focusable_media_card.dart';
 import '../widgets/focusable_popup_menu_button.dart';
 import '../widgets/loading_indicator_box.dart';
+import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 import '../widgets/search_input_field.dart';
 import '../widgets/settings_builder.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
 import 'catalog_search_screen.dart';
+import 'home_rows_screen.dart';
 import 'trakt_discover_lists_screen.dart';
 import 'libraries/state_messages.dart';
 
@@ -324,6 +328,12 @@ class ExploreScreenState extends State<ExploreScreen>
                 tooltip: t.explore.traktLists.discoverLists,
                 onPressed: () => unawaited(_openDiscoverLists(lists)),
               ),
+            if (sources.activeSource case final TraktListsCatalogSource lists)
+              FocusableAction(
+                icon: Symbols.keep_rounded,
+                tooltip: t.homeRows.manageHomeRows,
+                onPressed: () => _openHomeRows(lists),
+              ),
             FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
           ],
         ),
@@ -458,6 +468,41 @@ class ExploreScreenState extends State<ExploreScreen>
     if (changed == true && mounted) unawaited(_explore.load());
   }
 
+  void _openHomeRows(TraktListsCatalogSource source) {
+    unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => HomeRowsScreen(source: source))));
+  }
+
+  /// Trakt Lists rows can be pinned to Home from any card's long-press menu.
+  List<MediaMenuExtraEntry> _rowMenuEntriesFor(MediaHub hub) {
+    final source = _explore.activeSource;
+    final hubId = _rowForHub(hub)?.providerHubId;
+    if (source is! TraktListsCatalogSource || hubId == null) return const [];
+    final pinned = source.pins.isPinned(hubId);
+    return [
+      MediaMenuExtraEntry(
+        icon: pinned ? Symbols.keep_off_rounded : Symbols.keep_rounded,
+        label: pinned ? t.homeRows.unpinFromHome : t.homeRows.pinToHome,
+        onSelected: () => unawaited(_setPinned(source, hubId, hub.title, !pinned)),
+      ),
+      MediaMenuExtraEntry(
+        icon: Symbols.tune_rounded,
+        label: t.homeRows.manageHomeRows,
+        onSelected: () => _openHomeRows(source),
+      ),
+    ];
+  }
+
+  Future<void> _setPinned(TraktListsCatalogSource source, String hubId, String title, bool pinned) async {
+    try {
+      await source.pins.setPinned(hubId, title, pinned);
+      if (!mounted) return;
+      showSuccessSnackBar(context, pinned ? t.homeRows.pinned(title: title) : t.homeRows.unpinned(title: title));
+    } catch (e) {
+      appLogger.w('Explore: pin failed', error: e);
+      if (mounted) showErrorSnackBar(context, homeRowsSaveError(e));
+    }
+  }
+
   ExploreRowHub? _rowForHub(MediaHub hub) {
     for (final rowHub in _explore.rowHubs) {
       if (rowHub.hub.id == hub.id) return rowHub;
@@ -500,6 +545,13 @@ class ExploreScreenState extends State<ExploreScreen>
                   iconColor: foregroundColor,
                   tooltip: t.explore.traktLists.discoverLists,
                   onPressed: () => unawaited(_openDiscoverLists(active)),
+                ),
+              if (active is TraktListsCatalogSource)
+                FocusableAction(
+                  icon: Symbols.keep_rounded,
+                  iconColor: foregroundColor,
+                  tooltip: t.homeRows.manageHomeRows,
+                  onPressed: () => _openHomeRows(active),
                 ),
               if (active != null)
                 FocusableAction(
@@ -574,6 +626,7 @@ class ExploreScreenState extends State<ExploreScreen>
                 widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
                 expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
                 onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
+                rowMenuEntriesForHub: _rowMenuEntriesFor,
               ),
             ),
           TvToolbarOverlay(child: _buildTvToolbar(sources)),

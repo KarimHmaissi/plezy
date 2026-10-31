@@ -1182,6 +1182,29 @@
       "nobody": "Hidden"
     }
   },
+  "homeRows": {
+    "title": "Home rows",
+    "pinToHome": "Pin to Home",
+    "unpinFromHome": "Unpin from Home",
+    "removeRowFromHome": "Remove row from Home",
+    "removeRow": "Remove row",
+    "manageHomeRows": "Manage Home rows",
+    "pinned": "Pinned ${title} to Home",
+    "unpinned": "Unpinned ${title} from Home",
+    "hidden": "Removed ${title} from Home",
+    "restored": "${title} is back on Home",
+    "saveFailed": "Couldn't save Home rows to Trakt",
+    "listLimitReached": "Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can't be created",
+    "hideContinueWatchingTitle": "Remove ${title} from Home?",
+    "hideContinueWatchingMessage": "You won't see what you're in the middle of on Home. You can bring it back from Manage Home rows.",
+    "pinnedSection": "Pinned to Home",
+    "chartsSection": "Trakt charts",
+    "listsSection": "Your Trakt lists",
+    "hiddenSection": "Hidden rows",
+    "noHiddenRows": "No hidden rows",
+    "restore": "Show on Home again",
+    "syncedNote": "Saved to the private Trakt list \"Plezy\" so every device shows the same Home."
+  },
   "discover": {
     "title": "Discover",
     "noContentAvailable": "No content available",
@@ -1491,7 +1514,9 @@
       "listByUser": "by ${user} · ${count} items",
       "like": "Like list",
       "liked": "Liked",
-      "likeFailed": "Couldn't update the like on Trakt"
+      "likeFailed": "Couldn't update the like on Trakt",
+      "pin": "Pin to Home",
+      "pinned": "Pinned"
     },
     "title": "Explore",
     "selectSource": "Select source",

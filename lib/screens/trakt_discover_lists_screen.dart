@@ -22,6 +22,7 @@ import '../widgets/loading_indicator_box.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
+import 'home_rows_screen.dart';
 import 'libraries/state_messages.dart';
 
 /// Trending and popular public Trakt lists. Opening one shows its items with
@@ -171,11 +172,18 @@ class _TraktListScreenState extends State<TraktListScreen> {
   @override
   void initState() {
     super.initState();
+    widget.source.pins.addListener(_onPinsChanged);
+    unawaited(widget.source.pins.ensureLoaded());
     unawaited(_load());
+  }
+
+  void _onPinsChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    widget.source.pins.removeListener(_onPinsChanged);
     _spotlight.dispose();
     super.dispose();
   }
@@ -217,6 +225,44 @@ class _TraktListScreenState extends State<TraktListScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _togglePin() async {
+    final pins = widget.source.pins;
+    final pinned = !pins.isPinned(_hubId);
+    try {
+      await pins.setPinned(_hubId, widget.list.name, pinned);
+      if (!mounted) return;
+      showSuccessSnackBar(
+        context,
+        pinned ? t.homeRows.pinned(title: widget.list.name) : t.homeRows.unpinned(title: widget.list.name),
+      );
+    } catch (e) {
+      appLogger.w('Trakt Lists: pin toggle failed', error: e);
+      if (mounted) showErrorSnackBar(context, homeRowsSaveError(e));
+    }
+  }
+
+  FocusableAction _pinAction(Color color) {
+    final pinned = widget.source.pins.isPinned(_hubId);
+    return FocusableAction(
+      debugLabel: 'TraktListPin',
+      onPressed: () => unawaited(_togglePin()),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppIcon(Symbols.keep_rounded, fill: pinned ? 1 : 0, size: 22, color: color),
+            const SizedBox(width: 8),
+            Text(
+              pinned ? t.explore.traktLists.pinned : t.explore.traktLists.pin,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   FocusableAction _likeAction(Color color) => FocusableAction(
@@ -282,7 +328,7 @@ class _TraktListScreenState extends State<TraktListScreen> {
                       key: _actionBarKey,
                       onNavigateDown: _railKey.currentState?.requestFocus,
                       onBack: () => Navigator.of(context).maybePop(),
-                      actions: [_likeAction(color)],
+                      actions: [_likeAction(color), _pinAction(color)],
                     ),
                   ],
                 ),
@@ -295,7 +341,7 @@ class _TraktListScreenState extends State<TraktListScreen> {
       body = FocusedScrollScaffold(
         title: Text(widget.list.name),
         actions: [
-          FocusableActionBar(key: _actionBarKey, actions: [_likeAction(color)]),
+          FocusableActionBar(key: _actionBarKey, actions: [_likeAction(color), _pinAction(color)]),
         ],
         slivers: [
           SliverToBoxAdapter(

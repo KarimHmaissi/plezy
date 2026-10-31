@@ -12,6 +12,7 @@ import '../trackers/tracker_page.dart';
 import '../trackers/trakt/trakt_client.dart';
 import '../trackers/trakt/trakt_constants.dart';
 import 'catalog_source.dart';
+import 'home_pins.dart';
 import 'trakt_catalog_source.dart';
 
 /// Explore's "Trakt Lists" source: Trakt charts that change on their own
@@ -31,11 +32,23 @@ class TraktListsCatalogSource implements CatalogSource, CatalogHubSource {
   /// The wrapped Trakt source (detail, search, watchlist).
   TraktCatalogSource get trakt => _trakt;
 
+  /// Rows pinned to Home, stored on Trakt.
+  late final HomePinsController pins = HomePinsController(_client);
+
   static const String _boxOffice = 'chart:boxoffice';
   static const String _watchedMovies = 'chart:watched:movies';
   static const String _watchedShows = 'chart:watched:shows';
   static const String _anticipatedMovies = 'chart:anticipated:movies';
   static const String _anticipatedShows = 'chart:anticipated:shows';
+
+  /// The chart rows, in display order, with their titles.
+  static List<({String id, String title})> get charts => [
+    (id: _boxOffice, title: t.explore.traktLists.boxOffice),
+    (id: _watchedMovies, title: t.explore.traktLists.mostWatchedMovies),
+    (id: _watchedShows, title: t.explore.traktLists.mostWatchedShows),
+    (id: _anticipatedMovies, title: t.explore.traktLists.anticipatedMovies),
+    (id: _anticipatedShows, title: t.explore.traktLists.anticipatedShows),
+  ];
 
   /// Hub id for a list row: `list:{owner slug}:{trakt id}`.
   static String listHubId(TraktUserList list) => 'list:${list.userSlug ?? 'me'}:${list.traktId}';
@@ -75,21 +88,17 @@ class TraktListsCatalogSource implements CatalogSource, CatalogHubSource {
       }
     }
 
-    final lists = await _listsForRows();
+    final lists = await listsForRows();
     final hubs = await Future.wait([
-      safe(_boxOffice, t.explore.traktLists.boxOffice),
-      safe(_watchedMovies, t.explore.traktLists.mostWatchedMovies),
-      safe(_watchedShows, t.explore.traktLists.mostWatchedShows),
-      safe(_anticipatedMovies, t.explore.traktLists.anticipatedMovies),
-      safe(_anticipatedShows, t.explore.traktLists.anticipatedShows),
+      for (final chart in charts) safe(chart.id, chart.title),
       for (final list in lists) safe(listHubId(list), list.name),
     ]);
     return [for (final hub in hubs) ?hub];
   }
 
   /// Liked lists (newest like first), then the user's own lists except the
-  /// Comfort list, without repeats.
-  Future<List<TraktUserList>> _listsForRows() async {
+  /// Comfort and Plezy settings lists, without repeats.
+  Future<List<TraktUserList>> listsForRows() async {
     final liked = await _client.getLikedLists().catchError((Object e) {
       appLogger.w('Trakt Lists: liked lists failed', error: e);
       return <TraktUserList>[];
@@ -101,7 +110,10 @@ class TraktListsCatalogSource implements CatalogSource, CatalogHubSource {
     final seen = <int>{};
     return [
       for (final list in [...liked, ...own])
-        if (list.slug != ComfortShowsController.listSlug && seen.add(list.traktId)) list,
+        if (list.slug != ComfortShowsController.listSlug &&
+            list.slug != HomePinsController.listSlug &&
+            seen.add(list.traktId))
+          list,
     ];
   }
 
@@ -198,5 +210,5 @@ class TraktListsCatalogSource implements CatalogSource, CatalogHubSource {
 
   /// The wrapped Trakt source owns the client and its watchlist state.
   @override
-  void dispose() {}
+  void dispose() => pins.dispose();
 }

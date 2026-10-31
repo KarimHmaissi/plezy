@@ -218,6 +218,17 @@ class TraktClient implements DisposableTrackerClient {
     return TrackerPage.fromResponse(res, _decodeEntries(res.body));
   }
 
+  /// The account's personal-list allowance from `/users/settings` (`limits.list.count`),
+  /// or null when Trakt doesn't report one.
+  Future<int?> getPersonalListLimit() async {
+    final res = await _request('GET', '/users/settings');
+    if (res is! Map) return null;
+    final limits = res['limits'];
+    final list = limits is Map ? limits['list'] : null;
+    final count = list is Map ? list['count'] : null;
+    return count is int ? count : null;
+  }
+
   /// Lists the user has liked, most recently liked first.
   Future<List<TraktUserList>> getLikedLists({int limit = 100}) async {
     final res = await _request('GET', '/users/likes/lists?limit=$limit');
@@ -231,13 +242,18 @@ class TraktClient implements DisposableTrackerClient {
   }
 
   /// Items on any list the user can see (their own, or anyone's public list),
-  /// in list order. [user] is the owner's slug (`me` for the signed-in user).
+  /// in list order. [user] is the owner's slug (`me` for the signed-in user,
+  /// `*` to address the list by its id alone).
   Future<TrackerPage<TraktCatalogEntry>> getListItems(String user, int listId, {int page = 1, int limit = 50}) async {
-    final res = await _requestResponse(
-      'GET',
-      '/users/${Uri.encodeComponent(user)}/lists/$listId/items?$_catalogExtended&page=$page&limit=$limit',
-    );
+    final path = user == '*' ? '/lists/$listId' : '/users/${Uri.encodeComponent(user)}/lists/$listId';
+    final res = await _requestResponse('GET', '$path/items?$_catalogExtended&page=$page&limit=$limit');
     return TrackerPage.fromResponse(res, _decodeEntries(res.body));
+  }
+
+  /// One list by its Trakt id, or null if it can't be read.
+  Future<TraktUserList?> getList(int listId) async {
+    final res = await _request('GET', '/lists/$listId');
+    return res is Map<String, dynamic> ? TraktUserList.fromJson(res) : null;
   }
 
   Future<void> likeList(String user, int listId) =>

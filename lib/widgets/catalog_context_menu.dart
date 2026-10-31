@@ -13,14 +13,16 @@ import '../utils/catalog_navigation_helper.dart';
 import '../utils/app_logger.dart';
 import '../utils/snackbar_helper.dart';
 import 'app_menu.dart';
+import 'media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
 
-enum _CatalogMenuActionType { viewDetails, toggleWatchlist, openUrl }
+enum _CatalogMenuActionType { viewDetails, toggleWatchlist, openUrl, rowEntry }
 
 class _CatalogMenuAction {
   final _CatalogMenuActionType type;
   final String? url;
+  final MediaMenuExtraEntry? rowEntry;
 
-  const _CatalogMenuAction(this.type, {this.url});
+  const _CatalogMenuAction(this.type, {this.url, this.rowEntry});
 
   static const viewDetails = _CatalogMenuAction(_CatalogMenuActionType.viewDetails);
   static const toggleWatchlist = _CatalogMenuAction(_CatalogMenuActionType.toggleWatchlist);
@@ -32,6 +34,7 @@ class _CatalogMenuAction {
 Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset? position}) async {
   final source = Provider.of<CatalogSourcesProvider?>(context, listen: false)?.watchlistSourceFor(item);
   final onWatchlist = source?.isOnWatchlist(item.kind, item.ids);
+  final rowEntries = RowMenuEntries.of(context);
   if (source != null && onWatchlist == null) {
     // Load in the background so the row is actionable next open.
     unawaited(source.ensureWatchlistLoaded());
@@ -72,6 +75,12 @@ Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset
           label: onWatchlist ? t.explore.removeFromWatchlist : t.explore.addToWatchlist,
           icon: onWatchlist ? Symbols.bookmark_remove_rounded : Symbols.bookmark_add_rounded,
         ),
+      for (final entry in rowEntries)
+        AppMenuItem(
+          value: _CatalogMenuAction(_CatalogMenuActionType.rowEntry, rowEntry: entry),
+          label: entry.label,
+          icon: entry.icon,
+        ),
     ],
   );
   if (action == null || !context.mounted) return;
@@ -90,6 +99,8 @@ Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset
       } catch (_) {
         if (context.mounted) showErrorSnackBar(context, t.explore.watchlistUpdateFailed);
       }
+    case _CatalogMenuActionType.rowEntry:
+      action.rowEntry?.onSelected();
     case _CatalogMenuActionType.openUrl:
       final url = action.url;
       if (url != null) await _launchCatalogUrl(url);
