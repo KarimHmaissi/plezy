@@ -996,6 +996,10 @@ class SettingsService extends BaseSharedPreferencesService {
   /// Comfort shows: play a random episode straight away instead of showing
   /// the pick first.
   static const comfortPlayImmediately = BoolPref('comfort_play_immediately');
+
+  /// Continue Watching items untouched for longer than this many days move to
+  /// the "Pick back up" row.
+  static const continueWatchingStaleDays = IntPref('continue_watching_stale_days', defaultValue: 30);
   static const exitFullscreenOnPlayerClose = BoolPref('exit_fullscreen_on_player_close');
 
   static const playbackBufferTier = EnumPref<PlaybackBufferTier>(
@@ -1610,6 +1614,7 @@ class SettingsService extends BaseSharedPreferencesService {
     enableCompanionRemoteServer,
     startInFullscreen,
     comfortPlayImmediately,
+    continueWatchingStaleDays,
     exitFullscreenOnPlayerClose,
   ];
 

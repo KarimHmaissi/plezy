@@ -3273,6 +3273,9 @@ class Translations$discover$en {
 	/// en: 'Continue Watching'
 	String get continueWatching => 'Continue Watching';
 
+	/// en: 'Pick back up'
+	String get pickBackUp => 'Pick back up';
+
 	/// en: 'Continue Watching in ${library}'
 	String continueWatchingIn({required Object library}) => 'Continue Watching in ${library}';
 
@@ -9338,6 +9341,7 @@ extension on Translations {
 			'discover.noContentAvailable' => 'No content available',
 			'discover.addMediaToLibraries' => 'Add some media to your libraries',
 			'discover.continueWatching' => 'Continue Watching',
+			'discover.pickBackUp' => 'Pick back up',
 			'discover.continueWatchingIn' => ({required Object library}) => 'Continue Watching in ${library}',
 			'discover.selectVersion' => 'Select Version',
 			'discover.nextUp' => 'Next Up',
@@ -9777,9 +9781,9 @@ extension on Translations {
 			'liveTv.watchFromStart' => ({required Object minutes}) => 'Watch from start (${minutes} min ago)',
 			'liveTv.watchLive' => 'Watch Live',
 			'liveTv.goToLive' => 'Go to Live',
-			'liveTv.record' => 'Record',
 			_ => null,
 		} ?? switch (path) {
+			'liveTv.record' => 'Record',
 			'liveTv.recordEpisode' => 'Record Episode',
 			'liveTv.recordSeries' => 'Record Series',
 			'liveTv.recordOptions' => 'Record Options',
@@ -10291,9 +10295,9 @@ extension on Translations {
 			'performanceOverlay.rawDecoder' => 'Raw Decoder',
 			'performanceOverlay.tunneling' => 'Tunneling',
 			'performanceOverlay.passthrough' => 'Passthrough',
-			'performanceOverlay.aspect' => 'Aspect',
 			_ => null,
 		} ?? switch (path) {
+			'performanceOverlay.aspect' => 'Aspect',
 			'performanceOverlay.rotation' => 'Rotation',
 			'performanceOverlay.dvSource' => 'DV Source',
 			'performanceOverlay.dvPath' => 'DV Path',

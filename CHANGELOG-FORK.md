@@ -12,7 +12,25 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
   light and funny, under 30 minutes") and get back a list of suggestions from
   your libraries, each with its reasoning.
 
+### Continue Watching from Trakt progress (phase 2)
+- Use Trakt watch progress so "next up" is right even for episodes watched
+  outside these Plex servers (other apps, devices), and so very old shows
+  beyond Plex's On Deck window can still appear in "Pick back up".
+
 ## 2026-10-31
+
+### Smarter Continue Watching — `COMMIT`
+- Home's Continue Watching splits in two: **Continue Watching** (touched in
+  the last 30 days) stays at the top, and **Pick back up** (older) sits further
+  down Home. Most recent first in both; Remove from Continue Watching works
+  in both.
+- A show's age is when it was last watched; a new episode of a show you'd
+  caught up on stays in the top row however long ago you last watched.
+- Accidental starts (under 3 minutes in) and films 90%+ watched are hidden
+  (nothing is marked watched).
+- Shows on the Comfort list are left out of both rows.
+- Per-server fetch raised from 20 to 60 items. The cut-off is a setting
+  (`continue_watching_stale_days`, default 30).
 
 ### Comfort shows and Random episode — `a7bbf5a`
 - New **Comfort** tab (sofa icon, shown when Trakt is connected) listing the

@@ -50,8 +50,9 @@ class ComfortShowsController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// Fetch the list (creating it the first time) and its shows.
-  Future<void> load() async {
+  /// Fetch the list and its shows, creating the list the first time unless
+  /// [createIfMissing] is false (read-only callers such as Home).
+  Future<void> load({bool createIfMissing = true}) async {
     _loading = true;
     _error = null;
     _notify();
@@ -62,6 +63,12 @@ class ComfortShowsController extends ChangeNotifier {
       // one only when neither exists.
       var list =
           lists.where((l) => l.slug == listSlug).firstOrNull ?? lists.where((l) => l.name == listName).firstOrNull;
+      if (list == null && !createIfMissing) {
+        _shows = const [];
+        _paused = {};
+        _loaded = true;
+        return;
+      }
       list ??= await client.createMyList(listName, description: '');
       if (list == null) throw StateError('Trakt did not return the created list');
       final shows = _source.showsFromListEntries(await client.getMyListShows(list.traktId));

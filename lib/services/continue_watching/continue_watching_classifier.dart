@@ -1,0 +1,71 @@
+import '../../media/media_item.dart';
+import '../../media/media_kind.dart';
+
+/// Continue Watching split into the two Home rows.
+typedef ContinueWatchingSplit = ({List<MediaItem> fresh, List<MediaItem> pickBackUp});
+
+/// Below this much progress a start counts as accidental and is hidden.
+const Duration continueWatchingAccidentalStart = Duration(minutes: 3);
+
+/// A film this far through counts as finished and is hidden.
+const double continueWatchingFilmFinished = 0.9;
+
+/// Split the merged Continue Watching items (already most-recent first) into
+/// "Continue Watching" — touched within [staleAfter] — and "Pick back up".
+///
+/// - Age is the item's `lastViewedAt` (else `addedAt`; an item with neither
+///   stays fresh). For a next-up episode Plex reports the
+///   show's last-watched time there, so a show is aged by when it was last
+///   watched, not by the unwatched episode's add date.
+/// - A next-up episode added after the show was last watched is a new episode
+///   of a show the viewer had caught up on: it stays fresh regardless of age.
+/// - Accidental starts (under [continueWatchingAccidentalStart] in) and films
+///   past [continueWatchingFilmFinished] are dropped. Hidden client-side only;
+///   nothing is marked watched.
+/// - Episodes of shows in [excludedShowTitles] (normalised with
+///   [normalizeShowTitle]) are dropped — the Comfort tab covers those.
+///
+/// Order within each row is preserved.
+ContinueWatchingSplit classifyContinueWatching(
+  List<MediaItem> items, {
+  required DateTime now,
+  Duration staleAfter = const Duration(days: 30),
+  Set<String> excludedShowTitles = const {},
+}) {
+  final fresh = <MediaItem>[];
+  final pickBackUp = <MediaItem>[];
+  final cutoff = now.subtract(staleAfter).millisecondsSinceEpoch ~/ 1000;
+  for (final item in items) {
+    if (excludedShowTitles.isNotEmpty &&
+        item.kind == MediaKind.episode &&
+        excludedShowTitles.contains(normalizeShowTitle(item.grandparentTitle))) {
+      continue;
+    }
+    final offset = item.viewOffsetMs;
+    final started = offset != null && offset > 0;
+    if (started && offset < continueWatchingAccidentalStart.inMilliseconds) continue;
+    final duration = item.durationMs;
+    if (started && item.kind == MediaKind.movie && duration != null && duration > 0) {
+      if (offset / duration >= continueWatchingFilmFinished) continue;
+    }
+    final lastViewed = item.lastViewedAt;
+    final added = item.addedAt;
+    final isNewEpisode =
+        item.kind == MediaKind.episode && !started && added != null && lastViewed != null && added > lastViewed;
+    final activity = lastViewed ?? added;
+    // No timestamps at all is no evidence of age: keep it in the main row.
+    if (isNewEpisode || activity == null || activity >= cutoff) {
+      fresh.add(item);
+    } else {
+      pickBackUp.add(item);
+    }
+  }
+  return (fresh: fresh, pickBackUp: pickBackUp);
+}
+
+/// Compare show titles across sources: case, punctuation and a trailing
+/// "(2009)" year disambiguator are ignored ("Castle (2009)" == "Castle").
+String normalizeShowTitle(String? title) {
+  if (title == null) return '';
+  return title.toLowerCase().replaceAll(RegExp(r'\s*\(\d{4}\)\s*$'), '').replaceAll(RegExp(r'[^a-z0-9]+'), '');
+}

@@ -318,7 +318,9 @@ void main() {
   });
 
   test('limits the preview row and probes for more', () async {
-    aggregation.onDeckResult = () => [for (var i = 0; i < 30; i++) _item('item-$i')];
+    aggregation.onDeckResult = () => [
+      for (var i = 0; i < DiscoverProvider.continueWatchingPreviewLimit + 10; i++) _item('item-$i'),
+    ];
 
     await provider.load();
 
@@ -436,7 +438,10 @@ void main() {
 
   test('sub-threshold progress patches the row without refetching', () async {
     final playing = _item('ep-1').copyWith(durationMs: 100000, viewOffsetMs: 10000, viewCount: 0);
-    aggregation.onDeckResult = () => [playing, for (var i = 2; i <= 21; i++) _item('ep-$i')];
+    aggregation.onDeckResult = () => [
+      playing,
+      for (var i = 2; i <= DiscoverProvider.continueWatchingPreviewLimit + 1; i++) _item('ep-$i'),
+    ];
     aggregation.hubsResult = () => [_hub('hub-1')];
     await provider.load();
     await pumpEventQueue();

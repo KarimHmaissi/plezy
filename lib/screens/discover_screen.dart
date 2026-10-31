@@ -39,6 +39,10 @@ import '../profiles/active_profile_provider.dart';
 import '../profiles/profile.dart';
 import '../profiles/profile_activation.dart';
 import '../profiles/profile_avatar.dart';
+import '../providers/catalog_sources_provider.dart';
+import '../services/catalog/trakt_catalog_source.dart';
+import '../services/comfort/comfort_shows_controller.dart';
+import '../services/continue_watching/continue_watching_classifier.dart';
 import '../services/settings_service.dart';
 import '../widgets/settings_builder.dart';
 import '../widgets/fitting_title_text.dart';
@@ -126,6 +130,15 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   final _tvBrowseRailKey = GlobalKey<TvBrowseRailState>();
   final _hubFocusMemory = HubFocusMemory();
 
+  /// Normalised titles of the user's Trakt comfort shows, kept out of the
+  /// Continue Watching rows (see [classifyContinueWatching]). Empty when Trakt
+  /// is disconnected or the list could not be read.
+  Set<String> _comfortTitles = const {};
+  DateTime? _comfortTitlesLoadedAt;
+  CatalogSourcesProvider? _catalogSources;
+  TraktCatalogSource? _comfortSource;
+  static const Duration _comfortTitlesStaleAfter = Duration(minutes: 5);
+
   late FocusNode _heroFocusNode;
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
   final _serverActivitiesButtonKey = GlobalKey<ServerActivitiesButtonState>();
@@ -182,20 +195,55 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // rebuilds hand TvBrowseRail the same hubs list and its didUpdateWidget
   // fast path — and the cached rail widget below — kick in.
   List<MediaHub>? _tvBrowseHubsCache;
-  (List<MediaItem>, List<MediaHub>, bool, String)? _tvBrowseHubsCacheKey;
+  (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int)? _tvBrowseHubsCacheKey;
+
+  /// Where the "Pick back up" row sits among the backend hubs on TV: further
+  /// down Home, after this many of them.
+  static const int _pickBackUpAfterHubs = 2;
 
   List<MediaHub> get _tvBrowseHubs {
-    final key = (_onDeck, _hubs, _hasMoreContinueWatching, t.discover.continueWatching);
+    final staleDays = context.settingsRead(SettingsService.continueWatchingStaleDays);
+    final key = (_onDeck, _hubs, _hasMoreContinueWatching, t.discover.continueWatching, _comfortTitles, staleDays);
     if (_tvBrowseHubsCache != null && key == _tvBrowseHubsCacheKey) return _tvBrowseHubsCache!;
-    final hubs = <MediaHub>[];
-    if (_onDeck.isNotEmpty) {
-      hubs.add(_continueWatchingHub);
-    }
-    hubs.addAll(_hubs.where((hub) => hub.items.isNotEmpty));
+    final split = classifyContinueWatching(
+      _onDeck,
+      now: DateTime.now(),
+      staleAfter: Duration(days: staleDays),
+      excludedShowTitles: _comfortTitles,
+    );
+    final backendHubs = _hubs.where((hub) => hub.items.isNotEmpty).toList();
+    final insertAt = backendHubs.length < _pickBackUpAfterHubs ? backendHubs.length : _pickBackUpAfterHubs;
+    final hubs = <MediaHub>[
+      if (split.fresh.isNotEmpty) _continueWatchingHubFor(split.fresh),
+      ...backendHubs.take(insertAt),
+      if (split.pickBackUp.isNotEmpty) _pickBackUpHubFor(split.pickBackUp),
+      ...backendHubs.skip(insertAt),
+    ];
     _tvBrowseHubsCache = hubs;
     _tvBrowseHubsCacheKey = key;
     return hubs;
   }
+
+  MediaHub _continueWatchingHubFor(List<MediaItem> items) => MediaHub(
+    id: 'continue_watching',
+    title: t.discover.continueWatching,
+    type: 'mixed',
+    identifier: '_continue_watching_',
+    size: items.length + (_hasMoreContinueWatching ? 1 : 0),
+    more: _hasMoreContinueWatching,
+    items: items,
+  );
+
+  /// Older Continue Watching items. The id ends in a "continue" token so the
+  /// row keeps Continue Watching semantics (Remove from Continue Watching).
+  MediaHub _pickBackUpHubFor(List<MediaItem> items) => MediaHub(
+    id: 'pick_back_up_continue',
+    title: t.discover.pickBackUp,
+    type: 'mixed',
+    identifier: '_pick_back_up_continue_',
+    size: items.length,
+    items: items,
+  );
 
   /// The synthesized Continue Watching row, rendered ahead of the backend hubs
   /// on both the mobile list and the TV rail.
@@ -357,7 +405,38 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _discover.addListener(_onDiscoverChanged);
     _updateHubKeys();
     unawaited(_discover.load());
+    // Trakt usually connects after Home first builds; reload the comfort
+    // titles when its source appears or changes.
+    _catalogSources = context.read<CatalogSourcesProvider?>()?..addListener(_onCatalogSourcesChanged);
+    _onCatalogSourcesChanged();
     _startAutoScroll();
+  }
+
+  void _onCatalogSourcesChanged() {
+    final source = _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
+    if (identical(source, _comfortSource) && _comfortTitlesLoadedAt != null) return;
+    _comfortSource = source;
+    unawaited(_loadComfortTitles());
+  }
+
+  Future<void> _loadComfortTitles() async {
+    final source = _comfortSource;
+    _comfortTitlesLoadedAt = DateTime.now();
+    if (source == null) {
+      if (_comfortTitles.isNotEmpty && mounted) setState(() => _comfortTitles = const {});
+      return;
+    }
+    final controller = ComfortShowsController(source);
+    try {
+      await controller.load(createIfMissing: false);
+      if (!mounted || !controller.isLoaded) return;
+      final titles = {for (final show in controller.shows) normalizeShowTitle(show.title)};
+      if (titles.length != _comfortTitles.length || !titles.containsAll(_comfortTitles)) {
+        setState(() => _comfortTitles = titles);
+      }
+    } finally {
+      controller.dispose();
+    }
   }
 
   /// Mirror provider changes into this state's UI concerns: rebuild, apply
@@ -468,6 +547,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   @override
   void dispose() {
     _discover.removeListener(_onDiscoverChanged);
+    _catalogSources?.removeListener(_onCatalogSourcesChanged);
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();
@@ -582,6 +662,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void onTabShown() {
     _isTabVisible = true;
     _discover.refreshIfStale();
+    final comfortLoadedAt = _comfortTitlesLoadedAt;
+    if (comfortLoadedAt == null || DateTime.now().difference(comfortLoadedAt) > _comfortTitlesStaleAfter) {
+      unawaited(_loadComfortTitles());
+    }
     if (!_isAutoScrollPaused) {
       _startAutoScroll();
     }

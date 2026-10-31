@@ -1187,6 +1187,7 @@
     "noContentAvailable": "No content available",
     "addMediaToLibraries": "Add some media to your libraries",
     "continueWatching": "Continue Watching",
+    "pickBackUp": "Pick back up",
     "continueWatchingIn": "Continue Watching in ${library}",
     "selectVersion": "Select Version",
     "nextUp": "Next Up",
