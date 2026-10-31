@@ -75,6 +75,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$startup$en startup = Translations$startup$en.internal(_root);
 	late final Translations$licenses$en licenses = Translations$licenses$en.internal(_root);
 	late final Translations$navigation$en navigation = Translations$navigation$en.internal(_root);
+	late final Translations$watchlist$en watchlist = Translations$watchlist$en.internal(_root);
 	late final Translations$explore$en explore = Translations$explore$en.internal(_root);
 	late final Translations$liveTv$en liveTv = Translations$liveTv$en.internal(_root);
 	late final Translations$collections$en collections = Translations$collections$en.internal(_root);
@@ -3776,6 +3777,36 @@ class Translations$navigation$en {
 
 	/// en: 'Explore'
 	String get explore => 'Explore';
+
+	/// en: 'Watchlist'
+	String get watchlist => 'Watchlist';
+}
+
+// Path: watchlist
+class Translations$watchlist$en {
+	Translations$watchlist$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Films'
+	String get films => 'Films';
+
+	/// en: 'TV'
+	String get tv => 'TV';
+
+	/// en: 'Your watchlist is empty'
+	String get emptyTitle => 'Your watchlist is empty';
+
+	/// en: 'Titles you add to your ${source} watchlist appear here'
+	String emptyMessage({required Object source}) => 'Titles you add to your ${source} watchlist appear here';
+
+	/// en: 'No watchlist connected'
+	String get noSourceTitle => 'No watchlist connected';
+
+	/// en: 'Connect Plex, Trakt or another watchlist service in Settings'
+	String get noSourceMessage => 'Connect Plex, Trakt or another watchlist service in Settings';
 }
 
 // Path: explore
@@ -9422,6 +9453,13 @@ extension on Translations {
 			'navigation.downloads' => 'Downloads',
 			'navigation.liveTv' => 'Live TV',
 			'navigation.explore' => 'Explore',
+			'navigation.watchlist' => 'Watchlist',
+			'watchlist.films' => 'Films',
+			'watchlist.tv' => 'TV',
+			'watchlist.emptyTitle' => 'Your watchlist is empty',
+			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
+			'watchlist.noSourceTitle' => 'No watchlist connected',
+			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
 			'explore.title' => 'Explore',
 			'explore.selectSource' => 'Select source',
 			'explore.rows.watchlist' => 'Watchlist',
@@ -9640,6 +9678,8 @@ extension on Translations {
 			'liveTv.editRuleAction' => 'Edit',
 			'liveTv.recordingRuleUpdated' => 'Recording rule updated',
 			'liveTv.guideReloadRequested' => 'Guide refresh requested',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.guideReloadFailed' => 'Couldn\'t refresh the guide',
 			'liveTv.rulesProcessRequested' => 'Rule re-evaluation requested',
 			'liveTv.rulesProcessFailed' => 'Couldn\'t re-evaluate recording rules',
@@ -9647,8 +9687,6 @@ extension on Translations {
 			'liveTv.recordSettings.startEarly' => 'Start early (seconds)',
 			'liveTv.recordSettings.endLate' => 'End late (seconds)',
 			'liveTv.recordSettings.newOnly' => 'Only new episodes',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
 			'liveTv.recordSettings.anyTime' => 'Record at any time',
 			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
@@ -10154,6 +10192,8 @@ extension on Translations {
 			'performanceOverlay.maxFall' => 'MaxFALL',
 			'performanceOverlay.cacheUsed' => 'Cache Used',
 			'performanceOverlay.cacheLimit' => 'Cache Limit',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.speed' => 'Speed',
 			'performanceOverlay.player' => 'Player',
 			'performanceOverlay.playMethod' => 'Play Method',
@@ -10161,8 +10201,6 @@ extension on Translations {
 			'performanceOverlay.uiFps' => 'UI FPS',
 			'performanceOverlay.fps' => 'FPS',
 			'performanceOverlay.decoderAndroidHw' => 'Android HW',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.decoderNvidiaHw' => 'NVIDIA HW',
 			'performanceOverlay.decoderQualcommHw' => 'Qualcomm HW',
 			'performanceOverlay.decoderMediatekHw' => 'MediaTek HW',

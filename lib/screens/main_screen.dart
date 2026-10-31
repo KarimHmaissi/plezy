@@ -73,6 +73,7 @@ import 'libraries/library_quick_picker_sheet.dart';
 import 'libraries/libraries_screen.dart';
 import 'livetv/live_tv_screen.dart';
 import 'search_screen.dart';
+import 'watchlist_screen.dart';
 import 'downloads/downloads_screen.dart';
 import 'settings/settings_screen.dart';
 import 'profile/profile_switch_screen.dart';
@@ -417,6 +418,7 @@ class _MainScreenState extends State<MainScreen>
   RouteObserver<PageRoute<dynamic>>? _profileRouteObserver;
   bool _lastHasLiveTv = false;
   bool _lastHasExplore = false;
+  bool _lastHasWatchlist = false;
 
   /// Whether a reconnection attempt is in progress
   bool _isReconnecting = false;
@@ -538,9 +540,12 @@ class _MainScreenState extends State<MainScreen>
       _lastHasLiveTv = false;
     }
     try {
-      _lastHasExplore = context.read<CatalogSourcesProvider>().hasAnySource && _showExploreTabSetting;
+      final catalogSources = context.read<CatalogSourcesProvider>();
+      _lastHasExplore = catalogSources.hasAnySource && _showExploreTabSetting;
+      _lastHasWatchlist = catalogSources.watchlistCapableSources.isNotEmpty;
     } catch (_) {
       _lastHasExplore = false;
+      _lastHasWatchlist = false;
     }
     // Re-evaluate Explore tab visibility when the appearance toggle flips
     // mid-session; the catalog-sources listener covers source changes.
@@ -1202,6 +1207,7 @@ class _MainScreenState extends State<MainScreen>
     return switch (tab) {
       NavigationTabId.discover => DiscoverScreen(key: _screenKeys[tab]),
       NavigationTabId.explore => ExploreScreen(key: _screenKeys[tab]),
+      NavigationTabId.watchlist => WatchlistScreen(key: _screenKeys[tab]),
       NavigationTabId.libraries => LibrariesScreen(
         key: _screenKeys[tab],
         onLibraryOrderChanged: _onLibraryOrderChanged,
@@ -1226,6 +1232,7 @@ class _MainScreenState extends State<MainScreen>
     isOffline: isOffline,
     hasLiveTv: _hasLiveTv,
     hasExplore: _lastHasExplore,
+    hasWatchlist: _lastHasWatchlist,
     preferredStartup: SettingsService.instanceOrNull?.read(SettingsService.startupSection),
   );
 
@@ -1311,8 +1318,10 @@ class _MainScreenState extends State<MainScreen>
 
   void _handleCatalogSourcesChanged() {
     final hasExplore = (_catalogSourcesProvider?.hasAnySource ?? false) && _showExploreTabSetting;
-    if (hasExplore == _lastHasExplore) return;
+    final hasWatchlist = _catalogSourcesProvider?.watchlistCapableSources.isNotEmpty ?? false;
+    if (hasExplore == _lastHasExplore && hasWatchlist == _lastHasWatchlist) return;
     _lastHasExplore = hasExplore;
+    _lastHasWatchlist = hasWatchlist;
 
     _handleTabAvailabilityChanged();
     _applyPendingStartupTab();
@@ -1903,7 +1912,12 @@ class _MainScreenState extends State<MainScreen>
   bool get _hasLiveTv => _lastHasLiveTv;
 
   List<NavigationTab> _getVisibleTabs(bool isOffline) {
-    return NavigationTab.getVisibleTabs(isOffline: isOffline, hasLiveTv: _hasLiveTv, hasExplore: _lastHasExplore);
+    return NavigationTab.getVisibleTabs(
+      isOffline: isOffline,
+      hasLiveTv: _hasLiveTv,
+      hasExplore: _lastHasExplore,
+      hasWatchlist: _lastHasWatchlist,
+    );
   }
 
   List<NavigationTab> _getBottomNavigationTabs(BuildContext context) {

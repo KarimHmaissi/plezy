@@ -468,6 +468,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
 
   static const _kHome = 'home';
   static const _kExplore = 'explore';
+  static const _kWatchlist = 'watchlist';
   static const _kNowPlaying = 'nowPlaying';
   static const _kLibraries = 'libraries';
   static const _kSearch = 'search';
@@ -626,6 +627,8 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
         return _kHome;
       case NavigationTabId.explore:
         return _kExplore;
+      case NavigationTabId.watchlist:
+        return _kWatchlist;
       case NavigationTabId.libraries:
         final libKey = widget.selectedLibraryKey;
         if (libKey != null && _librariesExpanded) {
@@ -677,12 +680,14 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     required bool hasLiveTv,
     required bool hasNowPlaying,
     required bool hasExplore,
+    required bool hasWatchlist,
   }) {
     return {
       _kHome,
       if (hasNowPlaying) _kNowPlaying,
       _kLibraries,
       if (hasExplore) _kExplore,
+      if (hasWatchlist) _kWatchlist,
       _kSearch,
       if (_showDownloads) _kDownloads,
       _kSettings,
@@ -758,6 +763,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     required bool hasLiveTv,
     required bool hasNowPlaying,
     required bool hasExplore,
+    required bool hasWatchlist,
     required bool isCollapsed,
   }) {
     return [
@@ -767,6 +773,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
         if (hasNowPlaying) _kNowPlaying,
         if (hasLiveTv) 'liveTv',
         if (hasExplore) _kExplore,
+        if (hasWatchlist) _kWatchlist,
         _kSearch,
       ],
       if (_showDownloads) _kDownloads,
@@ -885,7 +892,9 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     final hasLiveTv = context.watch<MultiServerProvider>().hasLiveTv;
     // Nullable watch: rail tests (and any host without the profile session
     // scope) simply never show the Explore item.
-    final hasExploreSource = context.watch<CatalogSourcesProvider?>()?.hasAnySource ?? false;
+    final catalogSources = context.watch<CatalogSourcesProvider?>();
+    final hasExploreSource = catalogSources?.hasAnySource ?? false;
+    final hasWatchlist = catalogSources?.watchlistCapableSources.isNotEmpty ?? false;
     // Nullable watch: rail tests (and any host without the profile session
     // scope) simply never show the Now Playing item. TV-only — it is the
     // way back into the now-playing screen there; desktop already has the
@@ -929,6 +938,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
             hasLiveTv: hasLiveTv,
             hasNowPlaying: nowPlayingTrack != null,
             hasExplore: hasExplore,
+            hasWatchlist: hasWatchlist,
           ),
         );
         final focusOrder = _buildFocusOrder(
@@ -938,6 +948,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
           hasLiveTv: hasLiveTv,
           hasNowPlaying: nowPlayingTrack != null,
           hasExplore: hasExplore,
+          hasWatchlist: hasWatchlist,
           isCollapsed: isCollapsed,
         );
         _debugAssertUniqueFocusOrder(focusOrder);
@@ -1055,6 +1066,18 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
                                           isSelected: widget.selectedTab == NavigationTabId.explore,
                                           onTap: () => widget.onDestinationSelected(NavigationTabId.explore),
                                           focusNode: _focusTracker.get(_kExplore),
+                                          isCollapsed: isCollapsed,
+                                        ),
+                                        const SizedBox(height: _itemGap),
+                                      ],
+                                      if (hasWatchlist) ...[
+                                        _buildNavItem(
+                                          icon: Symbols.bookmark_rounded,
+                                          selectedIcon: Symbols.bookmark_rounded,
+                                          label: Translations.of(context).navigation.watchlist,
+                                          isSelected: widget.selectedTab == NavigationTabId.watchlist,
+                                          onTap: () => widget.onDestinationSelected(NavigationTabId.watchlist),
+                                          focusNode: _focusTracker.get(_kWatchlist),
                                           isCollapsed: isCollapsed,
                                         ),
                                         const SizedBox(height: _itemGap),

@@ -1434,7 +1434,16 @@
     "libraries": "Libraries",
     "downloads": "Downloads",
     "liveTv": "Live TV",
-    "explore": "Explore"
+    "explore": "Explore",
+    "watchlist": "Watchlist"
+  },
+  "watchlist": {
+    "films": "Films",
+    "tv": "TV",
+    "emptyTitle": "Your watchlist is empty",
+    "emptyMessage": "Titles you add to your ${source} watchlist appear here",
+    "noSourceTitle": "No watchlist connected",
+    "noSourceMessage": "Connect Plex, Trakt or another watchlist service in Settings"
   },
   "explore": {
     "title": "Explore",

@@ -76,5 +76,21 @@ void main() {
       final offline = NavigationTab.getVisibleTabs(isOffline: true, hasExplore: true);
       expect(offline.map((tab) => tab.id), isNot(contains(NavigationTabId.explore)));
     });
+
+    test('hides Watchlist until a watchlist source is connected, then shows it after Explore', () {
+      final without = NavigationTab.getVisibleTabs(isOffline: false, hasExplore: true);
+      expect(without.map((tab) => tab.id), isNot(contains(NavigationTabId.watchlist)));
+
+      final ids = NavigationTab.getVisibleTabs(
+        isOffline: false,
+        hasExplore: true,
+        hasWatchlist: true,
+      ).map((tab) => tab.id).toList();
+      expect(ids.indexOf(NavigationTabId.watchlist), ids.indexOf(NavigationTabId.explore) + 1);
+      expect(ids.indexOf(NavigationTabId.watchlist), ids.indexOf(NavigationTabId.search) - 1);
+
+      final offline = NavigationTab.getVisibleTabs(isOffline: true, hasWatchlist: true);
+      expect(offline.map((tab) => tab.id), isNot(contains(NavigationTabId.watchlist)));
+    });
   });
 }
