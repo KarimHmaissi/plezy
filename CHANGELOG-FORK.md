@@ -16,7 +16,8 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] Smarter Continue Watching: Continue Watching + Pick back up, older
       on-deck films, 1-year cut-off
 - [x] Trakt Lists in Explore: charts, liked lists, Discover lists
-- [x] Pin any Trakt list or chart to Home; remove any Home row (synced via
+- [x] Home builder: Home shows only the rows you add, in your order; any
+      row anywhere in Plezy can be added; same-title rows merge (synced via
       Trakt)
 
 Details of each are in the dated entries below.
@@ -50,7 +51,40 @@ Details of each are in the dated entries below.
 
 ## 2026-10-31
 
-### Pin to Home and Home rows — `fba532f55`
+### Home builder — `HASH`
+Replaces the first "Pin to Home" version below, after Karim's feedback.
+- **Home shows only the rows you add, in your order.** Existing pins carried
+  over: Continue Watching, Pick back up, then the pinned rows. Server rows are
+  no longer shown automatically. In **Manage Home**, turning off **Only show
+  rows I've added** brings back every other server row after yours.
+- **Add to Home from anywhere**: it's the first entry of the hold-OK menu on
+  Home rows, Explore rows of every source (Plex, Trakt, Trakt Lists), library
+  Recommended rows, Watchlist shelves (each genre shelf, plus the whole
+  Films / TV half), Comfort, Discover list pages, and Plex collection cards.
+  Adding something already on Home says so.
+- **No duplicate rows.** Rows with the same title, ignoring case and
+  punctuation, merge into one, with each title appearing once (by Plex guid).
+  Why Karim's Home had duplicates: PRM2-Xtra makes a curated "Oh, The
+  Horror!" row in each of its five movie libraries; PRM2-Main has two
+  collections called "Halloween Movies"; and there was one "Recently Added
+  in …" row per library on each server (13 rows, 11 after merging *Movies
+  with Movies and so on).
+- **Manage Home** (the builder):
+  - Rows on Home in order; select one to Move up / Move down / Move to top /
+    Remove.
+  - Then every row you can add, grouped: Continue Watching, From your Plex
+    servers (with one switch for all "Recently added" rows), Trakt charts,
+    your Trakt lists, Watchlist and Comfort, Explore rows of each source.
+  - Reached from any row's hold-OK menu and from Explore's toolbar.
+- Removing Continue Watching asks first.
+- Rows Home doesn't already have loaded are fetched when Home loads: Trakt
+  charts and lists, Explore rows, Watchlist shelves, Comfort, and library
+  rows or collections. Charts refresh on every load.
+- Storage: still the private Trakt list "Plezy", now as one compact encoded
+  line holding the ordered rows (`[plezy:home2=…]`). The first-version format
+  is migrated automatically. The local copy keeps Home instant offline.
+
+### Pin to Home and Home rows (first version, replaced above) — `fba532f55`
 - Hold OK (long-press) on any card in an Explore ▸ Trakt Lists row for
   **Pin to Home** / **Unpin from Home**. Public lists opened from Discover
   lists have a **Pin to Home** button next to Like list.

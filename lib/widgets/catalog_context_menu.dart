@@ -55,6 +55,12 @@ Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset
     anchorRect: anchorRect,
     focusFirstItem: position == null,
     entries: [
+      for (final entry in rowEntries)
+        AppMenuItem(
+          value: _CatalogMenuAction(_CatalogMenuActionType.rowEntry, rowEntry: entry),
+          label: entry.label,
+          icon: entry.icon,
+        ),
       AppMenuItem(value: _CatalogMenuAction.viewDetails, label: t.mediaMenu.viewDetails, icon: Symbols.info_rounded),
       if (item.trailerUrl case final trailerUrl? when trailerUrl.isNotEmpty)
         AppMenuItem(
@@ -74,12 +80,6 @@ Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset
           value: _CatalogMenuAction.toggleWatchlist,
           label: onWatchlist ? t.explore.removeFromWatchlist : t.explore.addToWatchlist,
           icon: onWatchlist ? Symbols.bookmark_remove_rounded : Symbols.bookmark_add_rounded,
-        ),
-      for (final entry in rowEntries)
-        AppMenuItem(
-          value: _CatalogMenuAction(_CatalogMenuActionType.rowEntry, rowEntry: entry),
-          label: entry.label,
-          icon: entry.icon,
         ),
     ],
   );

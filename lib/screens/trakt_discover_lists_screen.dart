@@ -15,14 +15,15 @@ import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/app_icon.dart';
+import '../services/catalog/home_pins.dart';
 import '../widgets/focusable_list_tile.dart';
+import '../widgets/home_row_actions.dart';
 import '../widgets/focused_scroll_scaffold.dart';
 import '../widgets/hub_section.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
-import 'home_rows_screen.dart';
 import 'libraries/state_messages.dart';
 
 /// Trending and popular public Trakt lists. Opening one shows its items with
@@ -227,24 +228,15 @@ class _TraktListScreenState extends State<TraktListScreen> {
     }
   }
 
+  HomeRowEntry get _homeRow => (id: HomeRowIds.traktLists(_hubId), title: widget.list.name, sources: const []);
+
   Future<void> _togglePin() async {
-    final pins = widget.source.pins;
-    final pinned = !pins.isPinned(_hubId);
-    try {
-      await pins.setPinned(_hubId, widget.list.name, pinned);
-      if (!mounted) return;
-      showSuccessSnackBar(
-        context,
-        pinned ? t.homeRows.pinned(title: widget.list.name) : t.homeRows.unpinned(title: widget.list.name),
-      );
-    } catch (e) {
-      appLogger.w('Trakt Lists: pin toggle failed', error: e);
-      if (mounted) showErrorSnackBar(context, homeRowsSaveError(e));
-    }
+    final row = _homeRow;
+    widget.source.pins.contains(row.id) ? await removeHomeRow(context, row) : await addHomeRows(context, [row]);
   }
 
   FocusableAction _pinAction(Color color) {
-    final pinned = widget.source.pins.isPinned(_hubId);
+    final pinned = widget.source.pins.contains(_homeRow.id);
     return FocusableAction(
       debugLabel: 'TraktListPin',
       onPressed: () => unawaited(_togglePin()),
@@ -253,10 +245,15 @@ class _TraktListScreenState extends State<TraktListScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            AppIcon(Symbols.keep_rounded, fill: pinned ? 1 : 0, size: 22, color: color),
+            AppIcon(
+              pinned ? Symbols.check_circle_rounded : Symbols.add_circle_rounded,
+              fill: 1,
+              size: 22,
+              color: color,
+            ),
             const SizedBox(width: 8),
             Text(
-              pinned ? t.explore.traktLists.pinned : t.explore.traktLists.pin,
+              pinned ? t.homeRows.onHome : t.homeRows.addToHome,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
             ),
           ],

@@ -39,6 +39,9 @@ import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
 import 'comfort_configure_screen.dart';
 import 'libraries/state_messages.dart';
+import '../services/catalog/home_pins.dart';
+import '../widgets/home_row_actions.dart';
+import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 
 enum _PickChoice { play, again }
 
@@ -363,6 +366,10 @@ class ComfortScreenState extends State<ComfortScreen>
     return _buildDesktopContent(hubs);
   }
 
+  /// Comfort shows can be added to Home as a row.
+  List<MediaMenuExtraEntry> _homeRowMenuEntriesFor(MediaHub hub) =>
+      homeRowMenuEntries(context, (id: HomeRowIds.comfort, title: t.homeRows.comfortRow, sources: const []));
+
   Widget _buildTvContent(List<MediaHub> hubs) {
     final message = _buildStateMessage();
     final foregroundColor = Theme.of(context).colorScheme.onSurface;
@@ -395,6 +402,7 @@ class ComfortScreenState extends State<ComfortScreen>
                 widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
                 expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
                 onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
+                rowMenuEntriesForHub: _homeRowMenuEntriesFor,
               ),
             ),
           TvToolbarOverlay(

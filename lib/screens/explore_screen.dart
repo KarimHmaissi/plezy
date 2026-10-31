@@ -22,9 +22,7 @@ import '../services/catalog/catalog_source.dart';
 import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/settings_service.dart';
 import '../utils/platform_detector.dart';
-import '../utils/app_logger.dart';
 import '../utils/provider_extensions.dart';
-import '../utils/snackbar_helper.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/catalog_source_logo.dart';
@@ -33,6 +31,8 @@ import '../widgets/hub_section.dart';
 import '../widgets/focusable_media_card.dart';
 import '../widgets/focusable_popup_menu_button.dart';
 import '../widgets/loading_indicator_box.dart';
+import '../services/catalog/home_pins.dart';
+import '../widgets/home_row_actions.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 import '../widgets/search_input_field.dart';
 import '../widgets/settings_builder.dart';
@@ -40,7 +40,6 @@ import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
 import 'catalog_search_screen.dart';
-import 'home_rows_screen.dart';
 import 'trakt_discover_lists_screen.dart';
 import 'libraries/state_messages.dart';
 
@@ -328,11 +327,11 @@ class ExploreScreenState extends State<ExploreScreen>
                 tooltip: t.explore.traktLists.discoverLists,
                 onPressed: () => unawaited(_openDiscoverLists(lists)),
               ),
-            if (sources.activeSource case final TraktListsCatalogSource lists)
+            if (homeLayoutSourceOf(context) != null)
               FocusableAction(
-                icon: Symbols.keep_rounded,
-                tooltip: t.homeRows.manageHomeRows,
-                onPressed: () => _openHomeRows(lists),
+                icon: Symbols.dashboard_customize_rounded,
+                tooltip: t.homeRows.manageHome,
+                onPressed: () => openHomeRows(context),
               ),
             FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
           ],
@@ -468,39 +467,29 @@ class ExploreScreenState extends State<ExploreScreen>
     if (changed == true && mounted) unawaited(_explore.load());
   }
 
-  void _openHomeRows(TraktListsCatalogSource source) {
-    unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => HomeRowsScreen(source: source))));
-  }
-
-  /// Trakt Lists rows can be pinned to Home from any card's long-press menu.
+  /// Every Explore row, of any source, can be added to Home from any card's
+  /// hold-OK menu.
   List<MediaMenuExtraEntry> _rowMenuEntriesFor(MediaHub hub) {
     final source = _explore.activeSource;
-    final hubId = _rowForHub(hub)?.providerHubId;
-    if (source is! TraktListsCatalogSource || hubId == null) return const [];
-    final pinned = source.pins.isPinned(hubId);
-    return [
-      MediaMenuExtraEntry(
-        icon: pinned ? Symbols.keep_off_rounded : Symbols.keep_rounded,
-        label: pinned ? t.homeRows.unpinFromHome : t.homeRows.pinToHome,
-        onSelected: () => unawaited(_setPinned(source, hubId, hub.title, !pinned)),
-      ),
-      MediaMenuExtraEntry(
-        icon: Symbols.tune_rounded,
-        label: t.homeRows.manageHomeRows,
-        onSelected: () => _openHomeRows(source),
-      ),
-    ];
-  }
-
-  Future<void> _setPinned(TraktListsCatalogSource source, String hubId, String title, bool pinned) async {
-    try {
-      await source.pins.setPinned(hubId, title, pinned);
-      if (!mounted) return;
-      showSuccessSnackBar(context, pinned ? t.homeRows.pinned(title: title) : t.homeRows.unpinned(title: title));
-    } catch (e) {
-      appLogger.w('Explore: pin failed', error: e);
-      if (mounted) showErrorSnackBar(context, homeRowsSaveError(e));
+    final rowHub = _rowForHub(hub);
+    if (source == null || rowHub == null) return const [];
+    final row = rowHub.row;
+    final providerHubId = rowHub.providerHubId;
+    final String id;
+    if (row != null) {
+      id = HomeRowIds.catalogRow(source.id, row);
+    } else if (providerHubId != null) {
+      id = source is TraktListsCatalogSource
+          ? HomeRowIds.traktLists(providerHubId)
+          : HomeRowIds.catalogHub(source.id, providerHubId);
+    } else {
+      return const [];
     }
+    // Rows every source has (Watchlist, Trending…) say whose they are.
+    final title = row != null && source is! TraktListsCatalogSource
+        ? '${hub.title} · ${source.displayName}'
+        : hub.title;
+    return homeRowMenuEntries(context, (id: id, title: title, sources: const []));
   }
 
   ExploreRowHub? _rowForHub(MediaHub hub) {
@@ -546,12 +535,12 @@ class ExploreScreenState extends State<ExploreScreen>
                   tooltip: t.explore.traktLists.discoverLists,
                   onPressed: () => unawaited(_openDiscoverLists(active)),
                 ),
-              if (active is TraktListsCatalogSource)
+              if (homeLayoutSourceOf(context) != null)
                 FocusableAction(
-                  icon: Symbols.keep_rounded,
+                  icon: Symbols.dashboard_customize_rounded,
                   iconColor: foregroundColor,
-                  tooltip: t.homeRows.manageHomeRows,
-                  onPressed: () => _openHomeRows(active),
+                  tooltip: t.homeRows.manageHome,
+                  onPressed: () => openHomeRows(context),
                 ),
               if (active != null)
                 FocusableAction(

@@ -22,8 +22,10 @@ import '../services/playlist_items_loader.dart';
 import '../services/recent_tags_service.dart';
 import '../services/watch_actions.dart';
 import '../services/deep_links/item_links.dart';
+import '../services/catalog/home_pins.dart';
 import '../services/catalog/library_watchlist_candidates.dart';
 import '../utils/content_utils.dart';
+import 'home_row_actions.dart';
 import '../utils/delete_impact.dart';
 import '../utils/download_utils.dart';
 import '../utils/focus_utils.dart';
@@ -434,10 +436,22 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         : menu.isCollection || menu.isPlaylist
         ? _buildListMenuActions(context, menu)
         : _buildItemMenuActions(context, menu);
-    final extras = _openExtras = [...widget.extraEntries, ...RowMenuEntries.of(this.context)];
+    // Row-wide entries (Add to Home…) lead the menu; caller extras close it.
+    final collection = menu.isCollection ? menu.mediaItem : null;
+    final leading = [
+      ...RowMenuEntries.of(this.context),
+      if (collection != null && collection.backend == MediaBackend.plex && collection.serverId != null)
+        ...homeRowMenuEntries(this.context, (
+          id: HomeRowIds.plex(collection.title ?? collection.id),
+          title: collection.title ?? collection.id,
+          sources: ['${collection.serverId}|/library/collections/${collection.id}/children'],
+        )),
+    ];
+    final extras = _openExtras = [...leading, ...widget.extraEntries];
     for (var i = 0; i < extras.length; i++) {
       final entry = extras[i];
-      menuActions.add(_MenuAction(value: 'extra_$i', icon: entry.icon, label: entry.label));
+      final action = _MenuAction(value: 'extra_$i', icon: entry.icon, label: entry.label);
+      i < leading.length ? menuActions.insert(i, action) : menuActions.add(action);
     }
 
     final openedFromKeyboard = _openedFromKeyboard;

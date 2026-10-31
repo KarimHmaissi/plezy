@@ -32,6 +32,7 @@ import '../widgets/hub_section.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
 import '../widgets/loading_indicator_box.dart';
+import '../widgets/home_row_actions.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 import '../widgets/profile_switching_overlay.dart';
 import 'profile/profile_switch_screen.dart';
@@ -42,6 +43,7 @@ import '../profiles/profile_activation.dart';
 import '../profiles/profile_avatar.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../services/catalog/home_pins.dart';
+import '../services/catalog/home_rows.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/comfort/comfort_shows_controller.dart';
@@ -68,7 +70,6 @@ import '../utils/tone_mapped_logo_image.dart';
 import '../theme/mono_tokens.dart';
 import 'libraries/content_state_builder.dart';
 import 'libraries/state_messages.dart';
-import 'home_rows_screen.dart';
 import 'main_screen.dart';
 import '../navigation/settings_shortcut.dart';
 import '../watch_together/watch_together.dart';
@@ -143,12 +144,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   TraktCatalogSource? _comfortSource;
   static const Duration _comfortTitlesStaleAfter = Duration(minutes: 5);
 
-  /// Rows pinned to Home (see [HomePinsController]) and the fetched rows,
-  /// keyed by pinned hub id. Charts refetch on every Home load.
+  /// The user's Home layout (see [HomePinsController]; null without Trakt)
+  /// and the added rows Home fetches itself, by row id. Charts refetch on
+  /// every Home load.
   TraktListsCatalogSource? _listsSource;
   HomePinsController? get _homePins => _listsSource?.pins;
-  Map<String, MediaHub> _pinnedHubs = const {};
-  final Set<String> _pinnedHubsLoading = {};
+  Map<String, MediaHub> _fetchedRows = const {};
+  final Set<String> _rowsLoading = {};
 
   late FocusNode _heroFocusNode;
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
@@ -206,12 +208,16 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // rebuilds hand TvBrowseRail the same hubs list and its didUpdateWidget
   // fast path — and the cached rail widget below — kick in.
   List<MediaHub>? _tvBrowseHubsCache;
-  (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int, int, Map<String, MediaHub>, String)?
+  (List<MediaItem>, List<MediaHub>, bool, String, Set<String>, int, int, Map<String, MediaHub>, HomeLayout?)?
   _tvBrowseHubsCacheKey;
+
+  /// The Home row each shown hub stands for, by hub id (for the row menu).
+  Map<String, HomeRowEntry> _rowForHubId = const {};
 
   List<MediaHub> get _tvBrowseHubs {
     final staleDays = context.settingsRead(SettingsService.continueWatchingStaleDays);
     final maxAgeDays = context.settingsRead(SettingsService.continueWatchingMaxAgeDays);
+    final layout = _homePins?.layout;
     final key = (
       _onDeck,
       _hubs,
@@ -220,8 +226,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       _comfortTitles,
       staleDays,
       maxAgeDays,
-      _pinnedHubs,
-      _homeLayoutSignature,
+      _fetchedRows,
+      layout,
     );
     if (_tvBrowseHubsCache != null && key == _tvBrowseHubsCacheKey) return _tvBrowseHubsCache!;
     final split = classifyContinueWatching(
@@ -231,149 +237,101 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       maxAge: Duration(days: maxAgeDays),
       excludedShowTitles: _comfortTitles,
     );
-    // Pick back up sits directly under Continue Watching, then the rows the
-    // user pinned (in pin order), then the backend hubs. Hidden rows drop out.
-    final pins = _homePins;
-    final hubs = <MediaHub>[
-      if (split.fresh.isNotEmpty) _continueWatchingHubFor(split.fresh),
-      if (split.pickBackUp.isNotEmpty) _pickBackUpHubFor(split.pickBackUp),
-      for (final pin in pins?.pins ?? const <HomeRow>[])
-        if (_pinnedHubs[pin.id] case final hub? when hub.items.isNotEmpty) hub,
-      ..._hubs.where((hub) => hub.items.isNotEmpty),
-    ].where((hub) => pins == null || _isPinnedHub(hub) || !pins.isHidden(_hiddenKeyFor(hub))).toList();
+    final continueWatching = split.fresh.isEmpty ? null : _continueWatchingHubFor(split.fresh);
+    final pickBackUp = split.pickBackUp.isEmpty ? null : _pickBackUpHubFor(split.pickBackUp);
+    // Same-title server rows (one per library or server) are one row.
+    final plex = mergePlexHubs(_hubs);
+    final plexById = {for (final row in plex) row.rowId: row};
+    final rowForHubId = <String, HomeRowEntry>{};
+    final hubs = <MediaHub>[];
+    void show(MediaHub? hub, HomeRowEntry row) {
+      if (hub == null || hub.items.isEmpty || rowForHubId.containsKey(hub.id)) return;
+      rowForHubId[hub.id] = row;
+      hubs.add(hub);
+    }
+
+    HomeRowEntry plexRow(MergedPlexHub row) => (id: row.rowId, title: row.hub.title, sources: row.sources);
+    if (layout == null) {
+      // No Trakt: the server's Home, without duplicate rows.
+      show(continueWatching, defaultHomeLayout.rows[0]);
+      show(pickBackUp, defaultHomeLayout.rows[1]);
+      for (final row in plex) {
+        show(row.hub, plexRow(row));
+      }
+    } else {
+      // Only the rows the user added, in their order; with curation off,
+      // every other server row follows.
+      for (final row in layout.rows) {
+        final hub = switch (row.id) {
+          HomeRowIds.continueWatching => continueWatching,
+          HomeRowIds.pickBackUp => pickBackUp,
+          _ => plexById[row.id]?.hub ?? _fetchedRows[row.id],
+        };
+        show(hub, row);
+      }
+      if (!layout.curated) {
+        for (final row in plex) {
+          if (!layout.rows.any((r) => r.id == row.rowId)) show(row.hub, plexRow(row));
+        }
+      }
+    }
+    _rowForHubId = rowForHubId;
     _tvBrowseHubsCache = hubs;
     _tvBrowseHubsCacheKey = key;
     return hubs;
   }
 
-  /// Changes whenever the pinned or hidden rows do.
-  String get _homeLayoutSignature {
-    final pins = _homePins;
-    if (pins == null) return '';
-    return '${pins.pins.map((p) => p.id).join(',')}|${pins.hidden.map((h) => h.id).join(',')}';
-  }
-
-  static const String _pinnedHubPrefix = 'pinned:';
-
-  bool _isPinnedHub(MediaHub hub) => hub.id.startsWith(_pinnedHubPrefix);
-
-  /// The key a Home row is hidden by; split library hubs hide per library.
-  String _hiddenKeyFor(MediaHub hub) {
-    final key = homeRowKey(identifier: hub.identifier, id: hub.id);
-    return hub.libraryId == null ? key : '$key@${hub.libraryId}';
-  }
-
   void _onHomePinsChanged() {
     if (!mounted) return;
     setState(() {});
-    unawaited(_loadPinnedHubs());
+    unawaited(_loadRows());
   }
 
-  /// Fetch pinned rows Home doesn't have yet, or all of them on [refresh]
-  /// (charts move), each on its own so one failing row never hides the rest.
-  Future<void> _loadPinnedHubs({bool refresh = false}) async {
-    final source = _listsSource;
-    final pins = source?.pins;
-    if (source == null || pins == null) return;
+  HomeRowResolver? _resolver() {
+    final sources = _catalogSources;
+    if (sources == null) return null;
+    final multiServer = context.read<MultiServerProvider?>();
+    return HomeRowResolver(sources: sources, clientFor: (id) => multiServer?.getClientForServer(id));
+  }
+
+  /// Fetch the added rows Home doesn't have loaded, or all of them on
+  /// [refresh] (charts move), each on its own so one failing row never hides
+  /// the rest. Plex rows come from Home's own hubs when they include them.
+  Future<void> _loadRows({bool refresh = false}) async {
+    final pins = _homePins;
+    final resolver = _resolver();
+    if (pins == null || resolver == null) return;
+    final plexIds = {for (final row in mergePlexHubs(_hubs)) row.rowId};
     final wanted = [
-      for (final pin in pins.pins)
-        if ((refresh || !_pinnedHubs.containsKey(pin.id)) && !_pinnedHubsLoading.contains(pin.id)) pin,
+      for (final row in pins.rows)
+        if (HomeRowResolver.needsFetch(row.id) &&
+            !(row.id.startsWith('px:') && (plexIds.contains(row.id) || _areHubsLoading)) &&
+            (refresh || !_fetchedRows.containsKey(row.id)) &&
+            !_rowsLoading.contains(row.id))
+          row,
     ];
-    final stale = _pinnedHubs.keys.where((id) => !pins.isPinned(id)).toList();
-    if (stale.isNotEmpty) {
-      setState(
-        () => _pinnedHubs = {
-          for (final entry in _pinnedHubs.entries)
-            if (!stale.contains(entry.key)) entry.key: entry.value,
-        },
-      );
-    }
     await Future.wait([
-      for (final pin in wanted)
+      for (final row in wanted)
         () async {
-          _pinnedHubsLoading.add(pin.id);
+          _rowsLoading.add(row.id);
           try {
-            final page = await source.fetchHub(pin.id, limit: TraktListsCatalogSource.rowItemLimit);
-            if (!mounted || !identical(_listsSource, source) || !pins.isPinned(pin.id)) return;
-            final hub = MediaHub(
-              id: '$_pinnedHubPrefix${pin.id}',
-              identifier: '$_pinnedHubPrefix${pin.id}',
-              title: pins.titleFor(pin.id),
-              type: 'mixed',
-              items: [for (final item in page.items) item.toMediaItem()],
-              size: page.items.length,
-            );
-            setState(() => _pinnedHubs = {..._pinnedHubs, pin.id: hub});
+            final hub = await resolver.fetch(row);
+            if (!mounted || !identical(_homePins, pins) || hub == null) return;
+            setState(() => _fetchedRows = {..._fetchedRows, row.id: hub});
           } catch (e) {
-            appLogger.w('Home: pinned row ${pin.id} failed', error: e);
+            appLogger.w('Home: row ${row.id} failed', error: e);
           } finally {
-            _pinnedHubsLoading.remove(pin.id);
+            _rowsLoading.remove(row.id);
           }
         }(),
     ]);
   }
 
-  /// Row actions in each Home row's long-press menu: unpin a pinned row,
-  /// remove any other row, and manage the pinned and hidden rows.
+  /// "Remove from Home" (or "Add to Home" for a server row shown with
+  /// curation off) and "Manage Home", leading each Home row's menu.
   List<MediaMenuExtraEntry> _rowMenuEntriesFor(MediaHub hub) {
-    final pins = _homePins;
-    if (pins == null) return const [];
-    return [
-      if (_isPinnedHub(hub))
-        MediaMenuExtraEntry(
-          icon: Symbols.keep_off_rounded,
-          label: t.homeRows.unpinFromHome,
-          onSelected: () => unawaited(_unpinRow(hub)),
-        )
-      else
-        MediaMenuExtraEntry(
-          icon: Symbols.visibility_off_rounded,
-          label: t.homeRows.removeRowFromHome,
-          onSelected: () => unawaited(_hideRow(hub)),
-        ),
-      MediaMenuExtraEntry(icon: Symbols.tune_rounded, label: t.homeRows.manageHomeRows, onSelected: _openHomeRows),
-    ];
-  }
-
-  Future<void> _unpinRow(MediaHub hub) async {
-    final pins = _homePins;
-    if (pins == null) return;
-    final id = hub.id.substring(_pinnedHubPrefix.length);
-    try {
-      await pins.setPinned(id, hub.title, false);
-      if (mounted) showSuccessSnackBar(context, t.homeRows.unpinned(title: hub.title));
-    } catch (e) {
-      appLogger.w('Home: unpin failed', error: e);
-      if (mounted) showErrorSnackBar(context, t.homeRows.saveFailed);
-    }
-  }
-
-  Future<void> _hideRow(MediaHub hub) async {
-    final pins = _homePins;
-    if (pins == null) return;
-    if (hub.isContinueWatchingHub) {
-      final confirmed = await showConfirmDialog(
-        context,
-        title: t.homeRows.hideContinueWatchingTitle(title: hub.title),
-        message: t.homeRows.hideContinueWatchingMessage,
-        confirmText: t.homeRows.removeRow,
-        isDestructive: true,
-      );
-      if (!confirmed || !mounted) return;
-    }
-    try {
-      await pins.setHidden(_hiddenKeyFor(hub), hub.title, true);
-      if (mounted) showSuccessSnackBar(context, t.homeRows.hidden(title: hub.title));
-    } catch (e) {
-      appLogger.w('Home: hide row failed', error: e);
-      if (mounted) showErrorSnackBar(context, homeRowsSaveError(e));
-    }
-  }
-
-  void _openHomeRows() {
-    final source = _listsSource;
-    if (source == null) return;
-    unawaited(Navigator.of(context).push(MaterialPageRoute(builder: (_) => HomeRowsScreen(source: source))));
+    final row = _rowForHubId[hub.id];
+    return row == null ? const [] : homeRowMenuEntries(context, row);
   }
 
   MediaHub _continueWatchingHubFor(List<MediaItem> items) => MediaHub(
@@ -569,11 +527,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     if (!identical(lists, _listsSource)) {
       _listsSource?.pins.removeListener(_onHomePinsChanged);
       _listsSource = lists;
-      _pinnedHubs = const {};
+      _fetchedRows = const {};
       if (lists != null) {
         lists.pins.addListener(_onHomePinsChanged);
         unawaited(lists.pins.ensureLoaded(refresh: true));
-        unawaited(_loadPinnedHubs());
+        unawaited(_loadRows());
       }
       if (mounted) setState(() {});
     }
@@ -633,10 +591,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         _updateHubKeys();
       });
     }
+    // Plex rows Home's own hubs don't include are fetched once those land.
+    if (renderChanged && !isNewLoad) unawaited(_loadRows());
     if (isNewLoad) {
       // Pick up changes made on another device, and keep charts current.
       unawaited(_homePins?.ensureLoaded(refresh: true));
-      unawaited(_loadPinnedHubs(refresh: true));
+      unawaited(_loadRows(refresh: true));
     }
     _applyPendingTvBrowseRailFocus();
 

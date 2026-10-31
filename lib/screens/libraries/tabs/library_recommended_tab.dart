@@ -27,6 +27,9 @@ import '../../../widgets/tv_browse_rail.dart';
 import '../../../widgets/tv_spotlight_scaffold.dart';
 import '../../main_screen.dart';
 import 'base_library_tab.dart';
+import '../../../services/catalog/home_pins.dart';
+import '../../../widgets/home_row_actions.dart';
+import '../../../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 
 /// Recommended tab for library screen
 /// Shows library-specific hubs and recommendations, including dedicated Continue Watching
@@ -326,6 +329,17 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryR
     );
   }
 
+  /// A library row can be added to Home; same-title rows merge there.
+  List<MediaMenuExtraEntry> _homeRowMenuEntriesFor(MediaHub hub) {
+    final serverId = hub.serverId;
+    if (serverId == null) return const [];
+    return homeRowMenuEntries(context, (
+      id: HomeRowIds.plex(hub.title),
+      title: hub.title,
+      sources: ['$serverId|${hub.id}'],
+    ));
+  }
+
   Widget _buildTvContent(List<MediaHub> items) {
     final tvHubs = items.where((hub) => hub.items.isNotEmpty).toList();
     return TvSpotlightScaffold(
@@ -358,6 +372,7 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryR
                 widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
                 expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
                 onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
+                rowMenuEntriesForHub: _homeRowMenuEntriesFor,
               ),
             ),
     );

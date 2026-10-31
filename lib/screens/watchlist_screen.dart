@@ -30,6 +30,9 @@ import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
 import 'libraries/state_messages.dart';
+import '../services/catalog/home_pins.dart';
+import '../widgets/home_row_actions.dart';
+import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 
 /// The Watchlist tab: the user's catalog watchlist as genre shelves, Films
 /// first, then TV.
@@ -243,6 +246,29 @@ class WatchlistScreenState extends State<WatchlistScreen>
     ];
   }
 
+  /// Each shelf (and the whole Films / TV split) can be added to Home.
+  List<MediaMenuExtraEntry> _homeRowMenuEntriesFor(MediaHub hub) {
+    final source = _source;
+    final prefix = 'watchlist:${source?.id.name}:';
+    if (source == null || !hub.id.startsWith(prefix)) return const [];
+    final shelf = hub.id.substring(prefix.length);
+    final split = shelf.split('.').first;
+    final entries = homeRowMenuEntries(context, (id: HomeRowIds.watchlist(shelf), title: hub.title, sources: const []));
+    if (entries.isEmpty || shelf == split) return entries;
+    // A genre shelf also offers its whole half.
+    final half = split == 'films' ? t.watchlist.films : t.watchlist.tv;
+    final halfEntry = homeRowMenuEntries(context, (
+      id: HomeRowIds.watchlist(split),
+      title: half,
+      sources: const [],
+    )).first;
+    return [
+      entries.first,
+      MediaMenuExtraEntry(icon: halfEntry.icon, label: '${halfEntry.label}: $half', onSelected: halfEntry.onSelected),
+      ...entries.skip(1),
+    ];
+  }
+
   static IconData _iconFor(MediaHub hub) =>
       hub.identifier?.startsWith('watchlist.films') ?? false ? Symbols.movie_rounded : Symbols.tv_rounded;
 
@@ -321,6 +347,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 widePosterScale: TvBrowseRailLayout.compactEpisodeThumbnailScale,
                 expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
                 onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
+                rowMenuEntriesForHub: _homeRowMenuEntriesFor,
               ),
             ),
           TvToolbarOverlay(
