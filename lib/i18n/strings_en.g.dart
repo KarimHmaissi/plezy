@@ -103,6 +103,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$deepLinks$en deepLinks = Translations$deepLinks$en.internal(_root);
 	late final Translations$cast$en cast = Translations$cast$en.internal(_root);
 	late final Translations$remoteAi$en remoteAi = Translations$remoteAi$en.internal(_root);
+	late final Translations$aiComposer$en aiComposer = Translations$aiComposer$en.internal(_root);
 }
 
 // Path: app
@@ -6839,6 +6840,87 @@ class Translations$remoteAi$en {
 	String get empty => 'Ask for something and the picks show up here.';
 }
 
+// Path: aiComposer
+class Translations$aiComposer$en {
+	Translations$aiComposer$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'ASK YOUR LIBRARY'
+	String get eyebrow => 'ASK YOUR LIBRARY';
+
+	/// en: 'What do you feel like watching?'
+	String get headline => 'What do you feel like watching?';
+
+	/// en: 'Where shall we take it next?'
+	String get followUpHeadline => 'Where shall we take it next?';
+
+	/// en: 'Action anime like Attack on Titan'
+	String get example1 => 'Action anime like Attack on Titan';
+
+	/// en: 'Something cosy for a Sunday afternoon'
+	String get example2 => 'Something cosy for a Sunday afternoon';
+
+	/// en: '80s action, easy to watch'
+	String get example3 => '80s action, easy to watch';
+
+	/// en: 'Surprise me with a Marvel film'
+	String get example4 => 'Surprise me with a Marvel film';
+
+	/// en: 'A twisty thriller I haven't seen'
+	String get example5 => 'A twisty thriller I haven\'t seen';
+
+	/// en: 'QUICK START'
+	String get quickStart => 'QUICK START';
+
+	/// en: 'Tonight's pick'
+	String get tonight => 'Tonight\'s pick';
+
+	/// en: 'Pick the one film I should watch tonight'
+	String get tonightRequest => 'Pick the one film I should watch tonight';
+
+	/// en: 'Based on my history'
+	String get history => 'Based on my history';
+
+	/// en: 'Something like what I've watched recently'
+	String get historyRequest => 'Something like what I\'ve watched recently';
+
+	/// en: 'Hidden gems'
+	String get gems => 'Hidden gems';
+
+	/// en: 'Hidden gems in my library that I haven't watched'
+	String get gemsRequest => 'Hidden gems in my library that I haven\'t watched';
+
+	/// en: 'Feel-good'
+	String get feelGood => 'Feel-good';
+
+	/// en: 'Feel-good films to lift the mood'
+	String get feelGoodRequest => 'Feel-good films to lift the mood';
+
+	/// en: 'Random film'
+	String get random => 'Random film';
+
+	/// en: 'Surprise me with a random great film'
+	String get randomRequest => 'Surprise me with a random great film';
+
+	/// en: 'Reading your library…'
+	String get status1 => 'Reading your library…';
+
+	/// en: 'Thinking about your taste…'
+	String get status2 => 'Thinking about your taste…';
+
+	/// en: 'Picking the best matches…'
+	String get status3 => 'Picking the best matches…';
+
+	/// en: 'Almost there…'
+	String get status4 => 'Almost there…';
+
+	/// en: 'You can close this: it keeps going and lands in the AI tab.'
+	String get keepsRunning => 'You can close this: it keeps going and lands in the AI tab.';
+}
+
 // Path: appIcon.names
 class Translations$appIcon$names$en {
 	Translations$appIcon$names$en.internal(this._root);
@@ -11366,6 +11448,30 @@ extension on Translations {
 			'remoteAi.working' => ({required Object name}) => '${name} is looking…',
 			'remoteAi.error' => ({required Object message}) => 'The TV couldn\'t answer: ${message}',
 			'remoteAi.empty' => 'Ask for something and the picks show up here.',
+			'aiComposer.eyebrow' => 'ASK YOUR LIBRARY',
+			'aiComposer.headline' => 'What do you feel like watching?',
+			'aiComposer.followUpHeadline' => 'Where shall we take it next?',
+			'aiComposer.example1' => 'Action anime like Attack on Titan',
+			'aiComposer.example2' => 'Something cosy for a Sunday afternoon',
+			'aiComposer.example3' => '80s action, easy to watch',
+			'aiComposer.example4' => 'Surprise me with a Marvel film',
+			'aiComposer.example5' => 'A twisty thriller I haven\'t seen',
+			'aiComposer.quickStart' => 'QUICK START',
+			'aiComposer.tonight' => 'Tonight\'s pick',
+			'aiComposer.tonightRequest' => 'Pick the one film I should watch tonight',
+			'aiComposer.history' => 'Based on my history',
+			'aiComposer.historyRequest' => 'Something like what I\'ve watched recently',
+			'aiComposer.gems' => 'Hidden gems',
+			'aiComposer.gemsRequest' => 'Hidden gems in my library that I haven\'t watched',
+			'aiComposer.feelGood' => 'Feel-good',
+			'aiComposer.feelGoodRequest' => 'Feel-good films to lift the mood',
+			'aiComposer.random' => 'Random film',
+			'aiComposer.randomRequest' => 'Surprise me with a random great film',
+			'aiComposer.status1' => 'Reading your library…',
+			'aiComposer.status2' => 'Thinking about your taste…',
+			'aiComposer.status3' => 'Picking the best matches…',
+			'aiComposer.status4' => 'Almost there…',
+			'aiComposer.keepsRunning' => 'You can close this: it keeps going and lands in the AI tab.',
 			_ => null,
 		};
 	}

@@ -92,6 +92,21 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Full-screen AI composer (branch `feature/ai-helper`)
+- **Ask opens a full-screen composer** on TV, Mac and phone instead of a
+  small text dialog: a slowly drifting mosaic of your own posters (fetched
+  tiny and scaled up, so it's soft without a live blur), an accent-coloured
+  glow, a large headline and input, and example asks that type themselves
+  into the placeholder.
+- **Quick starts:** Tonight's pick, Based on my history, Hidden gems,
+  Feel-good, Random film, plus your last five asks. One tap or select sends.
+- **Thinking orb:** on send the input turns into a pulsing orb with rotating
+  status lines until the answer lands. Closing (Back, ✕ or swipe down) keeps
+  the request running; it lands in the AI tab as before. On the phone the
+  request runs on the TV as usual.
+- D-pad: the input is focused on open, Right goes to Send, Down to the
+  chips. Reduced motion stops the drift, glow and typing.
+
 ### Fix: phone AI tab's Ask did nothing (branch `feature/ai-helper`)
 - Top-bar actions drawn with a custom label (Ask, Follow-up, retry chips)
   had no tap handler, only D-pad select, so on a touch screen they did

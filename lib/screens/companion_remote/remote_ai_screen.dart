@@ -37,6 +37,21 @@ class RemoteAiSession extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>>? _sub;
   CompanionRemoteProvider? _remote;
 
+  /// [ask], completing when the TV answers (or fails, or after 3 minutes).
+  Future<void> askAndWait(CompanionRemoteProvider remote, String request) {
+    ask(remote, request);
+    final mine = asks.first;
+    final done = Completer<void>();
+    void check() {
+      if (mine.status == 'done' || mine.status == 'error') {
+        if (!done.isCompleted) done.complete();
+      }
+    }
+
+    addListener(check);
+    return done.future.timeout(const Duration(minutes: 3), onTimeout: () {}).whenComplete(() => removeListener(check));
+  }
+
   void ask(CompanionRemoteProvider remote, String request) {
     if (!identical(_remote, remote)) {
       _sub?.cancel();
@@ -89,8 +104,7 @@ class _RemoteAiScreenState extends State<RemoteAiScreen> {
     FocusScope.of(context).unfocus();
   }
 
-  String _hostName(CompanionRemoteProvider remote) =>
-      remote.connectedDevice?.name ?? t.companionRemote.unknownDevice;
+  String _hostName(CompanionRemoteProvider remote) => remote.connectedDevice?.name ?? t.companionRemote.unknownDevice;
 
   void _playOnHost(CompanionRemoteProvider remote, MediaItem item) {
     remote.castPlay(item);
@@ -205,7 +219,10 @@ class _RemoteAiScreenState extends State<RemoteAiScreen> {
         title: Text(answer?.label ?? ask.request, style: theme.textTheme.titleMedium),
         subtitle: switch (ask.status) {
           'working' => Text(t.remoteAi.working(name: name)),
-          'error' => Text(t.remoteAi.error(message: ask.error ?? ''), style: TextStyle(color: theme.colorScheme.error)),
+          'error' => Text(
+            t.remoteAi.error(message: ask.error ?? ''),
+            style: TextStyle(color: theme.colorScheme.error),
+          ),
           _ => answer?.intro == null ? null : Text(answer!.intro!),
         },
         trailing: ask.status == 'working'

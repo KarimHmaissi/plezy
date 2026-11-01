@@ -2791,5 +2791,31 @@
     "working": "${name} is looking…",
     "error": "The TV couldn't answer: ${message}",
     "empty": "Ask for something and the picks show up here."
+  },
+  "aiComposer": {
+    "eyebrow": "ASK YOUR LIBRARY",
+    "headline": "What do you feel like watching?",
+    "followUpHeadline": "Where shall we take it next?",
+    "example1": "Action anime like Attack on Titan",
+    "example2": "Something cosy for a Sunday afternoon",
+    "example3": "80s action, easy to watch",
+    "example4": "Surprise me with a Marvel film",
+    "example5": "A twisty thriller I haven't seen",
+    "quickStart": "QUICK START",
+    "tonight": "Tonight's pick",
+    "tonightRequest": "Pick the one film I should watch tonight",
+    "history": "Based on my history",
+    "historyRequest": "Something like what I've watched recently",
+    "gems": "Hidden gems",
+    "gemsRequest": "Hidden gems in my library that I haven't watched",
+    "feelGood": "Feel-good",
+    "feelGoodRequest": "Feel-good films to lift the mood",
+    "random": "Random film",
+    "randomRequest": "Surprise me with a random great film",
+    "status1": "Reading your library…",
+    "status2": "Thinking about your taste…",
+    "status3": "Picking the best matches…",
+    "status4": "Almost there…",
+    "keepsRunning": "You can close this: it keeps going and lands in the AI tab."
   }
 }

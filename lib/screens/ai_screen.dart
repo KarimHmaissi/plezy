@@ -27,6 +27,7 @@ import '../services/customisation/customisation_store.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
+import 'ai_composer.dart';
 import '../services/settings_service.dart';
 import '../services/ai/ai_home_refresher.dart';
 import '../services/ai/ai_more_like_this.dart';
@@ -282,20 +283,21 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       if (host != null && !remote.isConnected) unawaited(remote.autoConnect(host));
       return;
     }
-    final request = await showTextInputDialog(
+    final remote = _thinClient ? context.read<CompanionRemoteProvider>() : null;
+    final previous = List.of(_conversation);
+    await AiComposer.open(
       context,
-      title: _conversation.isEmpty ? t.aiTab.askTitle : t.aiTab.followUpTitle,
-      labelText: t.ai.tryRequestLabel,
-      hintText: t.aiTab.askHint,
-      confirmText: t.ai.ask,
+      followUpOf: _conversation.isEmpty ? null : _conversation.last.request,
+      recent: {
+        for (final r in _rows)
+          if (r.request != AiAgent.tonightRequest) r.request,
+      }.take(5).toList(),
+      posters: [for (final r in _rows.take(6)) ...r.items.take(8)],
+      run: (text) {
+        if (remote != null) return RemoteAiSession.instance.askAndWait(remote, text);
+        return _runInBackground(_PendingAsk(text, previous: previous));
+      },
     );
-    final text = request?.trim();
-    if (text == null || text.isEmpty || !mounted) return;
-    if (_thinClient) {
-      RemoteAiSession.instance.ask(context.read<CompanionRemoteProvider>(), text);
-      return;
-    }
-    unawaited(_runInBackground(_PendingAsk(text, previous: List.of(_conversation))));
   }
 
   /// Run [ask] while the user keeps browsing; the answer is saved and
