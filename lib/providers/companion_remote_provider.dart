@@ -949,7 +949,11 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _deviceConnectedSubscription = peer.onDeviceConnected.listen((device) {
       if (!_ownsPeer(peer, generation)) return;
       appLogger.d('CompanionRemote: Device connected: ${device.name}');
-      _session = _session?.copyWith(status: RemoteSessionStatus.connected, connectedDevice: device);
+      // The remote side's placeholder host ('Desktop') can land after the
+      // host's deviceInfo with its real name; keep the real one.
+      final known = _session?.connectedDevice;
+      final keep = device.id == 'host' && known != null && known.id != 'host';
+      _session = _session?.copyWith(status: RemoteSessionStatus.connected, connectedDevice: keep ? known : device);
       safeNotifyListeners();
       // The player screen advertises its state once, when it opens; a remote
       // that pairs (or re-pairs) later would otherwise keep showing the
