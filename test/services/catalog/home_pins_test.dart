@@ -8,6 +8,7 @@ import 'package:plezy/services/catalog/home_pins.dart';
 import 'package:plezy/services/catalog/home_rows.dart';
 
 void main() {
+  coldStartTests();
   group('Home layout in the Plezy list description', () {
     test('round-trips ordered rows, their sources and curation', () {
       final layout = (
@@ -96,5 +97,41 @@ void main() {
       expect(merged.first.sources, ['s1|/a', 's1|/c']);
       expect(merged.last.sources, ['s1|/b', 's2|/d']);
     });
+  });
+}
+
+/// A provider like Plex Discover: a hub can only be fetched once the hub
+/// list has been read this session.
+class _ListFirstHubSource implements CatalogHubSource {
+  bool listed = false;
+  final CatalogItem item = CatalogItem(
+    source: CatalogSourceId.plex,
+    kind: MediaKind.movie,
+    ids: const CatalogItemIds(plex: 'p1'),
+    title: 'Released This Week',
+  );
+
+  @override
+  Future<CatalogPage> fetchHub(String id, {int page = 1, int limit = 25}) async =>
+      listed && id == 'home.historical-week' ? CatalogPage(items: [item]) : const CatalogPage(items: []);
+
+  @override
+  Future<List<CatalogHub>> fetchHubs({int limit = 25}) async {
+    listed = true;
+    return [
+      CatalogHub(
+        id: 'home.historical-week',
+        title: 'Released This Week in History',
+        page: CatalogPage(items: [item]),
+      ),
+    ];
+  }
+}
+
+void coldStartTests() {
+  test('a Plex Discover row added to Home loads on a cold start, before Explore was opened', () async {
+    final source = _ListFirstHubSource();
+    final page = await HomeRowResolver.fetchCatalogHub(source, 'home.historical-week', limit: 50);
+    expect([for (final i in page.items) i.title], ['Released This Week']);
   });
 }

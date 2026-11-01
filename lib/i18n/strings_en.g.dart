@@ -3310,6 +3310,15 @@ class Translations$homeRows$en {
 	/// en: 'On Home'
 	String get onHomeSection => 'On Home';
 
+	/// en: 'Loading…'
+	String get rowLoading => 'Loading…';
+
+	/// en: 'Nothing in this row right now — it stays on Home and fills in when it has titles'
+	String get rowEmpty => 'Nothing in this row right now — it stays on Home and fills in when it has titles';
+
+	/// en: 'Couldn't load right now — it stays on Home and Plezy keeps trying'
+	String get rowUnavailable => 'Couldn\'t load right now — it stays on Home and Plezy keeps trying';
+
 	/// en: 'Select a row to move it or remove it'
 	String get onHomeSectionDescription => 'Select a row to move it or remove it';
 
@@ -9508,6 +9517,9 @@ extension on Translations {
 			'homeRows.onlyAddedRows' => 'Only show rows I\'ve added',
 			'homeRows.onlyAddedRowsDescription' => 'Turn off to also show every other row your Plex servers offer, after yours',
 			'homeRows.onHomeSection' => 'On Home',
+			'homeRows.rowLoading' => 'Loading…',
+			'homeRows.rowEmpty' => 'Nothing in this row right now — it stays on Home and fills in when it has titles',
+			'homeRows.rowUnavailable' => 'Couldn\'t load right now — it stays on Home and Plezy keeps trying',
 			'homeRows.onHomeSectionDescription' => 'Select a row to move it or remove it',
 			'homeRows.nothingOnHome' => 'Nothing on Home yet. Add rows below, or hold OK on any row anywhere and choose Add to Home.',
 			'homeRows.moveUp' => 'Move up',
@@ -9933,11 +9945,11 @@ extension on Translations {
 			'explore.detail.recommendedByUsers' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Recommended by ${n} user', other: 'Recommended by ${n} users', ), 
 			'explore.detail.recommendedBy' => ({required Object who}) => 'Recommended by ${who}',
 			'explore.detail.favoritedBy' => ({required Object who}) => 'Favorited by ${who}',
+			_ => null,
+		} ?? switch (path) {
 			'explore.detail.unairedEpisodes' => ({required Object n}) => '${n} not aired yet',
 			'explore.detail.recommendedByPercent' => ({required Object percent}) => 'Recommended by ${percent} of viewers',
 			'explore.detail.relatedTitles' => 'Related titles',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.background' => 'Background',
 			'explore.totalResults' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} result', other: '${n} results', ), 
 			'liveTv.title' => 'Live TV',
@@ -10447,11 +10459,11 @@ extension on Translations {
 			'companionRemote.remote.seekBack' => 'Seek Back',
 			'companionRemote.remote.stop' => 'Stop',
 			'companionRemote.remote.seekForward' => 'Seek Fwd',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.volume' => 'Volume',
 			'companionRemote.remote.volumeDown' => 'Down',
 			'companionRemote.remote.volumeUp' => 'Up',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.fullscreen' => 'Fullscreen',
 			'companionRemote.remote.subtitles' => 'Subtitles',
 			'companionRemote.remote.audio' => 'Audio',

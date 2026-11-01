@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/media_hub.dart';
@@ -109,6 +111,12 @@ Future<List<WatchlistShelf>> loadWatchlistShelves(CatalogSource source, {int min
   ];
 }
 
+/// How an added row last loaded on Home, for Manage Home.
+enum HomeRowLoadState { loading, loaded, empty, unavailable }
+
+/// Load state of each added row that Home fetches itself, by row id.
+final ValueNotifier<Map<String, HomeRowLoadState>> homeRowLoadStates = ValueNotifier(const {});
+
 /// Fetches the rows added to Home that Home doesn't already have loaded:
 /// Trakt charts and lists, Explore rows of any source, Watchlist shelves,
 /// Comfort shows, and Plex rows Home's own hubs don't include (library rows,
@@ -149,7 +157,7 @@ class HomeRowResolver {
           items = _catalog((await source.fetchRow(rowId, limit: itemLimit)).items);
         } else {
           if (source is! CatalogHubSource) return null;
-          items = _catalog((await (source as CatalogHubSource).fetchHub(key, limit: itemLimit)).items);
+          items = _catalog((await fetchCatalogHub(source as CatalogHubSource, key, limit: itemLimit)).items);
         }
       case 'wl':
         final source = sources.activeSource?.supportsWatchlist == true
@@ -192,6 +200,18 @@ class HomeRowResolver {
       items: items,
       size: items.length,
     );
+  }
+
+  /// One provider hub by id. Some providers (Plex Discover) can only fetch
+  /// a hub once their hub list has been read this session, which only
+  /// Explore did; when the direct fetch comes back empty, the list is read
+  /// here so Home works from a cold start.
+  @visibleForTesting
+  static Future<CatalogPage> fetchCatalogHub(CatalogHubSource source, String id, {required int limit}) async {
+    final page = await source.fetchHub(id, limit: limit);
+    if (page.items.isNotEmpty) return page;
+    final listed = (await source.fetchHubs(limit: limit)).where((h) => h.id == id).firstOrNull;
+    return listed?.page ?? page;
   }
 
   static List<MediaItem> _catalog(List<CatalogItem> items) => [for (final item in items) item.toMediaItem()];

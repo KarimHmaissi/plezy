@@ -310,22 +310,51 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             !_rowsLoading.contains(row.id))
           row,
     ];
+    if (wanted.isEmpty) return;
+    void setLoadState(String id, HomeRowLoadState state) =>
+        homeRowLoadStates.value = {...homeRowLoadStates.value, id: state};
+    var missing = false;
     await Future.wait([
       for (final row in wanted)
         () async {
           _rowsLoading.add(row.id);
+          if (!_fetchedRows.containsKey(row.id)) setLoadState(row.id, HomeRowLoadState.loading);
           try {
             final hub = await resolver.fetch(row);
-            if (!mounted || !identical(_homePins, pins) || hub == null) return;
+            if (!mounted || !identical(_homePins, pins)) return;
+            if (hub == null || hub.items.isEmpty) {
+              // Kept on Home and retried: its source may still be
+              // connecting, or the row may fill up later.
+              missing = true;
+              if (!_fetchedRows.containsKey(row.id)) {
+                setLoadState(row.id, hub == null ? HomeRowLoadState.unavailable : HomeRowLoadState.empty);
+              }
+              return;
+            }
+            setLoadState(row.id, HomeRowLoadState.loaded);
             setState(() => _fetchedRows = {..._fetchedRows, row.id: hub});
           } catch (e) {
             appLogger.w('Home: row ${row.id} failed', error: e);
+            missing = true;
+            if (!_fetchedRows.containsKey(row.id)) setLoadState(row.id, HomeRowLoadState.unavailable);
           } finally {
             _rowsLoading.remove(row.id);
           }
         }(),
     ]);
+    if (missing && mounted && _rowRetries < _maxRowRetries) {
+      _rowRetryTimer?.cancel();
+      _rowRetryTimer = Timer(Duration(seconds: 10 * ++_rowRetries), () {
+        if (mounted) unawaited(_loadRows());
+      });
+    } else if (!missing) {
+      _rowRetries = 0;
+    }
   }
+
+  Timer? _rowRetryTimer;
+  int _rowRetries = 0;
+  static const int _maxRowRetries = 4;
 
   /// "Remove from Home" (or "Add to Home" for a server row shown with
   /// curation off) and "Manage Home", leading each Home row's menu.
@@ -534,6 +563,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         unawaited(_loadRows());
       }
       if (mounted) setState(() {});
+    } else {
+      // Another source (Plex Discover, MAL…) connecting can make rows that
+      // failed to load resolvable now.
+      _rowRetries = 0;
+      unawaited(_loadRows());
     }
     final source = _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
     if (identical(source, _comfortSource) && _comfortTitlesLoadedAt != null) return;
@@ -678,6 +712,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _discover.removeListener(_onDiscoverChanged);
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
     _listsSource?.pins.removeListener(_onHomePinsChanged);
+    _rowRetryTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();

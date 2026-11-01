@@ -129,7 +129,7 @@ class _HomeRowsScreenState extends State<HomeRowsScreen> {
     final sources = Provider.of<CatalogSourcesProvider?>(context, listen: false);
     final discover = Provider.of<DiscoverProvider?>(context, listen: false);
     return ListenableBuilder(
-      listenable: _pins,
+      listenable: Listenable.merge([_pins, homeRowLoadStates]),
       builder: (context, _) {
         final rows = _pins.rows;
         final plex = mergePlexHubs(discover?.hubs ?? const []);
@@ -169,6 +169,12 @@ class _HomeRowsScreenState extends State<HomeRowsScreen> {
                     builder: (tileContext) => FocusableListTile(
                       leading: Text('${i + 1}', style: Theme.of(context).textTheme.titleMedium),
                       title: Text(row.title),
+                      subtitle: switch (homeRowLoadStates.value[row.id]) {
+                        HomeRowLoadState.loading => Text(t.homeRows.rowLoading),
+                        HomeRowLoadState.empty => Text(t.homeRows.rowEmpty),
+                        HomeRowLoadState.unavailable => Text(t.homeRows.rowUnavailable),
+                        _ => null,
+                      },
                       trailing: const AppIcon(Symbols.more_vert_rounded),
                       onTap: () => unawaited(_rowMenu(tileContext, row, i, rows.length)),
                     ),

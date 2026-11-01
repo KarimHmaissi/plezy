@@ -49,6 +49,28 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-01
+
+### Fix: rows added to Home missing after a restart — `HASH`
+- **Plex Discover rows** (e.g. Most Watchlisted This Week, Released This
+  Week in History) only render after Plex's row list has been read during
+  the session, which only Explore did. On a fresh start Home got an empty
+  answer and quietly skipped them. Home now reads that list itself when
+  needed.
+- **Rows never dropped silently**: a row whose source is still connecting,
+  failed, or is empty stays saved and is retried (when sources connect, and
+  a few timed retries). Manage Home shows "Loading…", "Couldn't load right
+  now" or "Nothing in this row right now" next to it.
+- **Safer saving**: every change is kept on the device first, then synced to
+  the Plezy Trakt list one write at a time, retrying when Trakt rate-limits
+  (about one write a second). Before, a rate-limited save was rolled back.
+  Each save carries a revision number, so an older copy read back from Trakt
+  (list reads can lag behind writes) can no longer replace rows you just
+  added; a newer copy from another device still wins.
+- Rows added before this fix that had already been lost (overwritten by a
+  stale copy or rolled back) couldn't be recovered; the 7 saved rows were
+  backed up first and all of them show again.
+
 ## 2026-10-31
 
 ### Fix: cursor jumping to the 4th card when changing rows — `7f238ca0c`
