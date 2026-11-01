@@ -51,7 +51,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### Fix: rows added to Home missing after a restart — `HASH`
+### Fix: rows added to Home missing after a restart — `c01592a3a`
 - **Plex Discover rows** (e.g. Most Watchlisted This Week, Released This
   Week in History) only render after Plex's row list has been read during
   the session, which only Explore did. On a fresh start Home got an empty
