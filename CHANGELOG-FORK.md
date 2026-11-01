@@ -92,6 +92,21 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Highest-bitrate copy by default (branch `feature/ai-helper`)
+- **Opening a title** that's in the library from Explore (and its related
+  rows) goes straight to its library page on the copy with the highest
+  bitrate (then resolution) on a server that's online, instead of the
+  copy list. Titles not in the library, or a lookup slower than 3 seconds,
+  still open the Explore page. The long-press menu's "Details and all
+  copies" opens the full list to choose by hand.
+- **AI picks on the phone** open the highest-bitrate reachable copy (no
+  "Which copy?" sheet).
+- **Play** uses the highest-bitrate version when nothing is chosen or
+  remembered; a saved version preference, a download or "Play version"
+  still win.
+- `bestLibraryCopy` / `bestVersionIndex` in `media_item_merge.dart`, with
+  tests.
+
 ### Phone: compact bottom bar and solid headers (branch `feature/ai-helper`)
 - **Bottom bar** about 58dp (was ~84): 24dp icons over 12sp labels, the
   current tab in the accent colour and the rest muted, no pill.

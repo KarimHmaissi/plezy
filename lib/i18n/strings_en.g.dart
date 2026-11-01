@@ -3277,9 +3277,6 @@ class Translations$aiTab$en {
 	/// en: 'Play on TV'
 	String get playOnTv => 'Play on TV';
 
-	/// en: 'Which copy?'
-	String get chooseCopy => 'Which copy?';
-
 	/// en: 'This title isn't on a server this phone can reach.'
 	String get pickUnavailable => 'This title isn\'t on a server this phone can reach.';
 
@@ -4361,6 +4358,10 @@ class Translations$explore$en {
 	final Translations _root; // ignore: unused_field
 
 	// Translations
+
+	/// en: 'Details and all copies'
+	String get allCopies => 'Details and all copies';
+
 	late final Translations$explore$traktLists$en traktLists = Translations$explore$traktLists$en.internal(_root);
 
 	/// en: 'Explore'
@@ -6937,6 +6938,63 @@ class Translations$aiComposer$en {
 
 	/// en: 'Continue browsing'
 	String get continueBrowsing => 'Continue browsing';
+
+	/// en: 'Ask about this'
+	String get askAbout => 'Ask about this';
+
+	/// en: 'ASK ABOUT IT'
+	String get aboutEyebrow => 'ASK ABOUT IT';
+
+	/// en: 'About: ${title}'
+	String aboutChip({required Object title}) => 'About: ${title}';
+
+	/// en: 'What do you want to know?'
+	String get aboutHeadline => 'What do you want to know?';
+
+	/// en: 'Ask anything about it'
+	String get aboutHint => 'Ask anything about it';
+
+	/// en: 'Is it worth watching?'
+	String get aboutWorth => 'Is it worth watching?';
+
+	/// en: 'Is it worth watching? Give me an honest, spoiler-free take.'
+	String get aboutWorthRequest => 'Is it worth watching? Give me an honest, spoiler-free take.';
+
+	/// en: 'Anything like this?'
+	String get aboutLike => 'Anything like this?';
+
+	/// en: 'Anything like this in my library?'
+	String get aboutLikeRequest => 'Anything like this in my library?';
+
+	/// en: 'Who's in it?'
+	String get aboutCast => 'Who\'s in it?';
+
+	/// en: 'Who's in it, and who do they play?'
+	String get aboutCastRequest => 'Who\'s in it, and who do they play?';
+
+	/// en: 'Is it scary or kid-friendly?'
+	String get aboutScary => 'Is it scary or kid-friendly?';
+
+	/// en: 'How scary or intense is it, and is it OK for kids?'
+	String get aboutScaryRequest => 'How scary or intense is it, and is it OK for kids?';
+
+	/// en: 'Where should I start?'
+	String get aboutStart => 'Where should I start?';
+
+	/// en: 'Where should I start with this show, and is it worth sticking with?'
+	String get aboutStartRequest => 'Where should I start with this show, and is it worth sticking with?';
+
+	/// en: 'Programme notes'
+	String get programNotes => 'Programme notes';
+
+	/// en: 'Picks for it are in the AI tab.'
+	String get picksInTab => 'Picks for it are in the AI tab.';
+
+	/// en: 'Done'
+	String get done => 'Done';
+
+	/// en: 'Ask another'
+	String get askAnother => 'Ask another';
 
 	/// en: 'Film jammed'
 	String get jammed => 'Film jammed';
@@ -10035,7 +10093,6 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
 			'aiTab.playOnTv' => 'Play on TV',
-			'aiTab.chooseCopy' => 'Which copy?',
 			'aiTab.pickUnavailable' => 'This title isn\'t on a server this phone can reach.',
 			'aiTab.loadMoreCard' => 'Load more',
 			'aiTab.findingMoreCard' => 'Finding more…',
@@ -10422,6 +10479,7 @@ extension on Translations {
 			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
 			'watchlist.noSourceTitle' => 'No watchlist connected',
 			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
+			'explore.allCopies' => 'Details and all copies',
 			'explore.traktLists.boxOffice' => 'Box Office',
 			'explore.traktLists.mostWatchedMovies' => 'Most Watched Movies This Week',
 			'explore.traktLists.mostWatchedShows' => 'Most Watched Shows This Week',
@@ -11510,6 +11568,25 @@ extension on Translations {
 			'aiComposer.take3' => 'Take 3 · Final cut',
 			'aiComposer.wrap' => 'That\'s a wrap',
 			'aiComposer.continueBrowsing' => 'Continue browsing',
+			'aiComposer.askAbout' => 'Ask about this',
+			'aiComposer.aboutEyebrow' => 'ASK ABOUT IT',
+			'aiComposer.aboutChip' => ({required Object title}) => 'About: ${title}',
+			'aiComposer.aboutHeadline' => 'What do you want to know?',
+			'aiComposer.aboutHint' => 'Ask anything about it',
+			'aiComposer.aboutWorth' => 'Is it worth watching?',
+			'aiComposer.aboutWorthRequest' => 'Is it worth watching? Give me an honest, spoiler-free take.',
+			'aiComposer.aboutLike' => 'Anything like this?',
+			'aiComposer.aboutLikeRequest' => 'Anything like this in my library?',
+			'aiComposer.aboutCast' => 'Who\'s in it?',
+			'aiComposer.aboutCastRequest' => 'Who\'s in it, and who do they play?',
+			'aiComposer.aboutScary' => 'Is it scary or kid-friendly?',
+			'aiComposer.aboutScaryRequest' => 'How scary or intense is it, and is it OK for kids?',
+			'aiComposer.aboutStart' => 'Where should I start?',
+			'aiComposer.aboutStartRequest' => 'Where should I start with this show, and is it worth sticking with?',
+			'aiComposer.programNotes' => 'Programme notes',
+			'aiComposer.picksInTab' => 'Picks for it are in the AI tab.',
+			'aiComposer.done' => 'Done',
+			'aiComposer.askAnother' => 'Ask another',
 			'aiComposer.jammed' => 'Film jammed',
 			'aiComposer.timedOut' => 'The TV didn\'t answer in time.',
 			'aiComposer.edit' => 'Edit',

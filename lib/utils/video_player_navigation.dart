@@ -35,6 +35,7 @@ import 'provider_extensions.dart';
 import 'snackbar_helper.dart';
 import 'quality_preset_labels.dart';
 import '../i18n/strings.g.dart';
+import '../media/media_item_merge.dart';
 
 const String kVideoPlayerRouteName = '/video_player';
 
@@ -394,7 +395,13 @@ Future<bool?> navigateToVideoPlayer(
   }
   if (!launchCurrent()) return null;
   final preferredVersion = savedVersion;
-  final mediaIndex = selectedMediaIndex ?? downloadedMediaIndex ?? roomVersion?.index ?? preferredVersion?.index ?? 0;
+  // Fork: with no choice made or remembered, the highest-bitrate version.
+  final mediaIndex =
+      selectedMediaIndex ??
+      downloadedMediaIndex ??
+      roomVersion?.index ??
+      preferredVersion?.index ??
+      bestVersionIndex(metadata.mediaVersions);
   final mediaSourceId =
       selectedMediaSourceId ?? downloadedMediaSourceId ?? roomVersion?.sourceId ?? preferredVersion?.sourceId;
 

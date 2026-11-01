@@ -68,7 +68,7 @@ Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset
           label: more.label,
           icon: more.icon,
         ),
-      AppMenuItem(value: _CatalogMenuAction.viewDetails, label: t.mediaMenu.viewDetails, icon: Symbols.info_rounded),
+      AppMenuItem(value: _CatalogMenuAction.viewDetails, label: t.explore.allCopies, icon: Symbols.info_rounded),
       if (item.trailerUrl case final trailerUrl? when trailerUrl.isNotEmpty)
         AppMenuItem(
           value: _CatalogMenuAction(_CatalogMenuActionType.openUrl, url: trailerUrl),
@@ -94,7 +94,7 @@ Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset
 
   switch (action.type) {
     case _CatalogMenuActionType.viewDetails:
-      await navigateToCatalogItem(context, item);
+      await navigateToCatalogItem(context, item, chooseCopy: true);
     case _CatalogMenuActionType.toggleWatchlist:
       // Re-read membership: it can have changed while the menu was open
       // (snapshot load, another surface's toggle).
