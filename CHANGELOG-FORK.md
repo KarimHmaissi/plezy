@@ -65,7 +65,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### Calmer backdrop and background AI requests (branch `feature/ai-helper`) — `HASH`
+### Calmer backdrop and background AI requests (branch `feature/ai-helper`) — `5187c0f3f`
 - **Darker overlay on the full-screen backdrop** (Home, Explore, Comfort,
   AI, anywhere the TV spotlight shows), so the title and summary no longer
   fight with busy artwork:
