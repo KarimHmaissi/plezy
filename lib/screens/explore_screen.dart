@@ -42,6 +42,7 @@ import '../widgets/tv_spotlight_scaffold.dart';
 import 'catalog_search_screen.dart';
 import 'trakt_discover_lists_screen.dart';
 import 'libraries/state_messages.dart';
+import '../theme/fork_motion.dart';
 
 /// The Explore tab: watchlist + discover rows from the active external
 /// catalog source (Trakt). Only mounted when a source is connected (the tab
@@ -408,7 +409,7 @@ class ExploreScreenState extends State<ExploreScreen>
       // Horizontal-only SafeArea, as on Search: the field, shelves, and
       // results clear a landscape notch or iPhone Duo's portrait sensor column.
       body: RefreshIndicator(
-        onRefresh: _handleRefresh,
+        onRefresh: ForkMotion.refreshing(_handleRefresh),
         child: SafeArea(top: false, bottom: false, child: content),
       ),
     );

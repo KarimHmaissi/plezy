@@ -24,6 +24,7 @@ import '../widgets/loading_indicator_box.dart';
 import '../widgets/search_input_field.dart';
 import '../widgets/setting_tile.dart';
 import 'libraries/state_messages.dart';
+import '../theme/fork_motion.dart';
 
 /// Configure the comfort shows: whether Random episode plays straight away,
 /// which shows are in the mix (synced through the Trakt list), and adding or
@@ -162,6 +163,7 @@ class _ComfortAddShowScreenState extends State<ComfortAddShowScreen>
     setState(() => _adding = true);
     try {
       await widget.controller.addShow(show);
+      ForkMotion.success();
       if (!mounted) return;
       showAppSnackBar(context, t.comfort.added(title: show.title));
       Navigator.of(context).pop();

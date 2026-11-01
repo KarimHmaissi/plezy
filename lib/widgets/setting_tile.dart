@@ -10,6 +10,7 @@ import '../utils/snackbar_helper.dart';
 import 'app_icon.dart';
 import 'focusable_list_tile.dart';
 import 'settings_section.dart';
+import '../theme/fork_motion.dart';
 
 /// Reactive setting tiles bound to a [Pref] via [SettingsService.listenable].
 /// Eliminates the field-mirror + setState + manual reload pattern that used to
@@ -26,6 +27,7 @@ Future<void> _writeAndNotify<T>(
   T value,
   FutureOr<void> Function(T)? onAfterWrite,
 ) async {
+  ForkMotion.selection();
   final failure = await const SettingsMutationService().write(context, pref, value);
   if (failure != null && context.mounted) showErrorSnackBar(context, failure.display);
   if (onAfterWrite != null) await onAfterWrite(value);

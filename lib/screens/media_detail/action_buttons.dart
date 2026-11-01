@@ -62,6 +62,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
 
     Future<void> onPlayPressed() async {
       if (!_canUseDetail) return;
+      ForkMotion.selection();
       // For TV shows, play the episode the hero describes (focused on TV,
       // otherwise on-deck); with neither, the first episode of the first season.
       if (metadata.isShow) {
@@ -106,6 +107,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
 
     Future<void> onPlayVersionPressed() async {
       if (!_canUseDetail) return;
+      ForkMotion.selection();
       final didNavigate = await promptAndPlayVersion(context, metadata);
       // Same post-playback refresh plain Play gets from
       // navigateToVideoPlayerWithRefresh; the split segment is online-only.
@@ -176,7 +178,10 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
         button: true,
         onTap: onPlayPressed,
         excludeSemantics: true,
-        child: SizedBox(
+        child: Pressable(
+          longPress: false,
+          borderRadius: BorderRadius.circular(actionSize / 2),
+          child: SizedBox(
           height: actionSize,
           child: FilledButton(
             onPressed: onPlayPressed,
@@ -195,6 +200,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
                     ],
                   )
                 : playButtonIcon,
+          ),
           ),
         ),
       );

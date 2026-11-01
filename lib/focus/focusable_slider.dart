@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'dpad_navigator.dart';
 import 'focusable_wrapper.dart';
 import 'input_mode_tracker.dart';
+import '../theme/fork_motion.dart';
 
 class FocusableSlider extends StatefulWidget {
   final double value;
@@ -41,6 +42,16 @@ class FocusableSlider extends StatefulWidget {
 
 class _FocusableSliderState extends State<FocusableSlider> {
   bool _isFocused = false;
+
+  /// Fork: a tick for each step a dragged slider passes (every 5% when it
+  /// has no divisions).
+  void _onTouchChanged(double value) {
+    final step = _step;
+    if (step > 0 && ((value - widget.min) / step).round() != ((widget.value - widget.min) / step).round()) {
+      ForkMotion.selection();
+    }
+    widget.onChanged!(value);
+  }
 
   double get _step {
     if (widget.divisions != null && widget.divisions! > 0) {
@@ -91,7 +102,7 @@ class _FocusableSliderState extends State<FocusableSlider> {
           min: widget.min,
           max: widget.max,
           divisions: widget.divisions,
-          onChanged: widget.onChanged,
+          onChanged: widget.onChanged == null ? null : _onTouchChanged,
           onChangeStart: widget.onChangeStart,
           onChangeEnd: widget.onChangeEnd,
           activeColor: widget.activeColor,

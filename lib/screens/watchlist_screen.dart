@@ -37,6 +37,7 @@ import '../services/customisation/customisation_store.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/catalog_source_logo.dart';
+import '../theme/fork_motion.dart';
 
 /// The Watchlist tab: the user's catalog watchlist as genre shelves, Films
 /// first, then TV.
@@ -471,7 +472,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: ForkMotion.refreshing(_load),
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [

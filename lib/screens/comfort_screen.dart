@@ -44,6 +44,7 @@ import 'libraries/state_messages.dart';
 import '../services/catalog/home_pins.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
+import '../theme/fork_motion.dart';
 
 enum _PickChoice { play, again }
 
@@ -467,7 +468,7 @@ class ComfortScreenState extends State<ComfortScreen>
     final message = _buildStateMessage();
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: ForkMotion.refreshing(_load),
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [

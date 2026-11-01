@@ -92,6 +92,20 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Touch polish, round two (branch `feature/ai-helper`)
+- **Play / Resume** (film and show pages, and Play Version): presses in
+  and ticks.
+- **Seasons and episodes:** season chips press in (with the long-press
+  sink and tick before their menu) and tick when chosen; episodes tick on
+  tap on top of their press-in.
+- **Settings:** every switch, segmented choice and other setting write
+  ticks; sliders tick at each step as you drag (every 5% without steps).
+- **Adding:** a light tap when a Comfort show is added; adding rows to
+  Home already taps through its success message.
+- **Pull to refresh** (Watchlist, Comfort, Explore, library tabs): a
+  tick when you let go past the threshold (`ForkMotion.refreshing`).
+- All phone-only, through `ForkMotion` and `Pressable`.
+
 ### Load more at the end of AI rows (branch `feature/ai-helper`)
 - **Load more card:** every AI answer row (not Tonight's pick) ends in a
   poster-sized "Load more" card, on TV (D-pad), Mac and the phone

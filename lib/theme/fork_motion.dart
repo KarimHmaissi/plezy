@@ -27,6 +27,13 @@ abstract final class ForkMotion {
   static bool get _haptics => !PlatformDetector.isTV() && (Platform.isAndroid || Platform.isIOS);
 
   /// Tab switches, chips, toggles, play/pause.
+  /// Wraps a pull-to-refresh callback with a tick as the pull is let go
+  /// past the threshold.
+  static Future<void> Function() refreshing(Future<void> Function() onRefresh) => () {
+    selection();
+    return onRefresh();
+  };
+
   static void selection() {
     if (_haptics) HapticFeedback.selectionClick();
   }

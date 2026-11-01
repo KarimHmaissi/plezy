@@ -106,6 +106,7 @@ import '../providers/account_preferences_controller.dart';
 import '../services/playback_track_preview.dart';
 import '../utils/error_message_utils.dart';
 import '../theme/fork_motion.dart';
+import '../widgets/pressable.dart';
 
 part 'media_detail/action_buttons.dart';
 part 'media_detail/playback_tracks_status.dart';
@@ -2244,6 +2245,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   /// than the previous season's episodes.
   void _selectSeason(int seasonIndex) {
     if (seasonIndex < 0 || seasonIndex >= _seasons.length) return;
+    ForkMotion.selection();
     setState(() {
       _selectedSeasonIndex = seasonIndex;
       _syncSelectedSeasonEpisodes(seasonIndex, _seasons[seasonIndex].id);
@@ -2686,7 +2688,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                   onLongPress: () => _showSeasonTabContextMenu(index, position: tapPosition),
                   onSecondaryTapDown: (details) => tapPosition = details.globalPosition,
                   onSecondaryTap: () => _showSeasonTabContextMenu(index, position: tapPosition),
-                  child: FocusableTabChip(
+                  child: Pressable(
+                    borderRadius: BorderRadius.circular(12),
+                    child: FocusableTabChip(
                     label: season.title!,
                     isSelected: index == _selectedSeasonIndex,
                     topImage: topImage,
@@ -2722,6 +2726,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                     onBack: () {
                       Navigator.of(context).maybePop();
                     },
+                  ),
                   ),
                 ),
               ),

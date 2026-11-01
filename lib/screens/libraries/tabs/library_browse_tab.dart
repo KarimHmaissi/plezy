@@ -68,6 +68,7 @@ import '../../../utils/platform_detector.dart';
 import '../../../i18n/strings.g.dart';
 import '../../main_screen.dart';
 import 'base_library_tab.dart';
+import '../../../theme/fork_motion.dart';
 
 /// Browse tab for library screen
 /// Shows library items with grouping, filtering, and sorting
@@ -1822,7 +1823,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<MediaItem, LibraryBrows
     // Folders mode previously had its own RefreshIndicator inside FolderTreeView;
     // it now lives at this level since FolderTreeView is a sliver.
     if (isFolders) {
-      scrollView = RefreshIndicator(onRefresh: _refreshFolderTree, child: scrollView);
+      scrollView = RefreshIndicator(onRefresh: ForkMotion.refreshing(_refreshFolderTree), child: scrollView);
     }
 
     return scrollView;
