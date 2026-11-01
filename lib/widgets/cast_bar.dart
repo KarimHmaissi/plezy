@@ -119,7 +119,8 @@ class _CastBarState extends State<CastBar> {
           children: [
             LinearProgressIndicator(value: now.progress, minHeight: 2),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+              // Fork: slim, about 52dp with the progress line.
+              padding: const EdgeInsets.fromLTRB(12, 5, 4, 5),
               child: Row(
                 children: [
                   ClipRRect(
@@ -127,8 +128,8 @@ class _CastBarState extends State<CastBar> {
                     child: OptimizedMediaImage(
                       client: context.tryGetMediaClientWithFallback(serverIdOrNull(now.serverId)),
                       imagePath: now.thumb ?? now.art ?? now.poster,
-                      width: 72,
-                      height: 40,
+                      width: 64,
+                      height: 36,
                       fit: BoxFit.cover,
                     ),
                   ),
@@ -138,11 +139,16 @@ class _CastBarState extends State<CastBar> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(now.title, style: theme.textTheme.labelLarge, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text(
+                          now.title,
+                          style: theme.textTheme.labelLarge?.copyWith(height: 1.15),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         Text(
                           // Tapping the cast icon still switches where new Play goes.
                           casting ? t.cast.playingOn(name: name) : t.cast.nowPlaying(name: name),
-                          style: theme.textTheme.bodySmall,
+                          style: theme.textTheme.bodySmall?.copyWith(height: 1.15),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -150,11 +156,13 @@ class _CastBarState extends State<CastBar> {
                     ),
                   ),
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     tooltip: casting ? t.cast.switchToThisPhone : t.cast.switchToHost(name: name),
                     onPressed: () => remote.setCastToHost(!casting),
                     icon: Icon(casting ? Symbols.cast_connected_rounded : Symbols.smartphone_rounded),
                   ),
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     tooltip: t.cast.playPause,
                     onPressed: () {
                       ForkMotion.selection();

@@ -92,6 +92,16 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Phone: compact bottom bar and solid headers (branch `feature/ai-helper`)
+- **Bottom bar** about 58dp (was ~84): 24dp icons over 12sp labels, the
+  current tab in the accent colour and the rest muted, no pill.
+- **Mini cast bar** about 52dp (was ~66): smaller art, tighter lines,
+  compact buttons.
+- **Headers** that float over content (Discover, Watchlist, Comfort,
+  Explore…) are solid on phones, so rows scrolled under them no longer show
+  through; Discover keeps its artwork under the header until you scroll.
+- TV unchanged.
+
 ### AI composer: Continue browsing (branch `feature/ai-helper`)
 - While the film strip runs, an amber "Continue browsing" button under it
   closes the composer like ✕ (focused on TV, a tick on the phone); the

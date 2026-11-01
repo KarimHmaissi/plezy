@@ -1101,6 +1101,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     final colorScheme = Theme.of(context).colorScheme;
     final foregroundColor = colorScheme.onSurface;
     return ToolbarScrim(
+      scrollController: _scrollController,
       child: Row(
         children: [
           if (!PlatformDetector.isTV())

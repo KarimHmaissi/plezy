@@ -2443,8 +2443,28 @@ class _MainScreenState extends State<MainScreen>
               // this builder reruns on label toggles AND on every
               // MainScreen rebuild (offline bar appearing/disappearing).
               _scheduleNavBarMeasure(rail: false);
+              // Fork: a compact Plex-like bar: 24dp icons over 12sp labels,
+              // the current tab in the accent and the rest muted, no pill.
+              final scheme = Theme.of(context).colorScheme;
+              final muted = scheme.onSurface.withValues(alpha: 0.6);
               return NavigationBarTheme(
-                data: NavigationBarTheme.of(context).copyWith(height: hideLabels ? 56 : null),
+                data: NavigationBarTheme.of(context).copyWith(
+                  height: hideLabels ? 48 : 58,
+                  indicatorColor: Colors.transparent,
+                  labelPadding: const EdgeInsets.only(top: 2),
+                  iconTheme: WidgetStateProperty.resolveWith(
+                    (states) =>
+                        IconThemeData(size: 24, color: states.contains(WidgetState.selected) ? scheme.primary : muted),
+                  ),
+                  labelTextStyle: WidgetStateProperty.resolveWith(
+                    (states) => TextStyle(
+                      fontSize: 12,
+                      height: 1.1,
+                      fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+                      color: states.contains(WidgetState.selected) ? scheme.primary : muted,
+                    ),
+                  ),
+                ),
                 child: _buildBottomNavigationBar(context, hideLabels: hideLabels),
               );
             },
