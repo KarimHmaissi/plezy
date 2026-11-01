@@ -1196,7 +1196,14 @@
     "noKeyTitle": "Add your Anthropic API key",
     "noKeyMessage": "The AI helper needs your own API key. Add it in Settings ▸ AI.",
     "emptyTitle": "Ask for something to watch",
-    "emptyMessage": "Press Ask and describe what you're in the mood for."
+    "emptyMessage": "Press Ask and describe what you're in the mood for.",
+    "loadMore": "Load more",
+    "refreshRow": "Refresh picks",
+    "refreshing": "Refreshing: ${request}",
+    "deleteRow": "Delete this row",
+    "deleteRowTitle": "Delete \"${request}\"?",
+    "deleteRowMessage": "This saved answer will be removed from the AI tab (and from Home if it's there).",
+    "deleted": "Deleted"
   },
   "ai": {
     "settingsTitle": "AI",

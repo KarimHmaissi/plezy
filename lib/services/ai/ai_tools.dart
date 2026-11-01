@@ -154,7 +154,7 @@ class AiTools {
     {
       'name': 'get_ratings',
       'description':
-          'Trakt community rating and vote count for up to 10 shortlisted titles (by id), to judge new or '
+          'Trakt community rating and vote count for up to 20 shortlisted titles (by id), to judge new or '
           'surprisingly highly rated titles. Use only on a shortlist, never on long result lists.',
       'input_schema': {
         'type': 'object',
@@ -162,7 +162,7 @@ class AiTools {
           'ids': {
             'type': 'array',
             'items': {'type': 'string'},
-            'maxItems': 10,
+            'maxItems': 20,
           },
         },
         'required': ['ids'],
@@ -173,7 +173,7 @@ class AiTools {
       'name': showPicksTool,
       'description':
           'Show your final picks to the user as a row of playable cards. Call exactly once, at the end, with ids '
-          'returned by the other tools only (never invented). 3-12 picks, best first, each with one short reason.',
+          'returned by the other tools only (never invented). Best first, each with one short reason: about 15-20 for broad requests, only the true matches for narrow ones.',
       'strict': true,
       'input_schema': {
         'type': 'object',
@@ -220,7 +220,7 @@ class AiTools {
       case 'get_continue_watching':
         return _list(await _continueWatching(), withWatched: true);
       case 'get_ratings':
-        return _ratings([...(input['ids'] as List? ?? const []).whereType<String>()].take(10).toList());
+        return _ratings([...(input['ids'] as List? ?? const []).whereType<String>()].take(20).toList());
       case showPicksTool:
         intro = input['intro'] as String?;
         picks = [

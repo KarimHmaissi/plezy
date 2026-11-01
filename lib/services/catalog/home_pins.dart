@@ -49,6 +49,9 @@ abstract final class HomeRowIds {
   /// A Watchlist page shelf (`films`, `tv`, `films.Horror`, `tv.other`…) of
   /// [source]'s watchlist; without a source, whichever watchlist the
   /// Watchlist page would show.
+  /// A saved answer from the AI tab (its snapshot of picks).
+  static String ai(String historyId) => 'ai:$historyId';
+
   static String watchlist(String shelfId, {CatalogSourceId? source}) =>
       source == null ? 'wl:$shelfId' : 'wl:${source.name}:$shelfId';
 }

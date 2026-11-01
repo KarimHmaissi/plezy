@@ -3306,6 +3306,27 @@ class Translations$aiTab$en {
 
 	/// en: 'Press Ask and describe what you're in the mood for.'
 	String get emptyMessage => 'Press Ask and describe what you\'re in the mood for.';
+
+	/// en: 'Load more'
+	String get loadMore => 'Load more';
+
+	/// en: 'Refresh picks'
+	String get refreshRow => 'Refresh picks';
+
+	/// en: 'Refreshing: ${request}'
+	String refreshing({required Object request}) => 'Refreshing: ${request}';
+
+	/// en: 'Delete this row'
+	String get deleteRow => 'Delete this row';
+
+	/// en: 'Delete "${request}"?'
+	String deleteRowTitle({required Object request}) => 'Delete "${request}"?';
+
+	/// en: 'This saved answer will be removed from the AI tab (and from Home if it's there).'
+	String get deleteRowMessage => 'This saved answer will be removed from the AI tab (and from Home if it\'s there).';
+
+	/// en: 'Deleted'
+	String get deleted => 'Deleted';
 }
 
 // Path: ai
@@ -9752,6 +9773,13 @@ extension on Translations {
 			'aiTab.noKeyMessage' => 'The AI helper needs your own API key. Add it in Settings ▸ AI.',
 			'aiTab.emptyTitle' => 'Ask for something to watch',
 			'aiTab.emptyMessage' => 'Press Ask and describe what you\'re in the mood for.',
+			'aiTab.loadMore' => 'Load more',
+			'aiTab.refreshRow' => 'Refresh picks',
+			'aiTab.refreshing' => ({required Object request}) => 'Refreshing: ${request}',
+			'aiTab.deleteRow' => 'Delete this row',
+			'aiTab.deleteRowTitle' => ({required Object request}) => 'Delete "${request}"?',
+			'aiTab.deleteRowMessage' => 'This saved answer will be removed from the AI tab (and from Home if it\'s there).',
+			'aiTab.deleted' => 'Deleted',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10175,6 +10203,8 @@ extension on Translations {
 			'explore.stats.listed' => ({required Object n}) => '${n} listed',
 			'explore.stats.viewersDay' => ({required Object n}) => '${n} watched today',
 			'explore.stats.viewersWeek' => ({required Object n}) => '${n} watched this week',
+			_ => null,
+		} ?? switch (path) {
 			'explore.stats.viewersMonth' => ({required Object n}) => '${n} watched this month',
 			'explore.stats.viewersYear' => ({required Object n}) => '${n} watched this year',
 			'explore.stats.viewersAllTime' => ({required Object n}) => '${n} viewers',
@@ -10182,8 +10212,6 @@ extension on Translations {
 			'explore.stats.favorited' => ({required Object n}) => '${n} favorites',
 			'explore.stats.dropRate' => ({required Object percent}) => '${percent} dropped it',
 			'explore.stats.comments' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} comment', other: '${n} comments', ), 
-			_ => null,
-		} ?? switch (path) {
 			'explore.stats.votes' => ({required Object n}) => '${n} votes',
 			'explore.stats.watching' => ({required Object n}) => '${n} watching it',
 			'explore.stats.completed' => ({required Object n}) => '${n} completed',
@@ -10689,6 +10717,8 @@ extension on Translations {
 			'downloads.unknownAlbum' => 'Unknown Album',
 			'downloads.completedOfTotal' => ({required Object completed, required Object total}) => '${completed}/${total} completed',
 			'downloads.errorFileNotFound' => 'File not found (404)',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.errorDownloadNotAllowed' => 'Download not allowed by the server (403)',
 			'downloads.errorDownloadFailed' => 'Download failed',
 			'downloads.errorDownloadFailedWithReason' => ({required Object reason}) => 'Download failed: ${reason}',
@@ -10696,8 +10726,6 @@ extension on Translations {
 			'downloads.errorPostProcessing' => ({required Object reason}) => 'Post-processing failed: ${reason}',
 			'downloads.reasonFileNotSaved' => 'the file could not be saved on this device',
 			'downloads.reasonCannotResume' => 'the partial download could not be resumed',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.reasonDeviceStorageFull' => 'this device is out of storage',
 			'downloads.notificationDownloading' => 'Downloading...',
 			'downloads.notificationComplete' => 'Download complete',

@@ -7,6 +7,7 @@ import '../../media/media_item.dart';
 import '../../media/media_server_client.dart';
 import '../../models/catalog/catalog_item.dart';
 import '../../providers/catalog_sources_provider.dart';
+import '../ai/ai_history.dart';
 import '../comfort/comfort_shows_controller.dart';
 import 'catalog_source.dart';
 import 'home_pins.dart';
@@ -194,6 +195,9 @@ class HomeRowResolver {
         }
         final merged = mergePlexHubs(parts).firstOrNull;
         items = merged?.hub.items.take(itemLimit).toList();
+      case 'ai':
+        // A saved AI answer: its stored picks, no server calls.
+        items = (await AiHistory.get(rest))?.items;
       default:
         return null;
     }

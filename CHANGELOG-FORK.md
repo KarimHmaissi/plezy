@@ -27,10 +27,21 @@ Details of each are in the dated entries below.
 
 ## Backlog (not built yet)
 
+### AI
+- **Voice requests** — speak a request on the AI tab instead of typing it
+  (typed requests are built).
+- **Richer context per title (later)** — add more about each title to the
+  library index, such as reviews or subtitles (possibly as embeddings), so
+  the helper can match on mood, themes and dialogue, not just genre, cast
+  and summary.
+- **Auto-refreshing AI rows on Home** — AI rows added to Home re-run their
+  request now and then (for example once a day, with Haiku to keep it cheap),
+  so they pick up new additions and drop what you've watched. Today they
+  only refresh when you choose Refresh picks.
+- **"Previously on"** — when you go back to a show after a break, a short,
+  spoiler-free AI recap of what's happened up to the episode you're on.
+
 ### Features
-- **AI helper** — a new nav item where you send a voice command or typed
-  request ("something light and funny, under 30 minutes") and get back a list
-  of suggestions from your libraries, each with its reasoning.
 - **Continue Watching from Trakt progress (phase 2)** — use Trakt watch
   progress so "next up" is right even for episodes watched outside these Plex
   servers, and so old shows beyond Plex's On Deck window can appear in "Pick
@@ -53,6 +64,27 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### AI tab: saved answers, bigger rows, AI rows on Home (branch `feature/ai-helper`) — `HASH`
+- **More picks for broad requests.** The helper now aims for 15–20 picks
+  for a genre, mood, era, "something like X" or "based on my history", so
+  there's a full row to browse. For narrow requests (one title, a yes/no
+  question, a small filmography, tight limits) it returns only what really
+  fits, even one or two, and never pads the list. Tonight picks are 6–10.
+  Trakt rating checks now cover up to 20 shortlisted titles.
+- **Every answer is saved** in the local database (so it's in Backup &
+  transfer): the request, the intro, each pick and its reason. Reopening the
+  tab shows them straight away with no Plex calls. The newest answer is the
+  top row; Tonight sits under this visit's answers, then older ones. Ten
+  rows show at first, and **Load more** (the ⌄ button at the top) adds ten
+  more. Up to 200 answers are kept; the oldest go first, except any on Home.
+- **Hold OK on an AI row** for: **Add to Home** (it joins your Home rows and
+  Manage Home like any other row, showing the saved picks, so it costs
+  nothing to load), **Refresh picks** (re-runs the request, one Sonnet call,
+  and replaces the picks everywhere) and **Delete this row** (also removes
+  it from Home).
+- **New conversation** now only resets the follow-up context; saved rows
+  stay.
 
 ### AI tab (branch `feature/ai-helper`) — `3829b262a`
 - **New AI item in the side nav** (after Comfort). On opening, Haiku 5.5

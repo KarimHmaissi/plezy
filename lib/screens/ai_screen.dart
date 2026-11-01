@@ -16,16 +16,21 @@ import '../navigation/main_screen_scope.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../services/ai/ai_agent.dart';
+import '../services/ai/ai_history.dart';
 import '../services/ai/ai_key_store.dart';
 import '../services/ai/claude_client.dart';
+import '../services/catalog/home_pins.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../services/library_index/library_index.dart';
 import '../utils/app_logger.dart';
 import '../utils/dialogs.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/focused_scroll_scaffold.dart';
+import '../widgets/home_row_actions.dart';
 import '../widgets/hub_section.dart';
+import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/side_navigation_rail.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
@@ -33,22 +38,10 @@ import '../widgets/tv_spotlight_scaffold.dart';
 import 'libraries/state_messages.dart';
 import 'settings/ai_settings_screen.dart';
 
-/// One answer shown as a row: the request, the helper's intro, and the picks
-/// as playable items with their reasons.
-class _AiRow {
-  _AiRow({required this.request, required this.answer, required this.items, required this.reasons});
-
-  final String request;
-  final AiAnswer answer;
-  final List<MediaItem> items;
-
-  /// Reason per item, keyed by [MediaItem.globalKey].
-  final Map<String, String> reasons;
-}
-
 /// The AI helper tab: a hello with "Tonight" picks on opening, then any
-/// request typed with "Ask", each answer a row of playable cards. Follow-ups
-/// remember the earlier requests in this session.
+/// request typed with "Ask", each answer a row of playable cards. Every
+/// answer is saved ([AiHistory]): the newest at the top, older ones below
+/// with "Load more". Follow-ups remember the earlier requests in this visit.
 class AiScreen extends StatefulWidget {
   const AiScreen({super.key});
 
@@ -59,10 +52,21 @@ class AiScreen extends StatefulWidget {
 class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefreshable, TabVisibilityAware, FocusableTab {
   /// "Tonight" picks are made with Haiku and reused for this long.
   static const Duration _tonightFresh = Duration(hours: 4);
-  static _AiRow? _tonightCache;
+  static AiHistoryEntry? _tonightCache;
   static DateTime? _tonightAt;
 
-  final List<_AiRow> _rows = [];
+  /// Saved rows shown at first, and added per "Load more".
+  static const int _pageSize = 10;
+
+  AiHistoryEntry? _tonightRow;
+
+  /// Saved answers loaded so far, newest first.
+  final List<AiHistoryEntry> _saved = [];
+  int _savedTotal = 0;
+  bool _historyLoaded = false;
+
+  /// Answers asked on this visit sit above Tonight; older ones below it.
+  int _askedThisVisit = 0;
   final List<({String request, AiAnswer answer})> _conversation = [];
   bool _busy = false;
   bool? _hasKey;
@@ -90,10 +94,34 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   }
 
   Future<void> _start() async {
+    if (!_historyLoaded) await _loadHistory();
     final key = await AiKeyStore.read();
     if (!mounted) return;
     setState(() => _hasKey = key != null);
     if (key != null) await _tonight();
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      final total = await AiHistory.count();
+      final page = await AiHistory.page(limit: _pageSize);
+      if (!mounted) return;
+      setState(() {
+        _historyLoaded = true;
+        _savedTotal = total;
+        _saved
+          ..clear()
+          ..addAll(page);
+      });
+    } catch (e) {
+      appLogger.w('AI tab: loading saved answers failed', error: e);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    final more = await AiHistory.page(offset: _saved.length, limit: _pageSize);
+    if (!mounted) return;
+    setState(() => _saved.addAll(more.where((e) => !_saved.any((s) => s.id == e.id))));
   }
 
   AiAgent _agent(ClaudeModel model) {
@@ -105,18 +133,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     final at = _tonightAt;
     final cached = _tonightCache;
     if (!refresh && cached != null && at != null && DateTime.now().difference(at) < _tonightFresh) {
-      setState(() => _rows.removeWhere((r) => r.request == AiAgent.tonightRequest));
-      setState(() => _rows.insert(0, cached));
+      setState(() => _tonightRow = cached);
       return;
     }
-    final row = await _run(AiAgent.tonightRequest, ClaudeModel.haiku, status: t.aiTab.preparingTonight);
-    if (row == null) return;
-    _tonightCache = row;
+    final result = await _run(AiAgent.tonightRequest, ClaudeModel.haiku, status: t.aiTab.preparingTonight);
+    if (result == null || !mounted) return;
+    _tonightCache = result.entry;
     _tonightAt = DateTime.now();
-    setState(() {
-      _rows.removeWhere((r) => r.request == AiAgent.tonightRequest);
-      _rows.insert(0, row);
-    });
+    setState(() => _tonightRow = result.entry);
   }
 
   Future<void> _ask() async {
@@ -129,21 +153,97 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     );
     final text = request?.trim();
     if (text == null || text.isEmpty || !mounted) return;
-    final row = await _run(text, ClaudeModel.sonnet, status: t.aiTab.thinking(request: text), withHistory: true);
-    if (row == null || !mounted) return;
-    _conversation.add((request: text, answer: row.answer));
-    setState(() => _rows.insert(0, row));
+    final result = await _run(text, ClaudeModel.sonnet, status: t.aiTab.thinking(request: text), withHistory: true);
+    if (result == null || !mounted) return;
+    _conversation.add((request: text, answer: result.answer));
+    try {
+      await AiHistory.add(result.entry);
+    } catch (e) {
+      appLogger.w('AI tab: saving the answer failed', error: e);
+    }
+    if (!mounted) return;
+    setState(() {
+      _saved.insert(0, result.entry);
+      _savedTotal++;
+      _askedThisVisit++;
+    });
     // New answers appear at the top; put focus on them.
     WidgetsBinding.instance.addPostFrameCallback((_) => _tvBrowseRailKey.currentState?.requestFocus());
   }
 
-  void _newConversation() => setState(() {
-    _conversation.clear();
-    _rows.removeWhere((r) => r.request != AiAgent.tonightRequest);
-  });
+  /// Forget the follow-up context; saved rows stay.
+  void _newConversation() => setState(_conversation.clear);
 
-  /// Ask the helper and turn its picks into playable items.
-  Future<_AiRow?> _run(String request, ClaudeModel model, {required String status, bool withHistory = false}) async {
+  HomeRowEntry _homeRow(AiHistoryEntry entry) => (id: HomeRowIds.ai(entry.id), title: entry.request, sources: const []);
+
+  /// Re-run a saved request (one Sonnet call) and replace its picks.
+  Future<void> _refreshRow(AiHistoryEntry entry) async {
+    final result = await _run(
+      entry.request,
+      ClaudeModel.sonnet,
+      status: t.aiTab.refreshing(request: entry.request),
+      id: entry.id,
+    );
+    if (result == null || !mounted) return;
+    await AiHistory.replace(result.entry);
+    if (!mounted) return;
+    setState(() {
+      final i = _saved.indexWhere((e) => e.id == entry.id);
+      if (i >= 0) _saved[i] = result.entry;
+    });
+  }
+
+  Future<void> _deleteRow(AiHistoryEntry entry) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: t.aiTab.deleteRowTitle(request: entry.request),
+      message: t.aiTab.deleteRowMessage,
+      confirmText: t.common.delete,
+      isDestructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    final homeId = HomeRowIds.ai(entry.id);
+    if (HomePinsController.instance.contains(homeId)) await HomePinsController.instance.remove([homeId]);
+    await AiHistory.remove(entry.id);
+    if (!mounted) return;
+    final i = _saved.indexWhere((e) => e.id == entry.id);
+    setState(() {
+      if (i >= 0) {
+        _saved.removeAt(i);
+        _savedTotal--;
+        if (i < _askedThisVisit) _askedThisVisit--;
+      }
+    });
+    showSuccessSnackBar(context, t.aiTab.deleted);
+  }
+
+  List<MediaMenuExtraEntry> _rowMenuEntries(MediaHub hub) {
+    final entry = _entryForHub(hub);
+    if (entry == null || entry.request == AiAgent.tonightRequest) return const [];
+    return [
+      ...homeRowMenuEntries(context, _homeRow(entry)),
+      MediaMenuExtraEntry(
+        icon: Symbols.refresh_rounded,
+        label: t.aiTab.refreshRow,
+        onSelected: () => unawaited(_refreshRow(entry)),
+      ),
+      MediaMenuExtraEntry(
+        icon: Symbols.delete_rounded,
+        label: t.aiTab.deleteRow,
+        onSelected: () => unawaited(_deleteRow(entry)),
+      ),
+    ];
+  }
+
+  /// Ask the helper and turn its picks into playable items, as an entry
+  /// with [id] (a new one when not given).
+  Future<({AiAnswer answer, AiHistoryEntry entry})?> _run(
+    String request,
+    ClaudeModel model, {
+    required String status,
+    bool withHistory = false,
+    String? id,
+  }) async {
     if (_busy) return null;
     setState(() {
       _busy = true;
@@ -175,11 +275,16 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       final picks = [...fetched.nonNulls];
       setState(() => _status = picks.isEmpty ? (answer.intro ?? answer.text) : null);
       if (picks.isEmpty) return null;
-      return _AiRow(
-        request: request,
+      return (
         answer: answer,
-        items: [for (final p in picks) p.item],
-        reasons: {for (final p in picks) p.item.globalKey: p.reason},
+        entry: AiHistoryEntry(
+          id: id ?? AiHistory.newId(),
+          request: request,
+          intro: answer.intro,
+          createdAt: DateTime.now(),
+          items: [for (final p in picks) p.item],
+          reasons: {for (final p in picks) p.item.globalKey: p.reason},
+        ),
       );
     } finally {
       agent.close();
@@ -187,10 +292,21 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     }
   }
 
+  /// Rows in order: this visit's answers, Tonight, then older saved ones.
+  List<AiHistoryEntry> get _rows => [
+    ..._saved.take(_askedThisVisit),
+    ?_tonightRow,
+    ..._saved.skip(_askedThisVisit),
+  ];
+
+  static String _hubId(AiHistoryEntry entry) => 'aitab:${entry.id}';
+
+  AiHistoryEntry? _entryForHub(MediaHub hub) => _rows.where((e) => _hubId(e) == hub.id).firstOrNull;
+
   List<MediaHub> get _hubs => [
-    for (final (i, row) in _rows.indexed)
+    for (final row in _rows)
       MediaHub(
-        id: 'ai:$i:${row.request.hashCode}',
+        id: _hubId(row),
         identifier: 'ai.answer',
         title: row.request == AiAgent.tonightRequest ? t.aiTab.tonight : row.request,
         type: 'mixed',
@@ -201,14 +317,12 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   void _onFocused(MediaHub hub, MediaItem item) {
     _spotlight.select(item);
-    final row = _rows.where((r) => r.items.contains(item)).firstOrNull;
-    _focusedReason.value = row?.reasons[item.globalKey];
+    _focusedReason.value = _entryForHub(hub)?.reasons[item.globalKey];
   }
 
-  String? get _headline {
-    final first = _rows.firstOrNull;
-    return first?.answer.intro;
-  }
+  String? get _headline => _rows.firstOrNull?.intro;
+
+  bool get _hasMore => _saved.length < _savedTotal;
 
   @override
   void manualRefresh() => unawaited(_tonight(refresh: true));
@@ -269,6 +383,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       tooltip: t.aiTab.refreshTonight,
       onPressed: _busy || _hasKey != true ? null : () => unawaited(_tonight(refresh: true)),
     ),
+    if (_hasMore)
+      FocusableAction(
+        icon: Symbols.expand_more_rounded,
+        iconColor: color,
+        tooltip: t.aiTab.loadMore,
+        onPressed: () => unawaited(_loadMore()),
+      ),
   ];
 
   Widget? _message() {
@@ -321,8 +442,24 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
           else
             for (final hub in hubs)
               SliverToBoxAdapter(
-                child: HubSection(hub: hub, focusMemory: _hubFocusMemory, icon: Symbols.auto_awesome_rounded),
+                child: RowMenuEntries(
+                  entries: _rowMenuEntries(hub),
+                  child: HubSection(hub: hub, focusMemory: _hubFocusMemory, icon: Symbols.auto_awesome_rounded),
+                ),
               ),
+          if (message == null && _hasMore)
+            SliverToBoxAdapter(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: TextButton.icon(
+                    onPressed: () => unawaited(_loadMore()),
+                    icon: const Icon(Symbols.expand_more_rounded),
+                    label: Text(t.aiTab.loadMore),
+                  ),
+                ),
+              ),
+            ),
         ],
       );
     }
@@ -347,6 +484,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 hubs: hubs,
                 focusMemory: _hubFocusMemory,
                 iconForHub: (_, _) => Symbols.auto_awesome_rounded,
+                rowMenuEntriesForHub: _rowMenuEntries,
                 onFocusedHubItemChanged: _onFocused,
                 onNavigateUp: _actionBarKey.currentState?.requestFocusOnFirst,
                 onNavigateToSidebar: _navigateToSidebar,
