@@ -3337,6 +3337,9 @@ class Translations$aiTab$en {
 	/// en: 'No picks came back'
 	String get noPicks => 'No picks came back';
 
+	/// en: 'Home already has 10 AI rows. Remove one first.'
+	String get homeFull => 'Home already has 10 AI rows. Remove one first.';
+
 	/// en: 'More like this'
 	String get moreLikeThis => 'More like this';
 
@@ -3444,6 +3447,15 @@ class Translations$ai$en {
 
 	/// en: '${dollars} USD this month across ${requests} requests (no cap)'
 	String spendThisMonth({required Object dollars, required Object requests}) => '${dollars} USD this month across ${requests} requests (no cap)';
+
+	/// en: '${dollars} of it on Home auto-refresh'
+	String spendAutoRefresh({required Object dollars}) => '${dollars} of it on Home auto-refresh';
+
+	/// en: 'Auto-refresh AI rows on Home'
+	String get autoRefreshTitle => 'Auto-refresh AI rows on Home';
+
+	/// en: 'Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.'
+	String get autoRefreshSubtitle => 'Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.';
 
 	/// en: 'Models'
 	String get modelsTitle => 'Models';
@@ -9798,6 +9810,7 @@ extension on Translations {
 			'aiTab.retryChip' => ({required Object request}) => 'Retry: ${request}',
 			'aiTab.ready' => ({required Object request}) => 'New picks ready: ${request}',
 			'aiTab.noPicks' => 'No picks came back',
+			'aiTab.homeFull' => 'Home already has 10 AI rows. Remove one first.',
 			'aiTab.moreLikeThis' => 'More like this',
 			'aiTab.moreLike' => ({required Object title}) => 'more like ${title}',
 			'ai.settingsTitle' => 'AI',
@@ -9831,6 +9844,9 @@ extension on Translations {
 			'ai.ask' => 'Ask',
 			'ai.spendTitle' => 'Spend',
 			'ai.spendThisMonth' => ({required Object dollars, required Object requests}) => '${dollars} USD this month across ${requests} requests (no cap)',
+			'ai.spendAutoRefresh' => ({required Object dollars}) => '${dollars} of it on Home auto-refresh',
+			'ai.autoRefreshTitle' => 'Auto-refresh AI rows on Home',
+			'ai.autoRefreshSubtitle' => 'Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.',
 			'ai.modelsTitle' => 'Models',
 			'ai.modelsDescription' => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.',
 			'backupTransfer.title' => 'Backup & transfer',
@@ -10214,12 +10230,12 @@ extension on Translations {
 			'explore.badge.declined' => 'Declined',
 			'explore.badge.requestFailed' => 'Request failed',
 			'explore.badge.requested4k' => '4K requested',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.seasonsAvailable' => ({required Object available, required Object total}) => '${available}/${total} seasons',
 			'explore.badge.nextEpisodeIn' => ({required Object episode, required Object duration}) => 'Ep ${episode} in ${duration}',
 			'explore.badge.nextAiringIn' => ({required Object duration}) => 'Next in ${duration}',
 			'explore.badge.episodesShort' => ({required Object n}) => '${n} eps',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
 			'explore.badge.adult' => '18+',
 			'explore.stats.listed' => ({required Object n}) => '${n} listed',
@@ -10728,12 +10744,12 @@ extension on Translations {
 			'downloads.backgroundWarning.statusUnknown' => 'Not checked yet',
 			'downloads.backgroundWarning.settingsUnavailable' => 'Couldn\'t open system settings on this device',
 			'downloads.backgroundWarning.linkUnavailable' => 'Couldn\'t open dontkillmyapp.com on this device',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.options' => 'Downloads options',
 			'downloads.groupings.library' => 'Library',
 			'downloads.groupings.collections' => 'Collections',
 			'downloads.unknownLibrary' => 'Unknown library',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.unknownShow' => 'Unknown Show',
 			'downloads.unknownSeason' => 'Unknown Season',
 			'downloads.unknownAlbum' => 'Unknown Album',

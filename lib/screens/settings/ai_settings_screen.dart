@@ -11,6 +11,7 @@ import '../../providers/catalog_sources_provider.dart';
 import '../../services/ai/ai_eval.dart';
 import '../../services/ai/ai_key_receiver.dart';
 import '../../services/ai/ai_spend.dart';
+import '../../services/ai/ai_home_refresher.dart';
 import '../../services/ai/claude_client.dart';
 import '../../services/catalog/trakt_catalog_source.dart';
 import '../../services/library_index/library_index.dart';
@@ -35,6 +36,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   String? _keyHint;
   bool _loaded = false;
   bool _busy = false;
+  bool _autoRefresh = true;
+  String? _autoRefreshStatus;
 
   @override
   void initState() {
@@ -44,9 +47,11 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
 
   Future<void> _load() async {
     final key = await AiKeyStore.read();
+    final autoRefresh = await AiHomeRefresher.enabled();
     if (!mounted) return;
     setState(() {
       _keyHint = key == null ? null : AiKeyStore.hint(key);
+      _autoRefresh = autoRefresh;
       _loaded = true;
     });
   }
@@ -262,6 +267,34 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 subtitle: Text(_evalStatus ?? AiEval.promptsFile),
                 onTap: _evalStatus != null && !_evalStatus!.startsWith('Done') ? null : () => unawaited(_eval()),
               ),
+            if (hint != null)
+              FocusableSwitchListTile(
+                secondary: const AppIcon(Symbols.autorenew_rounded, fill: 1),
+                title: Text(t.ai.autoRefreshTitle),
+                subtitle: Text(t.ai.autoRefreshSubtitle),
+                value: _autoRefresh,
+                onChanged: (v) async {
+                  setState(() => _autoRefresh = v);
+                  await AiHomeRefresher.setEnabled(v);
+                },
+              ),
+            if (hint != null && kDebugMode)
+              FocusableListTile(
+                leading: const AppIcon(Symbols.science_rounded, fill: 1),
+                title: const Text('Auto-refresh Home AI rows now (Haiku)'),
+                subtitle: Text(_autoRefreshStatus ?? 'Ignores the 12-hour wait'),
+                onTap: _autoRefreshStatus == 'Refreshing…'
+                    ? null
+                    : () async {
+                        setState(() => _autoRefreshStatus = 'Refreshing…');
+                        final before = (await AiSpend.month()).autoRefreshDollars;
+                        final n = await AiHomeRefresher.check(force: true);
+                        final cost = (await AiSpend.month()).autoRefreshDollars - before;
+                        if (mounted) {
+                          setState(() => _autoRefreshStatus = 'Done: $n rows, \$${cost.toStringAsFixed(4)}');
+                        }
+                      },
+              ),
             FutureBuilder(
               future: AiSpend.month(),
               builder: (context, snap) => ListTile(
@@ -269,10 +302,14 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 subtitle: Text(
                   snap.data == null
                       ? '…'
-                      : t.ai.spendThisMonth(
-                          dollars: snap.data!.dollars.toStringAsFixed(2),
-                          requests: snap.data!.requests,
-                        ),
+                      : [
+                          t.ai.spendThisMonth(
+                            dollars: snap.data!.dollars.toStringAsFixed(2),
+                            requests: snap.data!.requests,
+                          ),
+                          if (snap.data!.autoRefreshDollars > 0)
+                            t.ai.spendAutoRefresh(dollars: snap.data!.autoRefreshDollars.toStringAsFixed(2)),
+                        ].join(' · '),
                 ),
               ),
             ),

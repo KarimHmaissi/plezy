@@ -42,6 +42,8 @@ import '../profiles/profile.dart';
 import '../profiles/profile_activation.dart';
 import '../profiles/profile_avatar.dart';
 import '../providers/catalog_sources_provider.dart';
+import '../services/ai/ai_history.dart';
+import '../services/ai/ai_home_refresher.dart';
 import '../services/catalog/home_pins.dart';
 import '../services/library_index/library_index.dart';
 import '../services/plex_client.dart';
@@ -285,6 +287,15 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     return hubs;
   }
 
+  /// An AI row got new picks (Refresh or auto-refresh): load them.
+  void _onAiRowReplaced() {
+    final id = AiHistory.replaced.value;
+    if (!mounted || id == null) return;
+    final rowId = HomeRowIds.ai(id);
+    if (!_fetchedRows.containsKey(rowId)) return;
+    unawaited(_loadRows(refreshIds: {rowId}));
+  }
+
   void _onHomePinsChanged() {
     if (!mounted) return;
     setState(() {});
@@ -301,7 +312,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   /// Fetch the added rows Home doesn't have loaded, or all of them on
   /// [refresh] (charts move), each on its own so one failing row never hides
   /// the rest. Plex rows come from Home's own hubs when they include them.
-  Future<void> _loadRows({bool refresh = false}) async {
+  Future<void> _loadRows({bool refresh = false, Set<String> refreshIds = const {}}) async {
     final pins = _homePins;
     final resolver = _resolver();
     if (resolver == null) return;
@@ -310,7 +321,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       for (final row in pins.rows)
         if (HomeRowResolver.needsFetch(row.id) &&
             !(row.id.startsWith('px:') && (plexIds.contains(row.id) || _areHubsLoading)) &&
-            (refresh || !_fetchedRows.containsKey(row.id)) &&
+            (refresh || refreshIds.contains(row.id) || !_fetchedRows.containsKey(row.id)) &&
             !_rowsLoading.contains(row.id))
           row,
     ];
@@ -567,11 +578,17 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // titles when its source appears or changes.
     _catalogSources = context.read<CatalogSourcesProvider?>()?..addListener(_onCatalogSourcesChanged);
     _homePins.addListener(_onHomePinsChanged);
+    AiHistory.replaced.addListener(_onAiRowReplaced);
     // Build or refresh the library index in the background once the
     // servers have connected and startup has settled.
     _indexStartTimer = Timer(const Duration(seconds: 30), () {
       if (!mounted) return;
       final servers = context.read<MultiServerProvider>();
+      // AI rows on Home refresh themselves (Haiku, every 12 hours).
+      AiHomeRefresher.start(
+        clientFor: servers.getClientForServer,
+        trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
+      );
       unawaited(
         LibraryIndex.instance.start(
           () => [
@@ -743,6 +760,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _discover.removeListener(_onDiscoverChanged);
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
     _homePins.removeListener(_onHomePinsChanged);
+    AiHistory.replaced.removeListener(_onAiRowReplaced);
     _rowRetryTimer?.cancel();
     _indexStartTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);

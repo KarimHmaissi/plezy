@@ -1207,6 +1207,7 @@
     "retryChip": "Retry: ${request}",
     "ready": "New picks ready: ${request}",
     "noPicks": "No picks came back",
+    "homeFull": "Home already has 10 AI rows. Remove one first.",
     "moreLikeThis": "More like this",
     "moreLike": "more like ${title}"
   },
@@ -1242,6 +1243,9 @@
     "ask": "Ask",
     "spendTitle": "Spend",
     "spendThisMonth": "${dollars} USD this month across ${requests} requests (no cap)",
+    "spendAutoRefresh": "${dollars} of it on Home auto-refresh",
+    "autoRefreshTitle": "Auto-refresh AI rows on Home",
+    "autoRefreshSubtitle": "Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.",
     "modelsTitle": "Models",
     "modelsDescription": "Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs."
   },

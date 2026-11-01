@@ -3,7 +3,14 @@ import 'dart:convert';
 import '../customisation/customisation_store.dart';
 import 'claude_client.dart';
 
-typedef AiMonthSpend = ({double dollars, int requests, int inputTokens, int outputTokens, int cachedTokens});
+typedef AiMonthSpend = ({
+  double dollars,
+  int requests,
+  int inputTokens,
+  int outputTokens,
+  int cachedTokens,
+  double autoRefreshDollars,
+});
 
 /// What the AI helper has cost, per calendar month, from each response's
 /// token usage (no cap; shown in Settings ▸ AI).
@@ -20,6 +27,7 @@ abstract final class AiSpend {
       inputTokens: i('input'),
       outputTokens: i('output'),
       cachedTokens: i('cached'),
+      autoRefreshDollars: (j['auto'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -37,8 +45,20 @@ abstract final class AiSpend {
         'input': current.inputTokens + n('input_tokens') + n('cache_creation_input_tokens'),
         'output': current.outputTokens + n('output_tokens'),
         'cached': current.cachedTokens + n('cache_read_input_tokens'),
+        'auto': current.autoRefreshDollars,
       }),
     );
     return cost;
+  }
+
+  /// Note that [dollars] (already recorded) went on Home's auto-refresh, so
+  /// Settings can show it separately.
+  static Future<void> noteAutoRefresh(double dollars) async {
+    final now = DateTime.now();
+    final store = await Customisation.store;
+    final raw = await store.readSetting(_key(now));
+    final j = raw == null ? <String, Object?>{} : Map<String, Object?>.of(jsonDecode(raw) as Map<String, Object?>);
+    j['auto'] = ((j['auto'] as num?)?.toDouble() ?? 0) + dollars;
+    await store.writeSetting(_key(now), jsonEncode(j));
   }
 }

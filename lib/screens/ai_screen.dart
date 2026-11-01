@@ -18,6 +18,7 @@ import '../providers/multi_server_provider.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
+import '../services/ai/ai_home_refresher.dart';
 import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_rows.dart';
 import '../services/ai/ai_key_store.dart';
@@ -108,8 +109,21 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   void initState() {
     super.initState();
     AiMoreLikeThis.requests.addListener(_takeMoreLikeThis);
+    AiHistory.replaced.addListener(_onReplaced);
     unawaited(_start());
     WidgetsBinding.instance.addPostFrameCallback((_) => _takeMoreLikeThis());
+  }
+
+  /// A saved answer got new picks elsewhere (Home's auto-refresh): show them.
+  Future<void> _onReplaced() async {
+    final id = AiHistory.replaced.value;
+    if (id == null || !_saved.any((e) => e.id == id)) return;
+    final fresh = await AiHistory.get(id);
+    if (!mounted || fresh == null) return;
+    setState(() {
+      final i = _saved.indexWhere((e) => e.id == id);
+      if (i >= 0) _saved[i] = fresh;
+    });
   }
 
   /// Start any "More like this" requests from long-press menus.
@@ -127,6 +141,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   @override
   void dispose() {
     AiMoreLikeThis.requests.removeListener(_takeMoreLikeThis);
+    AiHistory.replaced.removeListener(_onReplaced);
     _spotlight.dispose();
     _tvRowsExpanded.dispose();
     _focusedReason.dispose();
@@ -284,8 +299,20 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   List<MediaMenuExtraEntry> _rowMenuEntries(MediaHub hub) {
     final entry = _entryForHub(hub);
     if (entry == null || entry.request == AiAgent.tonightRequest) return const [];
+    final homeRow = _homeRow(entry);
+    final homeFull =
+        !HomePinsController.instance.contains(homeRow.id) &&
+        AiHomeRefresher.homeRowCount() >= AiHomeRefresher.maxHomeRows;
     return [
-      ...homeRowMenuEntries(context, _homeRow(entry)),
+      for (final e in homeRowMenuEntries(context, homeRow))
+        // At the cap, "Add to Home" explains instead of adding.
+        homeFull && e.label == t.homeRows.addToHome
+            ? MediaMenuExtraEntry(
+                icon: e.icon,
+                label: e.label,
+                onSelected: () => showAppSnackBar(context, t.aiTab.homeFull),
+              )
+            : e,
       MediaMenuExtraEntry(
         icon: Symbols.refresh_rounded,
         label: t.aiTab.refreshRow,

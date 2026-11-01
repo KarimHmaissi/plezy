@@ -34,10 +34,6 @@ Details of each are in the dated entries below.
   library index, such as reviews or subtitles (possibly as embeddings), so
   the helper can match on mood, themes and dialogue, not just genre, cast
   and summary.
-- **Auto-refreshing AI rows on Home** — AI rows added to Home re-run their
-  request now and then (for example once a day, with Haiku to keep it cheap),
-  so they pick up new additions and drop what you've watched. Today they
-  only refresh when you choose Refresh picks.
 - **Ask about this title** — from a title's detail page or its hold-OK
   menu, ask the AI about that title ("is it scary?", "do I need to have
   seen the first one?", "more like this but lighter"), with the answer and
@@ -68,6 +64,29 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Auto-refreshing AI rows on Home (branch `feature/ai-helper`) — `HASH`
+- **AI rows on Home refresh themselves twice a day** while Plezy is open
+  (there's no background service). Plezy checks 30 s after Home opens and
+  then hourly.
+  - Any Home AI row whose picks are 12 hours or more old re-runs its request
+    on **Haiku 5.5**, one row at a time, quietly.
+  - It keeps the 15–20 rule, leaves out what you've watched and prefers
+    titles that weren't in the last version. The row keeps its name.
+  - Home and the AI tab swap in the new picks. If a refresh fails, the old
+    picks stay and it tries again at the next hourly check.
+  - Rows that are only on the AI tab never auto-refresh. Manual **Refresh
+    picks** still uses Sonnet.
+- **At most 10 AI rows on Home.** Adding an 11th says "Home already has 10
+  AI rows. Remove one first." Nothing is dropped silently.
+- **Settings ▸ AI ▸ Auto-refresh AI rows on Home** (on by default). The
+  monthly spend line now shows how much of it went on auto-refresh. Debug
+  builds also have "Auto-refresh Home AI rows now", which skips the 12-hour
+  wait for testing.
+- **Not yet tried on the TV** (Karim had to leave): it compiles, `flutter
+  analyze` is clean and the AI tests pass. Still to do: run one forced
+  refresh from Settings to check it end to end and measure what a Haiku
+  refresh costs (expected about $0.001–0.002).
 
 ### "More like this" from any title (branch `feature/ai-helper`) — `9ea216b38`
 - **Hold OK on any film or show** (Home, Explore, Watchlist, libraries, AI
