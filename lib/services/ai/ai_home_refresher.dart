@@ -83,6 +83,7 @@ abstract final class AiHomeRefresher {
   }
 
   static Future<bool> _refresh(AiHistoryEntry entry, MediaServerClient? Function(ServerId) clientFor) async {
+    if (entry.extended) return _extend(entry, clientFor);
     final previous = entry.items.map((i) => i.title).nonNulls.join(', ');
     final sent =
         '${entry.request}\n\n'
@@ -111,6 +112,39 @@ abstract final class AiHomeRefresher {
         '(\$${result.answer.cost.toStringAsFixed(4)})',
       );
       return true;
+    } catch (e) {
+      appLogger.w('AI auto-refresh: "${entry.label}" failed; keeping the old picks', error: e);
+      return false;
+    }
+  }
+
+  /// A row grown with Find more keeps its picks: add up to 10 new ones in
+  /// front instead of replacing it.
+  static Future<bool> _extend(AiHistoryEntry entry, MediaServerClient? Function(ServerId) clientFor) async {
+    try {
+      final result = await buildAiRow(
+        request: entry.request,
+        sentRequest: '${findMoreRequest(entry, atMost: 10)} Leave out anything they have already watched.',
+        model: ClaudeModel.haiku,
+        clientFor: clientFor,
+        trakt: _trakt?.call(),
+        id: entry.id,
+        keepTitle: entry.title,
+        excludeKeys: {for (final i in entry.items) i.globalKey},
+      );
+      await AiSpend.noteAutoRefresh(result.answer.cost);
+      final found = result.entry;
+      // Restart the clock either way, so a row with nothing new isn't retried hourly.
+      await AiHistory.replace(
+        found == null
+            ? mergeFindMore(entry, entry, createdAt: DateTime.now())
+            : mergeFindMore(entry, found, createdAt: DateTime.now()),
+      );
+      appLogger.i(
+        'AI auto-refresh: "${entry.label}" gained ${found?.items.length ?? 0} picks '
+        '(\$${result.answer.cost.toStringAsFixed(4)})',
+      );
+      return found != null;
     } catch (e) {
       appLogger.w('AI auto-refresh: "${entry.label}" failed; keeping the old picks', error: e);
       return false;

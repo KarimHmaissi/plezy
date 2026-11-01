@@ -233,7 +233,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         id: ask.replaceId,
         useTitle: ask.useTitle,
         keepTitle: extend?.title,
-        sentRequest: extend == null ? null : _findMoreRequest(extend),
+        sentRequest: extend == null ? null : findMoreRequest(extend),
         excludeKeys: {...?extend?.items.map((i) => i.globalKey)},
       );
       final found = result.entry;
@@ -248,7 +248,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         if (mounted) setState(() => ask.error = result.answer.error ?? result.answer.intro ?? t.aiTab.noPicks);
         return;
       }
-      final entry = extend == null ? found : _merged(extend, found);
+      final entry = extend == null ? found : mergeFindMore(extend, found);
       if (ask.replaceId == null) {
         _conversation.add((request: ask.request, answer: result.answer));
         await AiHistory.add(entry);
@@ -299,7 +299,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   );
 
   /// Ask the same request again for titles not already in [entry]; the new
-  /// batch goes in front and the old picks stay (see [_merged]).
+  /// batch goes in front and the old picks stay (see [mergeFindMore]).
   Future<void> _findMore(AiHistoryEntry entry) => _runInBackground(
     _PendingAsk(
       entry.request,
@@ -310,33 +310,6 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       extend: entry,
     ),
   );
-
-  static String _findMoreRequest(AiHistoryEntry entry) {
-    final shown = entry.items.map((i) => i.year == null ? i.title : '${i.title} (${i.year})').nonNulls.join('; ');
-    return '${entry.request}\n\n'
-        'Find more: the user already has these picks for this request and wants different titles that fit it '
-        'just as well. Do not repeat any of them: $shown. If nothing else genuinely fits, call show_picks with '
-        'no picks.';
-  }
-
-  /// [found]'s new picks first, then [old]'s, without repeats, capped at
-  /// [AiHistory.maxItemsPerEntry]. Keeps the answer's name, intro and age.
-  static AiHistoryEntry _merged(AiHistoryEntry old, AiHistoryEntry found) {
-    final seen = <String>{};
-    final items = [
-      for (final item in [...found.items, ...old.items])
-        if (seen.add(item.globalKey)) item,
-    ].take(AiHistory.maxItemsPerEntry).toList();
-    return AiHistoryEntry(
-      id: old.id,
-      request: old.request,
-      title: old.title,
-      intro: old.intro,
-      createdAt: old.createdAt,
-      items: items,
-      reasons: {...old.reasons, ...found.reasons},
-    );
-  }
 
   Future<void> _deleteRow(AiHistoryEntry entry) async {
     final confirmed = await showConfirmDialog(

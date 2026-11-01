@@ -19,6 +19,7 @@ class AiHistoryEntry {
     required this.items,
     required this.reasons,
     this.title,
+    this.extended = false,
   });
 
   final String id;
@@ -37,12 +38,17 @@ class AiHistoryEntry {
   /// Reason per item, keyed by [MediaItem.globalKey].
   final Map<String, String> reasons;
 
+  /// Grown with Find more: Home's auto-refresh adds to it instead of
+  /// replacing it.
+  final bool extended;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'request': request,
     'title': title,
     'intro': intro,
     'createdAt': createdAt.millisecondsSinceEpoch,
+    if (extended) 'extended': true,
     'items': [
       for (final item in items) {'item': item.toJson(), 'reason': reasons[item.globalKey]},
     ],
@@ -66,6 +72,7 @@ class AiHistoryEntry {
         createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int? ?? 0),
         items: items,
         reasons: reasons,
+        extended: json['extended'] == true,
       );
     } catch (e) {
       appLogger.d('AI history: unreadable entry', error: e);

@@ -57,3 +57,34 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
     agent.close();
   }
 }
+
+/// The request sent for Find more: the same ask, minus the titles [entry]
+/// already has, and at most [atMost] new picks when given.
+String findMoreRequest(AiHistoryEntry entry, {int? atMost}) {
+  final shown = entry.items.map((i) => i.year == null ? i.title : '${i.title} (${i.year})').join('; ');
+  return '${entry.request}\n\n'
+      'Find more: the user already has these picks for this request and wants different titles that fit it '
+      'just as well. Do not repeat any of them: $shown.${atMost == null ? '' : ' Return $atMost picks at most.'} '
+      'If nothing else genuinely fits, call show_picks with no picks.';
+}
+
+/// [found]'s new picks first, then [old]'s, without repeats, capped at
+/// [AiHistory.maxItemsPerEntry]. Keeps the answer's name and intro, and its
+/// age unless [createdAt] is given (auto-refresh restarts the clock).
+AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime? createdAt}) {
+  final seen = <String>{};
+  final items = [
+    for (final item in [...found.items, ...old.items])
+      if (seen.add(item.globalKey)) item,
+  ].take(AiHistory.maxItemsPerEntry).toList();
+  return AiHistoryEntry(
+    id: old.id,
+    request: old.request,
+    title: old.title,
+    intro: old.intro,
+    createdAt: createdAt ?? old.createdAt,
+    items: items,
+    reasons: {...old.reasons, ...found.reasons},
+    extended: true,
+  );
+}

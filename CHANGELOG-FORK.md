@@ -89,6 +89,9 @@ Details of each are in the dated entries below.
   nothing new fits it says "No more matches". Repeats are filtered out in
   code too; an answer keeps at most 200 picks. Saved like any answer, so it
   survives restarts and backups and shows on Home if the row is pinned.
+- **Home auto-refresh adds to extended rows.** A pinned answer that's been
+  grown with Find more isn't replaced twice a day: Haiku adds up to 10 new
+  picks in front instead (same 200 cap). Other rows are replaced as before.
 - **Bigger lists by default:** broad requests now aim for about 30–40 picks
   and list-style asks ("every…", "all…") for 40–50. Narrow requests still
   return only the true matches. Tonight (6–10) and Home auto-refresh (≤20)
