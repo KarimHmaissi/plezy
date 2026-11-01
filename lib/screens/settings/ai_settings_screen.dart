@@ -4,7 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../i18n/strings.g.dart';
+import 'package:flutter/foundation.dart';
+import 'package:provider/provider.dart';
+
+import '../../providers/catalog_sources_provider.dart';
+import '../../services/ai/ai_eval.dart';
 import '../../services/ai/ai_key_receiver.dart';
+import '../../services/ai/ai_spend.dart';
+import '../../services/catalog/trakt_catalog_source.dart';
+import '../../services/library_index/library_index.dart';
+import 'ai_try_screen.dart';
 import '../../services/ai/ai_key_store.dart';
 import '../../utils/dialogs.dart';
 import '../../utils/snackbar_helper.dart';
@@ -141,6 +150,37 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     }
   }
 
+  String? _evalStatus;
+
+  Future<void> _try() async {
+    final request = await showTextInputDialog(
+      context,
+      title: t.ai.tryRequest,
+      labelText: t.ai.tryRequestLabel,
+      confirmText: t.ai.ask,
+    );
+    if (request == null || request.trim().isEmpty || !mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AiTryScreen(request: request.trim())));
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _eval() async {
+    final trakt = context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
+    setState(() => _evalStatus = 'Starting…');
+    try {
+      final path = await AiEval.run(
+        index: LibraryIndex.instance,
+        trakt: trakt?.client,
+        onProgress: (p) {
+          if (mounted) setState(() => _evalStatus = 'Running $p');
+        },
+      );
+      if (mounted) setState(() => _evalStatus = 'Done: $path');
+    } catch (e) {
+      if (mounted) setState(() => _evalStatus = 'Done (failed): $e');
+    }
+  }
+
   Future<void> _test() async {
     final key = await AiKeyStore.read();
     if (key == null) return;
@@ -206,6 +246,34 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 onTap: _busy ? null : () => unawaited(_remove()),
               ),
             ],
+            if (hint != null)
+              FocusableListTile(
+                leading: const AppIcon(Symbols.auto_awesome_rounded, fill: 1),
+                title: Text(t.ai.tryRequest),
+                subtitle: Text(t.ai.tryRequestDescription),
+                onTap: () => unawaited(_try()),
+              ),
+            if (hint != null && kDebugMode)
+              FocusableListTile(
+                leading: const AppIcon(Symbols.science_rounded, fill: 1),
+                title: const Text('Run eval (prompt list × Sonnet and Haiku)'),
+                subtitle: Text(_evalStatus ?? AiEval.promptsFile),
+                onTap: _evalStatus != null && !_evalStatus!.startsWith('Done') ? null : () => unawaited(_eval()),
+              ),
+            FutureBuilder(
+              future: AiSpend.month(),
+              builder: (context, snap) => ListTile(
+                title: Text(t.ai.spendTitle, style: Theme.of(context).textTheme.titleMedium),
+                subtitle: Text(
+                  snap.data == null
+                      ? '…'
+                      : t.ai.spendThisMonth(
+                          dollars: snap.data!.dollars.toStringAsFixed(2),
+                          requests: snap.data!.requests,
+                        ),
+                ),
+              ),
+            ),
             ListTile(
               title: Text(t.ai.modelsTitle, style: Theme.of(context).textTheme.titleMedium),
               subtitle: Text(t.ai.modelsDescription),

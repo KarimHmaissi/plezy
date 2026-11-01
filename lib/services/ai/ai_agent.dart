@@ -1,0 +1,216 @@
+import 'dart:convert';
+
+import '../../utils/app_logger.dart';
+import '../library_index/index_database.dart';
+import '../library_index/library_index.dart';
+import '../trackers/trakt/trakt_client.dart';
+import 'ai_key_store.dart';
+import 'ai_spend.dart';
+import 'ai_tools.dart';
+import 'claude_client.dart';
+
+/// One tool call the model made, for the eval report.
+typedef AiToolCall = ({String name, String input, int resultChars});
+
+/// The helper's answer to one request.
+class AiAnswer {
+  AiAnswer({
+    required this.intro,
+    required this.picks,
+    required this.text,
+    required this.toolCalls,
+    required this.elapsed,
+    required this.cost,
+    required this.inputTokens,
+    required this.outputTokens,
+    required this.cachedTokens,
+    required this.unknownPickIds,
+    this.error,
+  });
+
+  final String? intro;
+
+  /// Picks resolved against the index, in the model's order.
+  final List<({IndexedTitle title, String reason})> picks;
+
+  /// Any text the model wrote besides the picks.
+  final String text;
+  final List<AiToolCall> toolCalls;
+  final Duration elapsed;
+  final double cost;
+  final int inputTokens;
+  final int outputTokens;
+  final int cachedTokens;
+
+  /// Pick ids that aren't in the index (should always be empty).
+  final List<String> unknownPickIds;
+  final String? error;
+}
+
+/// The AI helper's agent loop: send the request with the tools, run the
+/// tools the model asks for on this device, send the results back, and stop
+/// once it calls `show_picks` (or answers in text).
+class AiAgent {
+  AiAgent({required this.index, this.trakt, this.model = ClaudeModel.sonnet, ClaudeClient? claudeClient})
+    : _client = claudeClient;
+
+  final LibraryIndex index;
+  final TraktClient? trakt;
+  final ClaudeModel model;
+  ClaudeClient? _client;
+
+  static const int maxSteps = 10;
+
+  static const String systemPrompt = '''
+You are the film and TV helper inside Plezy, a Plex app on the user's TV. The user asks for something to watch; you find it on their own Plex servers and hand back a short row of picks.
+
+How to work:
+- The user's library is large (about 30,000 films and 15,000 shows across two servers). You can't see it directly; use the tools.
+- For "only what's here" requests (genres, years, recently added, unwatched, a person, a library such as Anime or 4K), use search_library and text_search.
+- For taste-based requests ("like X", "awesome 80s action"), use your own knowledge to think of strong candidates, then check them with find_titles. Combine both approaches when useful.
+- For "based on my history" requests, call get_history first.
+- Ratings in the library are audience ratings (usually IMDb, 0-10). Brand-new titles often show 9-10 from a handful of votes; before calling a recent title top rated or popular, check a shortlist with get_ratings and prefer titles with many votes.
+- Only pick titles whose ids came back from the tools. Never invent ids or claim a title is available without a tool saying so.
+- Prefer one entry per title (the tools already merge 4K copies and the second server).
+- Respect explicit limits: unwatched means unwatched; runtime limits; "not too long" means roughly under 2 hours.
+- Finish by calling show_picks exactly once with 3-12 picks, best first, each with one short, specific reason. If nothing fits, say so briefly instead.
+- Keep it quick: a few well-chosen tool calls, not exhaustive searching.''';
+
+  Future<AiAnswer> ask(String request) async {
+    final started = DateTime.now();
+    final tools = AiTools(index: index, trakt: trakt);
+    final calls = <AiToolCall>[];
+    var cost = 0.0;
+    var input = 0;
+    var output = 0;
+    var cached = 0;
+    final texts = <String>[];
+    String? error;
+    final key = await AiKeyStore.read();
+    if (key == null) {
+      return _answer(tools, texts, calls, started, 0, 0, 0, 0, 'No API key; add one in Settings ▸ AI.');
+    }
+    final client = _client ??= ClaudeClient(key);
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final messages = <Map<String, Object?>>[
+      {
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': 'Today is $today.\n\n$request'},
+        ],
+      },
+    ];
+    try {
+      for (var step = 0; step < maxSteps; step++) {
+        final response = await client.createMessage({
+          'model': model.id,
+          'max_tokens': 16000,
+          'thinking': {'type': 'adaptive'},
+          'output_config': {'effort': 'medium'},
+          'system': [
+            {
+              'type': 'text',
+              'text': systemPrompt,
+              'cache_control': {'type': 'ephemeral'},
+            },
+          ],
+          'tools': tools.definitions(),
+          'messages': messages,
+          // Caches the growing conversation between tool steps.
+          'cache_control': {'type': 'ephemeral'},
+          if (model == ClaudeModel.sonnet) 'fallbacks': 'default',
+        }, betas: model == ClaudeModel.sonnet ? const ['server-side-fallback-2026-07-01'] : const []);
+        final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const {};
+        cost += await AiSpend.record(model, usage);
+        input +=
+            ((usage['input_tokens'] as num?) ?? 0).toInt() +
+            ((usage['cache_creation_input_tokens'] as num?) ?? 0).toInt();
+        output += ((usage['output_tokens'] as num?) ?? 0).toInt();
+        cached += ((usage['cache_read_input_tokens'] as num?) ?? 0).toInt();
+
+        final content = [...(response['content'] as List? ?? const []).whereType<Map<String, dynamic>>()];
+        // The whole assistant turn goes back unchanged (thinking blocks too).
+        messages.add({'role': 'assistant', 'content': content});
+        for (final block in content) {
+          if (block['type'] == 'text' && (block['text'] as String?)?.trim().isNotEmpty == true) {
+            texts.add(block['text'] as String);
+          }
+        }
+        final stop = response['stop_reason'] as String?;
+        if (stop == 'refusal') {
+          error = 'The model declined this request.';
+          break;
+        }
+        if (stop != 'tool_use') break;
+
+        final uses = content.where((b) => b['type'] == 'tool_use').toList();
+        final results = await Future.wait([
+          for (final use in uses)
+            () async {
+              final name = use['name'] as String;
+              final args = (use['input'] as Map?)?.cast<String, dynamic>() ?? const {};
+              String result;
+              var isError = false;
+              try {
+                result = await tools.run(name, args);
+              } catch (e) {
+                appLogger.w('AI: tool $name failed', error: e);
+                result = 'Tool failed: $e';
+                isError = true;
+              }
+              calls.add((name: name, input: jsonEncode(args), resultChars: result.length));
+              return {
+                'type': 'tool_result',
+                'tool_use_id': use['id'],
+                'content': result,
+                if (isError) 'is_error': true,
+              };
+            }(),
+        ]);
+        messages.add({'role': 'user', 'content': results});
+        // The picks are the answer; no need for another round trip.
+        if (uses.any((u) => u['name'] == AiTools.showPicksTool)) break;
+      }
+    } on ClaudeApiException catch (e) {
+      error = e.isAuth ? 'The API key was rejected; check Settings ▸ AI.' : 'Claude API error: ${e.message}';
+    } catch (e) {
+      error = 'Request failed: $e';
+    }
+    return _answer(tools, texts, calls, started, cost, input, output, cached, error);
+  }
+
+  Future<AiAnswer> _answer(
+    AiTools tools,
+    List<String> texts,
+    List<AiToolCall> calls,
+    DateTime started,
+    double cost,
+    int input,
+    int output,
+    int cached,
+    String? error,
+  ) async {
+    final db = await index.database;
+    final picks = <({IndexedTitle title, String reason})>[];
+    final unknown = <String>[];
+    for (final p in tools.picks) {
+      final t = await (db.select(db.indexTitles)..where((r) => r.id.equals(p.id))).getSingleOrNull();
+      t == null ? unknown.add(p.id) : picks.add((title: t, reason: p.reason));
+    }
+    return AiAnswer(
+      intro: tools.intro,
+      picks: picks,
+      text: texts.join('\n').trim(),
+      toolCalls: calls,
+      elapsed: DateTime.now().difference(started),
+      cost: cost,
+      inputTokens: input,
+      outputTokens: output,
+      cachedTokens: cached,
+      unknownPickIds: unknown,
+      error: error,
+    );
+  }
+
+  void close() => _client?.close();
+}

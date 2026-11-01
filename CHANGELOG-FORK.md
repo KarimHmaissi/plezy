@@ -54,6 +54,31 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### AI helper: client, tools and eval harness (branch `feature/ai-helper`) — `HASH`
+- **Claude client** over HTTPS (there's no Dart SDK): Messages API
+  `2026-10-21`, Sonnet 5.5 (main) / Haiku 5.5 (background), adaptive
+  thinking at medium effort, cached system prompt and conversation, server
+  fallbacks for Sonnet, retries with backoff on rate limits and overload.
+  Thinking blocks are passed back unchanged.
+- **Agent loop:** the model asks for tools, Plezy runs them on the device
+  and sends the results back, and the loop stops as soon as the model calls
+  `show_picks`.
+- **Tools over the library index:** `search_library` (structured filters),
+  `text_search` (plots, cast), `find_titles` (titles from the model's own
+  knowledge checked against the servers), `get_title`, `get_history`,
+  `get_continue_watching`, `get_ratings` (Trakt rating + votes for up to 10
+  shortlisted titles, never in bulk), and `show_picks` (strict schema; only
+  ids the tools returned). `get_new_seasons` is waiting on seasons being
+  indexed.
+- **Spend tracking** from each response's token usage, shown in Settings ▸ AI
+  (no cap).
+- **Settings ▸ AI ▸ Try a request:** runs one request and lists the picks
+  with reasons; select one to open it. First real request, "random marvel
+  film": 3 unwatched Marvel films, 11.5 s, $0.017.
+- **Eval harness** (debug builds): runs `notes/ai-eval-prompts.txt` on
+  Sonnet and Haiku and writes a markdown report (picks, all on servers?,
+  tool calls, time, tokens, cost) to `notes/`.
+
 ### Library index and AI key (branch `feature/ai-helper`) — `853d70e86`
 - **Library index** (Phase 1 of the AI helper plan): every movie and show on
   the Plex servers in a local SQLite file, `plezy_index.db` (a cache: safe to

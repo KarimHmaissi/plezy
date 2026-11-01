@@ -3339,6 +3339,24 @@ class Translations$ai$en {
 	/// en: 'The page closed after 5 minutes without a key'
 	String get receiveTimedOut => 'The page closed after 5 minutes without a key';
 
+	/// en: 'Try a request'
+	String get tryRequest => 'Try a request';
+
+	/// en: 'Ask for something to watch and see what the helper picks from your library'
+	String get tryRequestDescription => 'Ask for something to watch and see what the helper picks from your library';
+
+	/// en: 'What do you feel like watching?'
+	String get tryRequestLabel => 'What do you feel like watching?';
+
+	/// en: 'Ask'
+	String get ask => 'Ask';
+
+	/// en: 'Spend'
+	String get spendTitle => 'Spend';
+
+	/// en: '${dollars} USD this month across ${requests} requests (no cap)'
+	String spendThisMonth({required Object dollars, required Object requests}) => '${dollars} USD this month across ${requests} requests (no cap)';
+
 	/// en: 'Models'
 	String get modelsTitle => 'Models';
 
@@ -9690,6 +9708,12 @@ extension on Translations {
 			'ai.receiveNoNetwork' => 'This device isn\'t on a home network, so the key can\'t be sent from another device',
 			'ai.receiveTooManyAttempts' => 'Too many wrong codes; the page is closed',
 			'ai.receiveTimedOut' => 'The page closed after 5 minutes without a key',
+			'ai.tryRequest' => 'Try a request',
+			'ai.tryRequestDescription' => 'Ask for something to watch and see what the helper picks from your library',
+			'ai.tryRequestLabel' => 'What do you feel like watching?',
+			'ai.ask' => 'Ask',
+			'ai.spendTitle' => 'Spend',
+			'ai.spendThisMonth' => ({required Object dollars, required Object requests}) => '${dollars} USD this month across ${requests} requests (no cap)',
 			'ai.modelsTitle' => 'Models',
 			'ai.modelsDescription' => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.',
 			'backupTransfer.title' => 'Backup & transfer',
@@ -10103,14 +10127,14 @@ extension on Translations {
 			'explore.format.movie' => 'Movie',
 			'explore.format.special' => 'Special',
 			'explore.format.ova' => 'OVA',
+			_ => null,
+		} ?? switch (path) {
 			'explore.format.ona' => 'ONA',
 			'explore.format.music' => 'Music',
 			'explore.format.other' => 'Other',
 			'explore.sourceMaterial.original' => 'Original',
 			'explore.sourceMaterial.manga' => 'Manga',
 			'explore.sourceMaterial.lightNovel' => 'Light novel',
-			_ => null,
-		} ?? switch (path) {
 			'explore.sourceMaterial.novel' => 'Novel',
 			'explore.sourceMaterial.visualNovel' => 'Visual novel',
 			'explore.sourceMaterial.game' => 'Game',
@@ -10617,14 +10641,14 @@ extension on Translations {
 			'shaders.mode' => 'Mode',
 			'shaders.importShader' => 'Import Shader',
 			'shaders.customShaderDescription' => 'Custom GLSL shader',
+			_ => null,
+		} ?? switch (path) {
 			'shaders.shaderImported' => 'Shader imported',
 			'shaders.shaderImportFailed' => 'Failed to import shader',
 			'shaders.deleteShader' => 'Delete Shader',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Delete "${name}"?',
 			'companionRemote.title' => 'Companion Remote',
 			'companionRemote.connectedTo' => ({required Object name}) => 'Connected to ${name}',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.unknownDevice' => 'Unknown Device',
 			'companionRemote.session.startingServer' => 'Starting remote server...',
 			'companionRemote.session.hostAddress' => 'Host Address',
