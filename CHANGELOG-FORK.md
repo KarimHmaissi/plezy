@@ -65,7 +65,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### Auto-refreshing AI rows on Home (branch `feature/ai-helper`) — `HASH`
+### Auto-refreshing AI rows on Home (branch `feature/ai-helper`) — `48aee5ba2`
 - **AI rows on Home refresh themselves twice a day** while Plezy is open
   (there's no background service). Plezy checks 30 s after Home opens and
   then hourly.
