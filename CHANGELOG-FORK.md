@@ -65,7 +65,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### AI tab: saved answers, bigger rows, AI rows on Home (branch `feature/ai-helper`) — `HASH`
+### AI tab: saved answers, bigger rows, AI rows on Home (branch `feature/ai-helper`) — `d6dfa14cb`
 - **More picks for broad requests.** The helper now aims for 15–20 picks
   for a genre, mood, era, "something like X" or "based on my history", so
   there's a full row to browse. For narrow requests (one title, a yes/no
