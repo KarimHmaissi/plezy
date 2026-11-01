@@ -23,6 +23,22 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       row anywhere in Plezy can be added; same-title rows merge (synced via
       Trakt)
 
+### AI (branch `feature/ai-helper`, not merged yet)
+- [x] Library index of every film and show (built on first open, updated
+      every 6 hours)
+- [x] AI helper core: Sonnet 5.5 for requests, Haiku 5.5 for background
+      jobs, tools over the index, history and Trakt ratings, monthly spend
+      tracking, key stored encrypted and sent over the home network
+- [x] AI tab: Tonight picks, Ask / Follow up, 15–20 picks for broad
+      requests
+- [x] Saved answers (up to 200) with Load more; Add to Home, Refresh picks,
+      Delete on every AI row
+- [x] Requests run in the background with a pulsing chip and nav icon
+- [x] "More like this" in any title's long-press menu
+- [x] AI rows on Home auto-refresh twice a day on Haiku (max 10 AI rows on
+      Home; Settings toggle). Not yet tried on the TV
+- [x] Darker, calmer overlay on the TV spotlight backdrop
+
 Details of each are in the dated entries below.
 
 ## Backlog (not built yet)
