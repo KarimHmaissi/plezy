@@ -897,6 +897,10 @@ class SettingsService extends BaseSharedPreferencesService {
   static const audioPassthrough = _AudioPassthroughPref();
   static const audioNormalization = BoolPref('audio_normalization');
 
+  /// Fork, macOS: send audio to the receiver as Dolby Digital (see
+  /// `PlayerBase.setDolbyEncode`).
+  static const macDolbyEncode = BoolPref('mac_dolby_encode', defaultValue: true);
+
   /// Replaced the `audio_downmix` stereo toggle: on → [AudioChannelLimit.stereo].
   static const audioChannelLimit = LegacyBoolEnumPref<AudioChannelLimit>(
     'audio_channel_limit',

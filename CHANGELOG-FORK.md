@@ -45,6 +45,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] Phone mirrors the TV: AI answers as rows, Home and lists, edits go
       to the TV
 - [x] Media notification on the phone for what the TV is playing
+- [x] Mac: surround sent to the receiver as Dolby Digital
 
 Details of each are in the dated entries below.
 
@@ -90,6 +91,19 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Mac: surround as Dolby Digital (branch `feature/ai-helper`)
+- **Why.** On the MacBook's HDMI port, 8-channel PCM reached the receiver
+  with its channels rotated by a whole slot or more (centre on a front
+  speaker, two channels on one surround), and the offset changed whenever
+  the HDMI link re-synced. No speaker layout on the Mac can fix that.
+- **What.** On macOS Plezy now re-encodes decoded audio to Dolby Digital
+  5.1 at 640 kb/s (mpv `lavcac3enc`) and sends it as a bitstream; the
+  receiver places each channel itself. Stereo and up go this way; 7.1 is
+  folded to 5.1. Setting: Playback ▸ "Send surround as Dolby Digital",
+  on by default on macOS only.
+- **Passthrough is off on macOS.** It never bitstreamed there, and each
+  try switched the HDMI output's format and back, re-syncing the link.
 
 ### Notification for what the TV is playing (branch `feature/ai-helper`)
 - **Pause from the shade.** While the TV app the phone is connected to is

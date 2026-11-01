@@ -2085,6 +2085,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (settingsService.read(SettingsService.audioNormalization)) {
         await currentPlayer.setAudioNormalization(true);
       }
+      if (Platform.isMacOS && currentPlayer is PlayerBase && settingsService.read(SettingsService.macDolbyEncode)) {
+        await currentPlayer.setDolbyEncode(true);
+      }
 
       // After the passthrough apply: the stereo limit wins on both backends
       // (mpv clears audio-spdif, ExoPlayer force-decodes encoded audio). The

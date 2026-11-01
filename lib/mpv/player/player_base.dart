@@ -1399,10 +1399,29 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
       'acompressor=threshold=-34dB:ratio=4:knee=6dB:attack=30:release=300:makeup=15dB:link=maximum,'
       'alimiter=limit=-3dB:attack=1:release=60:level=false';
 
+  /// The two parts of `af`: normalization first, then (fork, macOS) the
+  /// Dolby Digital encoder, which must be last since it outputs a bitstream.
+  String _normalizationAf = '';
+  String _dolbyEncodeAf = '';
+
+  Future<void> _applyAf() =>
+      setProperty('af', [_normalizationAf, _dolbyEncodeAf].where((f) => f.isNotEmpty).join(','));
+
   @override
   Future<void> setAudioNormalization(bool enabled) async {
     final filter = Platform.isAndroid ? _androidNormalizationFilter : _loudnormFilter;
-    await setProperty('af', enabled ? filter : '');
+    _normalizationAf = enabled ? filter : '';
+    await _applyAf();
+  }
+
+  /// Fork: re-encode decoded audio to Dolby Digital (640 kb/s, up to 5.1) and
+  /// send it as an S/PDIF bitstream. On a Mac's HDMI port, multichannel PCM
+  /// can arrive at the receiver with its channels rotated (the offset changes
+  /// when the link re-syncs), so speakers swap; a Dolby bitstream carries its
+  /// own channel layout and the receiver places each channel itself.
+  Future<void> setDolbyEncode(bool enabled) async {
+    _dolbyEncodeAf = enabled ? '@dolby:lavcac3enc=tospdif=yes:bitrate=640:minch=2' : '';
+    await _applyAf();
   }
 
   /// mpv's `audio-channels` for each limit. The 5.1 limit is a list so stereo

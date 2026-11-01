@@ -414,6 +414,8 @@
     "tunneledPlayback": "Tunneled Playback",
     "tunneledPlaybackDescription": "Use video tunneling. Disable if HDR playback shows black video or motion stutters.",
     "audioPassthrough": "Audio Passthrough",
+    "macDolbyEncode": "Send surround as Dolby Digital",
+    "macDolbyEncodeDescription": "Encodes the audio to Dolby Digital 5.1 so the receiver places each speaker itself. Fixes channels coming out of the wrong speakers over HDMI. Plezy uses the HDMI output on its own while playing.",
     "audioPassthroughDescription": "Send Dolby/DTS audio to your receiver or TV without re-encoding, preserving surround sound. Turn off if you have no sound.",
     "audioPassthroughDescriptionApple": "Use Apple's native Dolby decoder for Dolby Digital Plus, including Atmos. DTS and TrueHD still play as multichannel PCM. Turn off if you have no sound.",
     "audioPassthroughDescriptionAppleSpatial": "Use Apple's native Dolby decoder for Dolby Digital Plus, including Atmos. On iOS, iPadOS and tvOS 26 or later, TrueHD Atmos and DTS:X play as spatial audio. Other DTS and TrueHD tracks play as multichannel PCM. Turn off if you have no sound.",
