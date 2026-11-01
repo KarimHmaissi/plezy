@@ -111,6 +111,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     duration: const Duration(milliseconds: 420),
   );
   final _retryFocus = FocusNode(debugLabel: 'AiComposerRetry');
+  final _browseFocus = FocusNode(debugLabel: 'AiComposerBrowse');
   final _editFocus = FocusNode(debugLabel: 'AiComposerEdit');
 
   late final AnimationController _flash = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
@@ -210,6 +211,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     _clap.dispose();
     _judder.dispose();
     _retryFocus.dispose();
+    _browseFocus.dispose();
     _editFocus.dispose();
     _controller.dispose();
     _fieldFocus.dispose();
@@ -402,6 +404,13 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _retryFocus.canRequestFocus) _retryFocus.requestFocus();
     });
+  }
+
+  /// Closes the composer like ✕; the request carries on and lands in the
+  /// AI tab.
+  void _continueBrowsing() {
+    ForkMotion.selection();
+    unawaited(Navigator.of(context).maybePop());
   }
 
   void _backToEdit() {
@@ -893,8 +902,32 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
             ),
           ),
           const SizedBox(height: 18),
-          if (jam == null)
+          if (jam == null && !_landed) ...[
+            FocusableButton(
+              focusNode: _browseFocus,
+              autofocus: isTv,
+              onPressed: _continueBrowsing,
+              child: Pressable(
+                longPress: false,
+                borderRadius: BorderRadius.circular(6),
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _amber,
+                    side: const BorderSide(color: _amber, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    padding: EdgeInsets.symmetric(horizontal: isTv ? 28 : 22, vertical: isTv ? 16 : 12),
+                  ),
+                  onPressed: _continueBrowsing,
+                  child: Text(
+                    t.aiComposer.continueBrowsing.toUpperCase(),
+                    style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 20, letterSpacing: 2.5),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
             Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38)),
+          ],
         ],
       ),
     );

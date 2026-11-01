@@ -6935,6 +6935,9 @@ class Translations$aiComposer$en {
 	/// en: 'That's a wrap'
 	String get wrap => 'That\'s a wrap';
 
+	/// en: 'Continue browsing'
+	String get continueBrowsing => 'Continue browsing';
+
 	/// en: 'Film jammed'
 	String get jammed => 'Film jammed';
 
@@ -6944,8 +6947,8 @@ class Translations$aiComposer$en {
 	/// en: 'Edit'
 	String get edit => 'Edit';
 
-	/// en: 'You can close this: it keeps going and lands in the AI tab.'
-	String get keepsRunning => 'You can close this: it keeps going and lands in the AI tab.';
+	/// en: 'It keeps going and lands in the AI tab.'
+	String get keepsRunning => 'It keeps going and lands in the AI tab.';
 }
 
 // Path: appIcon.names
@@ -11506,10 +11509,11 @@ extension on Translations {
 			'aiComposer.take2' => 'Take 2 · Shortlisting',
 			'aiComposer.take3' => 'Take 3 · Final cut',
 			'aiComposer.wrap' => 'That\'s a wrap',
+			'aiComposer.continueBrowsing' => 'Continue browsing',
 			'aiComposer.jammed' => 'Film jammed',
 			'aiComposer.timedOut' => 'The TV didn\'t answer in time.',
 			'aiComposer.edit' => 'Edit',
-			'aiComposer.keepsRunning' => 'You can close this: it keeps going and lands in the AI tab.',
+			'aiComposer.keepsRunning' => 'It keeps going and lands in the AI tab.',
 			_ => null,
 		};
 	}

@@ -92,6 +92,20 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### AI composer: Continue browsing (branch `feature/ai-helper`)
+- While the film strip runs, an amber "Continue browsing" button under it
+  closes the composer like ✕ (focused on TV, a tick on the phone); the
+  request keeps running and lands in the AI tab.
+
+### Fix: TV playback notification lost when paused (branch `feature/ai-helper`)
+- The phone's link to the TV can drop for a moment while its screen is
+  off; that cleared what's playing and with it the notification, and on
+  reconnecting to a paused TV the media service never started (it only
+  starts on a playing state, then keeps its notification through pauses).
+  Now a dropped connection keeps the notification for 45 seconds, and one
+  first shown paused starts the service with a playing beat, so a paused
+  film keeps its notification and lock-screen controls with a Play button.
+
 ### Phone: AI picks open their page (branch `feature/ai-helper`)
 - Tapping a pick on the phone's AI tab (mirror mode and the plain remote
   AI screen) now opens the title's page like a card anywhere else, instead

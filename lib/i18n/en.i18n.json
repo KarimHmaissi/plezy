@@ -2822,9 +2822,10 @@
     "take2": "Take 2 · Shortlisting",
     "take3": "Take 3 · Final cut",
     "wrap": "That's a wrap",
+    "continueBrowsing": "Continue browsing",
     "jammed": "Film jammed",
     "timedOut": "The TV didn't answer in time.",
     "edit": "Edit",
-    "keepsRunning": "You can close this: it keeps going and lands in the AI tab."
+    "keepsRunning": "It keeps going and lands in the AI tab."
   }
 }
