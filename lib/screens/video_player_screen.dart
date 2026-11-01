@@ -2085,8 +2085,12 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (settingsService.read(SettingsService.audioNormalization)) {
         await currentPlayer.setAudioNormalization(true);
       }
-      if (Platform.isMacOS && currentPlayer is PlayerBase && settingsService.read(SettingsService.macDolbyEncode)) {
-        await currentPlayer.setDolbyEncode(true);
+      if (Platform.isMacOS && currentPlayer is PlayerBase) {
+        // Passthrough is no longer offered on macOS, but the player outlives
+        // a settings change: clear a bitstream request it may still hold, or
+        // the encoder would be handed a bitstream instead of PCM.
+        await currentPlayer.setAudioPassthrough(false);
+        await currentPlayer.setDolbyEncode(settingsService.read(SettingsService.macDolbyEncode));
       }
 
       // After the passthrough apply: the stereo limit wins on both backends
