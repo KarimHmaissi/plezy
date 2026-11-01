@@ -21,9 +21,10 @@ class AiTools {
   final LibraryIndex index;
   final TraktClient? trakt;
 
-  /// Picks from the last `show_picks` call, and its intro line.
+  /// Picks from the last `show_picks` call, its intro line and row name.
   List<AiPick> picks = const [];
   String? intro;
+  String? title;
 
   static const String showPicksTool = 'show_picks';
 
@@ -178,6 +179,7 @@ class AiTools {
       'input_schema': {
         'type': 'object',
         'properties': {
+          'title': {'type': 'string', 'description': 'A short name for this row of picks, 2-6 words'},
           'intro': {'type': 'string', 'description': 'One friendly sentence introducing the picks'},
           'picks': {
             'type': 'array',
@@ -192,7 +194,7 @@ class AiTools {
             },
           },
         },
-        'required': ['intro', 'picks'],
+        'required': ['title', 'intro', 'picks'],
         'additionalProperties': false,
       },
     },
@@ -223,6 +225,7 @@ class AiTools {
         return _ratings([...(input['ids'] as List? ?? const []).whereType<String>()].take(20).toList());
       case showPicksTool:
         intro = input['intro'] as String?;
+        title = input['title'] as String?;
         picks = [
           for (final p in (input['picks'] as List? ?? const []).whereType<Map>())
             if (p['id'] is String) (id: p['id'] as String, reason: p['reason'] as String? ?? ''),
@@ -422,6 +425,7 @@ class AiTools {
 
   /// Picks as JSON, for logs and the eval report.
   String picksJson() => jsonEncode({
+    'title': title,
     'intro': intro,
     'picks': [
       for (final p in picks) {'id': p.id, 'reason': p.reason},

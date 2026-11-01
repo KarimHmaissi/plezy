@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../i18n/strings.g.dart';
 import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
+import '../services/ai/ai_more_like_this.dart';
 import '../services/catalog/library_watchlist_candidates.dart';
 import '../utils/catalog_navigation_helper.dart';
 import '../utils/app_logger.dart';
@@ -60,6 +61,12 @@ Future<void> showCatalogItemMenu(BuildContext context, CatalogItem item, {Offset
           value: _CatalogMenuAction(_CatalogMenuActionType.rowEntry, rowEntry: entry),
           label: entry.label,
           icon: entry.icon,
+        ),
+      if (AiMoreLikeThis.entryForCatalog(item) case final more?)
+        AppMenuItem(
+          value: _CatalogMenuAction(_CatalogMenuActionType.rowEntry, rowEntry: more),
+          label: more.label,
+          icon: more.icon,
         ),
       AppMenuItem(value: _CatalogMenuAction.viewDetails, label: t.mediaMenu.viewDetails, icon: Symbols.info_rounded),
       if (item.trailerUrl case final trailerUrl? when trailerUrl.isNotEmpty)

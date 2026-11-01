@@ -16,6 +16,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import '../i18n/strings.g.dart';
+import '../services/ai/ai_more_like_this.dart';
 import '../services/app_exit_service.dart';
 import '../services/tvos_system_navigation_service.dart';
 import '../services/update_service.dart';
@@ -530,6 +531,7 @@ class _MainScreenState extends State<MainScreen>
 
     WidgetsBinding.instance.addObserver(this);
     _contentFocusScope.addListener(_syncSidebarFocusWithContent);
+    AiMoreLikeThis.requests.addListener(_openAiForMoreLikeThis);
 
     if (PlatformDetector.isDesktopOS()) {
       windowManager.addListener(this);
@@ -1045,8 +1047,17 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
+  /// "More like this" from a long-press menu: back to the main screen and
+  /// on to the AI tab, which runs the request.
+  void _openAiForMoreLikeThis() {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _selectTab(NavigationTabId.ai);
+  }
+
   @override
   void dispose() {
+    AiMoreLikeThis.requests.removeListener(_openAiForMoreLikeThis);
     if (_watchTogether?.navigatorOpener == _navigateToWatchTogetherMedia) _watchTogether?.navigatorOpener = null;
     WidgetsBinding.instance.removeObserver(this);
     _profileRouteObserver?.unsubscribe(this);

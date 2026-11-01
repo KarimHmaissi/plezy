@@ -64,6 +64,7 @@ import 'watchlist_source_chooser.dart';
 import '../widgets/rating_bottom_sheet.dart';
 import '../i18n/strings.g.dart';
 import '../utils/error_message_utils.dart';
+import '../services/ai/ai_more_like_this.dart';
 
 class _MenuAction {
   final String value;
@@ -438,8 +439,10 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         : _buildItemMenuActions(context, menu);
     // Row-wide entries (Add to Home…) lead the menu; caller extras close it.
     final collection = menu.isCollection ? menu.mediaItem : null;
+    final moreLikeThis = menu.mediaItem == null ? null : AiMoreLikeThis.entryForItem(menu.mediaItem!);
     final leading = [
       ...RowMenuEntries.of(this.context),
+      ?moreLikeThis,
       if (collection != null && collection.backend == MediaBackend.plex && collection.serverId != null)
         ...homeRowMenuEntries(this.context, (
           id: HomeRowIds.plex(collection.title ?? collection.id),

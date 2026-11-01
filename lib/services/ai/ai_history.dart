@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
 import '../catalog/home_pins.dart';
@@ -16,11 +18,19 @@ class AiHistoryEntry {
     required this.createdAt,
     required this.items,
     required this.reasons,
+    this.title,
   });
 
   final String id;
   final String request;
+
+  /// The AI's row name, used instead of [request] for "More like this"
+  /// rows (whose request is a long prompt).
+  final String? title;
   final String? intro;
+
+  /// What the row is called on the AI tab and Home.
+  String get label => title ?? request;
   final DateTime createdAt;
   final List<MediaItem> items;
 
@@ -30,6 +40,7 @@ class AiHistoryEntry {
   Map<String, Object?> toJson() => {
     'id': id,
     'request': request,
+    'title': title,
     'intro': intro,
     'createdAt': createdAt.millisecondsSinceEpoch,
     'items': [
@@ -50,6 +61,7 @@ class AiHistoryEntry {
       return AiHistoryEntry(
         id: json['id'] as String,
         request: json['request'] as String,
+        title: json['title'] as String?,
         intro: json['intro'] as String?,
         createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int? ?? 0),
         items: items,
@@ -70,6 +82,10 @@ abstract final class AiHistory {
   static const int maxEntries = 200;
   static const String _indexKey = 'ai.history.index';
   static String _entryKey(String id) => 'ai.history.$id';
+
+  /// The id of the last answer replaced (Refresh or auto-refresh), so Home
+  /// and the AI tab can show the new picks.
+  static final ValueNotifier<String?> replaced = ValueNotifier(null);
 
   static Future<List<String>> _ids() async {
     final raw = await (await Customisation.store).readSetting(_indexKey);
@@ -126,8 +142,11 @@ abstract final class AiHistory {
   }
 
   /// Replace a saved answer in place (Refresh), keeping its position.
-  static Future<void> replace(AiHistoryEntry entry) async =>
-      (await Customisation.store).writeSetting(_entryKey(entry.id), jsonEncode(entry.toJson()));
+  static Future<void> replace(AiHistoryEntry entry) async {
+    await (await Customisation.store).writeSetting(_entryKey(entry.id), jsonEncode(entry.toJson()));
+    replaced.value = null;
+    replaced.value = entry.id;
+  }
 
   static Future<void> remove(String id) async {
     final store = await Customisation.store;

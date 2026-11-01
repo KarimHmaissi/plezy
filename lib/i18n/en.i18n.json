@@ -1206,7 +1206,9 @@
     "deleted": "Deleted",
     "retryChip": "Retry: ${request}",
     "ready": "New picks ready: ${request}",
-    "noPicks": "No picks came back"
+    "noPicks": "No picks came back",
+    "moreLikeThis": "More like this",
+    "moreLike": "more like ${title}"
   },
   "ai": {
     "settingsTitle": "AI",

@@ -418,6 +418,10 @@ void main() {
     });
 
     testWidgets('an admin chooses between playlist and collection', (tester) async {
+      // Tall enough that "Add to" fits below the fork's "More like this".
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       final menuKey = await _pumpJellyfinMovieMenu(
         tester,
         isAdministrator: true,

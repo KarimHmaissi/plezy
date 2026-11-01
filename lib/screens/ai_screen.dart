@@ -18,11 +18,12 @@ import '../providers/multi_server_provider.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
+import '../services/ai/ai_more_like_this.dart';
+import '../services/ai/ai_rows.dart';
 import '../services/ai/ai_key_store.dart';
 import '../services/ai/claude_client.dart';
 import '../services/catalog/home_pins.dart';
 import '../services/catalog/trakt_catalog_source.dart';
-import '../services/library_index/library_index.dart';
 import '../utils/app_logger.dart';
 import '../utils/dialogs.dart';
 import '../utils/platform_detector.dart';
@@ -42,11 +43,18 @@ import 'settings/ai_settings_screen.dart';
 /// A request running in the background (or failed, waiting for Retry);
 /// [replaceId] is set when it refreshes a saved row.
 class _PendingAsk {
-  _PendingAsk(this.request, {this.replaceId, this.previous = const []});
+  _PendingAsk(this.request, {this.replaceId, this.previous = const [], String? label, this.useTitle = false})
+    : label = label ?? request;
 
   final String request;
+
+  /// What the chip shows ("more like Severance" rather than the prompt).
+  final String label;
   final String? replaceId;
   final List<({String request, AiAnswer answer})> previous;
+
+  /// Name the row with the AI's title instead of the request.
+  final bool useTitle;
   String? error;
 }
 
@@ -99,11 +107,26 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   @override
   void initState() {
     super.initState();
+    AiMoreLikeThis.requests.addListener(_takeMoreLikeThis);
     unawaited(_start());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _takeMoreLikeThis());
+  }
+
+  /// Start any "More like this" requests from long-press menus.
+  void _takeMoreLikeThis() {
+    if (!mounted) return;
+    for (final seed in AiMoreLikeThis.take()) {
+      unawaited(
+        _runInBackground(
+          _PendingAsk(AiMoreLikeThis.prompt(seed), label: t.aiTab.moreLike(title: seed.title), useTitle: true),
+        ),
+      );
+    }
   }
 
   @override
   void dispose() {
+    AiMoreLikeThis.requests.removeListener(_takeMoreLikeThis);
     _spotlight.dispose();
     _tvRowsExpanded.dispose();
     _focusedReason.dispose();
@@ -139,11 +162,6 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     final more = await AiHistory.page(offset: _saved.length, limit: _pageSize);
     if (!mounted) return;
     setState(() => _saved.addAll(more.where((e) => !_saved.any((s) => s.id == e.id))));
-  }
-
-  AiAgent _agent(ClaudeModel model) {
-    final trakt = context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
-    return AiAgent(index: LibraryIndex.instance, trakt: trakt?.client, model: model);
   }
 
   Future<void> _tonight({bool refresh = false}) async {
@@ -183,7 +201,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     });
     AiActivity.running.value++;
     try {
-      final result = await _fetch(ask.request, ClaudeModel.sonnet, previous: ask.previous, id: ask.replaceId);
+      final result = await _fetch(
+        ask.request,
+        ClaudeModel.sonnet,
+        previous: ask.previous,
+        id: ask.replaceId,
+        useTitle: ask.useTitle,
+      );
       final entry = result.entry;
       if (entry == null) {
         if (mounted) setState(() => ask.error = result.answer.error ?? result.answer.intro ?? t.aiTab.noPicks);
@@ -208,7 +232,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         }
       });
       if (_visible) {
-        showAppSnackBar(context, t.aiTab.ready(request: entry.request));
+        showAppSnackBar(context, t.aiTab.ready(request: entry.label));
       } else {
         AiActivity.unseen.value++;
       }
@@ -226,15 +250,17 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     _pending.removeWhere((p) => p.error != null);
   });
 
-  HomeRowEntry _homeRow(AiHistoryEntry entry) => (id: HomeRowIds.ai(entry.id), title: entry.request, sources: const []);
+  HomeRowEntry _homeRow(AiHistoryEntry entry) => (id: HomeRowIds.ai(entry.id), title: entry.label, sources: const []);
 
   /// Re-run a saved request (one Sonnet call) and replace its picks.
-  Future<void> _refreshRow(AiHistoryEntry entry) => _runInBackground(_PendingAsk(entry.request, replaceId: entry.id));
+  Future<void> _refreshRow(AiHistoryEntry entry) => _runInBackground(
+    _PendingAsk(entry.request, replaceId: entry.id, label: entry.label, useTitle: entry.title != null),
+  );
 
   Future<void> _deleteRow(AiHistoryEntry entry) async {
     final confirmed = await showConfirmDialog(
       context,
-      title: t.aiTab.deleteRowTitle(request: entry.request),
+      title: t.aiTab.deleteRowTitle(request: entry.label),
       message: t.aiTab.deleteRowMessage,
       confirmText: t.common.delete,
       isDestructive: true,
@@ -304,42 +330,19 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     ClaudeModel model, {
     List<({String request, AiAnswer answer})> previous = const [],
     String? id,
-  }) async {
+    bool useTitle = false,
+  }) {
     final servers = context.read<MultiServerProvider>();
-    final agent = _agent(model);
-    try {
-      final answer = await agent.ask(request, previous: previous);
-      if (answer.error != null) return (answer: answer, entry: null);
-      final fetched = await Future.wait([
-        for (final pick in answer.picks)
-          () async {
-            try {
-              final item = await servers
-                  .getClientForServer(ServerId(pick.title.serverId))
-                  ?.fetchItem(pick.title.ratingKey);
-              return item == null ? null : (item: item, reason: pick.reason);
-            } catch (e) {
-              appLogger.d('AI tab: fetching ${pick.title.title} failed', error: e);
-              return null;
-            }
-          }(),
-      ]);
-      final picks = [...fetched.nonNulls];
-      if (picks.isEmpty) return (answer: answer, entry: null);
-      return (
-        answer: answer,
-        entry: AiHistoryEntry(
-          id: id ?? AiHistory.newId(),
-          request: request,
-          intro: answer.intro,
-          createdAt: DateTime.now(),
-          items: [for (final p in picks) p.item],
-          reasons: {for (final p in picks) p.item.globalKey: p.reason},
-        ),
-      );
-    } finally {
-      agent.close();
-    }
+    final trakt = context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
+    return buildAiRow(
+      request: request,
+      model: model,
+      clientFor: servers.getClientForServer,
+      trakt: trakt?.client,
+      previous: previous,
+      id: id,
+      useTitle: useTitle,
+    );
   }
 
   /// Rows in order: this visit's answers, Tonight, then older saved ones.
@@ -354,7 +357,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       MediaHub(
         id: _hubId(row),
         identifier: 'ai.answer',
-        title: row.request == AiAgent.tonightRequest ? t.aiTab.tonight : row.request,
+        title: row.request == AiAgent.tonightRequest ? t.aiTab.tonight : row.label,
         type: 'mixed',
         items: row.items,
         size: row.items.length,
@@ -663,7 +666,7 @@ class _PendingChipState extends State<_PendingChip> with SingleTickerProviderSta
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 240),
             child: Text(
-              failed ? t.aiTab.retryChip(request: widget.ask.request) : t.aiTab.thinking(request: widget.ask.request),
+              failed ? t.aiTab.retryChip(request: widget.ask.label) : t.aiTab.thinking(request: widget.ask.label),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: style,

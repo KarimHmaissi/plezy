@@ -15,6 +15,7 @@ typedef AiToolCall = ({String name, String input, int resultChars});
 /// The helper's answer to one request.
 class AiAnswer {
   AiAnswer({
+    this.title,
     required this.intro,
     required this.picks,
     required this.text,
@@ -28,6 +29,8 @@ class AiAnswer {
     this.error,
   });
 
+  /// The model's short name for the row of picks.
+  final String? title;
   final String? intro;
 
   /// Picks resolved against the index, in the model's order.
@@ -221,6 +224,7 @@ How to work:
       t == null ? unknown.add(p.id) : picks.add((title: t, reason: p.reason));
     }
     return AiAnswer(
+      title: tools.title,
       intro: tools.intro,
       picks: picks,
       text: texts.join('\n').trim(),

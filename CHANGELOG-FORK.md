@@ -42,11 +42,6 @@ Details of each are in the dated entries below.
   menu, ask the AI about that title ("is it scary?", "do I need to have
   seen the first one?", "more like this but lighter"), with the answer and
   any picks shown on the spot.
-- **"More like this" from any title** — a new entry in a title's hold-OK
-  menu that sends it to the AI ("titles similar to <title>"). It switches to
-  the AI tab and adds a new row of similar titles (running in the
-  background like any request), named by the AI, e.g. "Twisty mysteries
-  like Dark".
 - **"Previously on"** — when you go back to a show after a break, a short,
   spoiler-free AI recap of what's happened up to the episode you're on.
 
@@ -73,6 +68,19 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### "More like this" from any title (branch `feature/ai-helper`) — `HASH`
+- **Hold OK on any film or show** (Home, Explore, Watchlist, libraries, AI
+  rows…) and pick **More like this**. Episodes and seasons use their show.
+- It jumps to the AI tab and runs in the background ("Looking for: more like
+  Heroes"). The AI gets the title, type, year and Plex guid, so it knows the
+  exact title.
+- The new row lands at the top with 15–20 similar titles (never the title
+  itself), under a short name the AI writes, e.g. "Superpowered ensembles
+  like Heroes".
+- It's saved like any answer, so Add to Home, Refresh picks and Delete all
+  work. The AI now names every row; your own typed requests still show your
+  words.
 
 ### Calmer backdrop and background AI requests (branch `feature/ai-helper`) — `5187c0f3f`
 - **Darker overlay on the full-screen backdrop** (Home, Explore, Comfort,

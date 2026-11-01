@@ -3336,6 +3336,12 @@ class Translations$aiTab$en {
 
 	/// en: 'No picks came back'
 	String get noPicks => 'No picks came back';
+
+	/// en: 'More like this'
+	String get moreLikeThis => 'More like this';
+
+	/// en: 'more like ${title}'
+	String moreLike({required Object title}) => 'more like ${title}';
 }
 
 // Path: ai
@@ -9792,6 +9798,8 @@ extension on Translations {
 			'aiTab.retryChip' => ({required Object request}) => 'Retry: ${request}',
 			'aiTab.ready' => ({required Object request}) => 'New picks ready: ${request}',
 			'aiTab.noPicks' => 'No picks came back',
+			'aiTab.moreLikeThis' => 'More like this',
+			'aiTab.moreLike' => ({required Object title}) => 'more like ${title}',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10210,10 +10218,10 @@ extension on Translations {
 			'explore.badge.nextEpisodeIn' => ({required Object episode, required Object duration}) => 'Ep ${episode} in ${duration}',
 			'explore.badge.nextAiringIn' => ({required Object duration}) => 'Next in ${duration}',
 			'explore.badge.episodesShort' => ({required Object n}) => '${n} eps',
-			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
-			'explore.badge.adult' => '18+',
 			_ => null,
 		} ?? switch (path) {
+			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
+			'explore.badge.adult' => '18+',
 			'explore.stats.listed' => ({required Object n}) => '${n} listed',
 			'explore.stats.viewersDay' => ({required Object n}) => '${n} watched today',
 			'explore.stats.viewersWeek' => ({required Object n}) => '${n} watched this week',
@@ -10724,10 +10732,10 @@ extension on Translations {
 			'downloads.groupings.library' => 'Library',
 			'downloads.groupings.collections' => 'Collections',
 			'downloads.unknownLibrary' => 'Unknown library',
-			'downloads.unknownShow' => 'Unknown Show',
-			'downloads.unknownSeason' => 'Unknown Season',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.unknownShow' => 'Unknown Show',
+			'downloads.unknownSeason' => 'Unknown Season',
 			'downloads.unknownAlbum' => 'Unknown Album',
 			'downloads.completedOfTotal' => ({required Object completed, required Object total}) => '${completed}/${total} completed',
 			'downloads.errorFileNotFound' => 'File not found (404)',
