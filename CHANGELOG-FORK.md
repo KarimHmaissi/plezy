@@ -54,7 +54,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### Watchlist source switch and Comfort "Carry on watching" — `HASH`
+### Watchlist source switch and Comfort "Carry on watching" — `ef3f7c918`
 - **Watchlist**: a Plex / Trakt switch at the top (like Explore's source
   selector), remembered on the device and included in backups. Trakt's
   watchlist gets the same Films / TV genre shelves; Trakt's lower-case genre
