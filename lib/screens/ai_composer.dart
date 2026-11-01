@@ -185,18 +185,14 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Put the keyboard away before the app goes to the background, so the
     // window doesn't come back with the keyboard's inset still applied.
-    if (state != AppLifecycleState.resumed) _dropKeyboard();
+    // Only on a real background: Samsung reports inactive while the IME
+    // itself opens.
+    if (state == AppLifecycleState.paused) _dropKeyboard();
   }
 
   void _dropKeyboard() {
     if (_fieldFocus.hasFocus) _fieldFocus.unfocus();
     unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
-  }
-
-  @override
-  void deactivate() {
-    _dropKeyboard();
-    super.deactivate();
   }
 
   @override
@@ -432,6 +428,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   Widget _rise(double begin, double end, Widget child) {
     final a = _stage(begin, end);
     return FadeTransition(
+      // Keyed so that dropping a part on short screens (the keyboard
+      // opening) doesn't rebuild the parts after it, the input among them.
+      key: ValueKey<double>(begin),
       opacity: a,
       child: SlideTransition(
         position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(a),
@@ -447,6 +446,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     final wide = isTv || size.width >= 700;
 
     return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) _dropKeyboard();
+      },
       child: Scaffold(
         backgroundColor: Colors.black,
         resizeToAvoidBottomInset: true,
@@ -1237,12 +1239,17 @@ class _IrisTransition extends StatelessWidget {
       child: child,
       builder: (context, child) {
         final p = curved.value;
-        if (p >= 1) return child!;
+        // The same tree at every value: swapping it out once open would
+        // rebuild the composer (and lose its focus and keyboard).
         return Stack(
           fit: StackFit.expand,
           children: [
-            ClipPath(clipper: _IrisClipper(p, origin), child: child),
-            IgnorePointer(child: CustomPaint(painter: _BladesPainter(p, origin))),
+            ClipPath(
+              clipper: p >= 1 ? null : _IrisClipper(p, origin),
+              clipBehavior: p >= 1 ? Clip.none : Clip.antiAlias,
+              child: child,
+            ),
+            IgnorePointer(child: CustomPaint(painter: p >= 1 ? null : _BladesPainter(p, origin))),
           ],
         );
       },
