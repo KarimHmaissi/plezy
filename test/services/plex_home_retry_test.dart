@@ -24,6 +24,18 @@ class _SequenceClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
+    // Continue Watching tops itself up from /library/onDeck (older on-deck
+    // items the hub leaves out); answer it with nothing so these tests see
+    // only the requests they script.
+    if (request.url.path == '/library/onDeck') {
+      return Future.value(
+        http.StreamedResponse(
+          Stream.value(utf8.encode('{"MediaContainer":{"size":0}}')),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      );
+    }
     requests.add(request);
     if (_handlers.isEmpty) {
       throw StateError('Unexpected request: ${request.url}');

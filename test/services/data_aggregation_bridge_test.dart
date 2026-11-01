@@ -1023,8 +1023,10 @@ void main() {
 
       expect(result.items.map((item) => item.id), ['movie-1']);
       expect(result.succeededServerIds, {'plex-1'});
-      expect(captured.single.path, '/hubs');
-      expect(captured.single.queryParameters['count'], '21');
+      // The /library/onDeck top-up (older on-deck items) follows the hub.
+      final hub = captured.where((uri) => uri.path != '/library/onDeck').single;
+      expect(hub.path, '/hubs');
+      expect(hub.queryParameters['count'], '21');
     });
 
     test('getOnDeckFromAllServers filters hidden Plex continue-watching libraries', () async {
