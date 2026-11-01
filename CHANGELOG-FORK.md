@@ -38,6 +38,10 @@ Details of each are in the dated entries below.
   request now and then (for example once a day, with Haiku to keep it cheap),
   so they pick up new additions and drop what you've watched. Today they
   only refresh when you choose Refresh picks.
+- **Ask about this title** — from a title's detail page or its hold-OK
+  menu, ask the AI about that title ("is it scary?", "do I need to have
+  seen the first one?", "more like this but lighter"), with the answer and
+  any picks shown on the spot.
 - **"Previously on"** — when you go back to a show after a break, a short,
   spoiler-free AI recap of what's happened up to the episode you're on.
 
