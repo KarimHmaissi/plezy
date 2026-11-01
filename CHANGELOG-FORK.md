@@ -54,7 +54,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### AI helper: client, tools and eval harness (branch `feature/ai-helper`) — `HASH`
+### AI helper: client, tools and eval harness (branch `feature/ai-helper`) — `185f94c7e`
 - **Claude client** over HTTPS (there's no Dart SDK): Messages API
   `2026-10-21`, Sonnet 5.5 (main) / Haiku 5.5 (background), adaptive
   thinking at medium effort, cached system prompt and conversation, server
