@@ -41,7 +41,7 @@ class ForkSpacing {
   /// Folded phone: about three posters across.
   static const phone = ForkSpacing(
     edgeInset: 20,
-    rowGap: 28,
+    rowGap: 36,
     titleGap: 10,
     cardGap: 12,
     titleSize: 20,
