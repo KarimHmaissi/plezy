@@ -1185,6 +1185,9 @@
     }
   },
   "aiTab": {
+    "playOnTv": "Play on TV",
+    "chooseCopy": "Which copy?",
+    "pickUnavailable": "This title isn't on a server this phone can reach.",
     "loadMoreCard": "Load more",
     "findingMoreCard": "Finding more…",
     "noMoreCard": "No more matches",

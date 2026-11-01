@@ -16,6 +16,7 @@ import '../../utils/snackbar_helper.dart';
 import '../../utils/video_player_navigation.dart';
 import '../../widgets/optimized_media_image.dart';
 import 'mobile_remote_screen.dart';
+import '../ai_pick_open.dart';
 
 /// One request sent from this phone and what the TV has said about it.
 class RemoteAiAsk {
@@ -124,6 +125,11 @@ class _RemoteAiScreenState extends State<RemoteAiScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
+              leading: const Icon(Symbols.cast_rounded),
+              title: Text(t.aiTab.playOnTv),
+              onTap: () => Navigator.pop(context, 'play'),
+            ),
+            ListTile(
               leading: const Icon(Symbols.tv_rounded),
               title: Text(t.cast.showOnTv),
               onTap: () => Navigator.pop(context, 'open'),
@@ -138,6 +144,7 @@ class _RemoteAiScreenState extends State<RemoteAiScreen> {
       ),
     );
     if (!mounted) return;
+    if (choice == 'play') _playOnHost(remote, item);
     if (choice == 'open') remote.castOpen(item);
     if (choice == 'phone') unawaited(navigateToVideoPlayer(context, metadata: item, allowCast: false));
   }
@@ -251,7 +258,7 @@ class _RemoteAiScreenState extends State<RemoteAiScreen> {
                 ? null
                 : Text(answer.reasons[item.globalKey]!, maxLines: 3, overflow: TextOverflow.ellipsis),
             isThreeLine: answer.reasons[item.globalKey] != null,
-            onTap: () => _playOnHost(remote, item),
+            onTap: () => unawaited(openAiPick(context, item)),
             onLongPress: () => unawaited(_showActions(remote, item)),
           ),
       const Divider(),

@@ -248,6 +248,22 @@ class RowMenuEntries extends InheritedWidget {
   bool updateShouldNotify(RowMenuEntries oldWidget) => false;
 }
 
+/// Fork: entries a screen adds to the menu of each media item under it,
+/// built for that item (e.g. the phone AI tab's "Play on TV").
+class ItemMenuEntries extends InheritedWidget {
+  final List<MediaMenuExtraEntry> Function(MediaItem item) build;
+
+  const ItemMenuEntries({super.key, required this.build, required super.child});
+
+  static List<MediaMenuExtraEntry> of(BuildContext context, MediaItem? item) {
+    if (item == null) return const [];
+    return context.getInheritedWidgetOfExactType<ItemMenuEntries>()?.build(item) ?? const [];
+  }
+
+  @override
+  bool updateShouldNotify(ItemMenuEntries oldWidget) => false;
+}
+
 class MediaContextMenu extends StatefulWidget {
   /// Either a [MediaItem] or a [MediaPlaylist]. Typed as [Object] because
   /// Dart has no nominal union type — guarded at runtime via the
@@ -441,6 +457,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     final collection = menu.isCollection ? menu.mediaItem : null;
     final moreLikeThis = menu.mediaItem == null ? null : AiMoreLikeThis.entryForItem(menu.mediaItem!);
     final leading = [
+      ...ItemMenuEntries.of(this.context, menu.mediaItem),
       ...RowMenuEntries.of(this.context),
       ?moreLikeThis,
       if (collection != null && collection.backend == MediaBackend.plex && collection.serverId != null)

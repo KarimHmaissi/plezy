@@ -92,6 +92,17 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Phone: AI picks open their page (branch `feature/ai-helper`)
+- Tapping a pick on the phone's AI tab (mirror mode and the plain remote
+  AI screen) now opens the title's page like a card anywhere else, instead
+  of playing it on the TV at once. The pick is looked up on the phone's own
+  server connections by its Plex guid; a title on more than one server
+  asks "Which copy?" first. Play on that page casts while connected, or
+  plays on the phone.
+- "Play on TV" stays as a quick option in the pick's long-press menu
+  (`ItemMenuEntries`: per-item menu entries a screen can add).
+- TV and Mac AI rows already opened the page; unchanged.
+
 ### Touch polish, round two (branch `feature/ai-helper`)
 - **Play / Resume** (film and show pages, and Play Version): presses in
   and ticks.

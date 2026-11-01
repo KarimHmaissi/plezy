@@ -29,6 +29,7 @@ import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
 import 'ai_composer.dart';
+import 'ai_pick_open.dart';
 import '../services/settings_service.dart';
 import '../services/ai/ai_home_refresher.dart';
 import '../services/ai/ai_more_like_this.dart';
@@ -45,7 +46,7 @@ import '../utils/snackbar_helper.dart';
 import '../widgets/focused_scroll_scaffold.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/hub_section.dart';
-import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
+import '../widgets/media_context_menu.dart' show ItemMenuEntries, MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/side_navigation_rail.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
@@ -852,6 +853,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     return null;
   }
 
+  List<MediaMenuExtraEntry> _pickMenuEntries(MediaItem item) {
+    if (!_thinClient || !context.read<CompanionRemoteProvider>().isConnected) return const [];
+    return [
+      MediaMenuExtraEntry(icon: Symbols.cast_rounded, label: t.aiTab.playOnTv, onSelected: () => _playPick(item)),
+    ];
+  }
+
+  /// Phone menu: play a pick straight away (on the TV while casting).
   void _playPick(MediaItem item) {
     if (item.kind == MediaKind.movie || item.kind == MediaKind.episode) {
       unawaited(navigateToVideoPlayer(context, metadata: item));
@@ -859,6 +868,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       unawaited(navigateToMediaItem(context, item));
     }
   }
+
+  Future<void> _openPick(MediaItem item) => openAiPick(context, item);
 
   /// Phones don't run the AI themselves: requests go to the TV app they're
   /// connected to (its key, index and history).
@@ -887,13 +898,16 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
               SliverToBoxAdapter(
                 child: RowMenuEntries(
                   entries: _rowMenuEntries(hub),
-                  child: HubSection(
-                    hub: hub,
-                    trailingCard: _trailingCard(hub),
-                    focusMemory: _hubFocusMemory,
-                    icon: Symbols.auto_awesome_rounded,
-                    // Phone: a tap plays (on the TV while casting); shows open.
-                    onItemTap: _thinClient ? _playPick : null,
+                  child: ItemMenuEntries(
+                    build: _pickMenuEntries,
+                    child: HubSection(
+                      hub: hub,
+                      trailingCard: _trailingCard(hub),
+                      focusMemory: _hubFocusMemory,
+                      icon: Symbols.auto_awesome_rounded,
+                      // Phone: a tap plays (on the TV while casting); shows open.
+                      onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                    ),
                   ),
                 ),
               ),

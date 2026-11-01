@@ -3274,6 +3274,15 @@ class Translations$aiTab$en {
 
 	// Translations
 
+	/// en: 'Play on TV'
+	String get playOnTv => 'Play on TV';
+
+	/// en: 'Which copy?'
+	String get chooseCopy => 'Which copy?';
+
+	/// en: 'This title isn't on a server this phone can reach.'
+	String get pickUnavailable => 'This title isn\'t on a server this phone can reach.';
+
 	/// en: 'Load more'
 	String get loadMoreCard => 'Load more';
 
@@ -10022,6 +10031,9 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.usersOnly' => 'Users only',
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
+			'aiTab.playOnTv' => 'Play on TV',
+			'aiTab.chooseCopy' => 'Which copy?',
+			'aiTab.pickUnavailable' => 'This title isn\'t on a server this phone can reach.',
 			'aiTab.loadMoreCard' => 'Load more',
 			'aiTab.findingMoreCard' => 'Finding more…',
 			'aiTab.noMoreCard' => 'No more matches',
@@ -10461,11 +10473,11 @@ extension on Translations {
 			'explore.badge.rankPopular' => ({required Object n}) => '#${n} popular',
 			'explore.badge.rankAiring' => ({required Object n}) => '#${n} airing',
 			'explore.badge.rankRated' => ({required Object n}) => '#${n} rated',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.rankTrending' => ({required Object n}) => '#${n} trending',
 			'explore.badge.rankSeasonal' => ({required Object n, required Object season}) => '#${n} in ${season}',
 			'explore.badge.watchingNow' => ({required Object n}) => '${n} watching',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.available' => 'Available',
 			'explore.badge.partiallyAvailable' => 'Partly available',
 			'explore.badge.availableIn4k' => '4K available',
@@ -10975,11 +10987,11 @@ extension on Translations {
 			'downloads.backgroundWarning.reasonDataSaver' => 'Data Saver is on, which blocks background downloads on mobile data. Downloads should still run on Wi-Fi.',
 			'downloads.backgroundWarning.reasonOemUnknown' => 'Downloads repeatedly stopped while Plezy was in the background. Check Plezy\'s battery or background usage settings.',
 			'downloads.backgroundWarning.openSettings' => 'Open settings',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.backgroundWarning.stillNotWorking' => 'Device-specific help',
 			'downloads.backgroundWarning.stillNotWorkingDescription' => 'See steps for your device, or send a log from Settings › View Logs if the issue continues.',
 			'downloads.backgroundWarning.dialogTitle' => 'Downloads may not finish',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.backgroundWarning.dialogDownloadAnyway' => 'Download anyway',
 			'downloads.backgroundWarning.dialogFixFirst' => 'Fix this first',
 			'downloads.backgroundWarning.statusTile' => 'Background downloads',
@@ -11489,11 +11501,11 @@ extension on Translations {
 			'aiComposer.random' => 'Random film',
 			'aiComposer.randomRequest' => 'Surprise me with a random great film',
 			'aiComposer.take1' => 'Take 1 · Reading your library',
+			_ => null,
+		} ?? switch (path) {
 			'aiComposer.take2' => 'Take 2 · Shortlisting',
 			'aiComposer.take3' => 'Take 3 · Final cut',
 			'aiComposer.wrap' => 'That\'s a wrap',
-			_ => null,
-		} ?? switch (path) {
 			'aiComposer.jammed' => 'Film jammed',
 			'aiComposer.timedOut' => 'The TV didn\'t answer in time.',
 			'aiComposer.edit' => 'Edit',
