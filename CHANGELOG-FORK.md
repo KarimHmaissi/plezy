@@ -53,7 +53,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### Local database + Backup & transfer — `HASH`
+### Local database + Backup & transfer — `f50a7ef09`
 - The fork's customisations now live in their own local SQLite database
   (`plezy_fork.db`, beside Plezy's `plezy_downloads.db`, using the same
   drift library), not in Trakt list descriptions. Tables: Home rows (ordered,
