@@ -54,6 +54,24 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### AI tab (branch `feature/ai-helper`) — `HASH`
+- **New AI item in the side nav** (after Comfort). On opening, Haiku 5.5
+  says hello and makes **Tonight** picks from your history and what you're
+  partway through (e.g. "You're one episode from finishing Solo Leveling").
+  They're reused for 4 hours; ↻ makes new ones.
+- **Ask** opens a box for any request. Sonnet 5.5 answers with a row of
+  normal playable cards, newest row at the top and focused. The line at the
+  top of the screen shows the focused pick's reason.
+- **Follow up** keeps the conversation: "only films, nothing too long" after
+  "something like Severance" narrows to films. **New conversation** clears it.
+- Without a key the tab explains where to add one (Settings ▸ AI).
+- Eval fixes:
+  - A perfect 10.0 audience rating (usually a handful of votes on a new
+    release) now counts as 7.0 in "best rated" ordering and is flagged to the
+    model as "likely few votes".
+  - The helper prefers the last ~25 years unless asked for classics.
+  - Yes/no questions ("is X on my server?") always come with a playable card.
+
 ### AI helper: client, tools and eval harness (branch `feature/ai-helper`) — `185f94c7e`
 - **Claude client** over HTTPS (there's no Dart SDK): Messages API
   `2026-10-21`, Sonnet 5.5 (main) / Haiku 5.5 (background), adaptive

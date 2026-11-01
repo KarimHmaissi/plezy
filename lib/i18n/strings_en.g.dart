@@ -65,6 +65,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$profiles$en profiles = Translations$profiles$en.internal(_root);
 	late final Translations$connections$en connections = Translations$connections$en.internal(_root);
 	late final Translations$accountPreferences$en accountPreferences = Translations$accountPreferences$en.internal(_root);
+	late final Translations$aiTab$en aiTab = Translations$aiTab$en.internal(_root);
 	late final Translations$ai$en ai = Translations$ai$en.internal(_root);
 	late final Translations$backupTransfer$en backupTransfer = Translations$backupTransfer$en.internal(_root);
 	late final Translations$homeRows$en homeRows = Translations$homeRows$en.internal(_root);
@@ -3256,6 +3257,57 @@ class Translations$accountPreferences$en {
 	late final Translations$accountPreferences$mediaReviewsOptions$en mediaReviewsOptions = Translations$accountPreferences$mediaReviewsOptions$en.internal(_root);
 }
 
+// Path: aiTab
+class Translations$aiTab$en {
+	Translations$aiTab$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Tonight'
+	String get tonight => 'Tonight';
+
+	/// en: 'Ask'
+	String get ask => 'Ask';
+
+	/// en: 'Follow up'
+	String get followUp => 'Follow up';
+
+	/// en: 'What do you feel like watching?'
+	String get askTitle => 'What do you feel like watching?';
+
+	/// en: 'Follow up'
+	String get followUpTitle => 'Follow up';
+
+	/// en: 'e.g. a short funny film, or something like Severance'
+	String get askHint => 'e.g. a short funny film, or something like Severance';
+
+	/// en: 'Looking for: ${request}'
+	String thinking({required Object request}) => 'Looking for: ${request}';
+
+	/// en: 'Picking a few things for tonight…'
+	String get preparingTonight => 'Picking a few things for tonight…';
+
+	/// en: 'New conversation'
+	String get newConversation => 'New conversation';
+
+	/// en: 'New Tonight picks'
+	String get refreshTonight => 'New Tonight picks';
+
+	/// en: 'Add your Anthropic API key'
+	String get noKeyTitle => 'Add your Anthropic API key';
+
+	/// en: 'The AI helper needs your own API key. Add it in Settings ▸ AI.'
+	String get noKeyMessage => 'The AI helper needs your own API key. Add it in Settings ▸ AI.';
+
+	/// en: 'Ask for something to watch'
+	String get emptyTitle => 'Ask for something to watch';
+
+	/// en: 'Press Ask and describe what you're in the mood for.'
+	String get emptyMessage => 'Press Ask and describe what you\'re in the mood for.';
+}
+
 // Path: ai
 class Translations$ai$en {
 	Translations$ai$en.internal(this._root);
@@ -4066,6 +4118,9 @@ class Translations$navigation$en {
 	final Translations _root; // ignore: unused_field
 
 	// Translations
+
+	/// en: 'AI'
+	String get ai => 'AI';
 
 	/// en: 'Libraries'
 	String get libraries => 'Libraries';
@@ -9683,6 +9738,20 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.usersOnly' => 'Users only',
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
+			'aiTab.tonight' => 'Tonight',
+			'aiTab.ask' => 'Ask',
+			'aiTab.followUp' => 'Follow up',
+			'aiTab.askTitle' => 'What do you feel like watching?',
+			'aiTab.followUpTitle' => 'Follow up',
+			'aiTab.askHint' => 'e.g. a short funny film, or something like Severance',
+			'aiTab.thinking' => ({required Object request}) => 'Looking for: ${request}',
+			'aiTab.preparingTonight' => 'Picking a few things for tonight…',
+			'aiTab.newConversation' => 'New conversation',
+			'aiTab.refreshTonight' => 'New Tonight picks',
+			'aiTab.noKeyTitle' => 'Add your Anthropic API key',
+			'aiTab.noKeyMessage' => 'The AI helper needs your own API key. Add it in Settings ▸ AI.',
+			'aiTab.emptyTitle' => 'Ask for something to watch',
+			'aiTab.emptyMessage' => 'Press Ask and describe what you\'re in the mood for.',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -9988,6 +10057,7 @@ extension on Translations {
 			'licenses.license' => 'License',
 			'licenses.licenseNumber' => ({required Object number}) => 'License ${number}',
 			'licenses.licensesCount' => ({required Object count}) => '${count} licenses',
+			'navigation.ai' => 'AI',
 			'navigation.libraries' => 'Libraries',
 			'navigation.downloads' => 'Downloads',
 			'navigation.liveTv' => 'Live TV',
@@ -10112,6 +10182,8 @@ extension on Translations {
 			'explore.stats.favorited' => ({required Object n}) => '${n} favorites',
 			'explore.stats.dropRate' => ({required Object percent}) => '${percent} dropped it',
 			'explore.stats.comments' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} comment', other: '${n} comments', ), 
+			_ => null,
+		} ?? switch (path) {
 			'explore.stats.votes' => ({required Object n}) => '${n} votes',
 			'explore.stats.watching' => ({required Object n}) => '${n} watching it',
 			'explore.stats.completed' => ({required Object n}) => '${n} completed',
@@ -10127,8 +10199,6 @@ extension on Translations {
 			'explore.format.movie' => 'Movie',
 			'explore.format.special' => 'Special',
 			'explore.format.ova' => 'OVA',
-			_ => null,
-		} ?? switch (path) {
 			'explore.format.ona' => 'ONA',
 			'explore.format.music' => 'Music',
 			'explore.format.other' => 'Other',
@@ -10626,6 +10696,8 @@ extension on Translations {
 			'downloads.errorPostProcessing' => ({required Object reason}) => 'Post-processing failed: ${reason}',
 			'downloads.reasonFileNotSaved' => 'the file could not be saved on this device',
 			'downloads.reasonCannotResume' => 'the partial download could not be resumed',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.reasonDeviceStorageFull' => 'this device is out of storage',
 			'downloads.notificationDownloading' => 'Downloading...',
 			'downloads.notificationComplete' => 'Download complete',
@@ -10641,8 +10713,6 @@ extension on Translations {
 			'shaders.mode' => 'Mode',
 			'shaders.importShader' => 'Import Shader',
 			'shaders.customShaderDescription' => 'Custom GLSL shader',
-			_ => null,
-		} ?? switch (path) {
 			'shaders.shaderImported' => 'Shader imported',
 			'shaders.shaderImportFailed' => 'Failed to import shader',
 			'shaders.deleteShader' => 'Delete Shader',

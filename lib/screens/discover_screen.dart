@@ -357,6 +357,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   Timer? _rowRetryTimer;
+  Timer? _indexStartTimer;
   int _rowRetries = 0;
   static const int _maxRowRetries = 4;
 
@@ -568,7 +569,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _homePins.addListener(_onHomePinsChanged);
     // Build or refresh the library index in the background once the
     // servers have connected and startup has settled.
-    Future<void>.delayed(const Duration(seconds: 30), () {
+    _indexStartTimer = Timer(const Duration(seconds: 30), () {
       if (!mounted) return;
       final servers = context.read<MultiServerProvider>();
       unawaited(
@@ -743,6 +744,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
     _homePins.removeListener(_onHomePinsChanged);
     _rowRetryTimer?.cancel();
+    _indexStartTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();

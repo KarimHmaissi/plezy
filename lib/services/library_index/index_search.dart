@@ -3,6 +3,11 @@ import 'package:drift/drift.dart';
 import 'index_database.dart';
 import 'library_index.dart';
 
+/// The audience rating used for "best rated" ordering. Plex often reports a
+/// perfect 10.0 for titles with only a handful of votes (very common on new
+/// releases), so a 10.0 counts as 7.0 here instead of topping every list.
+const String trustedRatingSql = 'CASE WHEN audience_rating >= 9.95 THEN 7.0 ELSE audience_rating END';
+
 enum IndexWatchFilter { any, unwatched, inProgress, watched }
 
 enum IndexSort { rating, added, released, title }
@@ -108,7 +113,7 @@ extension LibraryIndexSearch on LibraryIndex {
         add("((type = 'movie' AND view_count > 0) OR (type = 'show' AND watched_episode_count >= episode_count))");
     }
     final order = switch (query.sort) {
-      IndexSort.rating => 'audience_rating DESC NULLS LAST, critic_rating DESC NULLS LAST',
+      IndexSort.rating => '$trustedRatingSql DESC NULLS LAST, critic_rating DESC NULLS LAST',
       IndexSort.added => 'added_at DESC',
       IndexSort.released => 'release_date DESC NULLS LAST',
       IndexSort.title => 'title COLLATE NOCASE',

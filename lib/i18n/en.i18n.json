@@ -1182,6 +1182,22 @@
       "nobody": "Hidden"
     }
   },
+  "aiTab": {
+    "tonight": "Tonight",
+    "ask": "Ask",
+    "followUp": "Follow up",
+    "askTitle": "What do you feel like watching?",
+    "followUpTitle": "Follow up",
+    "askHint": "e.g. a short funny film, or something like Severance",
+    "thinking": "Looking for: ${request}",
+    "preparingTonight": "Picking a few things for tonight…",
+    "newConversation": "New conversation",
+    "refreshTonight": "New Tonight picks",
+    "noKeyTitle": "Add your Anthropic API key",
+    "noKeyMessage": "The AI helper needs your own API key. Add it in Settings ▸ AI.",
+    "emptyTitle": "Ask for something to watch",
+    "emptyMessage": "Press Ask and describe what you're in the mood for."
+  },
   "ai": {
     "settingsTitle": "AI",
     "settingsSubtitle": "Anthropic API key for the AI helper",
@@ -1527,6 +1543,7 @@
     "licensesCount": "${count} licenses"
   },
   "navigation": {
+    "ai": "AI",
     "libraries": "Libraries",
     "downloads": "Downloads",
     "liveTv": "Live TV",

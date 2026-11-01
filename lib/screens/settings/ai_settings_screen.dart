@@ -11,6 +11,7 @@ import '../../providers/catalog_sources_provider.dart';
 import '../../services/ai/ai_eval.dart';
 import '../../services/ai/ai_key_receiver.dart';
 import '../../services/ai/ai_spend.dart';
+import '../../services/ai/claude_client.dart';
 import '../../services/catalog/trakt_catalog_source.dart';
 import '../../services/library_index/library_index.dart';
 import 'ai_try_screen.dart';
@@ -171,6 +172,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       final path = await AiEval.run(
         index: LibraryIndex.instance,
         trakt: trakt?.client,
+        models: const [ClaudeModel.sonnet],
         onProgress: (p) {
           if (mounted) setState(() => _evalStatus = 'Running $p');
         },
@@ -256,7 +258,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
             if (hint != null && kDebugMode)
               FocusableListTile(
                 leading: const AppIcon(Symbols.science_rounded, fill: 1),
-                title: const Text('Run eval (prompt list × Sonnet and Haiku)'),
+                title: const Text('Run eval (prompt list × Sonnet)'),
                 subtitle: Text(_evalStatus ?? AiEval.promptsFile),
                 onTap: _evalStatus != null && !_evalStatus!.startsWith('Done') ? null : () => unawaited(_eval()),
               ),

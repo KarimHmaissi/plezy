@@ -275,7 +275,8 @@ class AiTools {
       '${t.title}${t.year == null ? '' : ' (${t.year})'}',
       t.type,
       if (t.genres.isNotEmpty) t.genres.replaceAll('|', ', '),
-      if (t.audienceRating != null) '★${t.audienceRating!.toStringAsFixed(1)}',
+      if (t.audienceRating != null)
+        t.audienceRating! >= 9.95 ? '★10.0 (likely few votes)' : '★${t.audienceRating!.toStringAsFixed(1)}',
       if (t.type == 'movie' && t.durationMinutes != null) '${t.durationMinutes} min',
       if (t.type == 'show' && t.episodeCount != null) '${t.episodeCount} eps',
       if (t.releaseDate != null && t.type == 'show') 'first aired ${t.releaseDate}',

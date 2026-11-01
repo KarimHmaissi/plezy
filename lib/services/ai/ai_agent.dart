@@ -73,10 +73,14 @@ How to work:
 - Only pick titles whose ids came back from the tools. Never invent ids or claim a title is available without a tool saying so.
 - Prefer one entry per title (the tools already merge 4K copies and the second server).
 - Respect explicit limits: unwatched means unwatched; runtime limits; "not too long" means roughly under 2 hours.
-- Finish by calling show_picks exactly once with 3-12 picks, best first, each with one short, specific reason. If nothing fits, say so briefly instead.
+- Prefer films and shows from roughly the last 25 years unless the user asks for classics, a decade, or older titles; a few standout older picks are fine.
+- Finish by calling show_picks exactly once with 3-12 picks, best first, each with one short, specific reason.
+- Always finish with show_picks, even for yes/no questions ("is X on my server?", "do I have Y?"): put the answer in the intro and the title (or the closest matches) as picks so the user can play it. If nothing fits, call show_picks with an intro saying so and no picks.
 - Keep it quick: a few well-chosen tool calls, not exhaustive searching.''';
 
-  Future<AiAnswer> ask(String request) async {
+  /// [previous] carries earlier turns of this conversation (request and
+  /// picks), so follow-ups like "lighter" or "only films" make sense.
+  Future<AiAnswer> ask(String request, {List<({String request, AiAnswer answer})> previous = const []}) async {
     final started = DateTime.now();
     final tools = AiTools(index: index, trakt: trakt);
     final calls = <AiToolCall>[];
@@ -96,7 +100,7 @@ How to work:
       {
         'role': 'user',
         'content': [
-          {'type': 'text', 'text': 'Today is $today.\n\n$request'},
+          {'type': 'text', 'text': 'Today is $today.\n\n${_previousContext(previous)}$request'},
         ],
       },
     ];
@@ -178,6 +182,24 @@ How to work:
     }
     return _answer(tools, texts, calls, started, cost, input, output, cached, error);
   }
+
+  static String _previousContext(List<({String request, AiAnswer answer})> previous) {
+    if (previous.isEmpty) return '';
+    final recent = previous.length > 3 ? previous.sublist(previous.length - 3) : previous;
+    final lines = [
+      for (final turn in recent)
+        'Earlier request: "${turn.request}" -> you picked: '
+            '${turn.answer.picks.map((p) => '${p.title.title}${p.title.year == null ? '' : ' (${p.title.year})'}').join(', ')}',
+    ];
+    return 'This is a follow-up in the same conversation.\n${lines.join('\n')}\n'
+        'New request (avoid repeating earlier picks unless asked): ';
+  }
+
+  /// The request behind the AI tab's greeting and "Tonight" picks.
+  static const String tonightRequest =
+      'Greet me in one short, warm sentence (as the show_picks intro) and suggest 6 things for tonight: mix '
+      "finishing something I'm partway through with fresh picks that fit my recent history. Use get_history "
+      'and get_continue_watching.';
 
   Future<AiAnswer> _answer(
     AiTools tools,
