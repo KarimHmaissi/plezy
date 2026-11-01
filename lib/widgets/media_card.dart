@@ -40,6 +40,7 @@ import 'media_context_menu.dart';
 import 'media_card_list_layout.dart';
 import 'backend_badge.dart';
 import 'optimized_media_image.dart';
+import 'pressable.dart';
 
 const _failedPosterUrlCacheLimit = 512;
 final _failedPosterUrls = <String>{};
@@ -511,6 +512,9 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
             catalogItem: _catalogItem,
             enableDetailLinks: enableDetailLinks,
           );
+
+    // Fork: press-in, long-press tick and spring-back on touch.
+    cardWidget = Pressable(child: cardWidget);
 
     cardWidget = Semantics(
       container: preserveDetailSemantics,

@@ -13,6 +13,7 @@ import '../media/media_item.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../widgets/optimized_media_image.dart';
+import '../widgets/pressable.dart';
 
 /// Fork: the full-screen AI composer, the way into the AI feature. A slow
 /// mosaic of the user's own posters behind an accent glow, a large input
@@ -400,7 +401,11 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
                 onNavigateLeft: i > 0 ? () => _chipNode(i - 1).requestFocus() : null,
                 onNavigateRight: i < chips.length - 1 ? () => _chipNode(i + 1).requestFocus() : null,
                 onNavigateUp: _fieldFocus.requestFocus,
-                child: _Chip(chip: chip, accent: accent, large: isTv, onTap: () => unawaited(_send(chip.request))),
+                child: Pressable(
+                  longPress: false,
+                  borderRadius: BorderRadius.circular(40),
+                  child: _Chip(chip: chip, accent: accent, large: isTv, onTap: () => unawaited(_send(chip.request))),
+                ),
               );
             },
           ),

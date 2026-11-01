@@ -512,6 +512,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
       // Optimistic inside the source; the row/screens listening to
       // watchlistChanges (including this one) rebuild immediately.
       await mutateWatchlistMembership(metadata.kind, candidate, add: !current);
+      ForkMotion.success();
     } catch (_) {
       if (mounted) showErrorSnackBar(context, t.explore.watchlistUpdateFailed);
     } finally {

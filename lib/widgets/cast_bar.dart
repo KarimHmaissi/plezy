@@ -12,6 +12,7 @@ import '../screens/companion_remote/now_playing_screen.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
 import 'optimized_media_image.dart';
+import '../theme/fork_motion.dart';
 
 /// Phone side of casting: while connected to a TV app, shows where Play goes
 /// (the TV, or this phone) and, while the TV is playing, a mini player that
@@ -109,7 +110,10 @@ class _CastBarState extends State<CastBar> {
     return Material(
       color: theme.colorScheme.surfaceContainerHigh,
       child: InkWell(
-        onTap: () => unawaited(NowPlayingScreen.open(context)),
+        onTap: () {
+          ForkMotion.selection();
+          unawaited(NowPlayingScreen.open(context));
+        },
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -152,7 +156,10 @@ class _CastBarState extends State<CastBar> {
                   ),
                   IconButton(
                     tooltip: t.cast.playPause,
-                    onPressed: () => remote.sendCommand(RemoteCommandType.playPause),
+                    onPressed: () {
+                      ForkMotion.selection();
+                      remote.sendCommand(RemoteCommandType.playPause);
+                    },
                     icon: Icon(now.playing ? Symbols.pause_rounded : Symbols.play_arrow_rounded, fill: 1),
                   ),
                 ],

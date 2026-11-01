@@ -1,0 +1,48 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
+
+import '../utils/platform_detector.dart';
+
+/// Fork: shared timing, curves and haptics for touch feedback, so presses,
+/// long-presses and confirmations feel the same everywhere (modelled on
+/// Plex's mobile app). TV and desktop get no haptics.
+abstract final class ForkMotion {
+  /// Press-in when a finger lands on something tappable.
+  static const pressIn = Duration(milliseconds: 100);
+
+  /// Spring back on release.
+  static const release = Duration(milliseconds: 260);
+
+  static const pressCurve = Curves.easeOutCubic;
+  static const releaseCurve = Curves.easeOutBack;
+
+  /// Scale while pressed, and once a long press is recognised.
+  static const pressedScale = 0.96;
+  static const longPressedScale = 0.93;
+
+  static bool reduceMotion(BuildContext context) => MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+  static bool get _haptics => !PlatformDetector.isTV() && (Platform.isAndroid || Platform.isIOS);
+
+  /// Tab switches, chips, toggles, play/pause.
+  static void selection() {
+    if (_haptics) HapticFeedback.selectionClick();
+  }
+
+  /// A long press was recognised.
+  static void longPress() {
+    if (_haptics) HapticFeedback.mediumImpact();
+  }
+
+  /// Something was added or saved.
+  static void success() {
+    if (_haptics) HapticFeedback.lightImpact();
+  }
+
+  /// Something failed.
+  static void error() {
+    if (_haptics) HapticFeedback.heavyImpact();
+  }
+}

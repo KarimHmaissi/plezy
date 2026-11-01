@@ -92,6 +92,16 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Touch polish: press feedback and haptics (branch `feature/ai-helper`)
+- **Cards press in:** posters and episodes sink slightly and dim on touch,
+  sink further with a haptic tick when a long press lands (the context menu),
+  and spring back on release. Scrolling a row cancels it. Off on TV.
+- **Haptics:** a selection tick on bottom tabs, the cast bar's play/pause
+  and open, and the phone remote's buttons; a light tap on adding to the
+  watchlist and on success messages; a firm one on errors. Phones only.
+- Shared timings and curves in `lib/theme/fork_motion.dart`, the press
+  wrapper in `lib/widgets/pressable.dart`.
+
 ### Full-screen AI composer (branch `feature/ai-helper`)
 - **Ask opens a full-screen composer** on TV, Mac and phone instead of a
   small text dialog: a slowly drifting mosaic of your own posters (fetched

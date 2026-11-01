@@ -11,6 +11,7 @@ import '../../providers/companion_remote_provider.dart';
 import '../../utils/formatters.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/optimized_media_image.dart';
+import '../../theme/fork_motion.dart';
 
 /// What the host is playing, as sent in its `nowPlaying` updates, with the
 /// position carried forward between updates so the clock runs smoothly.
@@ -106,7 +107,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     if (mounted) setState(() => _now = HostNowPlaying(data));
   }
 
-  void _send(RemoteCommandType type) => _remote.sendCommand(type);
+  void _send(RemoteCommandType type) {
+    ForkMotion.selection();
+    _remote.sendCommand(type);
+  }
 
   Future<void> _pickTrack(String kind, List<({String id, String label})> tracks, String? selected) async {
     final choice = await showModalBottomSheet<String>(

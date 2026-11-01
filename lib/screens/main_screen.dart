@@ -92,6 +92,7 @@ import 'profile/profile_switch_screen.dart';
 import 'video_player_screen.dart';
 import 'profile/profile_teardown.dart';
 import '../watch_together/watch_together.dart';
+import '../theme/fork_motion.dart';
 
 /// Provides access to the main screen's focus control.
 // MainScreenFocusScope and SideNavigationBleedBuilder live in
@@ -1902,6 +1903,7 @@ class _MainScreenState extends State<MainScreen>
   void _selectTab(NavigationTabId tab, {bool focusSearchInput = true}) {
     // Guard: ignore if tab isn't available in current mode
     if (!_getVisibleTabs(_isOffline).any((t) => t.id == tab)) return;
+    ForkMotion.selection();
 
     final previousTab = _currentTab;
     final wasMounted = _mountedTabs.contains(tab);

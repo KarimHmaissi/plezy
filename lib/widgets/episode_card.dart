@@ -26,6 +26,7 @@ import '../widgets/media_context_menu.dart';
 import '../widgets/placeholder_container.dart';
 import '../theme/mono_tokens.dart';
 import '../media/media_server_client.dart';
+import 'pressable.dart';
 
 /// Episode card widget with D-pad long-press support
 class EpisodeCard extends StatefulWidget {
@@ -141,7 +142,8 @@ class _EpisodeCardState extends State<EpisodeCard> with ContextMenuTapMixin<Epis
           onSelect: widget.onTap,
           onLongPress: showContextMenuFromTap,
           disableScale: true,
-          child: MediaContextMenu(
+          child: Pressable(
+            child: MediaContextMenu(
             key: contextMenuKey,
             item: episode,
             onRefresh: widget.onRefresh,
@@ -304,6 +306,7 @@ class _EpisodeCardState extends State<EpisodeCard> with ContextMenuTapMixin<Epis
                 ),
               ),
             ),
+          ),
           ),
         ),
       ),

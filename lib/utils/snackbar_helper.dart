@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../navigation/profile_navigation_scope.dart';
 import 'layout_constants.dart';
 import 'platform_detector.dart';
+import '../theme/fork_motion.dart';
 
 /// Global key for the root ScaffoldMessenger, allowing snackbars to survive navigation.
 final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -94,6 +95,7 @@ void showAppSnackBar(BuildContext context, String message, {Duration? duration})
 }
 
 void showErrorSnackBar(BuildContext context, String message) {
+  ForkMotion.error();
   showSnackBar(context, message, type: SnackBarType.error);
 }
 
@@ -126,5 +128,6 @@ void showMainSnackBar(String message, {Duration duration = AppDurations.snackBar
 }
 
 void showSuccessSnackBar(BuildContext context, String message) {
+  ForkMotion.success();
   showSnackBar(context, message, type: SnackBarType.success);
 }
