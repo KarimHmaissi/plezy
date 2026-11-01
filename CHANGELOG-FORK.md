@@ -92,6 +92,23 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### AI composer on short screens; keyboard gap fix (branch `feature/ai-helper`)
+- **Fold cover screen:** below ~620dp of height (the cover screen, or any
+  phone with the keyboard up) the composer anchors above the keyboard: a
+  one-line headline (36-46sp), no "Quick start" label, chips fully
+  visible; under ~470dp the eyebrow and mark go too. Close moved to the
+  top right (48dp) clear of the text. The send key is solid amber with
+  text and an amber outline on black when empty, never see-through. The
+  poster wall is mostly desaturated and dimmed with a darker scrim behind
+  the content. The film strip scales to a third of the height.
+- **Stale keyboard gap:** switching apps with the composer's keyboard up
+  could bring the app back with the bottom bar and cast bar pushed
+  halfway up. The main shell no longer resizes for the keyboard (screens
+  with fields resize themselves), and the composer puts the keyboard away
+  when the app pauses and when it closes (test added).
+- **Press feedback fix:** `Pressable` passes its child's constraints
+  through unchanged (it had loosened them, shrinking the composer chips).
+
 ### AI composer, cinema cut 2 (branch `feature/ai-helper`)
 - **Iris from the Ask button:** the iris now opens centred on the button
   you pressed, sized to clear the furthest corner.

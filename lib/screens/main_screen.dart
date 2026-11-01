@@ -2349,6 +2349,10 @@ class _MainScreenState extends State<MainScreen>
   /// the content must not indent for it a second time.
   Widget _buildLandscapeShell(BuildContext context) {
     return Scaffold(
+      // Fork: the shell never moves for the keyboard (screens with fields
+      // have their own Scaffolds that do). A stale IME inset after an app
+      // switch on Samsung pushed the bottom bar halfway up the screen.
+      resizeToAvoidBottomInset: false,
       body: Builder(
         builder: (context) {
           final isRtl = Directionality.of(context) == TextDirection.rtl;
@@ -2388,6 +2392,10 @@ class _MainScreenState extends State<MainScreen>
 
   Widget _buildPortraitShell(BuildContext context) {
     return Scaffold(
+      // Fork: the shell never moves for the keyboard (screens with fields
+      // have their own Scaffolds that do). A stale IME inset after an app
+      // switch on Samsung pushed the bottom bar halfway up the screen.
+      resizeToAvoidBottomInset: false,
       body: _buildTickerAwareStack(),
       bottomNavigationBar: Column(
         key: _navBarKey,

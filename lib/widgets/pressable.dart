@@ -95,7 +95,9 @@ class _PressableState extends State<Pressable> with SingleTickerProviderStateMix
       onPointerCancel: (_) => _release(),
       child: ScaleTransition(
         scale: _scale,
+        // Passthrough: the child keeps the exact constraints it had.
         child: Stack(
+          fit: StackFit.passthrough,
           children: [
             widget.child,
             Positioned.fill(

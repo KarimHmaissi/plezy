@@ -5,6 +5,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../focus/focusable_button.dart';
@@ -90,7 +91,7 @@ class _QuickStart {
   final String request;
 }
 
-class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
+class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, WidgetsBindingObserver {
   final _controller = TextEditingController();
   final _fieldFocus = FocusNode(debugLabel: 'AiComposerField');
   final _sendFocus = FocusNode(debugLabel: 'AiComposerSend');
@@ -156,6 +157,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller.addListener(() => setState(() {}));
   }
 
@@ -180,7 +182,26 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Put the keyboard away before the app goes to the background, so the
+    // window doesn't come back with the keyboard's inset still applied.
+    if (state != AppLifecycleState.resumed) _dropKeyboard();
+  }
+
+  void _dropKeyboard() {
+    if (_fieldFocus.hasFocus) _fieldFocus.unfocus();
+    unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
+  }
+
+  @override
+  void deactivate() {
+    _dropKeyboard();
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _typer?.cancel();
     for (final timer in _takeTimers) {
       timer.cancel();
@@ -450,6 +471,17 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
                   ),
                 ),
               ),
+              // And darker still behind the content at the bottom.
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00000000), Color(0x8C000000), Color(0xE6000000)],
+                    stops: [0, 0.45, 1],
+                  ),
+                ),
+              ),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 220),
                 switchInCurve: Curves.easeOutCubic,
@@ -462,10 +494,11 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
               ),
               SafeArea(
                 child: Align(
-                  alignment: Alignment.topLeft,
+                  alignment: Alignment.topRight,
                   child: Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(4),
                     child: IconButton(
+                      constraints: const BoxConstraints.tightFor(width: 48, height: 48),
                       tooltip: t.common.close,
                       icon: const Icon(Symbols.close_rounded, color: Colors.white70),
                       onPressed: () => Navigator.of(context).maybePop(),
@@ -481,214 +514,229 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   }
 
   Widget _composeView(bool isTv, bool wide) {
+    return SafeArea(
+      key: const ValueKey('compose'),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // The Fold's cover screen with the keyboard up leaves ~400dp:
+          // there the page anchors above the keyboard and slims down.
+          final h = constraints.maxHeight;
+          final short = !isTv && h < 620;
+          final tiny = !isTv && h < 470;
+          return Align(
+            alignment: short ? Alignment.bottomCenter : Alignment.center,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: wide ? 980 : 640),
+              child: SingleChildScrollView(
+                reverse: short,
+                // Clear of the close button above.
+                padding: EdgeInsets.fromLTRB(wide ? 48 : 20, 52, wide ? 48 : 20, short ? 12 : 24),
+                child: _composeColumn(isTv, wide, short, tiny),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _composeColumn(bool isTv, bool wide, bool short, bool tiny) {
     final theme = Theme.of(context);
     final chips = _quickStarts;
     final hasText = _controller.text.trim().isNotEmpty;
-    final headlineSize = isTv ? 104.0 : (wide ? 88.0 : 60.0);
-    final inputSize = isTv ? 30.0 : (wide ? 26.0 : 21.0);
-    return SafeArea(
-      key: const ValueKey('compose'),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: wide ? 980 : 640),
-          child: SingleChildScrollView(
-            padding: EdgeInsets.symmetric(horizontal: wide ? 48 : 22, vertical: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+    final headlineSize = isTv ? 104.0 : (tiny ? 36.0 : (short ? 46.0 : (wide ? 88.0 : 60.0)));
+    final inputSize = isTv ? 30.0 : (tiny ? 19.0 : (wide ? 26.0 : 21.0));
+    final headline = (widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline).toUpperCase();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!tiny)
+          _rise(
+            0,
+            0.3,
+            Row(
               children: [
-                _rise(
-                  0,
-                  0.3,
-                  Row(
-                    children: [
-                      SizedBox.square(
-                        dimension: isTv ? 44 : 34,
-                        child: AnimatedBuilder(
-                          animation: _intro,
-                          builder: (context, _) => CustomPaint(painter: _MarkPainter(_intro.value)),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          t.aiComposer.eyebrow,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: _display,
-                            fontSize: isTv ? 24 : 18,
-                            letterSpacing: 4,
-                            color: _amber,
-                          ),
-                        ),
-                      ),
-                    ],
+                SizedBox.square(
+                  dimension: isTv ? 44 : 34,
+                  child: AnimatedBuilder(
+                    animation: _intro,
+                    builder: (context, _) => CustomPaint(painter: _MarkPainter(_intro.value)),
                   ),
                 ),
-                const SizedBox(height: 6),
-                _rise(
-                  0.15,
-                  0.65,
-                  Text(
-                    (widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline).toUpperCase(),
-                    style: TextStyle(
-                      fontFamily: _display,
-                      fontSize: headlineSize,
-                      height: 0.92,
-                      letterSpacing: 0.5,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                if (widget.followUpOf != null) ...[
-                  const SizedBox(height: 8),
-                  _rise(
-                    0.2,
-                    0.7,
-                    Text(
-                      '“${widget.followUpOf}”',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(color: Colors.white60, fontStyle: FontStyle.italic),
-                    ),
-                  ),
-                ],
-                SizedBox(height: wide ? 36 : 28),
-                // The input: big type on an amber rule, like a marquee line.
-                _rise(
-                  0.3,
-                  0.8,
-                  AnimatedBuilder(
-                    animation: _fieldFocus,
-                    builder: (context, child) => DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(
-                            color: _fieldFocus.hasFocus ? _amber : Colors.white24,
-                            width: _fieldFocus.hasFocus ? 2.5 : 1.5,
-                          ),
-                        ),
-                      ),
-                      child: child,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Expanded(
-                            child: TextSelectionTheme(
-                              data: const TextSelectionThemeData(cursorColor: _amber),
-                              child: FocusableTextField(
-                                controller: _controller,
-                                focusNode: _fieldFocus,
-                                autofocus: true,
-                                minLines: 1,
-                                maxLines: 4,
-                                textInputAction: TextInputAction.send,
-                                textCapitalization: TextCapitalization.sentences,
-                                style: TextStyle(
-                                  fontSize: inputSize,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w500,
-                                  height: 1.3,
-                                ),
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  filled: false,
-                                  isCollapsed: true,
-                                  hintText: _placeholder.isEmpty ? ' ' : '$_placeholder▍',
-                                  hintStyle: TextStyle(
-                                    fontSize: inputSize,
-                                    color: Colors.white38,
-                                    fontWeight: FontWeight.w400,
-                                  ),
-                                ),
-                                onSubmitted: (_) => unawaited(_send()),
-                                onNavigateRight: _sendFocus.requestFocus,
-                                onNavigateDown: () => _chipNode(0).requestFocus(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          FocusableButton(
-                            focusNode: _sendFocus,
-                            onPressed: hasText ? () => unawaited(_send()) : null,
-                            onNavigateLeft: _fieldFocus.requestFocus,
-                            onNavigateDown: () => _chipNode(0).requestFocus(),
-                            child: Pressable(
-                              longPress: false,
-                              enabled: hasText,
-                              borderRadius: BorderRadius.circular(10),
-                              child: _RollButton(
-                                enabled: hasText,
-                                onTap: () => unawaited(_send()),
-                                size: inputSize * 2.3,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: wide ? 32 : 26),
-                _rise(
-                  0.4,
-                  0.9,
-                  Text(
-                    t.aiComposer.quickStart,
-                    style: TextStyle(
-                      fontFamily: _display,
-                      fontSize: isTv ? 22 : 17,
-                      letterSpacing: 3,
-                      color: Colors.white54,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _rise(
-                  0.45,
-                  1,
-                  SizedBox(
-                    height: isTv ? 56 : 46,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      clipBehavior: Clip.none,
-                      itemCount: chips.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 10),
-                      itemBuilder: (context, i) {
-                        final chip = chips[i];
-                        return FocusableButton(
-                          focusNode: _chipNode(i),
-                          onPressed: () => unawaited(_send(chip.request)),
-                          onNavigateLeft: i > 0 ? () => _chipNode(i - 1).requestFocus() : null,
-                          onNavigateRight: i < chips.length - 1 ? () => _chipNode(i + 1).requestFocus() : null,
-                          onNavigateUp: _fieldFocus.requestFocus,
-                          child: Pressable(
-                            longPress: false,
-                            borderRadius: BorderRadius.circular(6),
-                            child: _Ticket(chip: chip, large: isTv, onTap: () => unawaited(_send(chip.request))),
-                          ),
-                        );
-                      },
-                    ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    t.aiComposer.eyebrow,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 18, letterSpacing: 4, color: _amber),
                   ),
                 ),
               ],
             ),
           ),
+        if (!tiny) const SizedBox(height: 6),
+        _rise(
+          0.15,
+          0.65,
+          short
+              // One line on short screens, shrunk to fit if need be.
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    headline,
+                    maxLines: 1,
+                    style: TextStyle(fontFamily: _display, fontSize: headlineSize, height: 1, color: Colors.white),
+                  ),
+                )
+              : Text(
+                  headline,
+                  style: TextStyle(
+                    fontFamily: _display,
+                    fontSize: headlineSize,
+                    height: 0.92,
+                    letterSpacing: 0.5,
+                    color: Colors.white,
+                  ),
+                ),
         ),
-      ),
+        if (widget.followUpOf != null && !tiny) ...[
+          const SizedBox(height: 8),
+          _rise(
+            0.2,
+            0.7,
+            Text(
+              '“${widget.followUpOf}”',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleMedium?.copyWith(color: Colors.white60, fontStyle: FontStyle.italic),
+            ),
+          ),
+        ],
+        SizedBox(height: tiny ? 14 : (short ? 20 : (wide ? 36 : 28))),
+        // The input: big type on an amber rule, like a marquee line.
+        _rise(
+          0.3,
+          0.8,
+          AnimatedBuilder(
+            animation: _fieldFocus,
+            builder: (context, child) => DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: _fieldFocus.hasFocus ? _amber : Colors.white24,
+                    width: _fieldFocus.hasFocus ? 2.5 : 1.5,
+                  ),
+                ),
+              ),
+              child: child,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TextSelectionTheme(
+                      data: const TextSelectionThemeData(cursorColor: _amber),
+                      child: FocusableTextField(
+                        controller: _controller,
+                        focusNode: _fieldFocus,
+                        autofocus: true,
+                        minLines: 1,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.send,
+                        textCapitalization: TextCapitalization.sentences,
+                        style: TextStyle(
+                          fontSize: inputSize,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                          height: 1.3,
+                        ),
+                        decoration: InputDecoration(
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          isCollapsed: true,
+                          hintText: _placeholder.isEmpty ? ' ' : '$_placeholder▍',
+                          hintStyle: TextStyle(fontSize: inputSize, color: Colors.white38, fontWeight: FontWeight.w400),
+                        ),
+                        onSubmitted: (_) => unawaited(_send()),
+                        onNavigateRight: _sendFocus.requestFocus,
+                        onNavigateDown: () => _chipNode(0).requestFocus(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FocusableButton(
+                    focusNode: _sendFocus,
+                    onPressed: hasText ? () => unawaited(_send()) : null,
+                    onNavigateLeft: _fieldFocus.requestFocus,
+                    onNavigateDown: () => _chipNode(0).requestFocus(),
+                    child: Pressable(
+                      longPress: false,
+                      enabled: hasText,
+                      borderRadius: BorderRadius.circular(10),
+                      child: _RollButton(enabled: hasText, onTap: () => unawaited(_send()), size: inputSize * 2.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: short ? 14 : (wide ? 32 : 26)),
+        if (!short)
+          _rise(
+            0.4,
+            0.9,
+            Text(
+              t.aiComposer.quickStart,
+              style: TextStyle(fontFamily: _display, fontSize: isTv ? 22 : 17, letterSpacing: 3, color: Colors.white54),
+            ),
+          ),
+        if (!short) const SizedBox(height: 10),
+        _rise(
+          0.45,
+          1,
+          SizedBox(
+            height: isTv ? 56 : 46,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              itemCount: chips.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final chip = chips[i];
+                return FocusableButton(
+                  focusNode: _chipNode(i),
+                  onPressed: () => unawaited(_send(chip.request)),
+                  onNavigateLeft: i > 0 ? () => _chipNode(i - 1).requestFocus() : null,
+                  onNavigateRight: i < chips.length - 1 ? () => _chipNode(i + 1).requestFocus() : null,
+                  onNavigateUp: _fieldFocus.requestFocus,
+                  child: Pressable(
+                    longPress: false,
+                    borderRadius: BorderRadius.circular(6),
+                    child: _Ticket(chip: chip, large: isTv, onTap: () => unawaited(_send(chip.request))),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _thinkingView(Size size, bool isTv, bool wide) {
     final theme = Theme.of(context);
-    final frameH = isTv ? 260.0 : (wide ? 230.0 : 170.0);
+    final media = MediaQuery.of(context);
+    final room = size.height - media.viewInsets.bottom - media.padding.vertical;
+    // The strip takes about a third of the height, so short screens fit.
+    final frameH = math.min(isTv ? 260.0 : (wide ? 230.0 : 170.0), math.max(96.0, room * 0.3));
     final frameW = frameH * 2 / 3;
     _pitch = frameW + frameW * 0.12;
     final jam = _jam;
@@ -877,12 +925,14 @@ class _RollButton extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          color: enabled ? _amber : const Color(0x1FFFFFFF),
+          // Solid either way, so posters never show through it.
+          color: enabled ? _amber : Colors.black,
+          border: Border.all(color: _amber, width: 1.5),
         ),
         child: Icon(
           Symbols.play_arrow_rounded,
           fill: 1,
-          color: enabled ? Colors.black : Colors.white38,
+          color: enabled ? Colors.black : _amber.withValues(alpha: 0.7),
           size: size * 0.6,
         ),
       ),
@@ -1395,6 +1445,14 @@ class _ClapperPainter extends CustomPainter {
   bool shouldRepaint(_ClapperPainter old) => old.closed != closed || old.color != color;
 }
 
+/// 75% desaturated, then dimmed to 40%.
+const _dimGrey = <double>[
+  0.4 * (0.25 + 0.75 * 0.2126), 0.4 * 0.75 * 0.7152, 0.4 * 0.75 * 0.0722, 0, 0, //
+  0.4 * 0.75 * 0.2126, 0.4 * (0.25 + 0.75 * 0.7152), 0.4 * 0.75 * 0.0722, 0, 0, //
+  0.4 * 0.75 * 0.2126, 0.4 * 0.75 * 0.7152, 0.4 * (0.25 + 0.75 * 0.0722), 0, 0, //
+  0, 0, 0, 1, 0,
+];
+
 /// A slowly drifting wall of the user's posters. Each tile is fetched tiny
 /// and drawn large with smooth filtering, which blurs it for free: no live
 /// blur filter, so it stays cheap on the Shield.
@@ -1421,8 +1479,10 @@ class _Mosaic extends StatelessWidget {
             child: child,
           );
         },
-        child: Opacity(
-          opacity: 0.5,
+        // Dimmed and mostly desaturated in one layer, so poster art and
+        // titles don't compete with the page.
+        child: ColorFiltered(
+          colorFilter: const ColorFilter.matrix(_dimGrey),
           child: OverflowBox(
             alignment: Alignment.topLeft,
             maxWidth: cols * tileW,
