@@ -65,6 +65,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$profiles$en profiles = Translations$profiles$en.internal(_root);
 	late final Translations$connections$en connections = Translations$connections$en.internal(_root);
 	late final Translations$accountPreferences$en accountPreferences = Translations$accountPreferences$en.internal(_root);
+	late final Translations$backupTransfer$en backupTransfer = Translations$backupTransfer$en.internal(_root);
 	late final Translations$homeRows$en homeRows = Translations$homeRows$en.internal(_root);
 	late final Translations$discover$en discover = Translations$discover$en.internal(_root);
 	late final Translations$errors$en errors = Translations$errors$en.internal(_root);
@@ -3254,6 +3255,75 @@ class Translations$accountPreferences$en {
 	late final Translations$accountPreferences$mediaReviewsOptions$en mediaReviewsOptions = Translations$accountPreferences$mediaReviewsOptions$en.internal(_root);
 }
 
+// Path: backupTransfer
+class Translations$backupTransfer$en {
+	Translations$backupTransfer$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Backup & transfer'
+	String get title => 'Backup & transfer';
+
+	/// en: 'Move your Home rows and Comfort settings to another device'
+	String get settingsSubtitle => 'Move your Home rows and Comfort settings to another device';
+
+	/// en: 'Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).'
+	String get description => 'Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).';
+
+	/// en: 'Export to a file'
+	String get export => 'Export to a file';
+
+	/// en: 'Saves a backup file to ${folder}'
+	String exportDescriptionFolder({required Object folder}) => 'Saves a backup file to ${folder}';
+
+	/// en: 'Backup saved'
+	String get exported => 'Backup saved';
+
+	/// en: 'Saved to: ${path}'
+	String exportedTo({required Object path}) => 'Saved to: ${path}';
+
+	/// en: 'Couldn't save the backup'
+	String get exportFailed => 'Couldn\'t save the backup';
+
+	/// en: 'Import from a file'
+	String get importFromFile => 'Import from a file';
+
+	/// en: 'Choose a backup file; you'll see what's in it before anything changes'
+	String get importDescription => 'Choose a backup file; you\'ll see what\'s in it before anything changes';
+
+	/// en: 'Backups on this device'
+	String get backupsHere => 'Backups on this device';
+
+	/// en: 'No backup files here yet. To bring one from another device, copy it into this folder.'
+	String get noBackups => 'No backup files here yet. To bring one from another device, copy it into this folder.';
+
+	/// en: 'Import this backup'
+	String get restoreThis => 'Import this backup';
+
+	/// en: 'Replace this device's customisations?'
+	String get replaceTitle => 'Replace this device\'s customisations?';
+
+	/// en: 'This backup (${when}) has ${homeRows} Home rows and ${paused} paused Comfort shows. They replace what's on this device now.'
+	String replaceMessage({required Object when, required Object homeRows, required Object paused}) => 'This backup (${when}) has ${homeRows} Home rows and ${paused} paused Comfort shows. They replace what\'s on this device now.';
+
+	/// en: 'Replace'
+	String get replace => 'Replace';
+
+	/// en: 'Backup imported'
+	String get imported => 'Backup imported';
+
+	/// en: 'Couldn't import the backup'
+	String get importFailed => 'Couldn\'t import the backup';
+
+	/// en: 'That file isn't a Plezy backup'
+	String get notABackup => 'That file isn\'t a Plezy backup';
+
+	/// en: 'That backup comes from a newer version of Plezy; update this device first'
+	String get newerVersion => 'That backup comes from a newer version of Plezy; update this device first';
+}
+
 // Path: homeRows
 class Translations$homeRows$en {
 	Translations$homeRows$en.internal(this._root);
@@ -3289,8 +3359,8 @@ class Translations$homeRows$en {
 	/// en: 'Removed ${title} from Home'
 	String removed({required Object title}) => 'Removed ${title} from Home';
 
-	/// en: 'Couldn't save your Home to Trakt'
-	String get saveFailed => 'Couldn\'t save your Home to Trakt';
+	/// en: 'Couldn't save your Home'
+	String get saveFailed => 'Couldn\'t save your Home';
 
 	/// en: 'Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can't be created'
 	String listLimitReached({required Object limit}) => 'Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can\'t be created';
@@ -3367,8 +3437,8 @@ class Translations$homeRows$en {
 	/// en: 'Explore'
 	String get exploreSection => 'Explore';
 
-	/// en: 'Saved to the private Trakt list "Plezy" so every device shows the same Home.'
-	String get syncedNote => 'Saved to the private Trakt list "Plezy" so every device shows the same Home.';
+	/// en: 'Saved on this device. To copy your Home to another device, use Settings ▸ Backup & transfer.'
+	String get syncedNote => 'Saved on this device. To copy your Home to another device, use Settings ▸ Backup & transfer.';
 }
 
 // Path: discover
@@ -9501,6 +9571,26 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.usersOnly' => 'Users only',
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
+			'backupTransfer.title' => 'Backup & transfer',
+			'backupTransfer.settingsSubtitle' => 'Move your Home rows and Comfort settings to another device',
+			'backupTransfer.description' => 'Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).',
+			'backupTransfer.export' => 'Export to a file',
+			'backupTransfer.exportDescriptionFolder' => ({required Object folder}) => 'Saves a backup file to ${folder}',
+			'backupTransfer.exported' => 'Backup saved',
+			'backupTransfer.exportedTo' => ({required Object path}) => 'Saved to: ${path}',
+			'backupTransfer.exportFailed' => 'Couldn\'t save the backup',
+			'backupTransfer.importFromFile' => 'Import from a file',
+			'backupTransfer.importDescription' => 'Choose a backup file; you\'ll see what\'s in it before anything changes',
+			'backupTransfer.backupsHere' => 'Backups on this device',
+			'backupTransfer.noBackups' => 'No backup files here yet. To bring one from another device, copy it into this folder.',
+			'backupTransfer.restoreThis' => 'Import this backup',
+			'backupTransfer.replaceTitle' => 'Replace this device\'s customisations?',
+			'backupTransfer.replaceMessage' => ({required Object when, required Object homeRows, required Object paused}) => 'This backup (${when}) has ${homeRows} Home rows and ${paused} paused Comfort shows. They replace what\'s on this device now.',
+			'backupTransfer.replace' => 'Replace',
+			'backupTransfer.imported' => 'Backup imported',
+			'backupTransfer.importFailed' => 'Couldn\'t import the backup',
+			'backupTransfer.notABackup' => 'That file isn\'t a Plezy backup',
+			'backupTransfer.newerVersion' => 'That backup comes from a newer version of Plezy; update this device first',
 			'homeRows.title' => 'Home',
 			'homeRows.addToHome' => 'Add to Home',
 			'homeRows.removeFromHome' => 'Remove from Home',
@@ -9510,7 +9600,7 @@ extension on Translations {
 			'homeRows.addedCount' => ({required Object count}) => 'Added ${count} rows to Home',
 			'homeRows.alreadyOnHome' => ({required Object title}) => '${title} is already on Home',
 			'homeRows.removed' => ({required Object title}) => 'Removed ${title} from Home',
-			'homeRows.saveFailed' => 'Couldn\'t save your Home to Trakt',
+			'homeRows.saveFailed' => 'Couldn\'t save your Home',
 			'homeRows.listLimitReached' => ({required Object limit}) => 'Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can\'t be created',
 			'homeRows.removeContinueWatchingTitle' => ({required Object title}) => 'Remove ${title} from Home?',
 			'homeRows.removeContinueWatchingMessage' => 'You won\'t see what you\'re in the middle of on Home. You can add it back from Manage Home.',
@@ -9536,7 +9626,7 @@ extension on Translations {
 			'homeRows.watchlistSection' => 'Watchlist and Comfort',
 			'homeRows.comfortRow' => 'Comfort shows',
 			'homeRows.exploreSection' => 'Explore',
-			'homeRows.syncedNote' => 'Saved to the private Trakt list "Plezy" so every device shows the same Home.',
+			'homeRows.syncedNote' => 'Saved on this device. To copy your Home to another device, use Settings ▸ Backup & transfer.',
 			'discover.title' => 'Discover',
 			'discover.noContentAvailable' => 'No content available',
 			'discover.addMediaToLibraries' => 'Add some media to your libraries',
@@ -9925,6 +10015,8 @@ extension on Translations {
 			'explore.detail.studios' => 'Studios',
 			'explore.detail.country' => 'Country',
 			'explore.detail.language' => 'Language',
+			_ => null,
+		} ?? switch (path) {
 			'explore.detail.released' => 'Released',
 			'explore.detail.physicalRelease' => 'On disc',
 			'explore.detail.ended' => 'Ended',
@@ -9945,8 +10037,6 @@ extension on Translations {
 			'explore.detail.recommendedByUsers' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Recommended by ${n} user', other: 'Recommended by ${n} users', ), 
 			'explore.detail.recommendedBy' => ({required Object who}) => 'Recommended by ${who}',
 			'explore.detail.favoritedBy' => ({required Object who}) => 'Favorited by ${who}',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.unairedEpisodes' => ({required Object n}) => '${n} not aired yet',
 			'explore.detail.recommendedByPercent' => ({required Object percent}) => 'Recommended by ${percent} of viewers',
 			'explore.detail.relatedTitles' => 'Related titles',
@@ -10439,6 +10529,8 @@ extension on Translations {
 			'companionRemote.pairing.sessionNotFound' => 'Device not found. Make sure Plezy is running on the host.',
 			'companionRemote.pairing.authFailed' => 'Authentication failed. Both devices need the same Plex account.',
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Failed to connect: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.disconnectConfirm' => 'Do you want to disconnect from the remote session?',
 			'companionRemote.remote.reconnecting' => 'Reconnecting...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Attempt ${current} of 5',
@@ -10459,8 +10551,6 @@ extension on Translations {
 			'companionRemote.remote.seekBack' => 'Seek Back',
 			'companionRemote.remote.stop' => 'Stop',
 			'companionRemote.remote.seekForward' => 'Seek Fwd',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.volume' => 'Volume',
 			'companionRemote.remote.volumeDown' => 'Down',
 			'companionRemote.remote.volumeUp' => 'Up',

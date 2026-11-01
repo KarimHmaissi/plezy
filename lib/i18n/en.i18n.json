@@ -1182,6 +1182,28 @@
       "nobody": "Hidden"
     }
   },
+  "backupTransfer": {
+    "title": "Backup & transfer",
+    "settingsSubtitle": "Move your Home rows and Comfort settings to another device",
+    "description": "Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).",
+    "export": "Export to a file",
+    "exportDescriptionFolder": "Saves a backup file to ${folder}",
+    "exported": "Backup saved",
+    "exportedTo": "Saved to: ${path}",
+    "exportFailed": "Couldn't save the backup",
+    "importFromFile": "Import from a file",
+    "importDescription": "Choose a backup file; you'll see what's in it before anything changes",
+    "backupsHere": "Backups on this device",
+    "noBackups": "No backup files here yet. To bring one from another device, copy it into this folder.",
+    "restoreThis": "Import this backup",
+    "replaceTitle": "Replace this device's customisations?",
+    "replaceMessage": "This backup (${when}) has ${homeRows} Home rows and ${paused} paused Comfort shows. They replace what's on this device now.",
+    "replace": "Replace",
+    "imported": "Backup imported",
+    "importFailed": "Couldn't import the backup",
+    "notABackup": "That file isn't a Plezy backup",
+    "newerVersion": "That backup comes from a newer version of Plezy; update this device first"
+  },
   "homeRows": {
     "title": "Home",
     "addToHome": "Add to Home",
@@ -1192,7 +1214,7 @@
     "addedCount": "Added ${count} rows to Home",
     "alreadyOnHome": "${title} is already on Home",
     "removed": "Removed ${title} from Home",
-    "saveFailed": "Couldn't save your Home to Trakt",
+    "saveFailed": "Couldn't save your Home",
     "listLimitReached": "Your Trakt account is at its ${limit}-list limit, so the Plezy settings list can't be created",
     "removeContinueWatchingTitle": "Remove ${title} from Home?",
     "removeContinueWatchingMessage": "You won't see what you're in the middle of on Home. You can add it back from Manage Home.",
@@ -1218,7 +1240,7 @@
     "watchlistSection": "Watchlist and Comfort",
     "comfortRow": "Comfort shows",
     "exploreSection": "Explore",
-    "syncedNote": "Saved to the private Trakt list \"Plezy\" so every device shows the same Home."
+    "syncedNote": "Saved on this device. To copy your Home to another device, use Settings ▸ Backup & transfer."
   },
   "discover": {
     "title": "Discover",

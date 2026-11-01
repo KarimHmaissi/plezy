@@ -16,6 +16,8 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] Smarter Continue Watching: Continue Watching + Pick back up, older
       on-deck films, 1-year cut-off
 - [x] Trakt Lists in Explore: charts, liked lists, Discover lists
+- [x] Local database for our customisations, with Backup & transfer in
+      Settings (replaces storing them on Trakt)
 - [x] Home builder: Home shows only the rows you add, in your order; any
       row anywhere in Plezy can be added; same-title rows merge (synced via
       Trakt)
@@ -50,6 +52,32 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Local database + Backup & transfer — `HASH`
+- The fork's customisations now live in their own local SQLite database
+  (`plezy_fork.db`, beside Plezy's `plezy_downloads.db`, using the same
+  drift library), not in Trakt list descriptions. Tables: Home rows (ordered,
+  plus "Only show rows I've added"), Comfort paused shows, Shortlist
+  (reserved for the planned feature) and key/value settings. A separate file
+  keeps upstream Plezy's database versions and migrations untouched. Storage
+  sits behind one interface so cloud sync can be added later.
+- First launch brings data over once: Home rows from the earlier local copy
+  (or else the "Plezy" Trakt list), and Comfort paused shows from the
+  Comfort Shows list description. Neither Trakt description is written any
+  more. Both lists are left as they are; the Comfort Shows list's items (the
+  shows) still come from Trakt.
+- Home rows and Manage Home now work without Trakt connected (Trakt charts
+  and lists still need it).
+- **Settings ▸ Backup & transfer**: **Export to a file** saves a versioned
+  JSON backup (format, schema version, app version, time, all the tables)
+  with no dialog, and shows the path: PC → `Documents\Plezy\plezy-backup-
+  <date>.json`; Android/Shield → the app's files folder (`Android/data/<app>/
+  files/Plezy backups`). **Backups on this device** lists the files in that
+  folder; picking one shows what's in it ("7 Home rows and 0 paused Comfort
+  shows") and asks to **Replace** before anything changes. Where a system
+  file dialog exists (not Android TV), **Import from a file** picks one from
+  anywhere. Files that aren't backups, or come from a newer version, are
+  rejected with a clear message.
 
 ### Fix: rows added to Home missing after a restart — `c01592a3a`
 - **Plex Discover rows** (e.g. Most Watchlisted This Week, Released This

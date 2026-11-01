@@ -27,9 +27,10 @@ enum _RowAction { top, up, down, remove }
 /// elsewhere (an Explore shelf, a library row, a Watchlist shelf, a
 /// collection) are added from their own hold-OK menu.
 class HomeRowsScreen extends StatefulWidget {
-  final TraktListsCatalogSource source;
+  /// Trakt Lists, when Trakt is connected (for its charts and lists).
+  final TraktListsCatalogSource? source;
 
-  const HomeRowsScreen({super.key, required this.source});
+  const HomeRowsScreen({super.key, this.source});
 
   @override
   State<HomeRowsScreen> createState() => _HomeRowsScreenState();
@@ -38,17 +39,19 @@ class HomeRowsScreen extends StatefulWidget {
 class _HomeRowsScreenState extends State<HomeRowsScreen> {
   List<TraktUserList>? _lists;
 
-  HomePinsController get _pins => widget.source.pins;
+  HomePinsController get _pins => HomePinsController.instance;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_pins.ensureLoaded(refresh: true));
+    unawaited(_pins.ensureLoaded());
     unawaited(_loadLists());
   }
 
   Future<void> _loadLists() async {
-    final lists = await widget.source.listsForRows();
+    final source = widget.source;
+    if (source == null) return;
+    final lists = await source.listsForRows();
     if (mounted) setState(() => _lists = lists);
   }
 
@@ -57,7 +60,7 @@ class _HomeRowsScreenState extends State<HomeRowsScreen> {
       await change();
     } catch (e) {
       appLogger.w('Home rows: save failed', error: e);
-      if (mounted) showErrorSnackBar(context, homeRowsSaveError(e));
+      if (mounted) showErrorSnackBar(context, t.homeRows.saveFailed);
     }
   }
 
@@ -197,26 +200,28 @@ class _HomeRowsScreenState extends State<HomeRowsScreen> {
                   if (recentlyAdded.length > 1) _groupSwitch(t.homeRows.allRecentlyAdded, recentlyAdded),
                   for (final row in plexRows) _addSwitch(row),
                 ],
-                _section(t.homeRows.chartsSection),
-                for (final chart in TraktListsCatalogSource.charts)
-                  _addSwitch((
-                    id: HomeRowIds.traktLists(chart.id),
-                    title: chart.title,
-                    sources: const [],
-                  ), icon: Symbols.trending_up_rounded),
-                _section(t.homeRows.listsSection),
-                if (lists == null)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else
-                  for (final list in lists)
+                if (widget.source != null) ...[
+                  _section(t.homeRows.chartsSection),
+                  for (final chart in TraktListsCatalogSource.charts)
                     _addSwitch((
-                      id: HomeRowIds.traktLists(TraktListsCatalogSource.listHubId(list)),
-                      title: list.name,
+                      id: HomeRowIds.traktLists(chart.id),
+                      title: chart.title,
                       sources: const [],
-                    ), icon: Symbols.format_list_bulleted_rounded),
+                    ), icon: Symbols.trending_up_rounded),
+                  _section(t.homeRows.listsSection),
+                  if (lists == null)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else
+                    for (final list in lists)
+                      _addSwitch((
+                        id: HomeRowIds.traktLists(TraktListsCatalogSource.listHubId(list)),
+                        title: list.name,
+                        sources: const [],
+                      ), icon: Symbols.format_list_bulleted_rounded),
+                ],
                 _section(t.homeRows.watchlistSection),
                 _addSwitch((
                   id: HomeRowIds.watchlist('films'),

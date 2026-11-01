@@ -32,8 +32,9 @@ class TraktListsCatalogSource implements CatalogSource, CatalogHubSource {
   /// The wrapped Trakt source (detail, search, watchlist).
   TraktCatalogSource get trakt => _trakt;
 
-  /// Rows pinned to Home, stored on Trakt.
-  late final HomePinsController pins = HomePinsController(_client);
+  /// The Home layout (stored locally). Earlier versions kept it on Trakt;
+  /// handing over the client lets it bring those rows over once.
+  HomePinsController get pins => HomePinsController.instance..attachTrakt(_client);
 
   static const String _boxOffice = 'chart:boxoffice';
   static const String _watchedMovies = 'chart:watched:movies';
@@ -208,7 +209,8 @@ class TraktListsCatalogSource implements CatalogSource, CatalogHubSource {
   @override
   Listenable get watchlistChanges => _trakt.watchlistChanges;
 
-  /// The wrapped Trakt source owns the client and its watchlist state.
+  /// The wrapped Trakt source owns the client and its watchlist state; the
+  /// Home layout outlives this source.
   @override
-  void dispose() => pins.dispose();
+  void dispose() {}
 }

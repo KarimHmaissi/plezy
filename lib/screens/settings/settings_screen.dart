@@ -52,6 +52,7 @@ import '../../profiles/active_profile_provider.dart';
 import '../../profiles/profile.dart';
 import '../../watch_together/services/watch_party_relays.dart';
 import 'about_screen.dart';
+import 'backup_transfer_screen.dart';
 import 'add_connection_screen.dart';
 import 'account_preferences_screen.dart';
 import 'appearance_settings_screen.dart';
@@ -233,6 +234,17 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
                     _buildControlsSection(sheetContext),
 
                   _buildAdvancedSection(),
+
+                  SettingsGroup(
+                    children: [
+                      SettingNavigationTile(
+                        icon: Symbols.swap_horiz_rounded,
+                        title: t.backupTransfer.title,
+                        subtitle: t.backupTransfer.settingsSubtitle,
+                        destinationBuilder: (context) => const BackupTransferScreen(),
+                      ),
+                    ],
+                  ),
 
                   if (UpdateService.isUpdateCheckAvailable) ...[_buildUpdateSection()],
 

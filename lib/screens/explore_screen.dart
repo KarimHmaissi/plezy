@@ -327,12 +327,11 @@ class ExploreScreenState extends State<ExploreScreen>
                 tooltip: t.explore.traktLists.discoverLists,
                 onPressed: () => unawaited(_openDiscoverLists(lists)),
               ),
-            if (homeLayoutSourceOf(context) != null)
-              FocusableAction(
-                icon: Symbols.dashboard_customize_rounded,
-                tooltip: t.homeRows.manageHome,
-                onPressed: () => openHomeRows(context),
-              ),
+            FocusableAction(
+              icon: Symbols.dashboard_customize_rounded,
+              tooltip: t.homeRows.manageHome,
+              onPressed: () => openHomeRows(context),
+            ),
             FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
           ],
         ),
@@ -535,13 +534,12 @@ class ExploreScreenState extends State<ExploreScreen>
                   tooltip: t.explore.traktLists.discoverLists,
                   onPressed: () => unawaited(_openDiscoverLists(active)),
                 ),
-              if (homeLayoutSourceOf(context) != null)
-                FocusableAction(
-                  icon: Symbols.dashboard_customize_rounded,
-                  iconColor: foregroundColor,
-                  tooltip: t.homeRows.manageHome,
-                  onPressed: () => openHomeRows(context),
-                ),
+              FocusableAction(
+                icon: Symbols.dashboard_customize_rounded,
+                iconColor: foregroundColor,
+                tooltip: t.homeRows.manageHome,
+                onPressed: () => openHomeRows(context),
+              ),
               if (active != null)
                 FocusableAction(
                   icon: Symbols.search_rounded,

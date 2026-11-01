@@ -148,7 +148,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   /// and the added rows Home fetches itself, by row id. Charts refetch on
   /// every Home load.
   TraktListsCatalogSource? _listsSource;
-  HomePinsController? get _homePins => _listsSource?.pins;
+  HomePinsController get _homePins => HomePinsController.instance;
   Map<String, MediaHub> _fetchedRows = const {};
   final Set<String> _rowsLoading = {};
 
@@ -217,7 +217,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   List<MediaHub> get _tvBrowseHubs {
     final staleDays = context.settingsRead(SettingsService.continueWatchingStaleDays);
     final maxAgeDays = context.settingsRead(SettingsService.continueWatchingMaxAgeDays);
-    final layout = _homePins?.layout;
+    final layout = _homePins.hasSavedLayout ? _homePins.layout : null;
     final key = (
       _onDeck,
       _hubs,
@@ -252,7 +252,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
     HomeRowEntry plexRow(MergedPlexHub row) => (id: row.rowId, title: row.hub.title, sources: row.sources);
     if (layout == null) {
-      // No Trakt: the server's Home, without duplicate rows.
+      // No layout of the user's own yet: the servers' Home, without
+      // duplicate rows.
       show(continueWatching, defaultHomeLayout.rows[0]);
       show(pickBackUp, defaultHomeLayout.rows[1]);
       for (final row in plex) {
@@ -300,7 +301,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   Future<void> _loadRows({bool refresh = false}) async {
     final pins = _homePins;
     final resolver = _resolver();
-    if (pins == null || resolver == null) return;
+    if (resolver == null) return;
     final plexIds = {for (final row in mergePlexHubs(_hubs)) row.rowId};
     final wanted = [
       for (final row in pins.rows)
@@ -547,6 +548,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // Trakt usually connects after Home first builds; reload the comfort
     // titles when its source appears or changes.
     _catalogSources = context.read<CatalogSourcesProvider?>()?..addListener(_onCatalogSourcesChanged);
+    _homePins.addListener(_onHomePinsChanged);
+    unawaited(_homePins.ensureLoaded());
     _onCatalogSourcesChanged();
     _startAutoScroll();
   }
@@ -554,14 +557,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void _onCatalogSourcesChanged() {
     final lists = _catalogSources?.connectedSources.whereType<TraktListsCatalogSource>().firstOrNull;
     if (!identical(lists, _listsSource)) {
-      _listsSource?.pins.removeListener(_onHomePinsChanged);
       _listsSource = lists;
-      _fetchedRows = const {};
-      if (lists != null) {
-        lists.pins.addListener(_onHomePinsChanged);
-        unawaited(lists.pins.ensureLoaded(refresh: true));
-        unawaited(_loadRows());
-      }
+      // Hands Trakt over for the one-time import of rows saved there.
+      lists?.pins;
+      _rowRetries = 0;
+      unawaited(_loadRows());
       if (mounted) setState(() {});
     } else {
       // Another source (Plex Discover, MAL…) connecting can make rows that
@@ -628,8 +628,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // Plex rows Home's own hubs don't include are fetched once those land.
     if (renderChanged && !isNewLoad) unawaited(_loadRows());
     if (isNewLoad) {
-      // Pick up changes made on another device, and keep charts current.
-      unawaited(_homePins?.ensureLoaded(refresh: true));
+      // Keep charts and other fetched rows current.
       unawaited(_loadRows(refresh: true));
     }
     _applyPendingTvBrowseRailFocus();
@@ -711,7 +710,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void dispose() {
     _discover.removeListener(_onDiscoverChanged);
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
-    _listsSource?.pins.removeListener(_onHomePinsChanged);
+    _homePins.removeListener(_onHomePinsChanged);
     _rowRetryTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();

@@ -1,13 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
 import '../../models/catalog/catalog_item.dart';
-import '../../models/trakt/trakt_user_list.dart';
 import '../base_shared_preferences_service.dart';
 import '../../utils/app_logger.dart';
-import '../trackers/tracker_exceptions.dart';
 import '../trackers/trakt/trakt_client.dart';
+import '../customisation/customisation_store.dart';
 import 'catalog_source.dart';
 
 /// One row the user added to Home: a row id (see [HomeRowIds]), its title,
@@ -177,45 +177,41 @@ String writeHomeLayout(String? description, HomeLayout layout, {int revision = 0
   return kept.join('\n');
 }
 
-/// Thrown when saving needs a new Trakt list but the account is at its
-/// personal-list limit.
-class HomePinsListLimitException implements Exception {
-  final int limit;
-  const HomePinsListLimitException(this.limit);
-  @override
-  String toString() => 'Trakt personal list limit reached ($limit)';
-}
-
-/// The user's Home layout. Every change is kept on this device first (so a
-/// change is never lost to a slow or failed save) and then synced to the
-/// description of the private Trakt list "Plezy" (see [parseHomeLayout]),
-/// one write at a time, retrying when Trakt rate-limits. Each save carries a
-/// revision number, so an older copy read back from Trakt (its list reads
-/// can lag behind writes) never replaces newer local changes; a newer one,
-/// saved on another device, does. The list is only created on the first
-/// change, and only if the account has a free list slot.
+/// The user's Home layout, kept in the fork's local database (see
+/// [CustomisationStore]) and moved between devices with Settings ▸ Backup &
+/// transfer. One instance serves the whole app ([instance]).
+///
+/// The first time it runs on a device with an empty database it brings the
+/// Home rows over once: from this device's earlier local copy, or else from
+/// the private Trakt list "Plezy" that earlier versions saved to (read
+/// only; that list is left as it is).
 class HomePinsController extends ChangeNotifier {
   static const String listName = 'Plezy';
   static const String listSlug = 'plezy';
-  static const String _cacheKey = 'home_layout_cache_v2';
+  static const String _legacyCacheKey = 'home_layout_cache_v2';
   static const String _v1CacheKey = 'home_layout_cache_v1';
-  static const int _maxRateLimitRetries = 5;
 
-  HomePinsController(this._client, {@visibleForTesting Duration Function(int? retryAfterSeconds)? retryDelay})
-    : _retryDelay = retryDelay ?? ((seconds) => Duration(seconds: (seconds ?? 2).clamp(1, 30)));
+  HomePinsController({Future<CustomisationStore>? store}) : _storeFuture = store;
 
-  final TraktClient _client;
-  final Duration Function(int? retryAfterSeconds) _retryDelay;
-  TraktUserList? _list;
+  static HomePinsController? _instance;
+  static HomePinsController get instance => _instance ??= HomePinsController();
+
+  @visibleForTesting
+  static set debugInstance(HomePinsController? controller) => _instance = controller;
+
+  final Future<CustomisationStore>? _storeFuture;
+  Future<CustomisationStore> get _store => _storeFuture ?? Customisation.store;
+
+  TraktClient? _trakt;
   HomeLayout _layout = defaultHomeLayout;
   int _revision = 0;
 
-  /// Local changes Trakt doesn't have yet.
-  bool _dirty = false;
+  /// Whether the layout came from the database (or a migration) rather than
+  /// the built-in default.
+  bool _persisted = false;
   bool _loaded = false;
   Future<void>? _loading;
-  Future<void> _syncChain = Future.value();
-  bool _disposed = false;
+  Future<void> _writes = Future.value();
 
   HomeLayout get layout => _layout;
   List<HomeRowEntry> get rows => _layout.rows;
@@ -224,87 +220,97 @@ class HomePinsController extends ChangeNotifier {
   bool get curated => _layout.curated;
   bool get isLoaded => _loaded;
 
-  /// Whether some changes are still waiting to reach Trakt.
-  bool get hasUnsyncedChanges => _dirty;
-
   bool contains(String id) => _layout.rows.any((r) => r.id == id);
 
-  void _notify() {
-    if (!_disposed) notifyListeners();
+  /// Whether the user has a Home layout of their own (saved, imported or
+  /// brought over). Until then Home shows the servers' rows.
+  bool get hasSavedLayout => _persisted;
+
+  /// Trakt connected: rows saved there by earlier versions can be brought
+  /// over if this device has none yet.
+  void attachTrakt(TraktClient client) {
+    if (identical(_trakt, client)) return;
+    _trakt = client;
+    if (_loaded && !_persisted) unawaited(_migrateFromTrakt());
   }
 
-  /// Read the layout once (coalesced); [refresh] re-reads Trakt so changes
-  /// made on another device show up.
+  /// Read the layout once (coalesced); [refresh] re-reads the database (after
+  /// an import).
   Future<void> ensureLoaded({bool refresh = false}) {
     if (_loaded && !refresh) return Future.value();
     return _loading ??= _load().whenComplete(() => _loading = null);
   }
 
   Future<void> _load() async {
-    final v1Titles = <String, String>{};
-    if (!_loaded) await _readCache(v1Titles);
     try {
-      final lists = await _client.getMyLists();
-      _list = lists.where((l) => l.slug == listSlug).firstOrNull ?? lists.where((l) => l.name == listName).firstOrNull;
-      final description = _list?.description;
-      final remote = parseHomeLayoutWithRevision(description, titles: v1Titles);
-      // Trakt's copy wins only when it's at least as new and nothing local
-      // is waiting to be synced.
-      if (remote != null && !_dirty && remote.revision >= _revision) {
-        _layout = remote.layout;
-        _revision = remote.revision;
+      final stored = await (await _store).readHomeLayout();
+      if (stored != null) {
+        _layout = (
+          rows: [for (final r in stored.rows) (id: r.id, title: r.title, sources: r.sources)],
+          curated: stored.curated,
+        );
+        _revision = stored.revision;
+        _persisted = true;
+      } else if (!_persisted) {
+        await _migrateFromLocalCache();
       }
       _loaded = true;
-      _notify();
-      // Push local changes Trakt is missing (or an older copy, or the
-      // first-version format) back up.
-      if (_dirty || (remote != null && remote.revision < _revision) || isLegacyHomeLayout(description)) {
-        _dirty = true;
-      }
-      await _writeCache();
-      if (_dirty) await _scheduleSync().catchError((Object _) {});
+      notifyListeners();
+      if (!_persisted) await _migrateFromTrakt();
     } catch (e) {
       appLogger.w('Home layout: load failed', error: e);
+      _loaded = true;
+      notifyListeners();
     }
   }
 
-  Future<void> _readCache(Map<String, String> v1Titles) async {
+  /// The local copy earlier versions kept beside their Trakt saves.
+  Future<void> _migrateFromLocalCache() async {
     try {
       final prefs = await BaseSharedPreferencesService.sharedCache();
-      final raw = prefs.getString(_cacheKey);
-      if (raw != null) {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) {
-          _layout = _layoutFromJson(decoded);
-          _revision = _revisionOf(decoded);
-          _dirty = decoded['dirty'] == true;
-          _loaded = true;
-          _notify();
-        }
-        return;
-      }
-      // Titles remembered by the first version, for migrating its pins.
-      final v1 = prefs.getString(_v1CacheKey);
-      final decoded = v1 == null ? null : jsonDecode(v1);
+      final raw = prefs.getString(_legacyCacheKey);
+      final decoded = raw == null ? null : jsonDecode(raw);
+      if (decoded is! Map) return;
+      appLogger.i('Home layout: bringing rows over from the earlier local copy');
+      await _replace(_layoutFromJson(decoded));
+    } catch (e) {
+      appLogger.w('Home layout: earlier local copy unreadable', error: e);
+    }
+  }
+
+  /// The private Trakt list "Plezy" that earlier versions saved to (read
+  /// only).
+  Future<void> _migrateFromTrakt() async {
+    final client = _trakt;
+    if (client == null || _persisted) return;
+    try {
+      final lists = await client.getMyLists();
+      final list =
+          lists.where((l) => l.slug == listSlug).firstOrNull ?? lists.where((l) => l.name == listName).firstOrNull;
+      final remote = parseHomeLayout(list?.description, titles: await _v1Titles());
+      if (remote == null || _persisted) return;
+      appLogger.i('Home layout: bringing ${remote.rows.length} rows over from the Trakt list "$listName"');
+      await _replace(remote);
+    } catch (e) {
+      appLogger.w('Home layout: reading the Trakt list failed', error: e);
+    }
+  }
+
+  Future<Map<String, String>> _v1Titles() async {
+    final titles = <String, String>{};
+    try {
+      final prefs = await BaseSharedPreferencesService.sharedCache();
+      final raw = prefs.getString(_v1CacheKey);
+      final decoded = raw == null ? null : jsonDecode(raw);
       if (decoded is Map && decoded['titles'] is Map) {
         for (final entry in (decoded['titles'] as Map).entries) {
           if (entry.key is String && entry.value is String) {
-            v1Titles[HomeRowIds.traktLists(_v1HubId(entry.key as String))] = entry.value as String;
+            titles[HomeRowIds.traktLists(_v1HubId(entry.key as String))] = entry.value as String;
           }
         }
       }
-    } catch (e) {
-      appLogger.d('Home layout: cache unreadable', error: e);
-    }
-  }
-
-  Future<void> _writeCache() async {
-    try {
-      final prefs = await BaseSharedPreferencesService.sharedCache();
-      await prefs.setString(_cacheKey, jsonEncode({..._layoutToJson(_layout, revision: _revision), 'dirty': _dirty}));
-    } catch (e) {
-      appLogger.d('Home layout: cache write failed', error: e);
-    }
+    } catch (_) {}
+    return titles;
   }
 
   /// Add [rows] to the end of Home; rows already on it are skipped. Returns
@@ -316,7 +322,7 @@ class HomePinsController extends ChangeNotifier {
       if (!contains(row.id) && !fresh.any((r) => r.id == row.id)) fresh.add(row);
     }
     if (fresh.isEmpty) return 0;
-    await _change((rows: [..._layout.rows, ...fresh], curated: _layout.curated));
+    await _replace((rows: [..._layout.rows, ...fresh], curated: _layout.curated));
     return fresh.length;
   }
 
@@ -324,7 +330,7 @@ class HomePinsController extends ChangeNotifier {
     await ensureLoaded();
     final drop = ids.toSet();
     if (!_layout.rows.any((r) => drop.contains(r.id))) return;
-    await _change((
+    await _replace((
       rows: [
         for (final row in _layout.rows)
           if (!drop.contains(row.id)) row,
@@ -341,81 +347,31 @@ class HomePinsController extends ChangeNotifier {
     final to = (from + delta).clamp(0, rows.length - 1);
     if (to == from) return;
     rows.insert(to, rows.removeAt(from));
-    await _change((rows: rows, curated: _layout.curated));
+    await _replace((rows: rows, curated: _layout.curated));
   }
 
   Future<void> setCurated(bool curated) async {
     await ensureLoaded();
     if (_layout.curated == curated) return;
-    await _change((rows: _layout.rows, curated: curated));
+    await _replace((rows: _layout.rows, curated: curated));
   }
 
-  /// Apply [layout] locally (kept even if Trakt can't be reached), then sync.
-  /// Only a missing list slot is reported; other sync failures retry later.
-  Future<void> _change(HomeLayout layout) async {
+  /// Apply [layout] at once, then save it; saves run one at a time in
+  /// order, so the database always ends up with the latest layout.
+  Future<void> _replace(HomeLayout layout) {
     _layout = layout;
     _revision++;
-    _dirty = true;
-    _notify();
-    await _writeCache();
-    await _scheduleSync();
-  }
-
-  /// Queue a sync behind any running one, so writes reach Trakt one at a
-  /// time and the last one always carries the latest layout.
-  Future<void> _scheduleSync() {
-    final next = _syncChain.catchError((Object _) {}).then((_) => _sync());
-    _syncChain = next;
-    return next;
-  }
-
-  Future<void> _sync() async {
-    var rateLimited = 0;
-    while (_dirty && !_disposed) {
-      final revision = _revision;
-      final layout = _layout;
-      try {
-        await _write(layout, revision);
-        if (_revision == revision) _dirty = false;
-        await _writeCache();
-      } on TrackerRateLimitException catch (e) {
-        if (++rateLimited > _maxRateLimitRetries) {
-          appLogger.w('Home layout: still rate-limited, will sync later');
-          return;
-        }
-        await Future<void>.delayed(_retryDelay(e.retryAfterSeconds));
-      } on HomePinsListLimitException {
-        rethrow;
-      } catch (e) {
-        appLogger.w('Home layout: sync failed, kept on this device', error: e);
-        return;
-      }
-    }
-  }
-
-  Future<void> _write(HomeLayout layout, int revision) async {
-    var list = _list;
-    if (list == null) {
-      // Creating the list uses one of the account's personal-list slots.
-      final own = await _client.getMyLists();
-      list = own.where((l) => l.slug == listSlug).firstOrNull ?? own.where((l) => l.name == listName).firstOrNull;
-      if (list == null) {
-        final limit = await _client.getPersonalListLimit();
-        if (limit != null && own.length >= limit) throw HomePinsListLimitException(limit);
-        list = await _client.createMyList(listName, description: writeHomeLayout(null, layout, revision: revision));
-        if (list == null) throw StateError('Trakt did not return the created list');
-        _list = list;
-        return;
-      }
-    }
-    final description = writeHomeLayout(list.description, layout, revision: revision);
-    await _client.updateMyListDescription(list.traktId, description);
-    _list = TraktUserList(traktId: list.traktId, slug: list.slug, name: list.name, description: description);
-  }
-
-  @override
-  void dispose() {
-    _disposed = true;
-    super.dispose();
+    _persisted = true;
+    notifyListeners();
+    final revision = _revision;
+    final write = _writes.catchError((Object _) {}).then((_) async {
+      await (await _store).writeHomeLayout(
+        [for (final r in layout.rows) (id: r.id, title: r.title, sources: r.sources)],
+        curated: layout.curated,
+        revision: revision,
+      );
+    });
+    _writes = write;
+    return write;
   }
 }

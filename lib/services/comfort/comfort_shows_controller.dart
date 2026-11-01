@@ -5,20 +5,26 @@ import '../../models/trakt/trakt_ids.dart';
 import '../../models/trakt/trakt_user_list.dart';
 import '../../utils/app_logger.dart';
 import '../catalog/trakt_catalog_source.dart';
+import '../customisation/customisation_store.dart';
 import 'comfort_list_description.dart';
 
-/// The user's comfort shows, backed by one private Trakt list.
-///
-/// The list's items are the shows; its description records which are paused
-/// (see [parsePausedTraktIds]). Both are re-read on every [load], so changes
-/// made on trakt.tv or another device show up the next time the page loads.
+/// The user's comfort shows: the items of one private Trakt list (curated on
+/// trakt.tv or here), re-read on every [load]. Which shows are out of the
+/// Random episode mix is kept in the fork's local database (moved between
+/// devices with Settings ▸ Backup & transfer). Earlier versions kept that in
+/// the list's description (see [parsePausedTraktIds]); it's brought over
+/// once and the description is no longer written.
 class ComfortShowsController extends ChangeNotifier {
   static const String listName = 'Comfort Shows';
   static const String listSlug = 'comfort-shows';
 
-  ComfortShowsController(this._source);
+  ComfortShowsController(this._source, {Future<CustomisationStore>? store}) : _storeFuture = store;
+
+  static const String _migratedKey = 'comfort.pausedMigrated';
 
   final TraktCatalogSource _source;
+  final Future<CustomisationStore>? _storeFuture;
+  Future<CustomisationStore> get _store => _storeFuture ?? Customisation.store;
   TraktUserList? _list;
   List<CatalogItem> _shows = const [];
   Set<int> _paused = {};
@@ -75,7 +81,16 @@ class ComfortShowsController extends ChangeNotifier {
       final onList = {for (final show in shows) ?show.ids.trakt};
       _list = list;
       _shows = shows;
-      _paused = parsePausedTraktIds(list.description).intersection(onList);
+      final store = await _store;
+      if (await store.readSetting(_migratedKey) == null) {
+        final fromDescription = parsePausedTraktIds(list.description);
+        await store.writeComfortPaused({
+          for (final show in shows)
+            if (show.ids.trakt case final id? when fromDescription.contains(id)) id: show.title,
+        });
+        await store.writeSetting(_migratedKey, '1');
+      }
+      _paused = (await store.readComfortPaused()).keys.toSet().intersection(onList);
       _loaded = true;
     } catch (e) {
       appLogger.w('Comfort shows: load failed', error: e);
@@ -87,7 +102,7 @@ class ComfortShowsController extends ChangeNotifier {
   }
 
   /// Move [show] in or out of the random-episode pool. Updates optimistically
-  /// and rolls back if Trakt rejects the change.
+  /// and rolls back if the save fails.
   Future<void> setPaused(CatalogItem show, bool paused) async {
     final id = show.ids.trakt;
     final list = _list;
@@ -96,7 +111,7 @@ class ComfortShowsController extends ChangeNotifier {
     _paused = paused ? {..._paused, id} : ({..._paused}..remove(id));
     _notify();
     try {
-      await _savePaused(list);
+      await _savePaused();
     } catch (e) {
       _paused = previous;
       _notify();
@@ -104,13 +119,11 @@ class ComfortShowsController extends ChangeNotifier {
     }
   }
 
-  Future<void> _savePaused(TraktUserList list) async {
-    final description = writePausedTraktIds(list.description, {
+  Future<void> _savePaused() async {
+    await (await _store).writeComfortPaused({
       for (final show in _shows)
         if (show.ids.trakt case final id? when _paused.contains(id)) id: show.title,
     });
-    await _source.client.updateMyListDescription(list.traktId, description);
-    _list = TraktUserList(traktId: list.traktId, slug: list.slug, name: list.name, description: description);
   }
 
   Future<void> addShow(CatalogItem show) async {
@@ -130,7 +143,7 @@ class ComfortShowsController extends ChangeNotifier {
         for (final s in _shows)
           if (s.ids.trakt != id) s,
       ];
-      await _savePaused(list);
+      await _savePaused();
     }
     await load();
   }

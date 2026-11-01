@@ -14,23 +14,17 @@ import '../utils/dialogs.dart';
 import '../utils/snackbar_helper.dart';
 import 'media_context_menu.dart' show MediaMenuExtraEntry;
 
-/// The Trakt Lists source, which owns the Home layout (it's stored on
-/// Trakt), or null when Trakt isn't connected.
-TraktListsCatalogSource? homeLayoutSourceOf(BuildContext context) => Provider.of<CatalogSourcesProvider?>(
+/// The Trakt Lists source, when Trakt is connected (Manage Home lists its
+/// charts and lists).
+TraktListsCatalogSource? traktListsSourceOf(BuildContext context) => Provider.of<CatalogSourcesProvider?>(
   context,
   listen: false,
 )?.connectedSources.whereType<TraktListsCatalogSource>().firstOrNull;
 
-/// User-facing message for a failed Home layout save.
-String homeRowsSaveError(Object e) =>
-    e is HomePinsListLimitException ? t.homeRows.listLimitReached(limit: e.limit) : t.homeRows.saveFailed;
-
 /// "Add to Home" (or "Remove from Home") and "Manage Home" for one row, for
-/// the top of a row's hold-OK menu. Empty when Trakt isn't connected.
+/// the top of a row's hold-OK menu.
 List<MediaMenuExtraEntry> homeRowMenuEntries(BuildContext context, HomeRowEntry row) {
-  final source = homeLayoutSourceOf(context);
-  if (source == null) return const [];
-  final onHome = source.pins.contains(row.id);
+  final onHome = HomePinsController.instance.contains(row.id);
   return [
     MediaMenuExtraEntry(
       icon: onHome ? Symbols.remove_circle_rounded : Symbols.add_circle_rounded,
@@ -46,10 +40,9 @@ List<MediaMenuExtraEntry> homeRowMenuEntries(BuildContext context, HomeRowEntry 
 }
 
 Future<void> addHomeRows(BuildContext context, List<HomeRowEntry> rows) async {
-  final source = homeLayoutSourceOf(context);
-  if (source == null || rows.isEmpty) return;
+  if (rows.isEmpty) return;
   try {
-    final added = await source.pins.add(rows);
+    final added = await HomePinsController.instance.add(rows);
     if (!context.mounted) return;
     if (added == 0) {
       showAppSnackBar(context, t.homeRows.alreadyOnHome(title: rows.first.title));
@@ -61,14 +54,12 @@ Future<void> addHomeRows(BuildContext context, List<HomeRowEntry> rows) async {
     }
   } catch (e) {
     appLogger.w('Home rows: add failed', error: e);
-    if (context.mounted) showErrorSnackBar(context, homeRowsSaveError(e));
+    if (context.mounted) showErrorSnackBar(context, t.homeRows.saveFailed);
   }
 }
 
 /// Remove [row] from Home; Continue Watching asks first.
 Future<void> removeHomeRow(BuildContext context, HomeRowEntry row, {bool announce = true}) async {
-  final source = homeLayoutSourceOf(context);
-  if (source == null) return;
   if (row.id == HomeRowIds.continueWatching) {
     final confirmed = await showConfirmDialog(
       context,
@@ -80,16 +71,18 @@ Future<void> removeHomeRow(BuildContext context, HomeRowEntry row, {bool announc
     if (!confirmed || !context.mounted) return;
   }
   try {
-    await source.pins.remove([row.id]);
+    await HomePinsController.instance.remove([row.id]);
     if (announce && context.mounted) showSuccessSnackBar(context, t.homeRows.removed(title: row.title));
   } catch (e) {
     appLogger.w('Home rows: remove failed', error: e);
-    if (context.mounted) showErrorSnackBar(context, homeRowsSaveError(e));
+    if (context.mounted) showErrorSnackBar(context, t.homeRows.saveFailed);
   }
 }
 
 void openHomeRows(BuildContext context) {
-  final source = homeLayoutSourceOf(context);
-  if (source == null) return;
-  unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => HomeRowsScreen(source: source))));
+  unawaited(
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => HomeRowsScreen(source: traktListsSourceOf(context)))),
+  );
 }
