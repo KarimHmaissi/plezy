@@ -54,7 +54,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### AI tab (branch `feature/ai-helper`) — `HASH`
+### AI tab (branch `feature/ai-helper`) — `3829b262a`
 - **New AI item in the side nav** (after Comfort). On opening, Haiku 5.5
   says hello and makes **Tonight** picks from your history and what you're
   partway through (e.g. "You're one episode from finishing Solo Leveling").
