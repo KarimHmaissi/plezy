@@ -54,7 +54,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### Library index and AI key (branch `feature/ai-helper`) — `HASH`
+### Library index and AI key (branch `feature/ai-helper`) — `853d70e86`
 - **Library index** (Phase 1 of the AI helper plan): every movie and show on
   the Plex servers in a local SQLite file, `plezy_index.db` (a cache: safe to
   delete, rebuilt automatically, not backed up). It stores title, year, dates,
