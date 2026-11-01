@@ -44,6 +44,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       player screen controlling the TV
 - [x] Phone mirrors the TV: AI answers as rows, Home and lists, edits go
       to the TV
+- [x] Media notification on the phone for what the TV is playing
 
 Details of each are in the dated entries below.
 
@@ -89,6 +90,18 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Notification for what the TV is playing (branch `feature/ai-helper`)
+- **Pause from the shade.** While the TV app the phone is connected to is
+  playing, the phone shows a media notification (shade, lock screen,
+  Samsung's quick panel player): artwork, title, progress, play/pause,
+  ±10 s, previous/next episode and seek. The buttons send remote commands
+  to the TV; it goes when playback stops or the phone disconnects.
+- **Same session as the phone's own playback.** It uses the media session
+  and foreground service the video and music players already use. When
+  the phone plays something itself, that takes over the notification
+  (`LocalMediaSession`), and the TV's comes back after.
+- Tapping it opens Plezy, where the mini player is.
 
 ### Phone mirrors the TV (branch `feature/ai-helper`)
 - **The TV is the one copy.** While connected, the phone shows the TV's
