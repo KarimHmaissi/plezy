@@ -3327,6 +3327,15 @@ class Translations$aiTab$en {
 
 	/// en: 'Deleted'
 	String get deleted => 'Deleted';
+
+	/// en: 'Retry: ${request}'
+	String retryChip({required Object request}) => 'Retry: ${request}';
+
+	/// en: 'New picks ready: ${request}'
+	String ready({required Object request}) => 'New picks ready: ${request}';
+
+	/// en: 'No picks came back'
+	String get noPicks => 'No picks came back';
 }
 
 // Path: ai
@@ -9780,6 +9789,9 @@ extension on Translations {
 			'aiTab.deleteRowTitle' => ({required Object request}) => 'Delete "${request}"?',
 			'aiTab.deleteRowMessage' => 'This saved answer will be removed from the AI tab (and from Home if it\'s there).',
 			'aiTab.deleted' => 'Deleted',
+			'aiTab.retryChip' => ({required Object request}) => 'Retry: ${request}',
+			'aiTab.ready' => ({required Object request}) => 'New picks ready: ${request}',
+			'aiTab.noPicks' => 'No picks came back',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10200,11 +10212,11 @@ extension on Translations {
 			'explore.badge.episodesShort' => ({required Object n}) => '${n} eps',
 			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
 			'explore.badge.adult' => '18+',
+			_ => null,
+		} ?? switch (path) {
 			'explore.stats.listed' => ({required Object n}) => '${n} listed',
 			'explore.stats.viewersDay' => ({required Object n}) => '${n} watched today',
 			'explore.stats.viewersWeek' => ({required Object n}) => '${n} watched this week',
-			_ => null,
-		} ?? switch (path) {
 			'explore.stats.viewersMonth' => ({required Object n}) => '${n} watched this month',
 			'explore.stats.viewersYear' => ({required Object n}) => '${n} watched this year',
 			'explore.stats.viewersAllTime' => ({required Object n}) => '${n} viewers',
@@ -10714,11 +10726,11 @@ extension on Translations {
 			'downloads.unknownLibrary' => 'Unknown library',
 			'downloads.unknownShow' => 'Unknown Show',
 			'downloads.unknownSeason' => 'Unknown Season',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.unknownAlbum' => 'Unknown Album',
 			'downloads.completedOfTotal' => ({required Object completed, required Object total}) => '${completed}/${total} completed',
 			'downloads.errorFileNotFound' => 'File not found (404)',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.errorDownloadNotAllowed' => 'Download not allowed by the server (403)',
 			'downloads.errorDownloadFailed' => 'Download failed',
 			'downloads.errorDownloadFailedWithReason' => ({required Object reason}) => 'Download failed: ${reason}',

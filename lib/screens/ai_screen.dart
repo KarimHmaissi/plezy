@@ -15,6 +15,7 @@ import '../mixins/tab_visibility_aware.dart';
 import '../navigation/main_screen_scope.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
 import '../services/ai/ai_key_store.dart';
@@ -37,6 +38,17 @@ import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
 import 'libraries/state_messages.dart';
 import 'settings/ai_settings_screen.dart';
+
+/// A request running in the background (or failed, waiting for Retry);
+/// [replaceId] is set when it refreshes a saved row.
+class _PendingAsk {
+  _PendingAsk(this.request, {this.replaceId, this.previous = const []});
+
+  final String request;
+  final String? replaceId;
+  final List<({String request, AiAnswer answer})> previous;
+  String? error;
+}
 
 /// The AI helper tab: a hello with "Tonight" picks on opening, then any
 /// request typed with "Ask", each answer a row of playable cards. Every
@@ -68,6 +80,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// Answers asked on this visit sit above Tonight; older ones below it.
   int _askedThisVisit = 0;
   final List<({String request, AiAnswer answer})> _conversation = [];
+
+  /// Requests running in the background, shown as chips in the toolbar;
+  /// browsing carries on meanwhile.
+  final List<_PendingAsk> _pending = [];
+  bool _visible = true;
   bool _busy = false;
   bool? _hasKey;
   String? _status;
@@ -153,45 +170,66 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     );
     final text = request?.trim();
     if (text == null || text.isEmpty || !mounted) return;
-    final result = await _run(text, ClaudeModel.sonnet, status: t.aiTab.thinking(request: text), withHistory: true);
-    if (result == null || !mounted) return;
-    _conversation.add((request: text, answer: result.answer));
-    try {
-      await AiHistory.add(result.entry);
-    } catch (e) {
-      appLogger.w('AI tab: saving the answer failed', error: e);
-    }
-    if (!mounted) return;
-    setState(() {
-      _saved.insert(0, result.entry);
-      _savedTotal++;
-      _askedThisVisit++;
-    });
-    // New answers appear at the top; put focus on them.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _tvBrowseRailKey.currentState?.requestFocus());
+    unawaited(_runInBackground(_PendingAsk(text, previous: List.of(_conversation))));
   }
 
-  /// Forget the follow-up context; saved rows stay.
-  void _newConversation() => setState(_conversation.clear);
+  /// Run [ask] while the user keeps browsing; the answer is saved and
+  /// lands as the top row (or replaces the row it refreshes) without moving
+  /// focus. Off the tab, the side nav shows a dot instead of a toast.
+  Future<void> _runInBackground(_PendingAsk ask) async {
+    setState(() {
+      ask.error = null;
+      if (!_pending.contains(ask)) _pending.add(ask);
+    });
+    AiActivity.running.value++;
+    try {
+      final result = await _fetch(ask.request, ClaudeModel.sonnet, previous: ask.previous, id: ask.replaceId);
+      final entry = result.entry;
+      if (entry == null) {
+        if (mounted) setState(() => ask.error = result.answer.error ?? result.answer.intro ?? t.aiTab.noPicks);
+        return;
+      }
+      if (ask.replaceId == null) {
+        _conversation.add((request: ask.request, answer: result.answer));
+        await AiHistory.add(entry);
+      } else {
+        await AiHistory.replace(entry);
+      }
+      if (!mounted) return;
+      setState(() {
+        _pending.remove(ask);
+        if (ask.replaceId == null) {
+          _saved.insert(0, entry);
+          _savedTotal++;
+          _askedThisVisit++;
+        } else {
+          final i = _saved.indexWhere((e) => e.id == entry.id);
+          if (i >= 0) _saved[i] = entry;
+        }
+      });
+      if (_visible) {
+        showAppSnackBar(context, t.aiTab.ready(request: entry.request));
+      } else {
+        AiActivity.unseen.value++;
+      }
+    } catch (e) {
+      appLogger.w('AI tab: background request failed', error: e);
+      if (mounted) setState(() => ask.error = '$e');
+    } finally {
+      AiActivity.running.value--;
+    }
+  }
+
+  /// Forget the follow-up context (and failed requests); saved rows stay.
+  void _newConversation() => setState(() {
+    _conversation.clear();
+    _pending.removeWhere((p) => p.error != null);
+  });
 
   HomeRowEntry _homeRow(AiHistoryEntry entry) => (id: HomeRowIds.ai(entry.id), title: entry.request, sources: const []);
 
   /// Re-run a saved request (one Sonnet call) and replace its picks.
-  Future<void> _refreshRow(AiHistoryEntry entry) async {
-    final result = await _run(
-      entry.request,
-      ClaudeModel.sonnet,
-      status: t.aiTab.refreshing(request: entry.request),
-      id: entry.id,
-    );
-    if (result == null || !mounted) return;
-    await AiHistory.replace(result.entry);
-    if (!mounted) return;
-    setState(() {
-      final i = _saved.indexWhere((e) => e.id == entry.id);
-      if (i >= 0) _saved[i] = result.entry;
-    });
-  }
+  Future<void> _refreshRow(AiHistoryEntry entry) => _runInBackground(_PendingAsk(entry.request, replaceId: entry.id));
 
   Future<void> _deleteRow(AiHistoryEntry entry) async {
     final confirmed = await showConfirmDialog(
@@ -235,29 +273,43 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     ];
   }
 
-  /// Ask the helper and turn its picks into playable items, as an entry
-  /// with [id] (a new one when not given).
+  /// Tonight picks, with the status line showing progress.
   Future<({AiAnswer answer, AiHistoryEntry entry})?> _run(
     String request,
     ClaudeModel model, {
     required String status,
-    bool withHistory = false,
-    String? id,
   }) async {
     if (_busy) return null;
     setState(() {
       _busy = true;
       _status = status;
     });
+    try {
+      final result = await _fetch(request, model);
+      final entry = result.entry;
+      if (!mounted) return null;
+      setState(
+        () => _status = entry == null ? (result.answer.error ?? result.answer.intro ?? result.answer.text) : null,
+      );
+      return entry == null ? null : (answer: result.answer, entry: entry);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Ask the helper and turn its picks into playable items, as an entry
+  /// with [id] (a new one when not given); no entry when nothing came back.
+  Future<({AiAnswer answer, AiHistoryEntry? entry})> _fetch(
+    String request,
+    ClaudeModel model, {
+    List<({String request, AiAnswer answer})> previous = const [],
+    String? id,
+  }) async {
+    final servers = context.read<MultiServerProvider>();
     final agent = _agent(model);
     try {
-      final answer = await agent.ask(request, previous: withHistory ? List.of(_conversation) : const []);
-      if (!mounted) return null;
-      if (answer.error != null) {
-        setState(() => _status = answer.error);
-        return null;
-      }
-      final servers = context.read<MultiServerProvider>();
+      final answer = await agent.ask(request, previous: previous);
+      if (answer.error != null) return (answer: answer, entry: null);
       final fetched = await Future.wait([
         for (final pick in answer.picks)
           () async {
@@ -273,8 +325,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
           }(),
       ]);
       final picks = [...fetched.nonNulls];
-      setState(() => _status = picks.isEmpty ? (answer.intro ?? answer.text) : null);
-      if (picks.isEmpty) return null;
+      if (picks.isEmpty) return (answer: answer, entry: null);
       return (
         answer: answer,
         entry: AiHistoryEntry(
@@ -288,16 +339,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       );
     } finally {
       agent.close();
-      if (mounted) setState(() => _busy = false);
     }
   }
 
   /// Rows in order: this visit's answers, Tonight, then older saved ones.
-  List<AiHistoryEntry> get _rows => [
-    ..._saved.take(_askedThisVisit),
-    ?_tonightRow,
-    ..._saved.skip(_askedThisVisit),
-  ];
+  List<AiHistoryEntry> get _rows => [..._saved.take(_askedThisVisit), ?_tonightRow, ..._saved.skip(_askedThisVisit)];
 
   static String _hubId(AiHistoryEntry entry) => 'aitab:${entry.id}';
 
@@ -332,12 +378,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   @override
   void onTabShown() {
+    _visible = true;
+    AiActivity.unseen.value = 0;
     if (_hasKey == null) return;
     unawaited(_start());
   }
 
   @override
-  void onTabHidden() {}
+  void onTabHidden() => _visible = false;
 
   @override
   void focusActiveTabIfReady() {
@@ -351,10 +399,17 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   void _navigateToSidebar() => MainScreenFocusScope.focusSidebarOf(context);
 
   List<FocusableAction> _actions(Color color) => [
+    for (final ask in _pending)
+      FocusableAction(
+        debugLabel: 'AiPending',
+        // Running requests just show progress; a failed one retries.
+        onPressed: ask.error == null ? null : () => unawaited(_runInBackground(ask)),
+        child: _PendingChip(ask: ask, color: color),
+      ),
     FocusableAction(
       debugLabel: 'AiAsk',
       autofocus: _rows.isEmpty,
-      onPressed: _busy || _hasKey != true ? null : () => unawaited(_ask()),
+      onPressed: _hasKey != true ? null : () => unawaited(_ask()),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
@@ -375,7 +430,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         icon: Symbols.add_comment_rounded,
         iconColor: color,
         tooltip: t.aiTab.newConversation,
-        onPressed: _busy ? null : _newConversation,
+        onPressed: _newConversation,
       ),
     FocusableAction(
       icon: Symbols.refresh_rounded,
@@ -547,6 +602,71 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                   ),
                 ],
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A background request in the toolbar: a softly pulsing "Looking for: …"
+/// while it runs, or "Retry: …" after it failed.
+class _PendingChip extends StatefulWidget {
+  const _PendingChip({required this.ask, required this.color});
+
+  final _PendingAsk ask;
+  final Color color;
+
+  @override
+  State<_PendingChip> createState() => _PendingChipState();
+}
+
+class _PendingChipState extends State<_PendingChip> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+    lowerBound: 0.45,
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final failed = widget.ask.error != null;
+    if (failed) {
+      _pulse
+        ..stop()
+        ..value = 1;
+    } else if (!_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    }
+    final style = Theme.of(context).textTheme.titleSmall?.copyWith(color: widget.color.withValues(alpha: 0.85));
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FadeTransition(
+            opacity: _pulse,
+            child: Icon(
+              failed ? Symbols.refresh_rounded : Symbols.auto_awesome_rounded,
+              size: 18,
+              color: failed ? Theme.of(context).colorScheme.error : widget.color,
+            ),
+          ),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 240),
+            child: Text(
+              failed ? t.aiTab.retryChip(request: widget.ask.request) : t.aiTab.thinking(request: widget.ask.request),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: style,
             ),
           ),
         ],

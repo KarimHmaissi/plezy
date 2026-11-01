@@ -33,6 +33,7 @@ import '../providers/multi_server_provider.dart';
 import '../services/fullscreen_state_manager.dart';
 import '../theme/mono_tokens.dart';
 import '../widgets/backend_badge.dart';
+import 'ai_nav_icon.dart';
 import '../i18n/strings.g.dart';
 
 enum _LibraryNavSection { visible, hidden }
@@ -1113,6 +1114,11 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
                                       _buildNavItem(
                                         icon: Symbols.auto_awesome_rounded,
                                         selectedIcon: Symbols.auto_awesome_rounded,
+                                        iconWidget: AiNavIcon(
+                                          color: widget.selectedTab == NavigationTabId.ai
+                                              ? tokens(context).accent
+                                              : tokens(context).textMuted,
+                                        ),
                                         label: Translations.of(context).navigation.ai,
                                         isSelected: widget.selectedTab == NavigationTabId.ai,
                                         onTap: () => widget.onDestinationSelected(NavigationTabId.ai),
@@ -1200,12 +1206,14 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     required FocusNode focusNode,
     required bool isCollapsed,
     bool autofocus = false,
+    Widget? iconWidget,
   }) {
     final t = tokens(context);
 
     return NavigationRailItem(
       icon: icon,
       selectedIcon: selectedIcon,
+      iconWidget: iconWidget,
       label: Text(
         label,
         style: TextStyle(fontSize: 14, fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400),

@@ -65,6 +65,30 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Calmer backdrop and background AI requests (branch `feature/ai-helper`) — `HASH`
+- **Darker overlay on the full-screen backdrop** (Home, Explore, Comfort,
+  AI, anywhere the TV spotlight shows), so the title and summary no longer
+  fight with busy artwork:
+  - a light overall dim;
+  - a strong dark band behind the text column that fades out across the
+    screen;
+  - darker under the rows.
+
+  It's just three flat gradients and no blur, so it costs nothing on the
+  Shield. Before and after: `notes/hero-overlay-before.png`,
+  `notes/hero-overlay-after.png`.
+- **AI requests run in the background.** After Ask or Follow up you can keep
+  browsing:
+  - a softly pulsing "Looking for: …" chip sits in the AI toolbar, and the
+    AI icon in the side nav pulses;
+  - when the picks arrive, the new row lands at the top without moving your
+    focus, with a "New picks ready" message;
+  - if you're on another tab, the answer is still saved and a dot on the AI
+    icon tells you it's there;
+  - several requests can run at once, and Refresh picks works the same way;
+  - a failed request turns into a "Retry: …" chip (New conversation clears
+    it).
+
 ### AI tab: saved answers, bigger rows, AI rows on Home (branch `feature/ai-helper`) — `d6dfa14cb`
 - **More picks for broad requests.** The helper now aims for 15–20 picks
   for a genre, mood, era, "something like X" or "based on my history", so

@@ -1203,7 +1203,10 @@
     "deleteRow": "Delete this row",
     "deleteRowTitle": "Delete \"${request}\"?",
     "deleteRowMessage": "This saved answer will be removed from the AI tab (and from Home if it's there).",
-    "deleted": "Deleted"
+    "deleted": "Deleted",
+    "retryChip": "Retry: ${request}",
+    "ready": "New picks ready: ${request}",
+    "noPicks": "No picks came back"
   },
   "ai": {
     "settingsTitle": "AI",
