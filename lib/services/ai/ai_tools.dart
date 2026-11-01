@@ -28,6 +28,9 @@ class AiTools {
 
   static const String showPicksTool = 'show_picks';
 
+  /// Hard cap on one answer's picks; the prompt lets the model size the list.
+  static const int maxPicks = 50;
+
   static const _typeEnum = {
     'type': 'string',
     'enum': ['movie', 'show'],
@@ -106,7 +109,7 @@ class AiTools {
         'properties': {
           'titles': {
             'type': 'array',
-            'maxItems': 30,
+            'maxItems': 50,
             'items': {
               'type': 'object',
               'properties': {
@@ -174,7 +177,7 @@ class AiTools {
       'name': showPicksTool,
       'description':
           'Show your final picks to the user as a row of playable cards. Call exactly once, at the end, with ids '
-          'returned by the other tools only (never invented). Best first, each with one short reason: about 15-20 for broad requests, only the true matches for narrow ones.',
+          'returned by the other tools only (never invented). Best first, each with one short reason. Up to 50, sized to the request: 30-50 for big lists, about 15-25 for broad requests, only the true matches for narrow ones.',
       'strict': true,
       'input_schema': {
         'type': 'object',
@@ -227,7 +230,7 @@ class AiTools {
         intro = input['intro'] as String?;
         title = input['title'] as String?;
         picks = [
-          for (final p in (input['picks'] as List? ?? const []).whereType<Map>())
+          for (final p in (input['picks'] as List? ?? const []).whereType<Map>().take(maxPicks))
             if (p['id'] is String) (id: p['id'] as String, reason: p['reason'] as String? ?? ''),
         ];
         return 'Shown to the user.';
@@ -309,7 +312,7 @@ class AiTools {
     final db = await index.database;
     final found = <String>[];
     final missing = <String>[];
-    for (final t in (input['titles'] as List? ?? const []).whereType<Map>().take(30)) {
+    for (final t in (input['titles'] as List? ?? const []).whereType<Map>().take(50)) {
       final title = (t['title'] as String? ?? '').trim();
       if (title.isEmpty) continue;
       final year = (t['year'] as num?)?.toInt();

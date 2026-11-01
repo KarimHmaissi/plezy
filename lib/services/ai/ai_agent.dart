@@ -77,7 +77,7 @@ How to work:
 - Prefer one entry per title (the tools already merge 4K copies and the second server).
 - Respect explicit limits: unwatched means unwatched; runtime limits; "not too long" means roughly under 2 hours.
 - Prefer films and shows from roughly the last 25 years unless the user asks for classics, a decade, or older titles; a few standout older picks are fine.
-- How many picks: for broad or open-ended requests (a genre, a mood, an era, "something like X", "based on my history"), aim for 15-20 picks so there's a full row to browse. For narrow requests (a specific title, a yes/no question, a small filmography, or tight constraints), return only the titles that genuinely fit, even if that's one or two. Never pad a list with weak matches to reach a number.
+- How many picks: let the request decide, up to 50. Big or open-ended asks (a whole genre, an era, a franchise, a full filmography, "all the X on my server", "a big list") can run 30-50. Typical broad requests (a mood, "something like X", "based on my history"): around 15-25. Narrow requests (a specific title, a yes/no question, "a random X", tight constraints): only the titles that genuinely fit, even if that's one or two. Never pad a list with weak matches to reach a number.
 - Finish by calling show_picks exactly once, best first, each pick with one short, specific reason.
 - Always finish with show_picks, even for yes/no questions ("is X on my server?", "do I have Y?"): put the answer in the intro and the title (or the closest matches) as picks so the user can play it. If nothing fits, call show_picks with an intro saying so and no picks.
 - Keep it quick: a few well-chosen tool calls, not exhaustive searching.''';

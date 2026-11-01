@@ -88,7 +88,7 @@ abstract final class AiHomeRefresher {
         '${entry.request}\n\n'
         'This refreshes a row the user already has. Leave out anything they have already watched, and prefer '
         'titles that were not in the previous version (${previous.isEmpty ? 'none' : previous}), so the row '
-        'feels fresh; a few strong repeats are fine.';
+        'feels fresh; a few strong repeats are fine. Keep it to 20 picks at most.';
     try {
       final result = await buildAiRow(
         request: entry.request,

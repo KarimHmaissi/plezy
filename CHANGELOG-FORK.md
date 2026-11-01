@@ -29,7 +29,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] AI helper core: Sonnet 5.5 for requests, Haiku 5.5 for background
       jobs, tools over the index, history and Trakt ratings, monthly spend
       tracking, key stored encrypted and sent over the home network
-- [x] AI tab: Tonight picks, Ask / Follow up, 15–20 picks for broad
+- [x] AI tab: Tonight picks, Ask / Follow up, up to 50 picks sized to the
       requests
 - [x] Saved answers (up to 200) with Load more; Add to Home, Refresh picks,
       Delete on every AI row
@@ -80,6 +80,17 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### AI answers sized to the request, up to 50 (branch `feature/ai-helper`)
+- **The AI decides how long a list should be**, up to 50 picks: 30–50 for
+  big list-style asks (a whole genre, an era, a franchise, "all the X on my
+  server"), about 15–25 for typical broad requests, and only the true
+  matches for narrow ones ("a random X", a specific title). It never pads a
+  list. 50 is a hard cap in code.
+- `find_titles` now checks up to 50 titles per call, so big lists don't need
+  extra steps.
+- **Unchanged:** Tonight stays at 6–10 picks, and auto-refreshed Home AI rows
+  are kept to 20 or fewer so refresh costs stay small.
 
 ### Auto-refreshing AI rows on Home (branch `feature/ai-helper`) — `48aee5ba2`
 - **AI rows on Home refresh themselves twice a day** while Plezy is open
