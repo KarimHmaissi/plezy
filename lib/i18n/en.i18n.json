@@ -2753,5 +2753,27 @@
     "openAsProfile": "Open as ${name}",
     "copy": "Copy",
     "copied": "Link copied"
+  },
+  "cast": {
+    "sending": "Playing ${title} on ${name}",
+    "playingOn": "Playing on ${name}",
+    "thisPhone": "This phone",
+    "switchToThisPhone": "Play on this phone",
+    "switchToHost": "Play on ${name}",
+    "nowPlaying": "Now playing on ${name}",
+    "failed": "Couldn't play on the TV: ${message}",
+    "itemNotFound": "That title isn't on the TV's servers",
+    "showOnTv": "Show on TV",
+    "playOnPhone": "Play on this phone"
+  },
+  "remoteAi": {
+    "title": "AI on ${name}",
+    "connectTitle": "Connect to your TV to use AI",
+    "connectMessage": "The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.",
+    "connect": "Connect",
+    "hint": "What do you feel like watching?",
+    "working": "${name} is looking…",
+    "error": "The TV couldn't answer: ${message}",
+    "empty": "Ask for something and the picks show up here."
   }
 }

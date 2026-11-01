@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import '../connection/connection.dart';
 import '../connection/connection_registry.dart';
 import '../i18n/strings.g.dart';
+import '../media/media_item.dart';
 import '../models/companion_remote/remote_command.dart';
 import '../models/companion_remote/remote_session.dart';
 import '../models/plex/plex_home.dart';
@@ -125,6 +126,55 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   RemoteSessionStatus get status => _session?.status ?? RemoteSessionStatus.disconnected;
   RemoteDevice? get connectedDevice => _session?.connectedDevice;
   bool get isPlayerActive => _isPlayerActive;
+
+  /// Casting (fork): while this phone is connected as a remote, Play sends the
+  /// title to the host instead of playing here, unless switched to this phone.
+  bool _castToHost = true;
+  bool get castToHost => _castToHost;
+  bool get isCasting => isRemote && isConnected && _castToHost;
+
+  void setCastToHost(bool value) {
+    if (_castToHost == value) return;
+    _castToHost = value;
+    safeNotifyListeners();
+  }
+
+  /// The host's answers to cast requests, for the phone to show.
+  final ValueNotifier<({bool ok, String message})?> castResults = ValueNotifier(null);
+
+  /// Ask the host to play [item] (see [isCasting]).
+  void castPlay(MediaItem item, {Duration? initialPosition}) =>
+      sendCommand(RemoteCommandType.playMedia, data: _castData(item, initialPosition: initialPosition));
+
+  /// Ask the host to show [item]'s detail page.
+  void castOpen(MediaItem item) => sendCommand(RemoteCommandType.openItem, data: _castData(item));
+
+  static Map<String, dynamic> _castData(MediaItem item, {Duration? initialPosition}) => {
+    'server': item.serverId,
+    'id': item.id,
+    'title': item.title,
+    if (initialPosition != null) 'offsetMs': initialPosition.inMilliseconds,
+  };
+
+  /// Phone side: the host's progress and picks for AI requests sent with
+  /// [askAi] (the raw `aiAnswer` data).
+  final StreamController<Map<String, dynamic>> _aiAnswers = StreamController.broadcast();
+  Stream<Map<String, dynamic>> get aiAnswers => _aiAnswers.stream;
+
+  /// Phone side: run [request] on the host's AI; returns the request id its
+  /// answers carry.
+  String askAi(String request) {
+    final rid = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+    sendCommand(RemoteCommandType.aiAsk, data: {'rid': rid, 'request': request});
+    return rid;
+  }
+
+  /// Host side: report on an AI request from the phone.
+  void sendAiAnswer(Map<String, dynamic> data) => sendCommand(RemoteCommandType.aiAnswer, data: data);
+
+  /// Host side: tell the phone how a cast request went.
+  void sendCastResult({required bool ok, required String message}) =>
+      sendCommand(RemoteCommandType.castResult, data: {'ok': ok, 'message': message});
   bool get isHostServerRunning => _peerService?.isServerRunning ?? false;
   List<String> get hostServerAddresses => _hostServerAddresses;
 
@@ -876,6 +926,14 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
           _handleDeviceInfo(command);
         } else if (command.type == RemoteCommandType.syncState) {
           _handleSyncState(command);
+        } else if (command.type == RemoteCommandType.aiAnswer) {
+          _aiAnswers.add(command.data ?? const {});
+        } else if (command.type == RemoteCommandType.castResult) {
+          castResults.value = null; // so a repeat result still notifies
+          castResults.value = (
+            ok: command.data?['ok'] == true,
+            message: command.data?['message'] as String? ?? '',
+          );
         } else if (command.type != RemoteCommandType.ping &&
             command.type != RemoteCommandType.pong &&
             command.type != RemoteCommandType.ack) {
@@ -1209,6 +1267,8 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _peerService = null;
     _pendingRemotePeer = null;
     _cleanupSubscriptions();
+    _aiAnswers.close();
+    castResults.dispose();
 
     _boundActiveProfile?.removeListener(_scheduleAuthContextRefresh);
     for (final sub in _profileServiceSubs) {

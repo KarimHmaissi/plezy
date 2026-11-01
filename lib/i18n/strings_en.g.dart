@@ -101,6 +101,8 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$services$en services = Translations$services$en.internal(_root);
 	late final Translations$addServer$en addServer = Translations$addServer$en.internal(_root);
 	late final Translations$deepLinks$en deepLinks = Translations$deepLinks$en.internal(_root);
+	late final Translations$cast$en cast = Translations$cast$en.internal(_root);
+	late final Translations$remoteAi$en remoteAi = Translations$remoteAi$en.internal(_root);
 }
 
 // Path: app
@@ -6717,6 +6719,78 @@ class Translations$deepLinks$en {
 	String get copied => 'Link copied';
 }
 
+// Path: cast
+class Translations$cast$en {
+	Translations$cast$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Playing ${title} on ${name}'
+	String sending({required Object title, required Object name}) => 'Playing ${title} on ${name}';
+
+	/// en: 'Playing on ${name}'
+	String playingOn({required Object name}) => 'Playing on ${name}';
+
+	/// en: 'This phone'
+	String get thisPhone => 'This phone';
+
+	/// en: 'Play on this phone'
+	String get switchToThisPhone => 'Play on this phone';
+
+	/// en: 'Play on ${name}'
+	String switchToHost({required Object name}) => 'Play on ${name}';
+
+	/// en: 'Now playing on ${name}'
+	String nowPlaying({required Object name}) => 'Now playing on ${name}';
+
+	/// en: 'Couldn't play on the TV: ${message}'
+	String failed({required Object message}) => 'Couldn\'t play on the TV: ${message}';
+
+	/// en: 'That title isn't on the TV's servers'
+	String get itemNotFound => 'That title isn\'t on the TV\'s servers';
+
+	/// en: 'Show on TV'
+	String get showOnTv => 'Show on TV';
+
+	/// en: 'Play on this phone'
+	String get playOnPhone => 'Play on this phone';
+}
+
+// Path: remoteAi
+class Translations$remoteAi$en {
+	Translations$remoteAi$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'AI on ${name}'
+	String title({required Object name}) => 'AI on ${name}';
+
+	/// en: 'Connect to your TV to use AI'
+	String get connectTitle => 'Connect to your TV to use AI';
+
+	/// en: 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.'
+	String get connectMessage => 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.';
+
+	/// en: 'Connect'
+	String get connect => 'Connect';
+
+	/// en: 'What do you feel like watching?'
+	String get hint => 'What do you feel like watching?';
+
+	/// en: '${name} is looking…'
+	String working({required Object name}) => '${name} is looking…';
+
+	/// en: 'The TV couldn't answer: ${message}'
+	String error({required Object message}) => 'The TV couldn\'t answer: ${message}';
+
+	/// en: 'Ask for something and the picks show up here.'
+	String get empty => 'Ask for something and the picks show up here.';
+}
+
 // Path: appIcon.names
 class Translations$appIcon$names$en {
 	Translations$appIcon$names$en.internal(this._root);
@@ -11210,6 +11284,24 @@ extension on Translations {
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
+			'cast.sending' => ({required Object title, required Object name}) => 'Playing ${title} on ${name}',
+			'cast.playingOn' => ({required Object name}) => 'Playing on ${name}',
+			'cast.thisPhone' => 'This phone',
+			'cast.switchToThisPhone' => 'Play on this phone',
+			'cast.switchToHost' => ({required Object name}) => 'Play on ${name}',
+			'cast.nowPlaying' => ({required Object name}) => 'Now playing on ${name}',
+			'cast.failed' => ({required Object message}) => 'Couldn\'t play on the TV: ${message}',
+			'cast.itemNotFound' => 'That title isn\'t on the TV\'s servers',
+			'cast.showOnTv' => 'Show on TV',
+			'cast.playOnPhone' => 'Play on this phone',
+			'remoteAi.title' => ({required Object name}) => 'AI on ${name}',
+			'remoteAi.connectTitle' => 'Connect to your TV to use AI',
+			'remoteAi.connectMessage' => 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.',
+			'remoteAi.connect' => 'Connect',
+			'remoteAi.hint' => 'What do you feel like watching?',
+			'remoteAi.working' => ({required Object name}) => '${name} is looking…',
+			'remoteAi.error' => ({required Object message}) => 'The TV couldn\'t answer: ${message}',
+			'remoteAi.empty' => 'Ask for something and the picks show up here.',
 			_ => null,
 		};
 	}

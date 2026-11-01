@@ -11,6 +11,7 @@ import '../media/media_version.dart';
 import '../media/media_version_preference.dart';
 import '../mpv/mpv.dart';
 import '../models/transcode_quality_preset.dart';
+import '../providers/companion_remote_provider.dart';
 import '../providers/download_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/watch_state_store.dart';
@@ -31,6 +32,7 @@ import 'platform_detector.dart';
 import 'download_version_utils.dart';
 import 'media_version_resolver.dart';
 import 'provider_extensions.dart';
+import 'snackbar_helper.dart';
 import 'quality_preset_labels.dart';
 import '../i18n/strings.g.dart';
 
@@ -318,6 +320,7 @@ Future<bool?> navigateToVideoPlayer(
   bool strictMediaSelection = false,
   bool explicitStartPolicy = false,
   PlaybackLaunchObserver? launchObserver,
+  bool allowCast = true,
 }) async {
   final watchTogether = isOffline || watchTogetherCopy == null ? null : context.read<WatchTogetherProvider?>();
   // A launch for the Watch Together room is stale once the room moved on.
@@ -326,6 +329,19 @@ Future<bool?> navigateToVideoPlayer(
       (launchObserver?.isCurrent ?? true) &&
       (watchTogetherCopy == null || watchTogether?.roomCopy?.ref == watchTogetherCopy);
   if (!launchCurrent()) return null;
+  // Casting (fork): a phone connected to a TV sends Play there instead.
+  final cast = context.read<CompanionRemoteProvider?>();
+  if (allowCast && cast != null && cast.isCasting && !isOffline && watchTogetherCopy == null && metadata.serverId != null) {
+    // An explicit position (play from start, resume at) travels; otherwise
+    // the TV resumes from the account's watch state like a normal Play.
+    final explicitOffset = resolveWatchState ? null : Duration(milliseconds: metadata.viewOffsetMs ?? 0);
+    cast.castPlay(metadata, initialPosition: initialPosition ?? explicitOffset);
+    showAppSnackBar(
+      context,
+      t.cast.sending(title: metadata.title ?? '', name: cast.connectedDevice?.name ?? t.companionRemote.unknownDevice),
+    );
+    return null;
+  }
   if (resolveWatchState) {
     metadata = context.readFreshWatchState(metadata);
   }

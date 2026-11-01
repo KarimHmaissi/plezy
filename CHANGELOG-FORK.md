@@ -38,12 +38,17 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] AI rows on Home auto-refresh twice a day on Haiku (max 10 AI rows on
       Home; Settings toggle). Not yet tried on the TV
 - [x] Darker, calmer overlay on the TV spotlight backdrop
+- [x] Phone as a thin client: AI requests run on the TV, and Play anywhere
+      on the phone casts to the TV ("This phone" toggle)
 
 Details of each are in the dated entries below.
 
 ## Backlog (not built yet)
 
 ### AI
+- **Phone remote, v2** — the TV's saved AI answers on the phone, Find more
+  from the phone, and play/pause/seek controls for what's casting; maybe
+  mirror the TV's Home layout on the phone.
 - **Voice requests** — speak a request on the AI tab instead of typing it
   (typed requests are built).
 - **Richer context per title (later)** — add more about each title to the
@@ -80,6 +85,28 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Phone as a thin client: AI on the TV, casting everywhere (branch `feature/ai-helper`)
+- **AI tab on the phone** talks to the TV app it's connected to: "AI on
+  <TV name>", a text box (keyboard dictation works), a working indicator,
+  then the picks with poster, year and reason. The request runs on the TV
+  with its key and library index and is saved in the TV's AI history (it
+  shows up as a new row on the TV's AI tab). The phone never asks for an
+  API key; not connected, it says "Connect to your TV to use AI".
+  Tap a pick to play it on the TV; hold for "Show on TV" (opens its page
+  there) or "Play on this phone". "More like this" on the phone goes to the
+  TV too.
+- **Casting from any tab:** while the phone is connected, Play anywhere
+  (Home, Libraries, Search, Comfort, Watchlist, Continue Watching, detail
+  pages, episodes) plays on the TV instead, resuming from the same point;
+  "play from start" and explicit positions travel with it. Detail pages
+  stay browsable on the phone. A bar above the phone's nav shows "Playing
+  on <TV>" and the last title started; tap it to switch to "This phone"
+  and back. Failures (title not on the TV's servers) show as a message.
+- New remote commands, appended so older builds ignore them: `aiAsk`,
+  `playMedia`, `openItem`, `castResult`, `aiAnswer`.
+- The phone's Home is still its own (empty) layout; the customisations
+  live in each device's local database.
 
 ### Find more on AI answers, bigger lists (branch `feature/ai-helper`)
 - **Find more** in the hold-OK menu of any saved AI answer (AI tab). It

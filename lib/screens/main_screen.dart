@@ -17,11 +17,15 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import '../i18n/strings.g.dart';
 import '../services/ai/ai_more_like_this.dart';
+import '../services/ai/ai_remote_asks.dart';
+import '../services/catalog/trakt_catalog_source.dart';
+import '../utils/media_navigation_helper.dart';
 import '../services/app_exit_service.dart';
 import '../services/tvos_system_navigation_service.dart';
 import '../services/update_service.dart';
 import '../utils/app_logger.dart';
 import '../widgets/auth_error_banner.dart';
+import '../widgets/cast_bar.dart';
 import '../widgets/app_icon.dart';
 import '../utils/platform_detector.dart';
 import '../utils/snackbar_helper.dart';
@@ -1034,6 +1038,58 @@ class _MainScreenState extends State<MainScreen>
         });
       }
     };
+    receiver.onPlayMedia = (data) => unawaited(_playFromPhone(data, play: true));
+    receiver.onOpenItem = (data) => unawaited(_playFromPhone(data, play: false));
+    receiver.onAiAsk = (data) {
+      final trakt = context
+          .read<CatalogSourcesProvider?>()
+          ?.connectedSources
+          .whereType<TraktCatalogSource>()
+          .firstOrNull;
+      unawaited(
+        AiRemoteAsks.run(
+          data,
+          remote: companionRemote,
+          clientFor: context.read<MultiServerProvider>().getClientForServer,
+          trakt: trakt?.client,
+        ),
+      );
+    };
+  }
+
+  /// A phone cast a title here: fetch it from this app's servers and play it
+  /// (or open its page), on top of whatever the TV was showing.
+  Future<void> _playFromPhone(Map<String, dynamic> data, {required bool play}) async {
+    final remote = context.read<CompanionRemoteProvider>();
+    final serverId = data['server'] as String?;
+    final id = data['id'] as String?;
+    final title = data['title'] as String? ?? '';
+    final offsetMs = data['offsetMs'] as int?;
+    try {
+      final client = serverId == null || id == null
+          ? null
+          : context.read<MultiServerProvider>().serverManager.getClient(ServerId(serverId));
+      final item = await client?.fetchItem(id!);
+      if (!mounted) return;
+      if (item == null) {
+        remote.sendCastResult(ok: false, message: t.cast.itemNotFound);
+        return;
+      }
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      remote.sendCastResult(ok: true, message: item.title ?? title);
+      if (play) {
+        await navigateToVideoPlayer(
+          context,
+          metadata: item,
+          initialPosition: offsetMs == null ? null : Duration(milliseconds: offsetMs),
+        );
+      } else {
+        await navigateToMediaItem(context, item);
+      }
+    } catch (e) {
+      appLogger.w('CompanionRemote: cast of $title failed', error: e);
+      if (mounted) remote.sendCastResult(ok: false, message: '$e');
+    }
   }
 
   Future<void> _autoStartCompanionRemoteServer() async {
@@ -1095,6 +1151,9 @@ class _MainScreenState extends State<MainScreen>
         receiver.onTabSettings = null;
         receiver.onHome = null;
         receiver.onSearchAction = null;
+        receiver.onPlayMedia = null;
+        receiver.onOpenItem = null;
+        receiver.onAiAsk = null;
         receiver.navigationOwner = null;
       }
     }
@@ -2276,6 +2335,7 @@ class _MainScreenState extends State<MainScreen>
         key: _navBarKey,
         mainAxisSize: .min,
         children: [
+          const CastBar(),
           // Reconnect bar when offline
           if (_isOffline)
             Material(

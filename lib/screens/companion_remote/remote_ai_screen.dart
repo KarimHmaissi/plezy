@@ -1,0 +1,234 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
+import 'package:provider/provider.dart';
+
+import '../../i18n/strings.g.dart';
+import '../../media/ids.dart';
+import '../../media/media_item.dart';
+import '../../providers/companion_remote_provider.dart';
+import '../../services/ai/ai_history.dart';
+import '../../utils/provider_extensions.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../utils/video_player_navigation.dart';
+import '../../widgets/optimized_media_image.dart';
+import 'mobile_remote_screen.dart';
+
+/// One request sent from this phone and what the TV has said about it.
+class RemoteAiAsk {
+  RemoteAiAsk(this.rid, this.request);
+
+  final String rid;
+  final String request;
+  String status = 'working';
+  String? error;
+  AiHistoryEntry? answer;
+}
+
+/// The phone's AI requests for this app run; the TV keeps the saved history.
+class RemoteAiSession extends ChangeNotifier {
+  RemoteAiSession._();
+  static final RemoteAiSession instance = RemoteAiSession._();
+
+  final List<RemoteAiAsk> asks = [];
+  StreamSubscription<Map<String, dynamic>>? _sub;
+  CompanionRemoteProvider? _remote;
+
+  void ask(CompanionRemoteProvider remote, String request) {
+    if (!identical(_remote, remote)) {
+      _sub?.cancel();
+      _remote = remote;
+      _sub = remote.aiAnswers.listen(_onAnswer);
+    }
+    asks.insert(0, RemoteAiAsk(remote.askAi(request), request));
+    notifyListeners();
+  }
+
+  void _onAnswer(Map<String, dynamic> data) {
+    final ask = asks.where((a) => a.rid == data['rid']).firstOrNull;
+    if (ask == null) return;
+    ask.status = data['status'] as String? ?? 'error';
+    if (ask.status == 'done') {
+      ask.answer = AiHistoryEntry.fromJson(data);
+      if (ask.answer == null) ask.status = 'error';
+    } else if (ask.status == 'error') {
+      ask.error = data['message'] as String? ?? '';
+    }
+    notifyListeners();
+  }
+}
+
+/// The phone's AI tab: requests run on the connected TV app (its key, index
+/// and history); picks play there with a tap.
+class RemoteAiScreen extends StatefulWidget {
+  const RemoteAiScreen({super.key});
+
+  @override
+  State<RemoteAiScreen> createState() => _RemoteAiScreenState();
+}
+
+class _RemoteAiScreenState extends State<RemoteAiScreen> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _send(CompanionRemoteProvider remote) {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    RemoteAiSession.instance.ask(remote, text);
+    _controller.clear();
+    FocusScope.of(context).unfocus();
+  }
+
+  String _hostName(CompanionRemoteProvider remote) =>
+      remote.connectedDevice?.name ?? t.companionRemote.unknownDevice;
+
+  void _playOnHost(CompanionRemoteProvider remote, MediaItem item) {
+    remote.castPlay(item);
+    showAppSnackBar(context, t.cast.sending(title: item.title ?? '', name: _hostName(remote)));
+  }
+
+  Future<void> _showActions(CompanionRemoteProvider remote, MediaItem item) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Symbols.tv_rounded),
+              title: Text(t.cast.showOnTv),
+              onTap: () => Navigator.pop(context, 'open'),
+            ),
+            ListTile(
+              leading: const Icon(Symbols.smartphone_rounded),
+              title: Text(t.cast.playOnPhone),
+              onTap: () => Navigator.pop(context, 'phone'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'open') remote.castOpen(item);
+    if (choice == 'phone') unawaited(navigateToVideoPlayer(context, metadata: item, allowCast: false));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final remote = context.watch<CompanionRemoteProvider>();
+    final theme = Theme.of(context);
+    if (!(remote.isRemote && remote.isConnected)) {
+      return Scaffold(
+        appBar: AppBar(title: Text(t.navigation.ai)),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Symbols.cast_rounded, size: 48, color: theme.colorScheme.primary),
+                const SizedBox(height: 16),
+                Text(t.remoteAi.connectTitle, style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                Text(t.remoteAi.connectMessage, textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: () =>
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => const MobileRemoteScreen())),
+                  icon: const Icon(Symbols.settings_remote_rounded),
+                  label: Text(t.remoteAi.connect),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    final name = _hostName(remote);
+    return Scaffold(
+      appBar: AppBar(title: Text(t.remoteAi.title(name: name))),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: TextField(
+              controller: _controller,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _send(remote),
+              decoration: InputDecoration(
+                hintText: t.remoteAi.hint,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(28)),
+                suffixIcon: IconButton(icon: const Icon(Symbols.send_rounded), onPressed: () => _send(remote)),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListenableBuilder(
+              listenable: RemoteAiSession.instance,
+              builder: (context, _) {
+                final asks = RemoteAiSession.instance.asks;
+                if (asks.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(t.remoteAi.empty, textAlign: TextAlign.center),
+                    ),
+                  );
+                }
+                return ListView(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  children: [for (final ask in asks) ..._askTiles(remote, ask, name)],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _askTiles(CompanionRemoteProvider remote, RemoteAiAsk ask, String name) {
+    final theme = Theme.of(context);
+    final answer = ask.answer;
+    return [
+      ListTile(
+        title: Text(answer?.label ?? ask.request, style: theme.textTheme.titleMedium),
+        subtitle: switch (ask.status) {
+          'working' => Text(t.remoteAi.working(name: name)),
+          'error' => Text(t.remoteAi.error(message: ask.error ?? ''), style: TextStyle(color: theme.colorScheme.error)),
+          _ => answer?.intro == null ? null : Text(answer!.intro!),
+        },
+        trailing: ask.status == 'working'
+            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+            : null,
+      ),
+      if (answer != null)
+        for (final item in answer.items)
+          ListTile(
+            leading: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: OptimizedMediaImage.poster(
+                client: context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId)),
+                imagePath: item.posterThumb(),
+                width: 44,
+                height: 66,
+              ),
+            ),
+            title: Text(item.year == null ? (item.title ?? '') : '${item.title} (${item.year})'),
+            subtitle: answer.reasons[item.globalKey] == null
+                ? null
+                : Text(answer.reasons[item.globalKey]!, maxLines: 3, overflow: TextOverflow.ellipsis),
+            isThreeLine: answer.reasons[item.globalKey] != null,
+            onTap: () => _playOnHost(remote, item),
+            onLongPress: () => unawaited(_showActions(remote, item)),
+          ),
+      const Divider(),
+    ];
+  }
+}

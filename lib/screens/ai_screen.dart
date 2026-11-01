@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -14,7 +15,9 @@ import '../mixins/refreshable.dart';
 import '../mixins/tab_visibility_aware.dart';
 import '../navigation/main_screen_scope.dart';
 import '../providers/catalog_sources_provider.dart';
+import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../services/ai/ai_remote_asks.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
@@ -38,6 +41,7 @@ import '../widgets/side_navigation_rail.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
+import 'companion_remote/remote_ai_screen.dart';
 import 'libraries/state_messages.dart';
 import 'settings/ai_settings_screen.dart';
 
@@ -119,6 +123,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     super.initState();
     AiMoreLikeThis.requests.addListener(_takeMoreLikeThis);
     AiHistory.replaced.addListener(_onReplaced);
+    AiRemoteAsks.landed.addListener(_onLanded);
     unawaited(_start());
     WidgetsBinding.instance.addPostFrameCallback((_) => _takeMoreLikeThis());
   }
@@ -135,9 +140,35 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     });
   }
 
+  /// A connected phone's request was answered: add it as the top row.
+  Future<void> _onLanded() async {
+    final id = AiRemoteAsks.landed.value;
+    if (id == null || _saved.any((e) => e.id == id)) return;
+    final fresh = await AiHistory.get(id);
+    if (!mounted || fresh == null || _saved.any((e) => e.id == id)) return;
+    setState(() {
+      _saved.insert(0, fresh);
+      _savedTotal++;
+      _askedThisVisit++;
+    });
+    if (_visible) {
+      showAppSnackBar(context, t.aiTab.ready(request: fresh.label));
+    } else {
+      AiActivity.unseen.value++;
+    }
+  }
+
   /// Start any "More like this" requests from long-press menus.
   void _takeMoreLikeThis() {
     if (!mounted) return;
+    if (_thinClient) {
+      final remote = context.read<CompanionRemoteProvider>();
+      if (!(remote.isRemote && remote.isConnected)) return;
+      for (final seed in AiMoreLikeThis.take()) {
+        RemoteAiSession.instance.ask(remote, AiMoreLikeThis.prompt(seed));
+      }
+      return;
+    }
     for (final seed in AiMoreLikeThis.take()) {
       unawaited(
         _runInBackground(
@@ -151,6 +182,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   void dispose() {
     AiMoreLikeThis.requests.removeListener(_takeMoreLikeThis);
     AiHistory.replaced.removeListener(_onReplaced);
+    AiRemoteAsks.landed.removeListener(_onLanded);
     _spotlight.dispose();
     _tvRowsExpanded.dispose();
     _focusedReason.dispose();
@@ -158,6 +190,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   }
 
   Future<void> _start() async {
+    if (_thinClient) return;
     if (!_historyLoaded) await _loadHistory();
     final key = await AiKeyStore.read();
     if (!mounted) return;
@@ -562,8 +595,15 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     return null;
   }
 
+  /// Phones don't run the AI themselves: requests go to the TV app they're
+  /// connected to (its key, index and history).
+  static bool get _thinClient =>
+      !PlatformDetector.isTV() &&
+      (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+
   @override
   Widget build(BuildContext context) {
+    if (_thinClient) return const RemoteAiScreen();
     final hubs = _hubs;
     final message = _message();
     final color = Theme.of(context).colorScheme.onSurface;

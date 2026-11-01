@@ -31,6 +31,9 @@ class CompanionRemoteReceiver {
   VoidCallback? onTabSettings;
   VoidCallback? onHome;
   void Function(String? query)? onSearchAction;
+  void Function(Map<String, dynamic> data)? onAiAsk;
+  void Function(Map<String, dynamic> data)? onPlayMedia;
+  void Function(Map<String, dynamic> data)? onOpenItem;
   VoidCallback? onNextTrack;
   VoidCallback? onPreviousTrack;
   VoidCallback? onStop;
@@ -118,6 +121,12 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.search:
         final query = command.data?['query'] as String?;
         onSearchAction?.call(query);
+      case RemoteCommandType.playMedia:
+        onPlayMedia?.call(command.data ?? const {});
+      case RemoteCommandType.openItem:
+        onOpenItem?.call(command.data ?? const {});
+      case RemoteCommandType.aiAsk:
+        onAiAsk?.call(command.data ?? const {});
 
       case RemoteCommandType.stop:
         onStop?.call();
@@ -144,6 +153,8 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.deviceInfo:
       case RemoteCommandType.disconnect:
       case RemoteCommandType.syncState:
+      case RemoteCommandType.castResult:
+      case RemoteCommandType.aiAnswer:
         break;
 
       default:
@@ -172,7 +183,9 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.ack ||
   RemoteCommandType.deviceInfo ||
   RemoteCommandType.disconnect ||
-  RemoteCommandType.syncState => false,
+  RemoteCommandType.syncState ||
+  RemoteCommandType.castResult ||
+  RemoteCommandType.aiAnswer => false,
   RemoteCommandType.dpadUp ||
   RemoteCommandType.dpadDown ||
   RemoteCommandType.dpadLeft ||
@@ -203,6 +216,9 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.tabSettings ||
   RemoteCommandType.home ||
   RemoteCommandType.search ||
+  RemoteCommandType.aiAsk ||
+  RemoteCommandType.playMedia ||
+  RemoteCommandType.openItem ||
   RemoteCommandType.subtitles ||
   RemoteCommandType.audioTracks ||
   RemoteCommandType.qualitySettings ||

@@ -52,6 +52,26 @@ enum RemoteCommandType {
   disconnect,
   ack,
   syncState,
+
+  /// Fork: run an AI request on the host (its key, index and saved answers).
+  /// Data: `rid` (the phone's request id), `request`.
+  aiAsk,
+
+  /// Fork, casting: play a title on the host. Data: `server`, `id`, `title`,
+  /// and `offsetMs` for an explicit position (else it resumes as usual).
+  playMedia,
+
+  /// Fork, casting: show a title's detail page on the host (`server`, `id`).
+  openItem,
+
+  /// Fork, casting: the host's answer to [playMedia] / [openItem]
+  /// (`ok`, `message`).
+  castResult,
+
+  /// Fork: the host's progress and picks for an [aiAsk]. Data: `rid`,
+  /// `status` (working / done / error), and when done `id`, `title`, `intro`,
+  /// `picks` (each `item` as MediaItem JSON plus `reason`); `message` on error.
+  aiAnswer,
 }
 
 class _RemoteCommandTypeConverter extends IndexedEnumConverter<RemoteCommandType> {
