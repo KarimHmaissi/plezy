@@ -72,6 +72,21 @@ enum RemoteCommandType {
   /// `status` (working / done / error), and when done `id`, `title`, `intro`,
   /// `picks` (each `item` as MediaItem JSON plus `reason`); `message` on error.
   aiAnswer,
+
+  /// Fork, now playing: the host's player state, sent on change and about
+  /// once a second while playing. Data: `state` (playing / paused /
+  /// buffering / stopped), `server`, `id`, `title`, `subtitle`, `thumb`,
+  /// `art`, `positionMs`, `durationMs`, `audio` / `subtitles` (lists of
+  /// `{id, label}`), `audioId`, `subtitleId`, `marker` (intro / credits),
+  /// `hasNext`, `hasPrevious`.
+  nowPlaying,
+
+  /// Fork, now playing: seek the host's player to `positionMs`.
+  seekTo,
+
+  /// Fork, now playing: pick a track on the host. Data: `kind` (audio /
+  /// subtitle), `id` (from [nowPlaying]'s lists).
+  selectTrack,
 }
 
 class _RemoteCommandTypeConverter extends IndexedEnumConverter<RemoteCommandType> {

@@ -46,6 +46,15 @@ class CompanionRemoteReceiver {
   VoidCallback? onAudioTracks;
   VoidCallback? onFullscreen;
 
+  /// Fork, now playing: direct player control from the phone, so it works
+  /// whatever has focus on the host.
+  VoidCallback? onPlayPause;
+  void Function(Duration position)? onSeekTo;
+  void Function(String kind, String id)? onSelectTrack;
+
+  /// Skip the intro / credits marker the player is in; set by the controls.
+  VoidCallback? onSkipMarker;
+
   /// The live music session's transport, installed by the session for its
   /// lifetime; returns whether it acted on the command. Transport commands go
   /// here while no video player owns the slots above: the space key that
@@ -84,11 +93,23 @@ class CompanionRemoteReceiver {
         simulateKeyPress(LogicalKeyboardKey.contextMenu);
 
       case RemoteCommandType.play:
-        simulateKeyPress(LogicalKeyboardKey.space);
       case RemoteCommandType.pause:
-        simulateKeyPress(LogicalKeyboardKey.space);
       case RemoteCommandType.playPause:
-        simulateKeyPress(LogicalKeyboardKey.space);
+        if (onPlayPause != null) {
+          onPlayPause!();
+        } else {
+          simulateKeyPress(LogicalKeyboardKey.space);
+        }
+      case RemoteCommandType.seekTo:
+        final ms = command.data?['positionMs'];
+        if (ms is int) onSeekTo?.call(Duration(milliseconds: ms));
+      case RemoteCommandType.selectTrack:
+        final kind = command.data?['kind'];
+        final id = command.data?['id'];
+        if (kind is String && id is String) onSelectTrack?.call(kind, id);
+      case RemoteCommandType.skipIntro:
+      case RemoteCommandType.skipCredits:
+        onSkipMarker?.call();
       case RemoteCommandType.seekForward:
         onSeekForward?.call();
       case RemoteCommandType.seekBackward:
@@ -155,6 +176,7 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.syncState:
       case RemoteCommandType.castResult:
       case RemoteCommandType.aiAnswer:
+      case RemoteCommandType.nowPlaying:
         break;
 
       default:
@@ -185,7 +207,8 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.disconnect ||
   RemoteCommandType.syncState ||
   RemoteCommandType.castResult ||
-  RemoteCommandType.aiAnswer => false,
+  RemoteCommandType.aiAnswer ||
+  RemoteCommandType.nowPlaying => false,
   RemoteCommandType.dpadUp ||
   RemoteCommandType.dpadDown ||
   RemoteCommandType.dpadLeft ||
@@ -219,6 +242,8 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.aiAsk ||
   RemoteCommandType.playMedia ||
   RemoteCommandType.openItem ||
+  RemoteCommandType.seekTo ||
+  RemoteCommandType.selectTrack ||
   RemoteCommandType.subtitles ||
   RemoteCommandType.audioTracks ||
   RemoteCommandType.qualitySettings ||

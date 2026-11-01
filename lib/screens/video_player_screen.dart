@@ -1028,6 +1028,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
     onCycleAudio: () => _cycleAudioTrack(),
     onHome: () => _handleHomeButton(),
     readProvider: () => context.read<CompanionRemoteProvider>(),
+    metadata: () => _currentMetadata,
+    hasPreviousItem: () => _hasPreviousItem,
+    onSelectAudio: (track) => unawaited(_onAudioTrackChanged(track)),
+    onSelectSubtitle: (track) => unawaited(_onSubtitleTrackChanged(track)),
   );
 
   /// Backend-neutral lookup. Returns whichever client (Plex or Jellyfin)

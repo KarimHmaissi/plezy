@@ -2764,7 +2764,19 @@
     "failed": "Couldn't play on the TV: ${message}",
     "itemNotFound": "That title isn't on the TV's servers",
     "showOnTv": "Show on TV",
-    "playOnPhone": "Play on this phone"
+    "playOnPhone": "Play on this phone",
+    "audio": "Audio",
+    "subtitles": "Subtitles",
+    "off": "Off",
+    "previous": "Previous",
+    "next": "Next",
+    "back10": "Back",
+    "forward10": "Forward",
+    "skipIntro": "Skip intro",
+    "skipCredits": "Skip credits",
+    "stop": "Stop",
+    "nothingPlaying": "Nothing is playing",
+    "playPause": "Play / pause"
   },
   "remoteAi": {
     "title": "AI on ${name}",

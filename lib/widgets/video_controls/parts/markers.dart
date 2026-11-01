@@ -4,7 +4,13 @@ extension _PlexVideoControlsMarkerMethods on _PlexVideoControlsState {
   void _listenToPosition() {
     _positionSubscription = widget.player.streams.position.listen((position) {
       _syncCurrentMarkerForPosition(position);
+      HostPlayerMarker.current.value = _currentMarker == null ? null : (_currentMarker!.isCredits ? 'credits' : 'intro');
     });
+  }
+
+  /// A connected phone pressed Skip intro / Skip credits.
+  void _skipMarkerFromRemote() {
+    if (_currentMarker != null) unawaited(_skipMarker());
   }
 
   void _syncCurrentMarkerForCurrentPosition() {

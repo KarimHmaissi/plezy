@@ -40,6 +40,8 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] Darker, calmer overlay on the TV spotlight backdrop
 - [x] Phone as a thin client: AI requests run on the TV, and Play anywhere
       on the phone casts to the TV ("This phone" toggle)
+- [x] Now playing on the phone: auto-reconnect, mini bar and a full
+      player screen controlling the TV
 
 Details of each are in the dated entries below.
 
@@ -85,6 +87,31 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Now playing on the phone (branch `feature/ai-helper`)
+- **Auto-reconnect:** the phone remembers the TV app it last connected to
+  and reconnects quietly when Plezy opens or comes back to the front, if
+  the TV is on the network. The Disconnect button on the remote screen
+  turns this off until you connect again.
+- **Live state from the TV:** while it plays, the TV sends what's playing,
+  the position (every second; every 5 s when paused), play/pause/buffering,
+  the audio and subtitle tracks, whether Skip intro / Skip credits is up,
+  and whether there's a previous/next episode; "stopped" when it ends.
+- **Mini bar:** the bar above the phone's nav becomes a mini player with
+  the episode still (or the film's backdrop), title, a thin progress line,
+  a cast toggle and play/pause. Tap it for the full screen.
+- **Now-playing screen:** large artwork, title and "S1 · E5 · name", a
+  scrubber with elapsed/remaining that seeks when you let go, play/pause,
+  back/forward (Plezy's skip step, 10 s by default), previous/next episode,
+  Skip intro / Skip credits when the TV shows them, audio and subtitle
+  pickers, and Stop. Artwork and controls sit side by side on the unfolded
+  screen and stack on the cover screen.
+- Play/pause from the phone now controls the TV's player directly instead
+  of simulating a key press, so it works whatever has focus.
+- The TV shows under its device name instead of "Desktop" after a
+  reconnect.
+- New remote commands, appended: `nowPlaying`, `seekTo`, `selectTrack`.
+  Skip intro/credits use the existing commands, which now do something.
 
 ### Phone as a thin client: AI on the TV, casting everywhere (branch `feature/ai-helper`)
 - **AI tab on the phone** talks to the TV app it's connected to: "AI on

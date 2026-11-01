@@ -979,6 +979,10 @@ class _MainScreenState extends State<MainScreen>
       _companionRemoteSetup = true;
       _setupCompanionRemote();
     }
+    if (!_autoConnectChecked && PlatformDetector.isMobile(context)) {
+      _autoConnectChecked = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_autoConnectToTv()));
+    }
 
     _miniPlayerInsets = context.read<MiniPlayerInsetController?>();
 
@@ -1092,6 +1096,24 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
+  bool _autoConnectChecked = false;
+
+  /// Phone: reconnect to the TV app last connected to, if it's on the LAN,
+  /// so casting and the now-playing bar work without opening the remote.
+  Future<void> _autoConnectToTv() async {
+    try {
+      final remote = context.read<CompanionRemoteProvider>();
+      if (remote.isInSession) return;
+      final settings = await SettingsService.getInstance();
+      final host = settings.read(SettingsService.companionRemoteAutoHost);
+      if (host == null || !mounted) return;
+      if (!await ensureCompanionRemoteCryptoFromContext(context)) return;
+      await remote.autoConnect(host);
+    } catch (e) {
+      appLogger.d('CompanionRemote: auto-connect skipped', error: e);
+    }
+  }
+
   Future<void> _autoStartCompanionRemoteServer() async {
     try {
       final settings = await SettingsService.getInstance();
@@ -1195,6 +1217,7 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _autoConnectChecked) unawaited(_autoConnectToTv());
     // Always consume: the gates latch backgrounding on every lifecycle event.
     final resumedFromBackground = _profileSelectionResumeGate.consumePromptOn(state);
     final refreshStaleContent = _contentRefreshResumeGate.consumeRefreshOn(state);

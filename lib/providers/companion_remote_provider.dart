@@ -18,6 +18,7 @@ import '../services/companion_remote/companion_remote_peer_service.dart';
 import '../services/companion_remote/lan_discovery_service.dart';
 import '../services/companion_remote/remote_auth_context.dart';
 import '../services/companion_remote/remote_auth_service.dart';
+import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/device_identity.dart';
 import '../utils/serial_future_queue.dart';
@@ -155,6 +156,49 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     'title': item.title,
     if (initialPosition != null) 'offsetMs': initialPosition.inMilliseconds,
   };
+
+  /// Phone side: what the host is playing (the raw `nowPlaying` data), or
+  /// null when nothing is.
+  final ValueNotifier<Map<String, dynamic>?> nowPlaying = ValueNotifier(null);
+
+  /// Phone side: seek the host's player.
+  void seekHostTo(Duration position) =>
+      sendCommand(RemoteCommandType.seekTo, data: {'positionMs': position.inMilliseconds});
+
+  /// Phone side: pick an audio / subtitle track on the host.
+  void selectHostTrack(String kind, String id) =>
+      sendCommand(RemoteCommandType.selectTrack, data: {'kind': kind, 'id': id});
+
+  /// Phone side: reconnect to the remembered host when it's on the LAN, with
+  /// no UI. Call once crypto is ready (see [ensureCryptoReady]).
+  Future<void> autoConnect(String hostClientId) async {
+    if (_autoConnecting || isInSession || isHostServerRunning) return;
+    final stream = discoverHosts();
+    if (stream == null) return;
+    _autoConnecting = true;
+    StreamSubscription<List<DiscoveredHost>>? sub;
+    try {
+      final found = Completer<DiscoveredHost?>();
+      sub = stream.listen((hosts) {
+        final host = hosts.where((h) => h.clientId == hostClientId).firstOrNull;
+        if (host != null && !found.isCompleted) found.complete(host);
+      });
+      final host = await found.future.timeout(const Duration(seconds: 12), onTimeout: () => null);
+      await sub.cancel();
+      sub = null;
+      stopDiscovery();
+      if (host == null || isInSession || isDisposed) return;
+      appLogger.d('CompanionRemote: auto-connecting to ${host.name}');
+      await connectToDiscoveredHost(host);
+    } catch (e) {
+      appLogger.d('CompanionRemote: auto-connect failed', error: e);
+    } finally {
+      await sub?.cancel();
+      _autoConnecting = false;
+    }
+  }
+
+  bool _autoConnecting = false;
 
   /// Phone side: the host's progress and picks for AI requests sent with
   /// [askAi] (the raw `aiAnswer` data).
@@ -797,6 +841,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
         _lastAuthContextId = peer.selectedAuthContextId ?? authContext.id;
         _lastHostClientId = peer.selectedHostClientId ?? host.clientId;
         _session = _session?.copyWith(status: RemoteSessionStatus.connected);
+        unawaited(_rememberAutoHost(_lastHostClientId));
       },
       failureLog: 'CompanionRemote: Failed to connect to host',
       onFailure: _failRemoteConnectSession,
@@ -926,6 +971,9 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
           _handleDeviceInfo(command);
         } else if (command.type == RemoteCommandType.syncState) {
           _handleSyncState(command);
+        } else if (command.type == RemoteCommandType.nowPlaying) {
+          final data = command.data ?? const {};
+          nowPlaying.value = data['state'] == 'stopped' ? null : data;
         } else if (command.type == RemoteCommandType.aiAnswer) {
           _aiAnswers.add(command.data ?? const {});
         } else if (command.type == RemoteCommandType.castResult) {
@@ -968,6 +1016,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       if (!_ownsPeer(peer, generation)) return;
       final intentional = _isIntentionalDisconnect(peer, generation);
       appLogger.d('CompanionRemote: Device disconnected (intentional: $intentional)');
+      nowPlaying.value = null;
       if (intentional) {
         _session = _session?.copyWith(status: RemoteSessionStatus.disconnected, connectedDevice: null);
         safeNotifyListeners();
@@ -1241,7 +1290,19 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     }
   }
 
+  Future<void> _rememberAutoHost(String? clientId) async {
+    try {
+      final settings = await SettingsService.getInstance();
+      await settings.write(SettingsService.companionRemoteAutoHost, clientId);
+    } catch (e) {
+      appLogger.d('CompanionRemote: could not save the host', error: e);
+    }
+  }
+
   Future<void> leaveSession() async {
+    // A manual disconnect stops the phone reconnecting on its own.
+    if (isRemote) unawaited(_rememberAutoHost(null));
+    nowPlaying.value = null;
     final leavingGeneration = _remoteGeneration;
     _markIntentionalDisconnect(_peerService, leavingGeneration);
     _markIntentionalDisconnect(_pendingRemotePeer, leavingGeneration);
@@ -1273,6 +1334,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _cleanupSubscriptions();
     _aiAnswers.close();
     castResults.dispose();
+    nowPlaying.dispose();
 
     _boundActiveProfile?.removeListener(_scheduleAuthContextRefresh);
     for (final sub in _profileServiceSubs) {

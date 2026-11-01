@@ -943,6 +943,13 @@ class SettingsService extends BaseSharedPreferencesService {
     transform: _trimEmptyAsNull,
   );
 
+  /// Fork: the host this phone reconnects to on its own (its client id);
+  /// cleared by a manual disconnect.
+  static final companionRemoteAutoHost = NullableStringPref(
+    'companion_remote_auto_host',
+    transform: _trimEmptyAsNull,
+  );
+
   static final maxVolume = IntPref('max_volume', defaultValue: 100, transform: (v) => v.clamp(100, 300));
   static final downmixCenterBoost = IntPref('downmix_center_boost', transform: (v) => v.clamp(0, 12));
   // mpv's sub-pos range: values above 100 move subtitles further down than
@@ -1638,6 +1645,7 @@ class SettingsService extends BaseSharedPreferencesService {
     customExternalPlayers,
     watchPartyRelayUrl,
     companionRemoteLastHostAddress,
+    companionRemoteAutoHost,
     rememberedBrightnessLevel,
     refusedVideoCodecs,
     audioOutputDevice,

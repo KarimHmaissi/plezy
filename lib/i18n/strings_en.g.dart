@@ -6756,6 +6756,42 @@ class Translations$cast$en {
 
 	/// en: 'Play on this phone'
 	String get playOnPhone => 'Play on this phone';
+
+	/// en: 'Audio'
+	String get audio => 'Audio';
+
+	/// en: 'Subtitles'
+	String get subtitles => 'Subtitles';
+
+	/// en: 'Off'
+	String get off => 'Off';
+
+	/// en: 'Previous'
+	String get previous => 'Previous';
+
+	/// en: 'Next'
+	String get next => 'Next';
+
+	/// en: 'Back'
+	String get back10 => 'Back';
+
+	/// en: 'Forward'
+	String get forward10 => 'Forward';
+
+	/// en: 'Skip intro'
+	String get skipIntro => 'Skip intro';
+
+	/// en: 'Skip credits'
+	String get skipCredits => 'Skip credits';
+
+	/// en: 'Stop'
+	String get stop => 'Stop';
+
+	/// en: 'Nothing is playing'
+	String get nothingPlaying => 'Nothing is playing';
+
+	/// en: 'Play / pause'
+	String get playPause => 'Play / pause';
 }
 
 // Path: remoteAi
@@ -11294,6 +11330,18 @@ extension on Translations {
 			'cast.itemNotFound' => 'That title isn\'t on the TV\'s servers',
 			'cast.showOnTv' => 'Show on TV',
 			'cast.playOnPhone' => 'Play on this phone',
+			'cast.audio' => 'Audio',
+			'cast.subtitles' => 'Subtitles',
+			'cast.off' => 'Off',
+			'cast.previous' => 'Previous',
+			'cast.next' => 'Next',
+			'cast.back10' => 'Back',
+			'cast.forward10' => 'Forward',
+			'cast.skipIntro' => 'Skip intro',
+			'cast.skipCredits' => 'Skip credits',
+			'cast.stop' => 'Stop',
+			'cast.nothingPlaying' => 'Nothing is playing',
+			'cast.playPause' => 'Play / pause',
 			'remoteAi.title' => ({required Object name}) => 'AI on ${name}',
 			'remoteAi.connectTitle' => 'Connect to your TV to use AI',
 			'remoteAi.connectMessage' => 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.',
