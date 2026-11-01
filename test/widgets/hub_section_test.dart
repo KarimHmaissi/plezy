@@ -64,6 +64,35 @@ void main() {
     expect(longPressedItem, same(item));
   });
 
+  testWidgets('a trailing card follows the last item and works by tap and D-pad', (tester) async {
+    final item = testMediaItem(id: 'only', backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Only Movie');
+    final hubKey = GlobalKey<HubSectionState>();
+    var taps = 0;
+
+    await tester.pumpWidget(
+      InputModeTracker(
+        child: _TestApp(
+          child: HubSection(
+            key: hubKey,
+            hub: _hubWith(item),
+            focusMemory: HubFocusMemory(),
+            icon: Symbols.live_tv_rounded,
+            trailingCard: HubTrailingCard(label: 'Load more', icon: Symbols.add_rounded, onTap: () => taps++),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Load more'), findsOneWidget);
+    await tester.tap(find.text('Load more'));
+    expect(taps, 1);
+
+    hubKey.currentState!.requestFocusAt(1);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    expect(taps, 2);
+  });
+
   testWidgets('custom item callbacks own D-pad actions', (tester) async {
     final item = testMediaItem(
       id: 'dpad_item',

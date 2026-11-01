@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../theme/fork_spacing.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:plezy/widgets/app_icon.dart';
+import 'package:plezy/widgets/pressable.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import '../focus/dpad_navigator.dart';
 import '../focus/dpad_select_long_press_controller.dart';
@@ -101,6 +102,10 @@ class HubSection extends StatefulWidget {
   /// Vertical viewport alignment when this hub is focused.
   final double focusScrollAlignment;
 
+  /// Fork: an action card after the last item (an AI row's "Load more"),
+  /// in place of the View All card.
+  final HubTrailingCard? trailingCard;
+
   const HubSection({
     super.key,
     required this.hub,
@@ -112,6 +117,7 @@ class HubSection extends StatefulWidget {
     bool? usesContinueWatchingAction,
     this.showServerName = false,
     this.loadMoreItems,
+    this.trailingCard,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -172,7 +178,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
   }
 
   /// Total item count including the optional "View All" card
-  int get _totalItemCount => widget.hub.items.length + (widget.hub.more ? 1 : 0);
+  int get _totalItemCount => widget.hub.items.length + (_hasEndCard ? 1 : 0);
+
+  bool get _hasEndCard => widget.hub.more || widget.trailingCard != null;
 
   @override
   void didUpdateWidget(HubSection oldWidget) {
@@ -181,7 +189,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
       _itemKeys.clear();
       _mediaCardKeys.clear();
       _displacedFocusItem = null;
-    } else if (widget.hub.items.length != oldWidget.hub.items.length || widget.hub.more != oldWidget.hub.more) {
+    } else if (widget.hub.items.length != oldWidget.hub.items.length ||
+        widget.hub.more != oldWidget.hub.more ||
+        (widget.trailingCard == null) != (oldWidget.trailingCard == null)) {
       _itemKeys.removeWhere((index, _) => index >= _totalItemCount);
       _mediaCardKeys.removeWhere((index, _) => index >= widget.hub.items.length);
     }
@@ -190,7 +200,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
       _followFocusedItem(oldWidget.hub.items);
     }
 
-    if (widget.hub.items.length != oldWidget.hub.items.length || widget.hub.more != oldWidget.hub.more) {
+    if (widget.hub.items.length != oldWidget.hub.items.length ||
+        widget.hub.more != oldWidget.hub.more ||
+        (widget.trailingCard == null) != (oldWidget.trailingCard == null)) {
       final maxIndex = _totalItemCount == 0 ? 0 : _totalItemCount - 1;
       if (_focusedIndex > maxIndex) {
         _focusedIndex = maxIndex;
@@ -420,6 +432,10 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
 
   void _activateCurrentItem() {
     _displacedFocusItem = null;
+    if (_focusedIndex == widget.hub.items.length && widget.trailingCard != null) {
+      widget.trailingCard!.onTap?.call();
+      return;
+    }
     if (_focusedIndex == widget.hub.items.length && widget.hub.more) {
       _navigateToHubDetail(context);
       return;
@@ -701,9 +717,39 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                                       : spacing.edgeInset - cardGap / 2,
                                   vertical: isTv ? 6 : 2,
                                 ),
-                          itemCount: isKeyboardMode ? _totalItemCount : widget.hub.items.length,
+                          itemCount: isKeyboardMode
+                              ? _totalItemCount
+                              : widget.hub.items.length + (widget.trailingCard != null ? 1 : 0),
                           itemBuilder: (context, index) {
                             final isItemFocused = hasFocus && index == _focusedIndex;
+
+                            final card = widget.trailingCard;
+                            if (index == widget.hub.items.length && card != null) {
+                              return Padding(
+                                key: _itemKeyFor(index),
+                                padding: cardPadding,
+                                child: FocusBuilders.buildLockedFocusWrapper(
+                                  context: context,
+                                  isFocused: isItemFocused,
+                                  onTap: card.onTap == null
+                                      ? null
+                                      : () {
+                                          _onItemTapped(index);
+                                          card.onTap!();
+                                        },
+                                  child: Pressable(
+                                    enabled: card.onTap != null,
+                                    longPress: false,
+                                    child: _TrailingCardView(
+                                      card: card,
+                                      width: cardWidth,
+                                      height: posterHeight,
+                                      large: isTv,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
 
                             if (index == widget.hub.items.length) {
                               return Padding(
@@ -842,5 +888,76 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     _notifyFocusedItemChanged();
     _scrollToIndex(clamped);
     _hubFocusNode.requestFocus();
+  }
+}
+
+/// Fork: what [HubSection.trailingCard] shows.
+class HubTrailingCard {
+  const HubTrailingCard({required this.label, this.icon, this.spinner = false, this.onTap});
+
+  final String label;
+  final IconData? icon;
+
+  /// Shows a spinner instead of [icon] (work in progress).
+  final bool spinner;
+
+  /// Null leaves the card inert (e.g. while loading, or nothing more).
+  final VoidCallback? onTap;
+}
+
+/// A poster-sized action card matching the row's cards.
+class _TrailingCardView extends StatelessWidget {
+  const _TrailingCardView({required this.card, required this.width, required this.height, required this.large});
+
+  final HubTrailingCard card;
+  final double width;
+  final double height;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final foreground = scheme.onSurface.withValues(alpha: card.onTap == null && !card.spinner ? 0.45 : 0.85);
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: card.spinner ? 0.25 : 0.45),
+      borderRadius: BorderRadius.circular(tokens(context).radiusSm),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: card.onTap,
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: Center(
+            child: Column(
+              mainAxisSize: .min,
+              children: [
+                if (card.spinner)
+                  SizedBox.square(
+                    dimension: large ? 28 : 22,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: foreground),
+                  )
+                else if (card.icon != null)
+                  AppIcon(card.icon!, fill: 1, size: large ? 36 : 28, color: foreground),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    card.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: foreground,
+                      fontWeight: FontWeight.w700,
+                      fontSize: large ? 16 : null,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

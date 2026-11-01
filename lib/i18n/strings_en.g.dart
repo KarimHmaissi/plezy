@@ -3274,6 +3274,15 @@ class Translations$aiTab$en {
 
 	// Translations
 
+	/// en: 'Load more'
+	String get loadMoreCard => 'Load more';
+
+	/// en: 'Finding more…'
+	String get findingMoreCard => 'Finding more…';
+
+	/// en: 'No more matches'
+	String get noMoreCard => 'No more matches';
+
 	/// en: 'Tonight'
 	String get tonight => 'Tonight';
 
@@ -10013,6 +10022,9 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.usersOnly' => 'Users only',
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
+			'aiTab.loadMoreCard' => 'Load more',
+			'aiTab.findingMoreCard' => 'Finding more…',
+			'aiTab.noMoreCard' => 'No more matches',
 			'aiTab.tonight' => 'Tonight',
 			'aiTab.ask' => 'Ask',
 			'aiTab.followUp' => 'Follow up',
@@ -10452,11 +10464,11 @@ extension on Translations {
 			'explore.badge.rankTrending' => ({required Object n}) => '#${n} trending',
 			'explore.badge.rankSeasonal' => ({required Object n, required Object season}) => '#${n} in ${season}',
 			'explore.badge.watchingNow' => ({required Object n}) => '${n} watching',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.available' => 'Available',
 			'explore.badge.partiallyAvailable' => 'Partly available',
 			'explore.badge.availableIn4k' => '4K available',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.requested' => 'Requested',
 			'explore.badge.pendingApproval' => 'Pending approval',
 			'explore.badge.processing' => 'Processing',
@@ -10966,11 +10978,11 @@ extension on Translations {
 			'downloads.backgroundWarning.stillNotWorking' => 'Device-specific help',
 			'downloads.backgroundWarning.stillNotWorkingDescription' => 'See steps for your device, or send a log from Settings › View Logs if the issue continues.',
 			'downloads.backgroundWarning.dialogTitle' => 'Downloads may not finish',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.backgroundWarning.dialogDownloadAnyway' => 'Download anyway',
 			'downloads.backgroundWarning.dialogFixFirst' => 'Fix this first',
 			'downloads.backgroundWarning.statusTile' => 'Background downloads',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.backgroundWarning.statusOk' => 'Allowed to run in the background',
 			'downloads.backgroundWarning.statusBlocked' => 'Blocked by system settings',
 			'downloads.backgroundWarning.statusDegraded' => 'Limited by system settings',
@@ -11480,11 +11492,11 @@ extension on Translations {
 			'aiComposer.take2' => 'Take 2 · Shortlisting',
 			'aiComposer.take3' => 'Take 3 · Final cut',
 			'aiComposer.wrap' => 'That\'s a wrap',
+			_ => null,
+		} ?? switch (path) {
 			'aiComposer.jammed' => 'Film jammed',
 			'aiComposer.timedOut' => 'The TV didn\'t answer in time.',
 			'aiComposer.edit' => 'Edit',
-			_ => null,
-		} ?? switch (path) {
 			'aiComposer.keepsRunning' => 'You can close this: it keeps going and lands in the AI tab.',
 			_ => null,
 		};

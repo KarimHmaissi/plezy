@@ -63,17 +63,38 @@ abstract final class AiRemoteAsks {
   /// tab's own (see `AiScreen._findMore` / `_refreshRow`); the result is
   /// saved with [AiHistory.replace], which updates the TV and, through the
   /// next snapshot, the phone.
+  ///
+  /// `loadMore` (the row's Load more card) appends instead, and when the
+  /// phone sends a `rid` it gets an `aiAnswer` back: `done`, `none` (nothing
+  /// new) or `error`.
   static Future<void> runAction(
     Map<String, dynamic> data, {
     required MediaServerClient? Function(ServerId serverId) clientFor,
     TraktClient? trakt,
+    CompanionRemoteProvider? remote,
   }) async {
     final action = data['action'] as String?;
     final id = data['id'] as String?;
+    final rid = data['rid'] as String?;
+    var status = 'error';
+    try {
+      status = await _runAction(action, id, clientFor: clientFor, trakt: trakt);
+    } finally {
+      if (rid != null) remote?.sendAiAnswer({'rid': rid, 'status': status});
+    }
+  }
+
+  static Future<String> _runAction(
+    String? action,
+    String? id, {
+    required MediaServerClient? Function(ServerId serverId) clientFor,
+    TraktClient? trakt,
+  }) async {
     final entry = id == null ? null : await AiHistory.get(id);
-    if (entry == null || (await AiKeyStore.read() ?? '').isEmpty) return;
-    final extend = action == 'findMore';
-    if (!extend && action != 'refresh') return;
+    if (entry == null || (await AiKeyStore.read() ?? '').isEmpty) return 'error';
+    final append = action == 'loadMore';
+    final extend = append || action == 'findMore';
+    if (!extend && action != 'refresh') return 'error';
     AiActivity.running.value++;
     try {
       final result = await buildAiRow(
@@ -88,10 +109,14 @@ abstract final class AiRemoteAsks {
         excludeKeys: extend ? {...entry.items.map((i) => i.globalKey)} : const {},
       );
       final found = result.entry;
-      if (found == null) return;
-      await AiHistory.replace(extend ? mergeFindMore(entry, found) : found);
+      if (found == null) return result.answer.error == null ? 'none' : 'error';
+      final merged = extend ? mergeFindMore(entry, found, append: append) : found;
+      if (extend && merged.items.length == entry.items.length) return 'none';
+      await AiHistory.replace(merged);
+      return 'done';
     } catch (e) {
       appLogger.w('AI: $action from the phone failed', error: e);
+      return 'error';
     } finally {
       AiActivity.running.value--;
     }

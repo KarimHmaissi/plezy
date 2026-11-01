@@ -1079,6 +1079,7 @@ class _MainScreenState extends State<MainScreen>
         data,
         clientFor: context.read<MultiServerProvider>().getClientForServer,
         trakt: _traktClient,
+        remote: companionRemote,
       ),
     );
   }

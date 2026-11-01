@@ -71,10 +71,11 @@ String findMoreRequest(AiHistoryEntry entry, {int? atMost}) {
 /// [found]'s new picks first, then [old]'s, without repeats, capped at
 /// [AiHistory.maxItemsPerEntry]. Keeps the answer's name and intro, and its
 /// age unless [createdAt] is given (auto-refresh restarts the clock).
-AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime? createdAt}) {
+/// [append] puts the new picks after the old ones instead (Load more).
+AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime? createdAt, bool append = false}) {
   final seen = <String>{};
   final items = [
-    for (final item in [...found.items, ...old.items])
+    for (final item in append ? [...old.items, ...found.items] : [...found.items, ...old.items])
       if (seen.add(item.globalKey)) item,
   ].take(AiHistory.maxItemsPerEntry).toList();
   return AiHistoryEntry(

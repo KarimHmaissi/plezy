@@ -23,6 +23,7 @@ import '../utils/media_navigation_helper.dart';
 import '../utils/video_player_navigation.dart';
 import '../models/companion_remote/remote_command.dart';
 import '../services/companion_remote/mirror_sync.dart';
+import '../theme/fork_motion.dart';
 import '../services/customisation/customisation_store.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
@@ -561,6 +562,126 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   static String _hubId(AiHistoryEntry entry) => 'aitab:${entry.id}';
 
+  /// Load more card state per answer id; absent means ready.
+  final Map<String, _MoreState> _more = {};
+
+  /// The answer [hub] shows when it can take a Load more card.
+  AiHistoryEntry? _loadMoreEntry(MediaHub hub) {
+    final entry = _entryForHub(hub);
+    if (entry == null || entry.request == AiAgent.tonightRequest) return null;
+    if (_thinClient && !_canEditMirror) return null;
+    if (entry.items.length >= AiHistory.maxItemsPerEntry) return null;
+    return entry;
+  }
+
+  HubTrailingCard? _trailingCard(MediaHub hub) {
+    final entry = _loadMoreEntry(hub);
+    if (entry == null) return null;
+    return switch (_more[entry.id]) {
+      _MoreState.finding => HubTrailingCard(label: t.aiTab.findingMoreCard, spinner: true),
+      _MoreState.none => HubTrailingCard(label: t.aiTab.noMoreCard, icon: Symbols.done_all_rounded),
+      _MoreState.error => HubTrailingCard(
+        label: t.common.retry,
+        icon: Symbols.refresh_rounded,
+        onTap: () => unawaited(_loadMoreInRow(entry)),
+      ),
+      null => HubTrailingCard(
+        label: t.aiTab.loadMoreCard,
+        icon: Symbols.playlist_add_rounded,
+        onTap: () => unawaited(_loadMoreInRow(entry)),
+      ),
+    };
+  }
+
+  TvRailTrailing _tvTrailing(MediaHub hub) {
+    final entry = _loadMoreEntry(hub);
+    if (entry == null) return hub.more ? TvRailTrailing.viewAll : TvRailTrailing.none;
+    return switch (_more[entry.id]) {
+      _MoreState.finding => TvRailTrailing.findingMore,
+      _MoreState.none => TvRailTrailing.noMore,
+      _MoreState.error => TvRailTrailing.error,
+      null => TvRailTrailing.loadMore,
+    };
+  }
+
+  void _loadMoreHub(MediaHub hub) {
+    final entry = _loadMoreEntry(hub);
+    if (entry != null) unawaited(_loadMoreInRow(entry));
+  }
+
+  /// Load more: ask the same request again for titles not in the row and
+  /// add them to its end, in the background; the card shows the progress.
+  Future<void> _loadMoreInRow(AiHistoryEntry entry) async {
+    if (_more[entry.id] == _MoreState.finding) return;
+    ForkMotion.selection();
+    setState(() => _more[entry.id] = _MoreState.finding);
+    final _MoreState? outcome;
+    if (_thinClient) {
+      outcome = await _remoteLoadMore(entry);
+    } else {
+      outcome = await _localLoadMore(entry);
+    }
+    if (!mounted) return;
+    setState(() => outcome == null ? _more.remove(entry.id) : _more[entry.id] = outcome);
+    if (outcome == null) ForkMotion.success();
+    if (outcome == _MoreState.error) ForkMotion.error();
+  }
+
+  /// Null when new picks were added.
+  Future<_MoreState?> _localLoadMore(AiHistoryEntry entry) async {
+    AiActivity.running.value++;
+    try {
+      final result = await _fetch(
+        entry.request,
+        ClaudeModel.sonnet,
+        id: entry.id,
+        useTitle: entry.title != null,
+        keepTitle: entry.title,
+        sentRequest: findMoreRequest(entry),
+        excludeKeys: {...entry.items.map((i) => i.globalKey)},
+      );
+      final found = result.entry;
+      if (found == null) return result.answer.error == null ? _MoreState.none : _MoreState.error;
+      // The row as it is now: it may have changed while this ran.
+      final current = await AiHistory.get(entry.id) ?? entry;
+      final merged = mergeFindMore(current, found, append: true);
+      if (merged.items.length == current.items.length) return _MoreState.none;
+      await AiHistory.replace(merged);
+      if (mounted) {
+        setState(() {
+          final i = _saved.indexWhere((e) => e.id == merged.id);
+          if (i >= 0) _saved[i] = merged;
+          if (_tonightRow?.id == merged.id) _tonightRow = merged;
+        });
+      }
+      return null;
+    } catch (e) {
+      appLogger.w('AI: Load more failed', error: e);
+      return _MoreState.error;
+    } finally {
+      AiActivity.running.value--;
+    }
+  }
+
+  /// Phone: the TV runs it and answers on the AI channel; the new picks
+  /// arrive with the next mirror snapshot.
+  Future<_MoreState?> _remoteLoadMore(AiHistoryEntry entry) async {
+    final remote = context.read<CompanionRemoteProvider>();
+    final rid = 'more-${DateTime.now().microsecondsSinceEpoch}';
+    final reply = remote.aiAnswers.firstWhere((d) => d['rid'] == rid).timeout(const Duration(minutes: 3));
+    remote.sendCommand(RemoteCommandType.aiAction, data: {'action': 'loadMore', 'id': entry.id, 'rid': rid});
+    try {
+      final data = await reply;
+      return switch (data['status']) {
+        'done' => null,
+        'none' => _MoreState.none,
+        _ => _MoreState.error,
+      };
+    } catch (_) {
+      return _MoreState.error;
+    }
+  }
+
   AiHistoryEntry? _entryForHub(MediaHub hub) => _rows.where((e) => _hubId(e) == hub.id).firstOrNull;
 
   List<MediaHub> get _hubs => [
@@ -768,6 +889,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                   entries: _rowMenuEntries(hub),
                   child: HubSection(
                     hub: hub,
+                    trailingCard: _trailingCard(hub),
                     focusMemory: _hubFocusMemory,
                     icon: Symbols.auto_awesome_rounded,
                     // Phone: a tap plays (on the TV while casting); shows open.
@@ -813,6 +935,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 focusMemory: _hubFocusMemory,
                 iconForHub: (_, _) => Symbols.auto_awesome_rounded,
                 rowMenuEntriesForHub: _rowMenuEntries,
+                trailingForHub: _tvTrailing,
+                onLoadMoreHub: _loadMoreHub,
+                onRetryHub: _loadMoreHub,
                 onFocusedHubItemChanged: _onFocused,
                 onNavigateUp: _actionBarKey.currentState?.requestFocusOnFirst,
                 onNavigateToSidebar: _navigateToSidebar,
@@ -947,3 +1072,6 @@ class _PendingChipState extends State<_PendingChip> with SingleTickerProviderSta
     );
   }
 }
+
+/// A row's Load more card while busy or spent (see `AiScreenState._more`).
+enum _MoreState { finding, none, error }

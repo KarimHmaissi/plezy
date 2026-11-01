@@ -92,6 +92,21 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Load more at the end of AI rows (branch `feature/ai-helper`)
+- **Load more card:** every AI answer row (not Tonight's pick) ends in a
+  poster-sized "Load more" card, on TV (D-pad), Mac and the phone
+  (including mirror mode, where the TV runs it). Activating it ticks
+  (phone), turns the card into a "Finding more…" spinner and asks the
+  same request again without the titles already shown; the new picks are
+  added to the end of the row (no repeats, capped at 200). It runs in the
+  background: scroll, open other rows or leave the screen meanwhile.
+- When nothing new fits the card says "No more matches"; on a failure it
+  becomes Retry. Long-press "Find more" still puts its batch in front.
+- The phone's request carries an id and the TV answers `done` / `none` /
+  `error` on the AI channel; the picks arrive with the mirror snapshot.
+- `HubSection.trailingCard` and `TvRailTrailing.loadMore` / `findingMore`
+  / `noMore` are the reusable parts.
+
 ### AI composer on short screens; keyboard gap fix (branch `feature/ai-helper`)
 - **Fold cover screen:** below ~620dp of height (the cover screen, or any
   phone with the keyboard up) the composer anchors above the keyboard: a
