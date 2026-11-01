@@ -3312,8 +3312,8 @@ class Translations$aiTab$en {
 	/// en: 'Load more'
 	String get loadMore => 'Load more';
 
-	/// en: 'Refresh picks'
-	String get refreshRow => 'Refresh picks';
+	/// en: 'Replace with new picks'
+	String get refreshRow => 'Replace with new picks';
 
 	/// en: 'Refreshing: ${request}'
 	String refreshing({required Object request}) => 'Refreshing: ${request}';
@@ -3348,8 +3348,8 @@ class Translations$aiTab$en {
 	/// en: 'more like ${title}'
 	String moreLike({required Object title}) => 'more like ${title}';
 
-	/// en: 'Find more'
-	String get findMore => 'Find more';
+	/// en: 'Find more (add titles)'
+	String get findMore => 'Find more (add titles)';
 
 	/// en: 'more: ${request}'
 	String findingMore({required Object request}) => 'more: ${request}';
@@ -9929,7 +9929,7 @@ extension on Translations {
 			'aiTab.emptyTitle' => 'Ask for something to watch',
 			'aiTab.emptyMessage' => 'Press Ask and describe what you\'re in the mood for.',
 			'aiTab.loadMore' => 'Load more',
-			'aiTab.refreshRow' => 'Refresh picks',
+			'aiTab.refreshRow' => 'Replace with new picks',
 			'aiTab.refreshing' => ({required Object request}) => 'Refreshing: ${request}',
 			'aiTab.deleteRow' => 'Delete this row',
 			'aiTab.deleteRowTitle' => ({required Object request}) => 'Delete "${request}"?',
@@ -9941,7 +9941,7 @@ extension on Translations {
 			'aiTab.homeFull' => 'Home already has 10 AI rows. Remove one first.',
 			'aiTab.moreLikeThis' => 'More like this',
 			'aiTab.moreLike' => ({required Object title}) => 'more like ${title}',
-			'aiTab.findMore' => 'Find more',
+			'aiTab.findMore' => 'Find more (add titles)',
 			'aiTab.findingMore' => ({required Object request}) => 'more: ${request}',
 			'aiTab.noMoreMatches' => ({required Object request}) => 'No more matches for ${request}',
 			'aiTab.addedMore' => ({required Object count, required Object request}) => '${count} more picks added: ${request}',

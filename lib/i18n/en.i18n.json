@@ -1198,7 +1198,7 @@
     "emptyTitle": "Ask for something to watch",
     "emptyMessage": "Press Ask and describe what you're in the mood for.",
     "loadMore": "Load more",
-    "refreshRow": "Refresh picks",
+    "refreshRow": "Replace with new picks",
     "refreshing": "Refreshing: ${request}",
     "deleteRow": "Delete this row",
     "deleteRowTitle": "Delete \"${request}\"?",
@@ -1210,7 +1210,7 @@
     "homeFull": "Home already has 10 AI rows. Remove one first.",
     "moreLikeThis": "More like this",
     "moreLike": "more like ${title}",
-    "findMore": "Find more",
+    "findMore": "Find more (add titles)",
     "findingMore": "more: ${request}",
     "noMoreMatches": "No more matches for ${request}",
     "addedMore": "${count} more picks added: ${request}"

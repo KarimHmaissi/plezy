@@ -125,7 +125,17 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   bool get isConnected => _session?.isConnected ?? false;
   RemoteSession? get session => _session;
   RemoteSessionStatus get status => _session?.status ?? RemoteSessionStatus.disconnected;
-  RemoteDevice? get connectedDevice => _session?.connectedDevice;
+  RemoteDevice? get connectedDevice {
+    final device = _session?.connectedDevice;
+    // The remote side only knows the host as a placeholder ('Desktop') until
+    // the host's deviceInfo lands; use the name it was discovered under.
+    final known = _knownHostName;
+    if (device != null && device.id == 'host' && known != null) return device.copyWith(name: known);
+    return device;
+  }
+
+  /// Remote side: the host's real name (from discovery or its deviceInfo).
+  String? _knownHostName;
   bool get isPlayerActive => _isPlayerActive;
 
   /// Casting (fork): while this phone is connected as a remote, Play sends the
@@ -827,6 +837,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _lastAuthContextId = authContext.id;
 
     appLogger.d('CompanionRemote: Connecting to ${host.name} at ${host.addresses}');
+    _knownHostName = host.name;
 
     String? winner;
     final connected = await _runRemoteConnect(
@@ -1084,6 +1095,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       appLogger.d('CompanionRemote: Device info - name: $name, platform: $platform, role: $role');
 
       final device = RemoteDevice(id: id, name: name, platform: platform, connectedAt: DateTime.now());
+      if (isRemote) _knownHostName = name;
 
       _session = _session?.copyWith(connectedDevice: device);
       safeNotifyListeners();

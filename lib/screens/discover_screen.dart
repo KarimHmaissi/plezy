@@ -33,7 +33,7 @@ import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/home_row_actions.dart';
-import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
+import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/profile_switching_overlay.dart';
 import 'profile/profile_switch_screen.dart';
 import 'profile/profile_teardown.dart';
@@ -154,6 +154,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   TraktListsCatalogSource? _listsSource;
   HomePinsController get _homePins => HomePinsController.instance;
   Map<String, MediaHub> _fetchedRows = const {};
+
+  /// Phone/tablet Home rows' keys, by hub id.
+  final Map<String, GlobalKey<HubSectionState>> _homeHubKeys = {};
   final Set<String> _rowsLoading = {};
 
   late FocusNode _heroFocusNode;
@@ -197,6 +200,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   List<GlobalKey<HubSectionState>> get _allHubKeys {
+    if (!PlatformDetector.isTV()) {
+      return [for (final hub in _tvBrowseHubs) _homeHubKeys.putIfAbsent(hub.id, GlobalKey<HubSectionState>.new)];
+    }
     final keys = <GlobalKey<HubSectionState>>[];
     if (_continueWatchingHubKey != null && _onDeck.isNotEmpty) {
       keys.add(_continueWatchingHubKey!);
@@ -414,18 +420,6 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     items: items,
   );
 
-  /// The synthesized Continue Watching row, rendered ahead of the backend hubs
-  /// on both the mobile list and the TV rail.
-  MediaHub get _continueWatchingHub => MediaHub(
-    id: 'continue_watching',
-    title: t.discover.continueWatching,
-    type: 'mixed',
-    identifier: '_continue_watching_',
-    size: _onDeck.length + (_hasMoreContinueWatching ? 1 : 0),
-    more: _hasMoreContinueWatching,
-    items: _onDeck,
-  );
-
   void _setSpotlightItem(MediaItem item) => _spotlight.select(item);
 
   void _scrollToTop() {
@@ -589,6 +583,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         clientFor: servers.getClientForServer,
         trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
       );
+      // A phone is a remote for the TV's AI: no index of its own.
+      if (PlatformDetector.isMobile(context)) return;
       unawaited(
         LibraryIndex.instance.start(
           () => [
@@ -1257,7 +1253,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
     final theme = Theme.of(context);
-    final continueWatchingHub = _onDeck.isEmpty ? null : _continueWatchingHub;
+    final homeHubs = _tvBrowseHubs;
     return Material(
       color: theme.scaffoldBackgroundColor,
       child: Stack(
@@ -1280,37 +1276,28 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               if (_isLoading) LoadingIndicatorBox.sliver,
               if (_errorMessage != null) SliverErrorState(message: _errorMessage!, onRetry: _discover.load),
               if (!_isLoading && _errorMessage == null) ...[
-                if (continueWatchingHub != null)
+                // The same rows as the TV, from the Home layout (the TV's,
+                // while this phone mirrors it), in its order.
+                for (final (i, hub) in homeHubs.indexed)
                   SliverToBoxAdapter(
-                    child: HubSection(
-                      key: _continueWatchingHubKey,
-                      hub: continueWatchingHub,
-                      focusMemory: _hubFocusMemory,
-                      icon: hubIconFor(continueWatchingHub),
-                      onRefresh: _discover.updateItem,
-                      onRemoveFromContinueWatching: _discover.refreshContinueWatching,
-                      isInContinueWatching: true,
-                      loadMoreItems: _discover.loadAllContinueWatching,
-                      onVerticalNavigation: (isUp) => _handleVerticalNavigation(0, isUp),
-                      onNavigateUp: _focusTopBoundary,
-                      onNavigateToSidebar: _navigateToSidebar,
-                    ),
-                  ),
-
-                // Recommendation Hubs (Trending, Top in Genre, etc.)
-                for (int i = 0; i < _hubs.length; i++)
-                  SliverToBoxAdapter(
-                    child: HubSection(
-                      key: i < _orderedHubKeys.length ? _orderedHubKeys[i] : null,
-                      hub: _hubs[i],
-                      focusMemory: _hubFocusMemory,
-                      icon: hubIconFor(_hubs[i]),
-                      showServerName: showServerNameOnHubs || hubsSpanMultipleServers,
-                      onRefresh: _discover.updateItem,
-                      // Hub index is i + 1 if continue watching exists, otherwise i
-                      onVerticalNavigation: (isUp) => _handleVerticalNavigation(_onDeck.isNotEmpty ? i + 1 : i, isUp),
-                      onNavigateUp: (i == 0 && _onDeck.isEmpty) ? _focusTopBoundary : null,
-                      onNavigateToSidebar: _navigateToSidebar,
+                    child: RowMenuEntries(
+                      entries: _rowMenuEntriesFor(hub),
+                      child: HubSection(
+                        key: _homeHubKeys.putIfAbsent(hub.id, GlobalKey<HubSectionState>.new),
+                        hub: hub,
+                        focusMemory: _hubFocusMemory,
+                        icon: hubIconFor(hub),
+                        showServerName: showServerNameOnHubs || hubsSpanMultipleServers,
+                        onRefresh: _discover.updateItem,
+                        isInContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching',
+                        onRemoveFromContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching'
+                            ? _discover.refreshContinueWatching
+                            : null,
+                        loadMoreItems: hub.id == 'continue_watching' ? _discover.loadAllContinueWatching : null,
+                        onVerticalNavigation: (isUp) => _handleVerticalNavigation(i, isUp),
+                        onNavigateUp: i == 0 ? _focusTopBoundary : null,
+                        onNavigateToSidebar: _navigateToSidebar,
+                      ),
                     ),
                   ),
 
