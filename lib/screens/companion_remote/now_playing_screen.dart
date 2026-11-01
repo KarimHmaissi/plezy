@@ -59,9 +59,15 @@ class HostNowPlaying {
 class NowPlayingScreen extends StatefulWidget {
   const NowPlayingScreen({super.key});
 
-  static Future<void> open(BuildContext context) => Navigator.of(
-    context,
-  ).push(MaterialPageRoute<void>(fullscreenDialog: true, builder: (_) => const NowPlayingScreen()));
+  /// Slides up from the mini bar; swipe down (or the chevron) to close.
+  static Future<void> open(BuildContext context) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: true,
+    enableDrag: true,
+    builder: (_) => const FractionallySizedBox(heightFactor: 1, child: NowPlayingScreen()),
+  );
 
   @override
   State<NowPlayingScreen> createState() => _NowPlayingScreenState();

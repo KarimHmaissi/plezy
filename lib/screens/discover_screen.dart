@@ -33,6 +33,7 @@ import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/home_row_actions.dart';
+import '../navigation/navigation_tabs.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/profile_switching_overlay.dart';
 import 'profile/profile_switch_screen.dart';
@@ -1134,6 +1135,21 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 onNavigateLeft: _navigateToSidebar,
                 onNavigateDown: _focusContentFromAppBar,
                 actions: [
+                  // Phone: Search and Downloads sit here instead of the bottom nav.
+                  if (PlatformDetector.isMobile(context)) ...[
+                    FocusableAction(
+                      icon: Symbols.search_rounded,
+                      iconColor: foregroundColor,
+                      tooltip: t.common.search,
+                      onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.search),
+                    ),
+                    FocusableAction(
+                      icon: Symbols.download_rounded,
+                      iconColor: foregroundColor,
+                      tooltip: t.navigation.downloads,
+                      onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.downloads),
+                    ),
+                  ],
                   FocusableAction(icon: Symbols.refresh_rounded, iconColor: foregroundColor, onPressed: manualRefresh),
                   // Watch Together
                   FocusableAction(

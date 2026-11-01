@@ -155,3 +155,10 @@ const allNavigationTabs = [
     getLabel: _getSettingsLabel,
   ),
 ];
+
+/// Fork: lets a tab's own toolbar switch tabs (the phone's Home shows Search
+/// and Downloads as top-bar icons rather than bottom-nav items). Set by the
+/// main screen.
+abstract final class MainTabSwitcher {
+  static void Function(NavigationTabId tab)? select;
+}

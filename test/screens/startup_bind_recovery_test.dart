@@ -152,6 +152,25 @@ void main() {
       expect(_ids(tabs), contains(NavigationTabId.settings));
     });
 
+    test('mobile online moves Search and Downloads out of the bar unless open', () {
+      final home = mainScreenBottomNavigationTabs(
+        visibleTabs: allNavigationTabs,
+        isMobile: true,
+        isOffline: false,
+        currentTab: NavigationTabId.discover,
+      );
+      expect(_ids(home), isNot(contains(NavigationTabId.search)));
+      expect(_ids(home), isNot(contains(NavigationTabId.downloads)));
+
+      final search = mainScreenBottomNavigationTabs(
+        visibleTabs: allNavigationTabs,
+        isMobile: true,
+        isOffline: false,
+        currentTab: NavigationTabId.search,
+      );
+      expect(_ids(search), contains(NavigationTabId.search));
+    });
+
     test('non-mobile returns all visible tabs unchanged', () {
       final tabs = mainScreenBottomNavigationTabs(
         visibleTabs: allNavigationTabs,

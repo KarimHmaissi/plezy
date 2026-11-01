@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../theme/fork_spacing.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -495,15 +497,18 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     final isKeyboardMode = InputModeTracker.isKeyboardMode(context);
     final isTv = PlatformDetector.isTV();
     final leadingPadding = _leadingPaddingFor(isTv);
-    final titleStyle = Theme.of(
-      context,
-    ).textTheme.titleLarge?.copyWith(fontSize: isTv ? 26 : null, fontWeight: isTv ? FontWeight.w700 : null);
+    // Fork: touch screens use the shared row rhythm (see ForkSpacing).
+    final spacing = !isTv && !widget.inset ? ForkSpacing.of(context) : null;
+    final titleStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
+      fontSize: isTv ? 26 : spacing?.titleSize,
+      fontWeight: isTv || spacing != null ? FontWeight.w700 : null,
+    );
 
     return Padding(
       padding: .only(
         bottom: isTv && !widget.inset && widget.cardSizing == HubCardSizing.shelf
             ? TvLayoutConstants.shelfVerticalGap
-            : 0,
+            : spacing?.rowGap ?? 0,
       ),
       child: Column(
         crossAxisAlignment: .start,
@@ -513,6 +518,8 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
           Padding(
             padding: widget.inset
                 ? EdgeInsets.symmetric(vertical: isTv ? 6 : 2)
+                : spacing != null
+                ? EdgeInsets.fromLTRB(spacing.edgeInset - 4, 0, 8, spacing.titleGap)
                 : EdgeInsets.fromLTRB(leadingPadding - 4, isTv ? 6 : 2, 8, isTv ? 8 : 2),
             child: ExcludeFocus(
               child: InkWell(
@@ -526,7 +533,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                   child: Row(
                     mainAxisSize: .min,
                     children: [
-                      AppIcon(widget.icon, fill: 1, size: isTv ? 28 : null),
+                      AppIcon(widget.icon, fill: 1, size: isTv ? 28 : spacing?.titleSize),
                       SizedBox(width: isTv ? 12 : 8),
                       Flexible(
                         child: Text(widget.hub.title, style: titleStyle, overflow: .ellipsis, maxLines: 1),
@@ -610,7 +617,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                     // same gutter the grid uses, so a row and the "see all"
                     // grid behind it render the same card at equal width.
                     final gridGap = svc.read(SettingsService.gridSpacing).gridGap;
-                    final cardWidth = isTv && widget.cardSizing == HubCardSizing.shelf
+                    final cardWidth = spacing != null
+                        ? spacing.cardWidth(constraints.maxWidth, wide: useWideLayout)
+                        : isTv && widget.cardSizing == HubCardSizing.shelf
                         ? _getTvCardWidth(
                             context,
                             constraints.maxWidth,
@@ -637,7 +646,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                     // always carried 4px (2px each side) on top of the card's
                     // own 3px padding, so Tight stays byte-identical and the
                     // wider settings render exactly the grid gutter (#2226).
-                    final cardGap = math.max(4.0, gridGap);
+                    final cardGap = spacing?.cardGap ?? math.max(4.0, gridGap);
                     final cardPadding = widget.inset
                         ? EdgeInsets.only(right: cardGap)
                         : EdgeInsets.symmetric(horizontal: cardGap / 2);
@@ -683,7 +692,15 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                           scrollCacheExtent: isTv ? null : const ScrollCacheExtent.pixels(0),
                           padding: widget.inset
                               ? EdgeInsets.symmetric(vertical: isTv ? 6 : 2)
-                              : EdgeInsets.symmetric(horizontal: isTv ? leadingPadding : 8, vertical: isTv ? 6 : 2),
+                              : EdgeInsets.symmetric(
+                                  horizontal: isTv
+                                      ? leadingPadding
+                                      // Touch: the first card lines up with the title.
+                                      : spacing == null
+                                      ? 8
+                                      : spacing.edgeInset - cardGap / 2,
+                                  vertical: isTv ? 6 : 2,
+                                ),
                           itemCount: isKeyboardMode ? _totalItemCount : widget.hub.items.length,
                           itemBuilder: (context, index) {
                             final isItemFocused = hasFocus && index == _focusedIndex;

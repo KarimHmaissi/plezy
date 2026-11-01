@@ -268,6 +268,10 @@ List<NavigationTab> mainScreenBottomNavigationTabs({
 }) {
   if (!isMobile) return visibleTabs;
   return visibleTabs.where((tab) {
+    // Fork: five items like Plex; Search and Downloads live in Home's top
+    // bar instead (shown here only while open, or Downloads offline).
+    if (tab.id == NavigationTabId.search) return currentTab == tab.id;
+    if (tab.id == NavigationTabId.downloads) return isOffline || currentTab == tab.id;
     if (tab.id != NavigationTabId.settings) return true;
     return isOffline || currentTab == NavigationTabId.settings;
   }).toList();
@@ -538,6 +542,7 @@ class _MainScreenState extends State<MainScreen>
     WidgetsBinding.instance.addObserver(this);
     _contentFocusScope.addListener(_syncSidebarFocusWithContent);
     AiMoreLikeThis.requests.addListener(_openAiForMoreLikeThis);
+    MainTabSwitcher.select = _switchTabFromToolbar;
 
     if (PlatformDetector.isDesktopOS()) {
       windowManager.addListener(this);
@@ -1111,6 +1116,8 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
+  void _switchTabFromToolbar(NavigationTabId tab) => _selectTab(tab);
+
   bool _autoConnectChecked = false;
 
   /// Phone: reconnect to the TV app last connected to, if it's on the LAN,
@@ -1151,6 +1158,7 @@ class _MainScreenState extends State<MainScreen>
   @override
   void dispose() {
     AiMoreLikeThis.requests.removeListener(_openAiForMoreLikeThis);
+    if (MainTabSwitcher.select == _switchTabFromToolbar) MainTabSwitcher.select = null;
     if (_watchTogether?.navigatorOpener == _navigateToWatchTogetherMedia) _watchTogether?.navigatorOpener = null;
     WidgetsBinding.instance.removeObserver(this);
     _profileRouteObserver?.unsubscribe(this);
