@@ -9,6 +9,7 @@ import '../models/trakt/trakt_user_list.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/discover_provider.dart';
 import '../providers/explore_provider.dart';
+import '../services/catalog/catalog_source.dart';
 import '../services/catalog/home_pins.dart';
 import '../services/catalog/home_rows.dart';
 import '../services/catalog/trakt_lists_catalog_source.dart';
@@ -223,16 +224,18 @@ class _HomeRowsScreenState extends State<HomeRowsScreen> {
                       ), icon: Symbols.format_list_bulleted_rounded),
                 ],
                 _section(t.homeRows.watchlistSection),
+                for (final source in sources?.watchlistCapableSources ?? const <CatalogSource>[])
+                  for (final (shelf, title) in [('films', t.watchlist.films), ('tv', t.watchlist.tv)])
+                    _addSwitch((
+                      id: HomeRowIds.watchlist(shelf, source: source.id),
+                      title: '$title · ${source.displayName}',
+                      sources: const [],
+                    ), icon: Symbols.bookmark_rounded),
                 _addSwitch((
-                  id: HomeRowIds.watchlist('films'),
-                  title: t.watchlist.films,
+                  id: HomeRowIds.comfortCarryOn,
+                  title: t.comfort.carryOn,
                   sources: const [],
-                ), icon: Symbols.bookmark_rounded),
-                _addSwitch((
-                  id: HomeRowIds.watchlist('tv'),
-                  title: t.watchlist.tv,
-                  sources: const [],
-                ), icon: Symbols.bookmark_rounded),
+                ), icon: Symbols.play_circle_rounded),
                 _addSwitch((
                   id: HomeRowIds.comfort,
                   title: t.homeRows.comfortRow,

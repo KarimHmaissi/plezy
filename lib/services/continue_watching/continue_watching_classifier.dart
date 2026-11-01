@@ -74,3 +74,27 @@ String normalizeShowTitle(String? title) {
   if (title == null) return '';
   return title.toLowerCase().replaceAll(RegExp(r'\s*\(\d{4}\)\s*$'), '').replaceAll(RegExp(r'[^a-z0-9]+'), '');
 }
+
+/// Comfort-show episodes the user is part-way through, newest first: the
+/// rows Home's Continue Watching leaves out (see [classifyContinueWatching]'s
+/// `excludedShowTitles`). Accidental starts and nearly finished episodes are
+/// dropped, as in Continue Watching.
+List<MediaItem> comfortCarryOn(Iterable<MediaItem> onDeck, Set<String> comfortTitles) {
+  if (comfortTitles.isEmpty) return const [];
+  bool partWatched(MediaItem item) {
+    final offset = item.viewOffsetMs;
+    final duration = item.durationMs;
+    if (offset == null || duration == null || duration <= 0) return false;
+    return offset >= continueWatchingAccidentalStart.inMilliseconds && offset / duration < continueWatchingFilmFinished;
+  }
+
+  final items = [
+    for (final item in onDeck)
+      if (item.kind == MediaKind.episode &&
+          comfortTitles.contains(normalizeShowTitle(item.grandparentTitle)) &&
+          partWatched(item))
+        item,
+  ];
+  items.sort((a, b) => (b.lastViewedAt ?? 0).compareTo(a.lastViewedAt ?? 0));
+  return items;
+}

@@ -18,6 +18,8 @@ import '../mixins/tab_visibility_aware.dart';
 import '../models/catalog/catalog_item.dart';
 import '../navigation/main_screen_scope.dart';
 import '../providers/catalog_sources_provider.dart';
+import '../providers/discover_provider.dart';
+import '../services/continue_watching/continue_watching_classifier.dart';
 import '../services/catalog/catalog_library_matcher.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../services/comfort/comfort_picker.dart';
@@ -63,6 +65,10 @@ class ComfortScreenState extends State<ComfortScreen>
   static const Duration _staleAfter = Duration(minutes: 5);
 
   late CatalogSourcesProvider _sources;
+
+  /// Home's on-deck items: part-watched comfort episodes come from here.
+  DiscoverProvider? _discover;
+  static const String _carryOnHubId = 'comfort:carryon';
   ComfortShowsController? _controller;
   DateTime? _loadedAt;
   bool _picking = false;
@@ -82,12 +88,23 @@ class ComfortScreenState extends State<ComfortScreen>
     super.initState();
     _sources = context.read<CatalogSourcesProvider>();
     _sources.addListener(_onSourcesChanged);
+    _discover = context.read<DiscoverProvider?>()?..addListener(_onDiscoverChanged);
     _onSourcesChanged();
+  }
+
+  List<MediaItem>? _seenOnDeck;
+
+  void _onDiscoverChanged() {
+    final onDeck = _discover?.onDeck;
+    if (identical(onDeck, _seenOnDeck)) return;
+    _seenOnDeck = onDeck;
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     _sources.removeListener(_onSourcesChanged);
+    _discover?.removeListener(_onDiscoverChanged);
     _controller?.removeListener(_onControllerChanged);
     _controller?.dispose();
     _spotlight.dispose();
@@ -277,14 +294,29 @@ class ComfortScreenState extends State<ComfortScreen>
       items: [for (final item in items) item.toMediaItem()],
       size: items.length,
     );
+    final carryOn = comfortCarryOn(_discover?.onDeck ?? const [], {
+      for (final show in controller.shows) normalizeShowTitle(show.title),
+    });
     return [
+      if (carryOn.isNotEmpty)
+        MediaHub(
+          id: _carryOnHubId,
+          identifier: 'comfort.carryon',
+          title: t.comfort.carryOn,
+          type: 'mixed',
+          items: carryOn,
+          size: carryOn.length,
+        ),
       if (controller.activeShows.isNotEmpty) hub('mix', t.comfort.inTheMix, controller.activeShows),
       if (controller.pausedShows.isNotEmpty) hub('paused', t.comfort.paused, controller.pausedShows),
     ];
   }
 
-  static IconData _iconFor(MediaHub hub) =>
-      hub.identifier == 'comfort.paused' ? Symbols.pause_circle_rounded : Symbols.weekend_rounded;
+  static IconData _iconFor(MediaHub hub) => switch (hub.identifier) {
+    'comfort.paused' => Symbols.pause_circle_rounded,
+    'comfort.carryon' => Symbols.play_circle_rounded,
+    _ => Symbols.weekend_rounded,
+  };
 
   void _navigateToSidebar() => MainScreenFocusScope.focusSidebarOf(context);
 
@@ -367,8 +399,9 @@ class ComfortScreenState extends State<ComfortScreen>
   }
 
   /// Comfort shows can be added to Home as a row.
-  List<MediaMenuExtraEntry> _homeRowMenuEntriesFor(MediaHub hub) =>
-      homeRowMenuEntries(context, (id: HomeRowIds.comfort, title: t.homeRows.comfortRow, sources: const []));
+  List<MediaMenuExtraEntry> _homeRowMenuEntriesFor(MediaHub hub) => hub.id == _carryOnHubId
+      ? homeRowMenuEntries(context, (id: HomeRowIds.comfortCarryOn, title: t.comfort.carryOn, sources: const []))
+      : homeRowMenuEntries(context, (id: HomeRowIds.comfort, title: t.homeRows.comfortRow, sources: const []));
 
   Widget _buildTvContent(List<MediaHub> hubs) {
     final message = _buildStateMessage();
@@ -403,6 +436,9 @@ class ComfortScreenState extends State<ComfortScreen>
                 expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
                 onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
                 rowMenuEntriesForHub: _homeRowMenuEntriesFor,
+                // Part-watched episodes resume where they stopped.
+                usesContinueWatchingAction: (hub) => hub.id == _carryOnHubId,
+                showTimeLeftForHub: (hub) => hub.id == _carryOnHubId,
               ),
             ),
           TvToolbarOverlay(

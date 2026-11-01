@@ -16,6 +16,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
 - [x] Smarter Continue Watching: Continue Watching + Pick back up, older
       on-deck films, 1-year cut-off
 - [x] Trakt Lists in Explore: charts, liked lists, Discover lists
+- [x] Watchlist Plex / Trakt switch; Comfort "Carry on watching"
 - [x] Local database for our customisations, with Backup & transfer in
       Settings (replaces storing them on Trakt)
 - [x] Home builder: Home shows only the rows you add, in your order; any
@@ -52,6 +53,20 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Watchlist source switch and Comfort "Carry on watching" — `HASH`
+- **Watchlist**: a Plex / Trakt switch at the top (like Explore's source
+  selector), remembered on the device and included in backups. Trakt's
+  watchlist gets the same Films / TV genre shelves; Trakt's lower-case genre
+  slugs now read as titles ("Drama Films", "Science Fiction Films"). Shelves
+  added to Home name their source ("Horror Films · Trakt") and keep working
+  whichever source the page shows.
+- **Comfort ▸ Carry on watching** (top row, hidden when empty): comfort-show
+  episodes you're part-way through, newest first, e.g. "Friends · S2 E6 ·
+  17 min left · The One with the Baby on the Bus" with a progress bar.
+  Selecting one resumes where you stopped. Comes from Plex's resume points
+  (the same data as Continue Watching, which leaves comfort shows out);
+  under 3 minutes in or 90%+ watched are left out. Can be added to Home.
 
 ### Local database + Backup & transfer — `f50a7ef09`
 - The fork's customisations now live in their own local SQLite database

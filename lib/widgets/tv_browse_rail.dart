@@ -398,6 +398,10 @@ class TvBrowseRail extends StatefulWidget {
   /// ([MediaCard.showTitleImplied]).
   final bool Function(MediaHub hub)? showTitleImpliedForHub;
 
+  /// Hubs whose part-watched episode cards show the time left
+  /// ([MediaCard.showTimeLeft]).
+  final bool Function(MediaHub hub)? showTimeLeftForHub;
+
   /// Explicit background bleed override. When null, the bleed target is read
   /// from [MainScreenFocusScope] (offset aspect) inside the bleed widget
   /// itself, so sidebar flips never rebuild the rail — only the bleed layer.
@@ -444,6 +448,7 @@ class TvBrowseRail extends StatefulWidget {
     this.episodePosterModeForHub,
     this.widePosterScaleForHub,
     this.showTitleImpliedForHub,
+    this.showTimeLeftForHub,
     this.backgroundBleedLeft,
     this.expandedTop,
     this.onExpandedChanged,
@@ -1730,6 +1735,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
       _isContinueWatchingHub(hub),
       _usesContinueWatchingAction(hub),
       widget.showTitleImpliedForHub?.call(hub) ?? false,
+      widget.showTimeLeftForHub?.call(hub) ?? false,
       widget.onRefresh != null,
       widget.onRemoveFromContinueWatching != null,
     );
@@ -1952,6 +1958,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
             mixedHubContext: metrics.isMixedHub,
             episodePosterModeOverride: episodePosterMode,
             showTitleImplied: widget.showTitleImpliedForHub?.call(hub) ?? false,
+            showTimeLeft: widget.showTimeLeftForHub?.call(hub) ?? false,
           );
   }
 

@@ -240,6 +240,10 @@ class MediaCard extends StatefulWidget {
   /// repeating the show on every card (#2217).
   final bool showTitleImplied;
 
+  /// Part-watched episodes add the time left to their caption
+  /// ("S2 E5 · 23 min left · Title").
+  final bool showTimeLeft;
+
   /// Paint-time black tint amount for the artwork, from 0 (clear) to 1 (black).
   final Animation<double>? artworkDim;
 
@@ -270,6 +274,7 @@ class MediaCard extends StatefulWidget {
     this.episodePosterModeOverride,
     this.fullBleedImage = false,
     this.showTitleImplied = false,
+    this.showTimeLeft = false,
     this.artworkDim,
     this.cardShapeOverride,
   }) : usesContinueWatchingAction = usesContinueWatchingAction ?? isInContinueWatching;
@@ -733,6 +738,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
                   isOffline: widget.isOffline,
                   enableDetailLinks: widget.onTap == null,
                   showTitleImplied: _impliesShowTitle(item),
+                  showTimeLeft: widget.showTimeLeft,
                   catalogItem: _catalogItem,
                 ),
             ],
@@ -1237,11 +1243,25 @@ class _MediaCardHelpers {
     bool isOffline = false,
     bool enableDetailLinks = true,
     bool showTitleImplied = false,
+    bool showTimeLeft = false,
     CatalogItem? catalogItem,
   }) {
     final catalogMetadata = catalogItem == null
         ? ''
         : _buildMediaMetadataLine(mi, catalogItem: catalogItem, compact: true);
+
+    if (showTimeLeft && mi.isEpisode && mi.parentIndex != null) {
+      final offset = mi.viewOffsetMs;
+      final duration = mi.durationMs;
+      if (offset != null && duration != null && offset > 0 && offset < duration) {
+        final minutes = ((duration - offset) / 60000).ceil();
+        return _caption(
+          context,
+          'S${mi.parentIndex}${_episodeNumberSuffix(mi)} · ${t.discover.minutesLeft(minutes: minutes)} · '
+          '${mi.displaySubtitle ?? mi.displayTitle}',
+        );
+      }
+    }
 
     // The only subtitle that is not a single caption: the season number links
     // to the season, so it needs its own row.

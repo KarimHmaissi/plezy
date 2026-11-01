@@ -33,6 +33,10 @@ import 'libraries/state_messages.dart';
 import '../services/catalog/home_pins.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
+import '../services/customisation/customisation_store.dart';
+import '../widgets/app_icon.dart';
+import '../widgets/app_menu.dart';
+import '../widgets/catalog_source_logo.dart';
 
 /// The Watchlist tab: the user's catalog watchlist as genre shelves, Films
 /// first, then TV.
@@ -95,6 +99,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     _sources = context.read<CatalogSourcesProvider>();
     _sources.addListener(_onSourcesChanged);
     _onSourcesChanged();
+    unawaited(_loadChosenSource());
   }
 
   @override
@@ -107,10 +112,84 @@ class WatchlistScreenState extends State<WatchlistScreen>
     super.dispose();
   }
 
+  /// The watchlist the user chose with the source switch (kept on this
+  /// device; see [_sourceSettingKey]).
+  CatalogSourceId? _chosenSourceId;
+  static const String _sourceSettingKey = 'watchlist.source';
+  final _sourceMenuKey = GlobalKey<AppMenuButtonState<CatalogSourceId>>();
+
+  Future<void> _loadChosenSource() async {
+    try {
+      final saved = await (await Customisation.store).readSetting(_sourceSettingKey);
+      final id = CatalogSourceId.values.where((v) => v.name == saved).firstOrNull;
+      if (id != null && id != _chosenSourceId && mounted) {
+        _chosenSourceId = id;
+        _onSourcesChanged();
+      }
+    } catch (e) {
+      appLogger.d('Watchlist: chosen source unreadable', error: e);
+    }
+  }
+
+  Future<void> _chooseSource(CatalogSourceId id) async {
+    _chosenSourceId = id;
+    _onSourcesChanged();
+    try {
+      await (await Customisation.store).writeSetting(_sourceSettingKey, id.name);
+    } catch (e) {
+      appLogger.d('Watchlist: saving chosen source failed', error: e);
+    }
+  }
+
   CatalogSource? _pickSource() {
+    final chosen = _sources.watchlistCapableSources.where((s) => s.id == _chosenSourceId).firstOrNull;
+    if (chosen != null) return chosen;
     final active = _sources.activeSource;
     if (active != null && active.supportsWatchlist) return active;
     return _sources.watchlistCapableSource;
+  }
+
+  /// Plex / Trakt switch, like Explore's source selector; shown when more
+  /// than one connected source has a watchlist.
+  FocusableAction? _sourceSwitchAction(Color color) {
+    final source = _source;
+    final options = _sources.watchlistCapableSources;
+    if (source == null || options.length < 2) return null;
+    return FocusableAction(
+      debugLabel: 'WatchlistSourceSwitcher',
+      onPressed: () => _sourceMenuKey.currentState?.showButtonMenu(focusFirstItem: true),
+      child: AppMenuButton<CatalogSourceId>(
+        key: _sourceMenuKey,
+        tooltip: t.explore.selectSource,
+        anchorAlignment: AppMenuAnchorAlignment.end,
+        onSelected: (id) => unawaited(_chooseSource(id)),
+        entriesBuilder: (context) => [
+          for (final option in options)
+            AppMenuItem<CatalogSourceId>(
+              value: option.id,
+              leading: CatalogSourceLogo(option.id),
+              label: option.displayName,
+              selected: option.id == source.id,
+            ),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CatalogSourceLogo(source.id, size: 22),
+              const SizedBox(width: 8),
+              Text(
+                source.displayName,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 4),
+              AppIcon(Symbols.arrow_drop_down_rounded, fill: 1, size: 24, color: color),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _onSourcesChanged() {
@@ -238,8 +317,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return [
       for (final group in groups)
         hub('${group.films ? 'films' : 'tv'}.${group.genre ?? 'other'}', switch ((group.films, group.genre)) {
-          (true, final String genre) => t.watchlist.genreFilms(genre: genre),
-          (false, final String genre) => t.watchlist.genreTv(genre: genre),
+          (true, final String genre) => t.watchlist.genreFilms(genre: displayGenre(genre)),
+          (false, final String genre) => t.watchlist.genreTv(genre: displayGenre(genre)),
           (true, null) => t.watchlist.otherFilms,
           (false, null) => t.watchlist.otherTv,
         }, group.items),
@@ -253,13 +332,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (source == null || !hub.id.startsWith(prefix)) return const [];
     final shelf = hub.id.substring(prefix.length);
     final split = shelf.split('.').first;
-    final entries = homeRowMenuEntries(context, (id: HomeRowIds.watchlist(shelf), title: hub.title, sources: const []));
+    // Each source's shelves are their own Home rows, named by source.
+    String named(String title) => '$title · ${source.displayName}';
+    final entries = homeRowMenuEntries(context, (
+      id: HomeRowIds.watchlist(shelf, source: source.id),
+      title: named(hub.title),
+      sources: const [],
+    ));
     if (entries.isEmpty || shelf == split) return entries;
     // A genre shelf also offers its whole half.
     final half = split == 'films' ? t.watchlist.films : t.watchlist.tv;
     final halfEntry = homeRowMenuEntries(context, (
-      id: HomeRowIds.watchlist(split),
-      title: half,
+      id: HomeRowIds.watchlist(split, source: source.id),
+      title: named(half),
       sources: const [],
     )).first;
     return [
@@ -361,6 +446,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     onNavigateDown: _tvBrowseRailKey.currentState?.requestFocus,
                     onBack: _navigateToSidebar,
                     actions: [
+                      ?_sourceSwitchAction(foregroundColor),
                       FocusableAction(
                         icon: Symbols.refresh_rounded,
                         iconColor: foregroundColor,
@@ -403,6 +489,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   key: _actionBarKey,
                   onNavigateDown: () => _hubKeys.first.currentState?.requestFocusFromMemory(),
                   actions: [
+                    ?_sourceSwitchAction(Theme.of(context).colorScheme.onSurface),
                     FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
                   ],
                 ),

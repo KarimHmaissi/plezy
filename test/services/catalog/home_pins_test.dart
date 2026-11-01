@@ -53,6 +53,12 @@ void main() {
       expect(parseHomeLayout('[plezy:home2=!!!]'), isNull);
     });
 
+    test('Watchlist shelves of each source are their own Home rows', () {
+      expect(HomeRowIds.watchlist('films.Horror', source: CatalogSourceId.trakt), 'wl:trakt:films.Horror');
+      expect(HomeRowIds.watchlist('films', source: CatalogSourceId.plex), 'wl:plex:films');
+      expect(HomeRowIds.watchlist('films'), 'wl:films');
+    });
+
     test('the same Trakt list from anywhere is one row', () {
       expect(HomeRowIds.traktLists('list:donxy:99'), HomeRowIds.traktLists('list:*:99'));
       expect(HomeRowIds.traktLists('list:me:99'), isNot(HomeRowIds.traktLists('list:me:100')));

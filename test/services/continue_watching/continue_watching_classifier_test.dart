@@ -35,6 +35,32 @@ MediaItem _movie(String title, {required int offsetMs, int durationMs = 7200000,
 List<String> _names(List<MediaItem> items) => [for (final i in items) i.grandparentTitle ?? i.title ?? ''];
 
 void main() {
+  group('comfortCarryOn', () {
+    test('part-watched comfort episodes, newest first; others, starts and near-finishes left out', () {
+      final comfort = {
+        normalizeShowTitle('Frasier'),
+        normalizeShowTitle('Friends'),
+        normalizeShowTitle('Castle (2009)'),
+      };
+      final items = comfortCarryOn([
+        _episode('Frasier', offsetMs: 600000, lastViewedDaysAgo: 3),
+        _episode('Friends', offsetMs: 900000, lastViewedDaysAgo: 1),
+        _episode('Castle', offsetMs: 300000, lastViewedDaysAgo: 2),
+        _episode('Heroes', offsetMs: 600000, lastViewedDaysAgo: 0), // not a comfort show
+        _episode('Seinfeld', offsetMs: 600000, lastViewedDaysAgo: 0),
+        _episode('Frasier', offsetMs: 60000, lastViewedDaysAgo: 0).copyWith(id: 'start'), // 1 min in
+        _episode('Friends', offsetMs: 1450000, lastViewedDaysAgo: 0).copyWith(id: 'nearly'), // 97%
+        _episode('Friends', lastViewedDaysAgo: 0).copyWith(id: 'next'), // next episode, unstarted
+        _movie('Friends', offsetMs: 600000, lastViewedDaysAgo: 0),
+      ], comfort);
+      expect(_names(items), ['Friends', 'Castle', 'Frasier']);
+    });
+
+    test('no comfort shows, no row', () {
+      expect(comfortCarryOn([_episode('Frasier', offsetMs: 600000, lastViewedDaysAgo: 1)], const {}), isEmpty);
+    });
+  });
+
   group('classifyContinueWatching', () {
     test('splits on the 30-day cut-off, keeping order', () {
       final split = classifyContinueWatching([

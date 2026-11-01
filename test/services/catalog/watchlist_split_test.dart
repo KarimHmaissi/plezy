@@ -11,6 +11,12 @@ CatalogItem _item(String title, MediaKind kind, {int? tmdb}) => CatalogItem(
 );
 
 void main() {
+  test('genre slugs read as titles; proper names are kept', () {
+    expect(displayGenre('drama'), 'Drama');
+    expect(displayGenre('science-fiction'), 'Science Fiction');
+    expect(displayGenre('Sci-Fi & Fantasy'), 'Sci-Fi & Fantasy');
+  });
+
   group('splitWatchlist', () {
     test('puts movies in films and everything else in TV, keeping order', () {
       final split = splitWatchlist([

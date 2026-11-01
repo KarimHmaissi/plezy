@@ -266,6 +266,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         final hub = switch (row.id) {
           HomeRowIds.continueWatching => continueWatching,
           HomeRowIds.pickBackUp => pickBackUp,
+          HomeRowIds.comfortCarryOn => _comfortCarryOnHub(),
           _ => plexById[row.id]?.hub ?? _fetchedRows[row.id],
         };
         show(hub, row);
@@ -362,6 +363,20 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   List<MediaMenuExtraEntry> _rowMenuEntriesFor(MediaHub hub) {
     final row = _rowForHubId[hub.id];
     return row == null ? const [] : homeRowMenuEntries(context, row);
+  }
+
+  /// Comfort's Carry on watching, when added to Home.
+  MediaHub? _comfortCarryOnHub() {
+    final items = comfortCarryOn(_onDeck, _comfortTitles);
+    if (items.isEmpty) return null;
+    return MediaHub(
+      id: 'comfort_carryon_continue',
+      identifier: '_comfort_carryon_continue_',
+      title: t.comfort.carryOn,
+      type: 'mixed',
+      items: items,
+      size: items.length,
+    );
   }
 
   MediaHub _continueWatchingHubFor(List<MediaItem> items) => MediaHub(
@@ -1356,6 +1371,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
       onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
       rowMenuEntriesForHub: _rowMenuEntriesFor,
+      showTimeLeftForHub: (hub) => hub.id == 'comfort_carryon_continue',
     );
   }
 

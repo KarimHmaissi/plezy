@@ -72,3 +72,15 @@ List<WatchlistGenreGroup> groupWatchlistByGenre(
 
   return [...half(split.films, films: true), ...half(split.tv, films: false)];
 }
+
+/// A genre as shown on a shelf: providers that send slugs ("science-fiction"
+/// from Trakt) read as "Science Fiction"; names that already have capitals
+/// ("Sci-Fi & Fantasy") are kept.
+String displayGenre(String genre) {
+  if (genre != genre.toLowerCase()) return genre;
+  return genre
+      .split(RegExp(r'[-_\s]+'))
+      .where((w) => w.isNotEmpty)
+      .map((w) => '${w[0].toUpperCase()}${w.substring(1)}')
+      .join(' ');
+}

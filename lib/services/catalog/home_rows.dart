@@ -77,8 +77,8 @@ MergedPlexHub _merge(String rowId, List<MediaHub> parts) {
 typedef WatchlistShelf = ({String id, String title, List<CatalogItem> items});
 
 String watchlistShelfTitle({required bool films, String? genre}) => switch ((films, genre)) {
-  (true, final String genre) => t.watchlist.genreFilms(genre: genre),
-  (false, final String genre) => t.watchlist.genreTv(genre: genre),
+  (true, final String genre) => t.watchlist.genreFilms(genre: displayGenre(genre)),
+  (false, final String genre) => t.watchlist.genreTv(genre: displayGenre(genre)),
   (true, null) => t.watchlist.otherFilms,
   (false, null) => t.watchlist.otherTv,
 };
@@ -130,7 +130,8 @@ class HomeRowResolver {
   static const int itemLimit = TraktListsCatalogSource.rowItemLimit;
 
   /// Whether Home fetches [id] itself (Continue Watching rows come from Home).
-  static bool needsFetch(String id) => id != HomeRowIds.continueWatching && id != HomeRowIds.pickBackUp;
+  static bool needsFetch(String id) =>
+      id != HomeRowIds.continueWatching && id != HomeRowIds.pickBackUp && id != HomeRowIds.comfortCarryOn;
 
   CatalogSource? _source(String name) => sources.connectedSources.where((s) => s.id.name == name).firstOrNull;
 
@@ -160,11 +161,16 @@ class HomeRowResolver {
           items = _catalog((await fetchCatalogHub(source as CatalogHubSource, key, limit: itemLimit)).items);
         }
       case 'wl':
-        final source = sources.activeSource?.supportsWatchlist == true
-            ? sources.activeSource
-            : sources.watchlistCapableSource;
-        if (source == null) return null;
-        final shelf = (await loadWatchlistShelves(source)).where((s) => s.id == rest).firstOrNull;
+        // `wl:{source}:{shelf}`, or `wl:{shelf}` from before shelves named
+        // their source.
+        final sep = rest.indexOf(':');
+        final named = sep < 0 ? null : _source(rest.substring(0, sep));
+        final shelfId = sep < 0 ? rest : rest.substring(sep + 1);
+        final source =
+            named ??
+            (sources.activeSource?.supportsWatchlist == true ? sources.activeSource : sources.watchlistCapableSource);
+        if (source == null || !source.supportsWatchlist) return null;
+        final shelf = (await loadWatchlistShelves(source)).where((s) => s.id == shelfId).firstOrNull;
         items = _catalog(shelf?.items ?? const []);
       case HomeRowIds.comfort:
         final trakt = sources.connectedSources.whereType<TraktCatalogSource>().firstOrNull;

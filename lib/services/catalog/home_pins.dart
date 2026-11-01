@@ -26,6 +26,9 @@ abstract final class HomeRowIds {
   static const String pickBackUp = 'pb';
   static const String comfort = 'comfort';
 
+  /// Part-watched comfort-show episodes (Comfort's Carry on watching).
+  static const String comfortCarryOn = 'comfort.carryon';
+
   /// A Trakt Lists hub (chart or list). Lists are addressed by id alone, so
   /// the same list pinned from anywhere is one row.
   static String traktLists(String hubId) {
@@ -43,8 +46,11 @@ abstract final class HomeRowIds {
   /// ("Oh, The Horror!" from five movie libraries) is one row.
   static String plex(String title) => 'px:${normalizeRowTitle(title)}';
 
-  /// A Watchlist page shelf: `films`, `tv`, `films.Horror`, `tv.other`…
-  static String watchlist(String shelfId) => 'wl:$shelfId';
+  /// A Watchlist page shelf (`films`, `tv`, `films.Horror`, `tv.other`…) of
+  /// [source]'s watchlist; without a source, whichever watchlist the
+  /// Watchlist page would show.
+  static String watchlist(String shelfId, {CatalogSourceId? source}) =>
+      source == null ? 'wl:$shelfId' : 'wl:${source.name}:$shelfId';
 }
 
 /// Hub id prefix for a Trakt list addressed by its id alone (`/lists/{id}`).

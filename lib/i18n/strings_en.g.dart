@@ -3985,6 +3985,9 @@ class Translations$comfort$en {
 
 	// Translations
 
+	/// en: 'Carry on watching'
+	String get carryOn => 'Carry on watching';
+
 	/// en: 'Random episode'
 	String get randomEpisode => 'Random episode';
 
@@ -9849,6 +9852,7 @@ extension on Translations {
 			'navigation.explore' => 'Explore',
 			'navigation.watchlist' => 'Watchlist',
 			'navigation.comfort' => 'Comfort',
+			'comfort.carryOn' => 'Carry on watching',
 			'comfort.randomEpisode' => 'Random episode',
 			'comfort.configure' => 'Configure',
 			'comfort.inTheMix' => 'In the mix',
@@ -10014,9 +10018,9 @@ extension on Translations {
 			'explore.detail.alsoKnownAs' => 'Also known as',
 			'explore.detail.studios' => 'Studios',
 			'explore.detail.country' => 'Country',
-			'explore.detail.language' => 'Language',
 			_ => null,
 		} ?? switch (path) {
+			'explore.detail.language' => 'Language',
 			'explore.detail.released' => 'Released',
 			'explore.detail.physicalRelease' => 'On disc',
 			'explore.detail.ended' => 'Ended',
@@ -10528,9 +10532,9 @@ extension on Translations {
 			'companionRemote.pairing.connectionTimedOut' => 'Connection timed out. Use the same network on both devices.',
 			'companionRemote.pairing.sessionNotFound' => 'Device not found. Make sure Plezy is running on the host.',
 			'companionRemote.pairing.authFailed' => 'Authentication failed. Both devices need the same Plex account.',
-			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Failed to connect: ${error}',
 			_ => null,
 		} ?? switch (path) {
+			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Failed to connect: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Do you want to disconnect from the remote session?',
 			'companionRemote.remote.reconnecting' => 'Reconnecting...',
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Attempt ${current} of 5',
