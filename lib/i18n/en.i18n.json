@@ -2776,7 +2776,9 @@
     "skipCredits": "Skip credits",
     "stop": "Stop",
     "nothingPlaying": "Nothing is playing",
-    "playPause": "Play / pause"
+    "playPause": "Play / pause",
+    "tvWorking": "${name} is working…",
+    "notConnected": "Not connected to ${name} — showing the last copy"
   },
   "remoteAi": {
     "title": "AI on ${name}",

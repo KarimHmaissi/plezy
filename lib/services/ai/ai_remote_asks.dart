@@ -58,4 +58,42 @@ abstract final class AiRemoteAsks {
       AiActivity.running.value--;
     }
   }
+
+  /// A phone's Find more / Refresh on a saved answer, run here like the AI
+  /// tab's own (see `AiScreen._findMore` / `_refreshRow`); the result is
+  /// saved with [AiHistory.replace], which updates the TV and, through the
+  /// next snapshot, the phone.
+  static Future<void> runAction(
+    Map<String, dynamic> data, {
+    required MediaServerClient? Function(ServerId serverId) clientFor,
+    TraktClient? trakt,
+  }) async {
+    final action = data['action'] as String?;
+    final id = data['id'] as String?;
+    final entry = id == null ? null : await AiHistory.get(id);
+    if (entry == null || (await AiKeyStore.read() ?? '').isEmpty) return;
+    final extend = action == 'findMore';
+    if (!extend && action != 'refresh') return;
+    AiActivity.running.value++;
+    try {
+      final result = await buildAiRow(
+        request: entry.request,
+        model: ClaudeModel.sonnet,
+        clientFor: clientFor,
+        trakt: trakt,
+        id: entry.id,
+        useTitle: entry.title != null,
+        keepTitle: extend ? entry.title : null,
+        sentRequest: extend ? findMoreRequest(entry) : null,
+        excludeKeys: extend ? {...entry.items.map((i) => i.globalKey)} : const {},
+      );
+      final found = result.entry;
+      if (found == null) return;
+      await AiHistory.replace(extend ? mergeFindMore(entry, found) : found);
+    } catch (e) {
+      appLogger.w('AI: $action from the phone failed', error: e);
+    } finally {
+      AiActivity.running.value--;
+    }
+  }
 }

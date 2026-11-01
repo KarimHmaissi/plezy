@@ -18,6 +18,8 @@ import 'package:window_manager/window_manager.dart';
 import '../i18n/strings.g.dart';
 import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_remote_asks.dart';
+import '../services/companion_remote/mirror_sync.dart';
+import '../services/trackers/trakt/trakt_client.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../utils/media_navigation_helper.dart';
 import '../services/app_exit_service.dart';
@@ -981,6 +983,7 @@ class _MainScreenState extends State<MainScreen>
     }
     if (!_autoConnectChecked && PlatformDetector.isMobile(context)) {
       _autoConnectChecked = true;
+      unawaited(MirrorClient.instance.start(context.read<CompanionRemoteProvider>()));
       WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_autoConnectToTv()));
     }
 
@@ -1044,22 +1047,34 @@ class _MainScreenState extends State<MainScreen>
     };
     receiver.onPlayMedia = (data) => unawaited(_playFromPhone(data, play: true));
     receiver.onOpenItem = (data) => unawaited(_playFromPhone(data, play: false));
-    receiver.onAiAsk = (data) {
-      final trakt = context
-          .read<CatalogSourcesProvider?>()
-          ?.connectedSources
-          .whereType<TraktCatalogSource>()
-          .firstOrNull;
-      unawaited(
-        AiRemoteAsks.run(
-          data,
-          remote: companionRemote,
-          clientFor: context.read<MultiServerProvider>().getClientForServer,
-          trakt: trakt?.client,
-        ),
-      );
+    receiver.onAiAsk = (data) => unawaited(
+      AiRemoteAsks.run(
+        data,
+        remote: companionRemote,
+        clientFor: context.read<MultiServerProvider>().getClientForServer,
+        trakt: _traktClient,
+      ),
+    );
+    // Mirroring: phones see and edit this device's Home, lists and AI answers.
+    final mirror = _mirrorHost = MirrorHost(companionRemote)..start();
+    receiver.onMirrorRequest = () {
+      unawaited(mirror.sendSnapshot());
+      mirror.sendActivity();
     };
+    receiver.onMirrorWrite = (op) => unawaited(mirror.applyWrite(op));
+    receiver.onAiAction = (data) => unawaited(
+      AiRemoteAsks.runAction(
+        data,
+        clientFor: context.read<MultiServerProvider>().getClientForServer,
+        trakt: _traktClient,
+      ),
+    );
   }
+
+  MirrorHost? _mirrorHost;
+
+  TraktClient? get _traktClient =>
+      context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client;
 
   /// A phone cast a title here: fetch it from this app's servers and play it
   /// (or open its page), on top of whatever the TV was showing.
@@ -1176,6 +1191,10 @@ class _MainScreenState extends State<MainScreen>
         receiver.onPlayMedia = null;
         receiver.onOpenItem = null;
         receiver.onAiAsk = null;
+        receiver.onMirrorRequest = null;
+        receiver.onMirrorWrite = null;
+        receiver.onAiAction = null;
+        _mirrorHost?.stop();
         receiver.navigationOwner = null;
       }
     }

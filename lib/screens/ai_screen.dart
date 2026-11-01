@@ -18,6 +18,12 @@ import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../services/ai/ai_remote_asks.dart';
+import '../media/media_kind.dart';
+import '../utils/media_navigation_helper.dart';
+import '../utils/video_player_navigation.dart';
+import '../models/companion_remote/remote_command.dart';
+import '../services/companion_remote/mirror_sync.dart';
+import '../services/customisation/customisation_store.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
@@ -124,6 +130,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     AiMoreLikeThis.requests.addListener(_takeMoreLikeThis);
     AiHistory.replaced.addListener(_onReplaced);
     AiRemoteAsks.landed.addListener(_onLanded);
+    Customisation.changed.addListener(_onDataChanged);
+    RemoteAiSession.instance.addListener(_onRemoteAsks);
     unawaited(_start());
     WidgetsBinding.instance.addPostFrameCallback((_) => _takeMoreLikeThis());
   }
@@ -183,14 +191,39 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     AiMoreLikeThis.requests.removeListener(_takeMoreLikeThis);
     AiHistory.replaced.removeListener(_onReplaced);
     AiRemoteAsks.landed.removeListener(_onLanded);
+    Customisation.changed.removeListener(_onDataChanged);
+    RemoteAiSession.instance.removeListener(_onRemoteAsks);
     _spotlight.dispose();
     _tvRowsExpanded.dispose();
     _focusedReason.dispose();
     super.dispose();
   }
 
+  /// The saved answers changed elsewhere: a phone's edit applied here, or
+  /// (on a phone) a new snapshot from the TV.
+  void _onDataChanged() {
+    if (!mounted) return;
+    if (_thinClient) {
+      setState(() => _hasKey = true);
+      // Mirroring (or its connection) changed; the build picks the layout.
+    }
+    unawaited(_loadHistory());
+  }
+
+  void _onRemoteAsks() {
+    if (mounted && _thinClient) setState(() {});
+  }
+
+  /// Phone, mirroring its TV: whether edits and requests can go to the TV.
+  bool get _canEditMirror => MirrorClient.instance.canEdit;
+
   Future<void> _start() async {
-    if (_thinClient) return;
+    if (_thinClient) {
+      // The TV runs requests; this shows its saved answers.
+      _hasKey = true;
+      if (Customisation.isMirror) await _loadHistory();
+      return;
+    }
     if (!_historyLoaded) await _loadHistory();
     final key = await AiKeyStore.read();
     if (!mounted) return;
@@ -245,6 +278,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     );
     final text = request?.trim();
     if (text == null || text.isEmpty || !mounted) return;
+    if (_thinClient) {
+      RemoteAiSession.instance.ask(context.read<CompanionRemoteProvider>(), text);
+      return;
+    }
     unawaited(_runInBackground(_PendingAsk(text, previous: List.of(_conversation))));
   }
 
@@ -326,23 +363,40 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   HomeRowEntry _homeRow(AiHistoryEntry entry) => (id: HomeRowIds.ai(entry.id), title: entry.label, sources: const []);
 
+  /// Phone: Find more / Refresh run on the TV; the new picks come back with
+  /// its next snapshot.
+  Future<void> _remoteAction(String action, AiHistoryEntry entry) async {
+    context.read<CompanionRemoteProvider>().sendCommand(
+      RemoteCommandType.aiAction,
+      data: {'action': action, 'id': entry.id},
+    );
+    showAppSnackBar(
+      context,
+      action == 'findMore' ? t.aiTab.findingMore(request: entry.label) : t.aiTab.thinking(request: entry.label),
+    );
+  }
+
   /// Re-run a saved request (one Sonnet call) and replace its picks.
-  Future<void> _refreshRow(AiHistoryEntry entry) => _runInBackground(
-    _PendingAsk(entry.request, replaceId: entry.id, label: entry.label, useTitle: entry.title != null),
-  );
+  Future<void> _refreshRow(AiHistoryEntry entry) => _thinClient
+      ? _remoteAction('refresh', entry)
+      : _runInBackground(
+          _PendingAsk(entry.request, replaceId: entry.id, label: entry.label, useTitle: entry.title != null),
+        );
 
   /// Ask the same request again for titles not already in [entry]; the new
   /// batch goes in front and the old picks stay (see [mergeFindMore]).
-  Future<void> _findMore(AiHistoryEntry entry) => _runInBackground(
-    _PendingAsk(
-      entry.request,
-      replaceId: entry.id,
-      label: t.aiTab.findingMore(request: entry.label),
-      useTitle: entry.title != null,
-      previous: List.of(_conversation),
-      extend: entry,
-    ),
-  );
+  Future<void> _findMore(AiHistoryEntry entry) => _thinClient
+      ? _remoteAction('findMore', entry)
+      : _runInBackground(
+          _PendingAsk(
+            entry.request,
+            replaceId: entry.id,
+            label: t.aiTab.findingMore(request: entry.label),
+            useTitle: entry.title != null,
+            previous: List.of(_conversation),
+            extend: entry,
+          ),
+        );
 
   Future<void> _deleteRow(AiHistoryEntry entry) async {
     final confirmed = await showConfirmDialog(
@@ -371,6 +425,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   List<MediaMenuExtraEntry> _rowMenuEntries(MediaHub hub) {
     final entry = _entryForHub(hub);
     if (entry == null || entry.request == AiAgent.tonightRequest) return const [];
+    if (_thinClient && !_canEditMirror) return const [];
     final homeRow = _homeRow(entry);
     final homeFull =
         !HomePinsController.instance.contains(homeRow.id) &&
@@ -511,7 +566,40 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   void _navigateToSidebar() => MainScreenFocusScope.focusSidebarOf(context);
 
+  /// Phone: its own requests still running on the TV (or failed), and
+  /// whether the TV is busy with others (asked on the TV, Find more...).
+  List<_PendingAsk> get _remotePending {
+    final remote = context.read<CompanionRemoteProvider>();
+    final mine = [
+      for (final a in RemoteAiSession.instance.asks)
+        if (a.status != 'done') _PendingAsk(a.request)..error = a.status == 'error' ? (a.error ?? '') : null,
+    ];
+    final running = remote.hostAiActivity.value?['running'] as int? ?? 0;
+    final working = mine.where((a) => a.error == null).length;
+    return [
+      ...mine,
+      if (_canEditMirror && running > working)
+        _PendingAsk(t.cast.tvWorking(name: MirrorClient.instance.hostName ?? '')),
+    ];
+  }
+
   List<FocusableAction> _actions(Color color) => [
+    if (_thinClient && !_canEditMirror)
+      FocusableAction(
+        debugLabel: 'AiOffline',
+        onPressed: null,
+        child: Text(
+          t.cast.notConnected(name: MirrorClient.instance.hostName ?? t.companionRemote.unknownDevice),
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color.withValues(alpha: 0.7)),
+        ),
+      ),
+    if (_thinClient)
+      for (final ask in _remotePending)
+        FocusableAction(
+          debugLabel: 'AiPending',
+          onPressed: null,
+          child: _PendingChip(ask: ask, color: color),
+        ),
     for (final ask in _pending)
       FocusableAction(
         debugLabel: 'AiPending',
@@ -522,7 +610,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     FocusableAction(
       debugLabel: 'AiAsk',
       autofocus: _rows.isEmpty,
-      onPressed: _hasKey != true ? null : () => unawaited(_ask()),
+      onPressed: _hasKey != true || (_thinClient && !_canEditMirror) ? null : () => unawaited(_ask()),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
@@ -545,12 +633,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         tooltip: t.aiTab.newConversation,
         onPressed: _newConversation,
       ),
-    FocusableAction(
-      icon: Symbols.refresh_rounded,
-      iconColor: color,
-      tooltip: t.aiTab.refreshTonight,
-      onPressed: _busy || _hasKey != true ? null : () => unawaited(_tonight(refresh: true)),
-    ),
+    if (!_thinClient)
+      FocusableAction(
+        icon: Symbols.refresh_rounded,
+        iconColor: color,
+        tooltip: t.aiTab.refreshTonight,
+        onPressed: _busy || _hasKey != true ? null : () => unawaited(_tonight(refresh: true)),
+      ),
     if (_hasMore)
       FocusableAction(
         icon: Symbols.expand_more_rounded,
@@ -595,6 +684,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     return null;
   }
 
+  void _playPick(MediaItem item) {
+    if (item.kind == MediaKind.movie || item.kind == MediaKind.episode) {
+      unawaited(navigateToVideoPlayer(context, metadata: item));
+    } else {
+      unawaited(navigateToMediaItem(context, item));
+    }
+  }
+
   /// Phones don't run the AI themselves: requests go to the TV app they're
   /// connected to (its key, index and history).
   static bool get _thinClient =>
@@ -603,7 +700,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   @override
   Widget build(BuildContext context) {
-    if (_thinClient) return const RemoteAiScreen();
+    if (_thinClient) {
+      context.watch<CompanionRemoteProvider>();
+      if (!Customisation.isMirror) return const RemoteAiScreen();
+    }
     final hubs = _hubs;
     final message = _message();
     final color = Theme.of(context).colorScheme.onSurface;
@@ -619,7 +719,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
               SliverToBoxAdapter(
                 child: RowMenuEntries(
                   entries: _rowMenuEntries(hub),
-                  child: HubSection(hub: hub, focusMemory: _hubFocusMemory, icon: Symbols.auto_awesome_rounded),
+                  child: HubSection(
+                    hub: hub,
+                    focusMemory: _hubFocusMemory,
+                    icon: Symbols.auto_awesome_rounded,
+                    // Phone: a tap plays (on the TV while casting); shows open.
+                    onItemTap: _thinClient ? _playPick : null,
+                  ),
                 ),
               ),
           if (message == null && _hasMore)

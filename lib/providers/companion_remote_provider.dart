@@ -161,6 +161,13 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   /// null when nothing is.
   final ValueNotifier<Map<String, dynamic>?> nowPlaying = ValueNotifier(null);
 
+  /// Phone side: the host's customisation snapshots (see `MirrorClient`).
+  final StreamController<Map<String, dynamic>> _mirrorSnapshots = StreamController.broadcast();
+  Stream<Map<String, dynamic>> get mirrorSnapshots => _mirrorSnapshots.stream;
+
+  /// Phone side: the host's running AI requests (`running`, `labels`).
+  final ValueNotifier<Map<String, dynamic>?> hostAiActivity = ValueNotifier(null);
+
   /// Phone side: seek the host's player.
   void seekHostTo(Duration position) =>
       sendCommand(RemoteCommandType.seekTo, data: {'positionMs': position.inMilliseconds});
@@ -971,6 +978,10 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
           _handleDeviceInfo(command);
         } else if (command.type == RemoteCommandType.syncState) {
           _handleSyncState(command);
+        } else if (command.type == RemoteCommandType.mirrorSnapshot) {
+          _mirrorSnapshots.add(command.data ?? const {});
+        } else if (command.type == RemoteCommandType.aiActivity) {
+          hostAiActivity.value = command.data;
         } else if (command.type == RemoteCommandType.nowPlaying) {
           final data = command.data ?? const {};
           nowPlaying.value = data['state'] == 'stopped' ? null : data;
@@ -1335,6 +1346,8 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _aiAnswers.close();
     castResults.dispose();
     nowPlaying.dispose();
+    hostAiActivity.dispose();
+    _mirrorSnapshots.close();
 
     _boundActiveProfile?.removeListener(_scheduleAuthContextRefresh);
     for (final sub in _profileServiceSubs) {

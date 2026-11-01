@@ -52,6 +52,11 @@ class CompanionRemoteReceiver {
   void Function(Duration position)? onSeekTo;
   void Function(String kind, String id)? onSelectTrack;
 
+  /// Fork, mirror (host side): a phone's data requests and edits.
+  VoidCallback? onMirrorRequest;
+  void Function(Map<String, dynamic> data)? onMirrorWrite;
+  void Function(Map<String, dynamic> data)? onAiAction;
+
   /// Skip the intro / credits marker the player is in; set by the controls.
   VoidCallback? onSkipMarker;
 
@@ -110,6 +115,12 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.skipIntro:
       case RemoteCommandType.skipCredits:
         onSkipMarker?.call();
+      case RemoteCommandType.mirrorRequest:
+        onMirrorRequest?.call();
+      case RemoteCommandType.mirrorWrite:
+        onMirrorWrite?.call(command.data ?? const {});
+      case RemoteCommandType.aiAction:
+        onAiAction?.call(command.data ?? const {});
       case RemoteCommandType.seekForward:
         onSeekForward?.call();
       case RemoteCommandType.seekBackward:
@@ -177,6 +188,8 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.castResult:
       case RemoteCommandType.aiAnswer:
       case RemoteCommandType.nowPlaying:
+      case RemoteCommandType.mirrorSnapshot:
+      case RemoteCommandType.aiActivity:
         break;
 
       default:
@@ -208,7 +221,12 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.syncState ||
   RemoteCommandType.castResult ||
   RemoteCommandType.aiAnswer ||
-  RemoteCommandType.nowPlaying => false,
+  RemoteCommandType.nowPlaying ||
+  RemoteCommandType.mirrorRequest ||
+  RemoteCommandType.mirrorSnapshot ||
+  RemoteCommandType.mirrorWrite ||
+  RemoteCommandType.aiAction ||
+  RemoteCommandType.aiActivity => false,
   RemoteCommandType.dpadUp ||
   RemoteCommandType.dpadDown ||
   RemoteCommandType.dpadLeft ||

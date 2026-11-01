@@ -6792,6 +6792,12 @@ class Translations$cast$en {
 
 	/// en: 'Play / pause'
 	String get playPause => 'Play / pause';
+
+	/// en: '${name} is working…'
+	String tvWorking({required Object name}) => '${name} is working…';
+
+	/// en: 'Not connected to ${name} — showing the last copy'
+	String notConnected({required Object name}) => 'Not connected to ${name} — showing the last copy';
 }
 
 // Path: remoteAi
@@ -11342,6 +11348,8 @@ extension on Translations {
 			'cast.stop' => 'Stop',
 			'cast.nothingPlaying' => 'Nothing is playing',
 			'cast.playPause' => 'Play / pause',
+			'cast.tvWorking' => ({required Object name}) => '${name} is working…',
+			'cast.notConnected' => ({required Object name}) => 'Not connected to ${name} — showing the last copy',
 			'remoteAi.title' => ({required Object name}) => 'AI on ${name}',
 			'remoteAi.connectTitle' => 'Connect to your TV to use AI',
 			'remoteAi.connectMessage' => 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.',

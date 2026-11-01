@@ -87,6 +87,24 @@ enum RemoteCommandType {
   /// Fork, now playing: pick a track on the host. Data: `kind` (audio /
   /// subtitle), `id` (from [nowPlaying]'s lists).
   selectTrack,
+
+  /// Fork, mirror: the phone asks for the host's customisation data.
+  mirrorRequest,
+
+  /// Fork, mirror: the host's customisation data (`rev`, `data`: an export
+  /// document), sent on [mirrorRequest] and after every change.
+  mirrorSnapshot,
+
+  /// Fork, mirror: an edit made on the phone, for the host to apply. Data:
+  /// `op` (setting / home / comfort) and its fields.
+  mirrorWrite,
+
+  /// Fork, mirror: run an AI row action on the host. Data: `action`
+  /// (findMore / refresh), `id` (the saved answer).
+  aiAction,
+
+  /// Fork, mirror: the host's running AI requests (`running`, `labels`).
+  aiActivity,
 }
 
 class _RemoteCommandTypeConverter extends IndexedEnumConverter<RemoteCommandType> {

@@ -42,6 +42,8 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       on the phone casts to the TV ("This phone" toggle)
 - [x] Now playing on the phone: auto-reconnect, mini bar and a full
       player screen controlling the TV
+- [x] Phone mirrors the TV: AI answers as rows, Home and lists, edits go
+      to the TV
 
 Details of each are in the dated entries below.
 
@@ -87,6 +89,30 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-01
+
+### Phone mirrors the TV (branch `feature/ai-helper`)
+- **The TV is the one copy.** While connected, the phone shows the TV's
+  customisation data: AI answers, Home layout, Comfort pauses, Shortlist
+  and the fork's content settings (AI auto-refresh, Watchlist source). The
+  TV sends it all on connect and again after every change (about 500 KB,
+  versioned). Device settings (playback, quality, theme, subtitles,
+  downloads) stay per device.
+- **Edits from the phone go to the TV**, which applies them and sends the
+  new data to every connected phone: deleting an AI answer, Add to Home /
+  remove / reorder on Home, Comfort pauses. The phone shows each edit at
+  once rather than waiting for the round trip.
+- **AI tab on the phone** now looks like the TV's: one horizontal row per
+  saved answer, newest first, with Load more. Ask sends the request to the
+  TV (a chip shows it running); its row appears on both devices. Find more
+  and Refresh picks run on the TV. A request started on the TV shows a
+  "TV is working…" chip on the phone, then its row. Tapping a film or
+  episode plays it (on the TV while casting); a show opens its page.
+- **Offline:** the phone keeps the last copy in its own cache file
+  (`tv_mirror.json`, never its own database) and shows it read-only with
+  "Not connected to <TV>"; Ask and row actions are off until it reconnects.
+  A phone that has never connected to a TV keeps using its own data.
+- New remote commands, appended: `mirrorRequest`, `mirrorSnapshot`,
+  `mirrorWrite`, `aiAction`, `aiActivity`.
 
 ### Now playing on the phone (branch `feature/ai-helper`)
 - **Auto-reconnect:** the phone remembers the TV app it last connected to
