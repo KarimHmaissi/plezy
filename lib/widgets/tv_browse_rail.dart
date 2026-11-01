@@ -117,7 +117,9 @@ class TvBrowseRailLayout {
 
   static double scaleForSize(Size size) => TvLayoutConstants.scaleForSize(size);
 
-  static double horizontalInsetForScale(double scale) => (24 * scale).clamp(18, 40).toDouble();
+  // Fork: more air than upstream (24 / 12 / 30), matching the touch rhythm
+  // in ForkSpacing at TV size.
+  static double horizontalInsetForScale(double scale) => (32 * scale).clamp(24, 48).toDouble();
 
   static double railTopPaddingForScale(double scale) => 12 * scale;
 
@@ -125,9 +127,9 @@ class TvBrowseRailLayout {
 
   static double railInteractionExpansionForScale(double scale) => (12 * scale).clamp(8, 18).toDouble();
 
-  static double fullCardItemGapForScale(double scale) => (12 * scale).clamp(8, 18).toDouble();
+  static double fullCardItemGapForScale(double scale) => (16 * scale).clamp(10, 22).toDouble();
 
-  static double hubStripHeightForScale(double scale) => 30 * scale;
+  static double hubStripHeightForScale(double scale) => 46 * scale;
 
   static double nextHubPeekHeightForScale(double scale) => 20 * scale;
 
@@ -1609,8 +1611,11 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
     return SizedBox(
       height: TvBrowseRailLayout.hubStripHeightForScale(scale),
       child: ExcludeFocus(
-        child: Align(
-          alignment: .centerLeft,
+        // Title sits low in the strip: the space above separates it from
+        // the row before.
+        child: Container(
+          alignment: .bottomLeft,
+          padding: EdgeInsets.only(bottom: 10 * scale),
           child: Row(
             children: [
               AppIcon(widget.iconForHub(hub, hubIndex), fill: 1, size: 20 * scale, color: iconColor),
