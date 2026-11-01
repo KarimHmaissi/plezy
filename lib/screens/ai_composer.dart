@@ -35,13 +35,33 @@ const _red = Color(0xFFE5484D);
 /// How a composer request went: the answer's top pick to freeze on, or
 /// why it failed.
 class AiComposerOutcome {
-  const AiComposerOutcome({this.pick, this.error});
+  const AiComposerOutcome({this.pick, this.error, this.text});
   final MediaItem? pick;
   final String? error;
+
+  /// A written answer (Ask about this): shown as a card instead of closing.
+  final String? text;
 }
 
+/// A quick start for [AiComposer.chips]: what it says and what it asks.
+typedef AiComposerChip = ({IconData icon, String label, String request});
+
 class AiComposer extends StatefulWidget {
-  const AiComposer({super.key, required this.run, this.followUpOf, this.recent = const [], this.posters = const []});
+  const AiComposer({
+    super.key,
+    required this.run,
+    this.followUpOf,
+    this.recent = const [],
+    this.posters = const [],
+    this.about,
+    this.chips,
+  });
+
+  /// The title being asked about (Ask about this), shown as a chip.
+  final String? about;
+
+  /// Quick starts in place of the usual ones.
+  final List<AiComposerChip>? chips;
 
   /// Runs a request; the film strip runs until it completes.
   final Future<AiComposerOutcome> Function(String request) run;
@@ -61,6 +81,8 @@ class AiComposer extends StatefulWidget {
     String? followUpOf,
     List<String> recent = const [],
     List<MediaItem> posters = const [],
+    String? about,
+    List<AiComposerChip>? chips,
 
     /// Where the iris opens from (the Ask button), in global coordinates.
     Rect? origin,
@@ -71,7 +93,8 @@ class AiComposer extends StatefulWidget {
         opaque: false,
         transitionDuration: const Duration(milliseconds: 260),
         reverseTransitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (_, _, _) => AiComposer(run: run, followUpOf: followUpOf, recent: recent, posters: posters),
+        pageBuilder: (_, _, _) =>
+            AiComposer(run: run, followUpOf: followUpOf, recent: recent, posters: posters, about: about, chips: chips),
         transitionsBuilder: (context, animation, _, child) {
           if (ForkMotion.reduceMotion(context)) return FadeTransition(opacity: animation, child: child);
           return _IrisTransition(animation: animation, origin: origin?.center, child: child);
@@ -125,6 +148,12 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   int? _pickSlot;
   MediaItem? _pick;
 
+  /// The written answer once it's in (Ask about this).
+  String? _answer;
+  bool _showAnswer = false;
+  final _doneFocus = FocusNode(debugLabel: 'AiComposerDone');
+  final _askAnotherFocus = FocusNode(debugLabel: 'AiComposerAskAnother');
+
   Timer? _typer;
   String _placeholder = '';
   int _exampleIndex = 0;
@@ -147,12 +176,16 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   List<String> get _takes => [t.aiComposer.take1, t.aiComposer.take2, t.aiComposer.take3];
 
   List<_QuickStart> get _quickStarts => [
-    _QuickStart(Symbols.nights_stay_rounded, t.aiComposer.tonight, t.aiComposer.tonightRequest),
-    _QuickStart(Symbols.history_rounded, t.aiComposer.history, t.aiComposer.historyRequest),
-    _QuickStart(Symbols.diamond_rounded, t.aiComposer.gems, t.aiComposer.gemsRequest),
-    _QuickStart(Symbols.sentiment_very_satisfied_rounded, t.aiComposer.feelGood, t.aiComposer.feelGoodRequest),
-    _QuickStart(Symbols.casino_rounded, t.aiComposer.random, t.aiComposer.randomRequest),
-    for (final r in widget.recent.take(5)) _QuickStart(Symbols.schedule_rounded, r, r),
+    if (widget.chips case final chips?) ...[
+      for (final c in chips) _QuickStart(c.icon, c.label, c.request),
+    ] else ...[
+      _QuickStart(Symbols.nights_stay_rounded, t.aiComposer.tonight, t.aiComposer.tonightRequest),
+      _QuickStart(Symbols.history_rounded, t.aiComposer.history, t.aiComposer.historyRequest),
+      _QuickStart(Symbols.diamond_rounded, t.aiComposer.gems, t.aiComposer.gemsRequest),
+      _QuickStart(Symbols.sentiment_very_satisfied_rounded, t.aiComposer.feelGood, t.aiComposer.feelGoodRequest),
+      _QuickStart(Symbols.casino_rounded, t.aiComposer.random, t.aiComposer.randomRequest),
+      for (final r in widget.recent.take(5)) _QuickStart(Symbols.schedule_rounded, r, r),
+    ],
   ];
 
   @override
@@ -211,6 +244,8 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     _clap.dispose();
     _judder.dispose();
     _retryFocus.dispose();
+    _doneFocus.dispose();
+    _askAnotherFocus.dispose();
     _browseFocus.dispose();
     _editFocus.dispose();
     _controller.dispose();
@@ -226,6 +261,11 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   /// moves on to the next.
   void _startTyping() {
     _typer?.cancel();
+    if (widget.about != null) {
+      // Asking about one title: the example asks don't fit.
+      setState(() => _placeholder = t.aiComposer.aboutHint);
+      return;
+    }
     var chars = 0;
     var holding = 0;
     var erasing = false;
@@ -306,6 +346,19 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
       _take = _takes.length; // "That's a wrap"
     });
     if (!_reduceMotion) unawaited(_flash.forward(from: 0));
+    if (_answer != null) {
+      // The answer card follows the freeze-frame and stays until Done.
+      unawaited(
+        Future.delayed(Duration(milliseconds: _pick != null ? 800 : 250), () {
+          if (!mounted) return;
+          setState(() => _showAnswer = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _doneFocus.canRequestFocus) _doneFocus.requestFocus();
+          });
+        }),
+      );
+      return;
+    }
     unawaited(
       Future.delayed(Duration(milliseconds: _pick != null ? 900 : 350), () {
         if (mounted) unawaited(Navigator.of(context).maybePop());
@@ -365,6 +418,8 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
       _jamStrip(error);
       return;
     }
+    final text = outcome.text?.trim();
+    _answer = text == null || text.isEmpty ? null : text;
     final pick = outcome.pick;
     if (pick != null) setState(() => _pick = pick);
     if (_reduceMotion || pick == null) {
@@ -411,6 +466,29 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   void _continueBrowsing() {
     ForkMotion.selection();
     unawaited(Navigator.of(context).maybePop());
+  }
+
+  void _closeAnswer() {
+    ForkMotion.selection();
+    unawaited(Navigator.of(context).maybePop());
+  }
+
+  /// From the answer card back to the input, for another question.
+  void _askAnother() {
+    ForkMotion.selection();
+    _controller.clear();
+    setState(() {
+      _showAnswer = false;
+      _thinking = false;
+      _landed = false;
+      _answer = null;
+      _pick = null;
+      _pickSlot = null;
+      _land = null;
+      _take = 0;
+    });
+    _startTyping();
+    _fieldFocus.requestFocus();
   }
 
   void _backToEdit() {
@@ -501,7 +579,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                   opacity: a,
                   child: ScaleTransition(scale: Tween(begin: 0.97, end: 1.0).animate(a), child: child),
                 ),
-                child: _thinking ? _thinkingView(size, isTv, wide) : _composeView(isTv, wide),
+                child: _showAnswer
+                    ? _answerView(isTv, wide)
+                    : (_thinking ? _thinkingView(size, isTv, wide) : _composeView(isTv, wide)),
               ),
               SafeArea(
                 child: Align(
@@ -557,7 +637,11 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     final hasText = _controller.text.trim().isNotEmpty;
     final headlineSize = isTv ? 104.0 : (tiny ? 36.0 : (short ? 46.0 : (wide ? 88.0 : 60.0)));
     final inputSize = isTv ? 30.0 : (tiny ? 19.0 : (wide ? 26.0 : 21.0));
-    final headline = (widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline).toUpperCase();
+    final headline =
+        (widget.about != null
+                ? t.aiComposer.aboutHeadline
+                : (widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline))
+            .toUpperCase();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -578,7 +662,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                 const SizedBox(width: 12),
                 Flexible(
                   child: Text(
-                    t.aiComposer.eyebrow,
+                    widget.about != null ? t.aiComposer.aboutEyebrow : t.aiComposer.eyebrow,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 18, letterSpacing: 4, color: _amber),
@@ -613,7 +697,10 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                   ),
                 ),
         ),
-        if (widget.followUpOf != null && !tiny) ...[
+        if (widget.about case final about?) ...[
+          SizedBox(height: tiny ? 6 : 12),
+          _rise(0.2, 0.7, _AboutChip(title: about, large: isTv)),
+        ] else if (widget.followUpOf != null && !tiny) ...[
           const SizedBox(height: 8),
           _rise(
             0.2,
@@ -739,6 +826,144 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
           ),
         ),
       ],
+    );
+  }
+
+  /// The written answer, as a card of programme notes, with Done and Ask
+  /// another.
+  Widget _answerView(bool isTv, bool wide) {
+    final theme = Theme.of(context);
+    final pick = _pick;
+    return SafeArea(
+      key: const ValueKey('answer'),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: wide ? 820 : 640),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(wide ? 48 : 20, 56, wide ? 48 : 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    SizedBox(
+                      width: isTv ? 64 : 48,
+                      height: isTv ? 56 : 42,
+                      child: CustomPaint(painter: _ClapperPainter(1, _amber)),
+                    ),
+                    const SizedBox(width: 14),
+                    Flexible(
+                      child: Text(
+                        t.aiComposer.programNotes.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: _display,
+                          fontSize: isTv ? 40 : 30,
+                          letterSpacing: 3,
+                          color: _amber,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (widget.about case final about?) ...[
+                  const SizedBox(height: 14),
+                  _AboutChip(title: about, large: isTv),
+                ],
+                const SizedBox(height: 16),
+                Text(
+                  '“${_controller.text.trim()}”',
+                  style: theme.textTheme.titleMedium?.copyWith(color: Colors.white60, fontStyle: FontStyle.italic),
+                ),
+                const SizedBox(height: 14),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xF2141210),
+                    borderRadius: BorderRadius.circular(4),
+                    border: const Border(left: BorderSide(color: _amber, width: 3)),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.all(isTv ? 28 : 20),
+                    child: Text(
+                      _answer ?? '',
+                      style: TextStyle(color: Colors.white, fontSize: isTv ? 24 : (wide ? 20 : 17), height: 1.45),
+                    ),
+                  ),
+                ),
+                if (pick != null) ...[
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Icon(Symbols.movie_rounded, color: _amber, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          t.aiComposer.picksInTab,
+                          style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white60),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 22),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    FocusableButton(
+                      focusNode: _doneFocus,
+                      autofocus: true,
+                      onPressed: _closeAnswer,
+                      onNavigateRight: _askAnotherFocus.requestFocus,
+                      child: Pressable(
+                        longPress: false,
+                        borderRadius: BorderRadius.circular(6),
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _amber,
+                            foregroundColor: Colors.black,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            padding: EdgeInsets.symmetric(horizontal: isTv ? 32 : 26, vertical: isTv ? 16 : 12),
+                          ),
+                          onPressed: _closeAnswer,
+                          child: Text(
+                            t.aiComposer.done.toUpperCase(),
+                            style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 20, letterSpacing: 2.5),
+                          ),
+                        ),
+                      ),
+                    ),
+                    FocusableButton(
+                      focusNode: _askAnotherFocus,
+                      onPressed: _askAnother,
+                      onNavigateLeft: _doneFocus.requestFocus,
+                      child: Pressable(
+                        longPress: false,
+                        borderRadius: BorderRadius.circular(6),
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white38, width: 1.5),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            padding: EdgeInsets.symmetric(horizontal: isTv ? 28 : 22, vertical: isTv ? 16 : 12),
+                          ),
+                          onPressed: _askAnother,
+                          child: Text(
+                            t.aiComposer.askAnother.toUpperCase(),
+                            style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 20, letterSpacing: 2.5),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -929,6 +1154,47 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
             Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38)),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// "About: <title>" — what an Ask about this question is about.
+class _AboutChip extends StatelessWidget {
+  const _AboutChip({required this.title, required this.large});
+  final String title;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(40),
+        border: Border.all(color: _amber, width: 1.5),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: large ? 18 : 14, vertical: large ? 8 : 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Symbols.local_movies_rounded, color: _amber, size: large ? 22 : 18, fill: 1),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                t.aiComposer.aboutChip(title: title).toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: _display,
+                  fontSize: large ? 24 : 19,
+                  letterSpacing: 1.5,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -311,6 +311,20 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
           )
         : null;
 
+    // Fork: ask the AI about this title (cinema composer over the page).
+    final askAboutAction = !widget.isOffline && AiAskAbout.supports(metadata)
+        ? FocusableAction(
+            debugLabel: 'detail_ask_about',
+            onPressed: () => unawaited(AiAskAbout.open(context, metadata)),
+            builder: (context, state) => iconActionButton(
+              state,
+              onPressed: () => unawaited(AiAskAbout.open(context, metadata)),
+              icon: const AppIcon(Symbols.question_answer_rounded, fill: 1),
+              tooltip: t.aiComposer.askAbout,
+            ),
+          )
+        : null;
+
     final downloadAction = !widget.isOffline && !PlatformDetector.isAppleTV()
         ? FocusableAction(
             debugLabel: 'detail_download',
@@ -382,6 +396,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
       ?trailerAction,
       ?shuffleAction,
       ?randomEpisodeAction,
+      ?askAboutAction,
       ?downloadAction,
       watchedAction,
       ?watchlistAction,

@@ -107,6 +107,7 @@ import '../services/playback_track_preview.dart';
 import '../utils/error_message_utils.dart';
 import '../theme/fork_motion.dart';
 import '../widgets/pressable.dart';
+import 'ai_ask_about.dart';
 
 part 'media_detail/action_buttons.dart';
 part 'media_detail/playback_tracks_status.dart';

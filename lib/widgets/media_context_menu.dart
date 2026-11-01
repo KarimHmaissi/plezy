@@ -65,6 +65,7 @@ import '../widgets/rating_bottom_sheet.dart';
 import '../i18n/strings.g.dart';
 import '../utils/error_message_utils.dart';
 import '../services/ai/ai_more_like_this.dart';
+import '../screens/ai_ask_about.dart';
 
 class _MenuAction {
   final String value;
@@ -460,6 +461,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       ...ItemMenuEntries.of(this.context, menu.mediaItem),
       ...RowMenuEntries.of(this.context),
       ?moreLikeThis,
+      if (menu.mediaItem case final item?) ?AiAskAbout.entryForItem(this.context, item),
       if (collection != null && collection.backend == MediaBackend.plex && collection.serverId != null)
         ...homeRowMenuEntries(this.context, (
           id: HomeRowIds.plex(collection.title ?? collection.id),

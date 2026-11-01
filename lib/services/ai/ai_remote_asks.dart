@@ -27,6 +27,8 @@ abstract final class AiRemoteAsks {
   }) async {
     final rid = data['rid'] as String? ?? '';
     final request = (data['request'] as String?)?.trim() ?? '';
+    // Ask about this: a written answer is the point; picks are optional.
+    final about = data['about'] == true;
     void reply(String status, [Map<String, dynamic> more = const {}]) =>
         remote.sendAiAnswer({'rid': rid, 'status': status, ...more});
 
@@ -45,12 +47,17 @@ abstract final class AiRemoteAsks {
         useTitle: true,
       );
       final entry = result.entry;
+      final answer = result.answer;
+      final text = (answer.intro?.trim().isNotEmpty ?? false) ? answer.intro : answer.text;
       if (entry == null) {
-        return reply('error', {'message': result.answer.error ?? result.answer.intro ?? 'No picks'});
+        if (about && answer.error == null && (text?.trim().isNotEmpty ?? false)) {
+          return reply('text', {'text': text});
+        }
+        return reply('error', {'message': answer.error ?? answer.intro ?? 'No picks'});
       }
       await AiHistory.add(entry);
       landed.value = entry.id;
-      reply('done', entry.toJson());
+      reply('done', {...entry.toJson(), if (about) 'text': text});
     } catch (e) {
       appLogger.w('AI: request from the phone failed', error: e);
       reply('error', {'message': '$e'});

@@ -92,6 +92,23 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Ask about this title (branch `feature/ai-helper`, backlog #43)
+- **Where:** an "Ask about this" button on film and show pages, and in
+  every film/show/episode long-press menu (episodes and seasons ask about
+  their show), on phone, TV and Mac.
+- **What:** the cinema composer opens over the page with an "About: …"
+  chip and its own quick questions: Is it worth watching?, Anything like
+  this?, Who's in it?, Is it scary or kid-friendly?, and Where should I
+  start? for shows. Or type anything.
+- **Answer:** after the film strip, a "Programme notes" card with a short,
+  spoiler-free answer (the helper looks the title up in the library index
+  and its Plex details), with Done and Ask another. Recommendation
+  questions also save a row of picks to the AI tab and freeze on the top
+  one first; other questions save nothing.
+- **Phone:** the question runs on the connected TV app (its key and
+  index), which answers on the AI channel with the text (`text`) or the
+  saved row (`done`).
+
 ### Highest-bitrate copy by default (branch `feature/ai-helper`)
 - **Opening a title** that's in the library from Explore (and its related
   rows) goes straight to its library page on the copy with the highest
