@@ -44,6 +44,12 @@ class HostMediaNotification {
   StreamSubscription<MediaControlEvent>? _events;
   String? _shownKey;
   String? _shownState;
+  Timer? _hideTimer;
+
+  /// How long a dropped connection keeps the notification: the phone's link
+  /// to the TV blips when its screen goes off, and a paused film shouldn't
+  /// lose its Play button over it.
+  static const _disconnectGrace = Duration(seconds: 45);
 
   void start(CompanionRemoteProvider remote, {required MediaServerClient? Function(String? serverId) clientFor}) {
     if (!Platform.isAndroid || identical(_remote, remote)) return;
@@ -68,20 +74,35 @@ class HostMediaNotification {
 
   void _sync() {
     if (!_wanted) {
+      final remote = _remote;
+      final dropped = remote != null && remote.isRemote && !remote.isConnected && !LocalMediaSession.active.value;
+      if (dropped && _controls != null) {
+        _hideTimer ??= Timer(_disconnectGrace, () {
+          _hideTimer = null;
+          if (!_wanted) unawaited(_hide());
+        });
+        return;
+      }
+      _hideTimer?.cancel();
+      _hideTimer = null;
       unawaited(_hide());
       return;
     }
+    _hideTimer?.cancel();
+    _hideTimer = null;
     final now = HostNowPlaying(_remote!.nowPlaying.value!);
     unawaited(_show(now));
   }
 
   Future<void> _show(HostNowPlaying now) async {
     var controls = _controls;
+    var fresh = false;
     if (controls == null) {
       controls = _controls = MediaControlsManager();
       _events = controls.controlEvents.listen(_onEvent);
       unawaited(NotificationPermission.ensure());
       await controls.setBackgroundMode(true);
+      fresh = true;
     }
     final key = '${now.serverId}|${now.title}|${now.subtitle}|${now.thumb ?? now.art ?? now.poster}';
     if (key != _shownKey) {
@@ -118,8 +139,14 @@ class HostMediaNotification {
       canSkip: true,
       skipInterval: const Duration(seconds: 10),
     );
+    // The media service only starts on a playing state and then keeps its
+    // notification through a pause; one first shown paused (connecting, or
+    // reconnecting, while the TV is paused) starts it with a playing beat.
+    if (fresh && !now.playing) {
+      await controls.updatePlaybackState(isPlaying: true, position: now.position, speed: 0, force: true);
+    }
     // A play/pause flip goes out at once; position ticks ride the throttle.
-    final stateChanged = now.state != _shownState;
+    final stateChanged = fresh || now.state != _shownState;
     _shownState = now.state;
     await controls.updatePlaybackState(
       isPlaying: now.playing,
