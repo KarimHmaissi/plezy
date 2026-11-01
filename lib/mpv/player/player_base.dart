@@ -1421,6 +1421,11 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   /// own channel layout and the receiver places each channel itself.
   Future<void> setDolbyEncode(bool enabled) async {
     _dolbyEncodeAf = enabled ? '@dolby:lavcac3enc=tospdif=yes:bitrate=640:minch=2' : '';
+    // The encoder needs decoded PCM. The native core outlives the Dart
+    // player (hot restart, settings changes), so clear a bitstream request
+    // directly rather than through the passthrough state, which may not
+    // know it is set.
+    if (enabled) await setProperty('audio-spdif', '');
     await _applyAf();
   }
 
