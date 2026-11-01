@@ -92,6 +92,21 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Previously on (branch `feature/ai-helper`, backlog #42)
+- **Where:** a "Previously on" button on a show's page (for the episode
+  Play would start) and on an episode's page, and in the long-press menu
+  of any episode (Continue Watching, Pick back up, episode lists). Hidden
+  at S1 E1, where there's nothing to recap. Optional, never automatic.
+- **What:** the cinema composer opens with "<show> · S2 E5" and starts the
+  recap straight away; the answer card is headed "Previously on". Quick
+  follow-ups: Shorter, Just the last episode, Who's who?, or type one.
+- **Spoiler line:** every request, follow-ups included, states that only
+  up to the episode before is known and forbids anything from the next
+  episode on (events, deaths, reveals, characters, hints), and to leave
+  out anything it's unsure about. Tested in
+  `test/screens/ai_previously_on_test.dart`.
+- **Phone:** runs on the connected TV app like Ask about this.
+
 ### Ask about this title (branch `feature/ai-helper`, backlog #43)
 - **Where:** an "Ask about this" button on film and show pages, and in
   every film/show/episode long-press menu (episodes and seasons ask about

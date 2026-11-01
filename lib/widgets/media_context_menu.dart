@@ -462,6 +462,7 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       ...RowMenuEntries.of(this.context),
       ?moreLikeThis,
       if (menu.mediaItem case final item?) ?AiAskAbout.entryForItem(this.context, item),
+      if (menu.mediaItem case final item?) ?AiPreviouslyOn.entryForItem(this.context, item),
       if (collection != null && collection.backend == MediaBackend.plex && collection.serverId != null)
         ...homeRowMenuEntries(this.context, (
           id: HomeRowIds.plex(collection.title ?? collection.id),

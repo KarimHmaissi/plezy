@@ -325,6 +325,22 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
           )
         : null;
 
+    // Fork: "Previously on" before the episode Play would start (a show's
+    // next episode, or this episode), when there's something to recap.
+    final recapEpisode = metadata.isShow ? _showPlayEpisode() : (metadata.isEpisode ? metadata : null);
+    final previouslyOnAction = !widget.isOffline && AiPreviouslyOn.supports(recapEpisode)
+        ? FocusableAction(
+            debugLabel: 'detail_previously_on',
+            onPressed: () => unawaited(AiPreviouslyOn.open(context, recapEpisode!)),
+            builder: (context, state) => iconActionButton(
+              state,
+              onPressed: () => unawaited(AiPreviouslyOn.open(context, recapEpisode!)),
+              icon: const AppIcon(Symbols.history_edu_rounded, fill: 1),
+              tooltip: t.aiComposer.previouslyOn,
+            ),
+          )
+        : null;
+
     final downloadAction = !widget.isOffline && !PlatformDetector.isAppleTV()
         ? FocusableAction(
             debugLabel: 'detail_download',
@@ -396,6 +412,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
       ?trailerAction,
       ?shuffleAction,
       ?randomEpisodeAction,
+      ?previouslyOnAction,
       ?askAboutAction,
       ?downloadAction,
       watchedAction,

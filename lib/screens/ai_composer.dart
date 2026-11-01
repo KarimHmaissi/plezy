@@ -55,7 +55,15 @@ class AiComposer extends StatefulWidget {
     this.posters = const [],
     this.about,
     this.chips,
+    this.autoRequest,
+    this.notesTitle,
   });
+
+  /// Sent as soon as the composer opens (Previously on), skipping the input.
+  final String? autoRequest;
+
+  /// The answer card's heading in place of "Programme notes".
+  final String? notesTitle;
 
   /// The title being asked about (Ask about this), shown as a chip.
   final String? about;
@@ -83,6 +91,8 @@ class AiComposer extends StatefulWidget {
     List<MediaItem> posters = const [],
     String? about,
     List<AiComposerChip>? chips,
+    String? autoRequest,
+    String? notesTitle,
 
     /// Where the iris opens from (the Ask button), in global coordinates.
     Rect? origin,
@@ -93,8 +103,16 @@ class AiComposer extends StatefulWidget {
         opaque: false,
         transitionDuration: const Duration(milliseconds: 260),
         reverseTransitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (_, _, _) =>
-            AiComposer(run: run, followUpOf: followUpOf, recent: recent, posters: posters, about: about, chips: chips),
+        pageBuilder: (_, _, _) => AiComposer(
+          run: run,
+          followUpOf: followUpOf,
+          recent: recent,
+          posters: posters,
+          about: about,
+          chips: chips,
+          autoRequest: autoRequest,
+          notesTitle: notesTitle,
+        ),
         transitionsBuilder: (context, animation, _, child) {
           if (ForkMotion.reduceMotion(context)) return FadeTransition(opacity: animation, child: child);
           return _IrisTransition(animation: animation, origin: origin?.center, child: child);
@@ -200,6 +218,11 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     super.didChangeDependencies();
     final reduce = ForkMotion.reduceMotion(context);
     if (_started && reduce == _reduceMotion) return;
+    if (!_started && widget.autoRequest != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_send(widget.autoRequest));
+      });
+    }
     _started = true;
     _reduceMotion = reduce;
     if (reduce) {
@@ -742,7 +765,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                       child: FocusableTextField(
                         controller: _controller,
                         focusNode: _fieldFocus,
-                        autofocus: true,
+                        autofocus: widget.autoRequest == null,
                         minLines: 1,
                         maxLines: 4,
                         textInputAction: TextInputAction.send,
@@ -855,7 +878,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                     const SizedBox(width: 14),
                     Flexible(
                       child: Text(
-                        t.aiComposer.programNotes.toUpperCase(),
+                        (widget.notesTitle ?? t.aiComposer.programNotes).toUpperCase(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

@@ -6942,6 +6942,33 @@ class Translations$aiComposer$en {
 	/// en: 'Ask about this'
 	String get askAbout => 'Ask about this';
 
+	/// en: 'Previously on'
+	String get previouslyOn => 'Previously on';
+
+	/// en: 'S${season} E${episode}'
+	String episodeCode({required Object season, required Object episode}) => 'S${season} E${episode}';
+
+	/// en: 'Catch me up before ${episode}'
+	String recapRequest({required Object episode}) => 'Catch me up before ${episode}';
+
+	/// en: 'Shorter'
+	String get recapShorter => 'Shorter';
+
+	/// en: 'Give me the recap again in three sentences.'
+	String get recapShorterRequest => 'Give me the recap again in three sentences.';
+
+	/// en: 'Just the last episode'
+	String get recapLast => 'Just the last episode';
+
+	/// en: 'Recap only the episode just before this one.'
+	String get recapLastRequest => 'Recap only the episode just before this one.';
+
+	/// en: 'Who's who?'
+	String get recapWho => 'Who\'s who?';
+
+	/// en: 'Remind me who the main characters are and where each one stands.'
+	String get recapWhoRequest => 'Remind me who the main characters are and where each one stands.';
+
 	/// en: 'ASK ABOUT IT'
 	String get aboutEyebrow => 'ASK ABOUT IT';
 
@@ -11569,6 +11596,15 @@ extension on Translations {
 			'aiComposer.wrap' => 'That\'s a wrap',
 			'aiComposer.continueBrowsing' => 'Continue browsing',
 			'aiComposer.askAbout' => 'Ask about this',
+			'aiComposer.previouslyOn' => 'Previously on',
+			'aiComposer.episodeCode' => ({required Object season, required Object episode}) => 'S${season} E${episode}',
+			'aiComposer.recapRequest' => ({required Object episode}) => 'Catch me up before ${episode}',
+			'aiComposer.recapShorter' => 'Shorter',
+			'aiComposer.recapShorterRequest' => 'Give me the recap again in three sentences.',
+			'aiComposer.recapLast' => 'Just the last episode',
+			'aiComposer.recapLastRequest' => 'Recap only the episode just before this one.',
+			'aiComposer.recapWho' => 'Who\'s who?',
+			'aiComposer.recapWhoRequest' => 'Remind me who the main characters are and where each one stands.',
 			'aiComposer.aboutEyebrow' => 'ASK ABOUT IT',
 			'aiComposer.aboutChip' => ({required Object title}) => 'About: ${title}',
 			'aiComposer.aboutHeadline' => 'What do you want to know?',
