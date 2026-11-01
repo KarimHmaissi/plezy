@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
+import '../theme/fork_motion.dart';
 import '../theme/fork_spacing.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:plezy/widgets/app_icon.dart';
@@ -27,6 +29,7 @@ import '../utils/media_navigation_helper.dart';
 import 'card_inflation_budget.dart';
 import 'focus_builders.dart';
 import 'media_card.dart';
+import 'media_context_menu.dart' show ItemMenuEntries, RowMenuEntries;
 import 'media_grid_delegate.dart';
 import 'skeleton_media_card.dart';
 import 'sliver_child_memo.dart';
@@ -199,6 +202,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     if (widget.hub.id == oldWidget.hub.id) {
       _followFocusedItem(oldWidget.hub.items);
     }
+    _syncSeeAll();
 
     if (widget.hub.items.length != oldWidget.hub.items.length ||
         widget.hub.more != oldWidget.hub.more ||
@@ -238,6 +242,8 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
 
   @override
   void dispose() {
+    _liveHub?.dispose();
+    _liveFooter?.dispose();
     _selectLongPress.dispose();
     _hubFocusNode.removeListener(_onFocusChange);
     _hubFocusNode.dispose();
@@ -470,17 +476,60 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     );
   }
 
+  /// Fork: on Android phones every row with items opens its See all page
+  /// from the header, not only rows the server says have more (cast rows
+  /// excepted). Elsewhere unchanged.
+  bool get _canSeeAll =>
+      widget.hub.more ||
+      (defaultTargetPlatform == TargetPlatform.android &&
+          !PlatformDetector.isTV() &&
+          widget.hub.items.isNotEmpty &&
+          !TvBrowseRailLayout.isPersonHub(widget.hub));
+
+  /// Fork: what an open See all page follows (created on first open).
+  ValueNotifier<MediaHub>? _liveHub;
+  ValueNotifier<HubTrailingCard?>? _liveFooter;
+
+  /// Push this row's latest items and trailing card to an open See all
+  /// page, after the frame (didUpdateWidget runs mid-build).
+  void _syncSeeAll() {
+    if (_liveHub == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _liveHub?.value = widget.hub;
+      _liveFooter?.value = widget.trailingCard;
+    });
+  }
+
+  void _openSeeAll(BuildContext context) {
+    ForkMotion.selection();
+    _navigateToHubDetail(context);
+  }
+
   void _navigateToHubDetail(BuildContext context) {
+    // The page sits on its own route, so it takes the row's menu entries
+    // (Add to Home, Play on TV…) with it.
+    final rowEntries = RowMenuEntries.of(context);
+    final itemEntries = context.getInheritedWidgetOfExactType<ItemMenuEntries>();
+    final liveHub = _liveHub ??= ValueNotifier(widget.hub);
+    final liveFooter = _liveFooter ??= ValueNotifier(widget.trailingCard);
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => HubDetailScreen(
-          hub: widget.hub,
-          loadItems: widget.loadMoreItems,
-          isInContinueWatching: widget.isInContinueWatching,
-          usesContinueWatchingAction: widget.usesContinueWatchingAction,
-          onRemoveFromContinueWatching: widget.onRemoveFromContinueWatching,
-        ),
+        builder: (context) {
+          Widget page = HubDetailScreen(
+            hub: widget.hub,
+            loadItems: widget.loadMoreItems,
+            isInContinueWatching: widget.isInContinueWatching,
+            usesContinueWatchingAction: widget.usesContinueWatchingAction,
+            onRemoveFromContinueWatching: widget.onRemoveFromContinueWatching,
+            liveHub: liveHub,
+            footer: liveFooter,
+            onItemTap: widget.onItemTap,
+          );
+          if (itemEntries != null) page = ItemMenuEntries(build: itemEntries.build, child: page);
+          return RowMenuEntries(entries: rowEntries, child: page);
+        },
       ),
     );
   }
@@ -539,8 +588,8 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                 : EdgeInsets.fromLTRB(leadingPadding - 4, isTv ? 6 : 2, 8, isTv ? 8 : 2),
             child: ExcludeFocus(
               child: InkWell(
-                mouseCursor: widget.hub.more ? SystemMouseCursors.click : MouseCursor.defer,
-                onTap: widget.hub.more ? () => _navigateToHubDetail(context) : null,
+                mouseCursor: _canSeeAll ? SystemMouseCursors.click : MouseCursor.defer,
+                onTap: _canSeeAll ? () => _openSeeAll(context) : null,
                 borderRadius: BorderRadius.circular(tokens(context).radiusSm),
                 child: Padding(
                   padding: widget.inset
@@ -582,7 +631,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                           ),
                         ),
                       ],
-                      if (widget.hub.more && !isKeyboardMode) ...[
+                      if (_canSeeAll && !isKeyboardMode) ...[
                         const SizedBox(width: 4),
                         AppIcon(Symbols.chevron_right_rounded, fill: 1, size: isTv ? 26 : 20),
                       ],

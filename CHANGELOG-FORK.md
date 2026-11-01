@@ -92,6 +92,19 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Phone: tap a row's title for See all (branch `feature/ai-helper`)
+- **Android phones:** tapping the title of any row with items (Home,
+  Discover, AI tab, Watchlist, Comfort, Explore, Trakt lists) opens the
+  full-screen See all grid of that row, with the title and a back button.
+  Before, only rows the server pages had a tappable title; now every row
+  shows the › chevron. Cast rows excepted. A selection tick on tap.
+- **AI rows:** the See all page keeps the row's Load more as a button
+  under the grid, and follows the row as new picks land (also in mirror
+  mode). Picks open like they do in the row (the phone's pick rule), and
+  the row's long-press entries (Add to Home, Play on TV…) carry over.
+- `HubDetailScreen` gains `liveHub`, `footer` and `onItemTap`. TV and Mac
+  unchanged.
+
 ### Previously on (branch `feature/ai-helper`, backlog #42)
 - **Where:** a "Previously on" button on a show's page (for the episode
   Play would start) and on an episode's page, and in the long-press menu

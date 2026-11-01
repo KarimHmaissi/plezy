@@ -15,6 +15,9 @@ import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_server_client.dart';
 import 'package:plezy/media/media_sort.dart';
 import 'package:plezy/media/server_capabilities.dart';
+import 'package:plezy/focus/locked_hub_controller.dart';
+import 'package:material_symbols_icons/symbols.dart';
+import 'package:plezy/widgets/hub_section.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/hub_detail_screen.dart';
 import 'package:plezy/services/multi_server_manager.dart';
@@ -40,6 +43,50 @@ void main() {
     resetSharedPreferencesForTest();
     SettingsService.resetForTesting();
     LocaleSettings.setLocaleSync(AppLocale.en);
+  });
+
+  testWidgets('a row header opens See all, which follows the row and shows its footer', (tester) async {
+    final items = List.generate(4, (index) => _item(index, backend: MediaBackend.plex));
+    final harness = await _createHarness(items, backend: MediaBackend.plex);
+    MediaItem? tapped;
+    var loadMoreTaps = 0;
+    Widget row(List<MediaItem> rowItems, {required bool finding}) => harness.wrap(
+      Scaffold(
+        body: ListView(
+          children: [
+            HubSection(
+              hub: MediaHub(id: 'aitab:1', title: 'Cosy picks', type: 'movie', items: rowItems, size: rowItems.length),
+              focusMemory: HubFocusMemory(),
+              icon: Symbols.auto_awesome_rounded,
+              onItemTap: (item) => tapped = item,
+              trailingCard: finding
+                  ? const HubTrailingCard(label: 'Finding more', spinner: true)
+                  : HubTrailingCard(label: 'Load more', onTap: () => loadMoreTaps++),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(row(items.take(2).toList(), finding: false));
+    await tester.tap(find.text('Cosy picks'));
+    await tester.pumpAndSettle();
+
+    final page = find.byType(HubDetailScreen);
+    expect(page, findsOneWidget);
+    expect(find.descendant(of: page, matching: find.byType(FocusableMediaCard)), findsNWidgets(2));
+    await tester.tap(find.descendant(of: page, matching: find.text('Load more')));
+    expect(loadMoreTaps, 1);
+
+    // The row grows underneath (Load more landed): the page follows it.
+    await tester.pumpWidget(row(items, finding: true));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.descendant(of: page, matching: find.byType(FocusableMediaCard)), findsNWidgets(4));
+    expect(find.descendant(of: page, matching: find.text('Finding more')), findsOneWidget);
+
+    await tester.tap(find.descendant(of: page, matching: find.text('Item 3')));
+    expect(tapped?.id, 'item_3');
   });
 
   testWidgets('Jellyfin hub advances by raw page size after screen filtering', (tester) async {
