@@ -92,6 +92,22 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### AI composer, cinema cut (branch `feature/ai-helper`)
+- **Iris open:** Ask opens the composer through a seven-bladed camera iris
+  (260 ms, light haptic); the poster wall fades in a beat later, then the
+  headline, input and quick starts rise in turn. Closing shuts the iris.
+- **Type:** Bebas Neue (OFL, `assets/fonts/bebas_neue`) for a big tight
+  headline ("What are we watching?"), amber the only accent; the input is
+  big type on an amber rule with a play-key send; quick starts are ticket
+  stubs. The aurora glow and orb are gone.
+- **Thinking:** a 35mm strip of your own posters (sprocket holes, soft at
+  speed, no live blur) races through a projector gate, with slate lines
+  Take 1 / Take 2 / Take 3 as time passes.
+- **Landing:** when the answer arrives the strip slows from its running
+  speed and stops with the answer's top pick sharp in the gate, a
+  freeze-frame flash and a haptic, its title underneath, then closes onto
+  the new row. Reduced motion skips to fades.
+
 ### Touch polish: press feedback and haptics (branch `feature/ai-helper`)
 - **Cards press in:** posters and episodes sink slightly and dim on touch,
   sink further with a haptic tick when a long press lands (the context menu),

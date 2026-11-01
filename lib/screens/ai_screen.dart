@@ -293,6 +293,12 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
           if (r.request != AiAgent.tonightRequest) r.request,
       }.take(5).toList(),
       posters: [for (final r in _rows.take(6)) ...r.items.take(8)],
+      landing: (text) {
+        for (final r in _rows) {
+          if (r.request == text) return r.items.isEmpty ? null : r.items.first;
+        }
+        return null;
+      },
       run: (text) {
         if (remote != null) return RemoteAiSession.instance.askAndWait(remote, text);
         return _runInBackground(_PendingAsk(text, previous: previous));

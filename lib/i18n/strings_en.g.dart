@@ -6851,11 +6851,11 @@ class Translations$aiComposer$en {
 	/// en: 'ASK YOUR LIBRARY'
 	String get eyebrow => 'ASK YOUR LIBRARY';
 
-	/// en: 'What do you feel like watching?'
-	String get headline => 'What do you feel like watching?';
+	/// en: 'What are we watching?'
+	String get headline => 'What are we watching?';
 
-	/// en: 'Where shall we take it next?'
-	String get followUpHeadline => 'Where shall we take it next?';
+	/// en: 'Where next?'
+	String get followUpHeadline => 'Where next?';
 
 	/// en: 'Action anime like Attack on Titan'
 	String get example1 => 'Action anime like Attack on Titan';
@@ -6905,17 +6905,17 @@ class Translations$aiComposer$en {
 	/// en: 'Surprise me with a random great film'
 	String get randomRequest => 'Surprise me with a random great film';
 
-	/// en: 'Reading your library…'
-	String get status1 => 'Reading your library…';
+	/// en: 'Take 1 · Reading your library'
+	String get take1 => 'Take 1 · Reading your library';
 
-	/// en: 'Thinking about your taste…'
-	String get status2 => 'Thinking about your taste…';
+	/// en: 'Take 2 · Shortlisting'
+	String get take2 => 'Take 2 · Shortlisting';
 
-	/// en: 'Picking the best matches…'
-	String get status3 => 'Picking the best matches…';
+	/// en: 'Take 3 · Final cut'
+	String get take3 => 'Take 3 · Final cut';
 
-	/// en: 'Almost there…'
-	String get status4 => 'Almost there…';
+	/// en: 'That's a wrap'
+	String get wrap => 'That\'s a wrap';
 
 	/// en: 'You can close this: it keeps going and lands in the AI tab.'
 	String get keepsRunning => 'You can close this: it keeps going and lands in the AI tab.';
@@ -11449,8 +11449,8 @@ extension on Translations {
 			'remoteAi.error' => ({required Object message}) => 'The TV couldn\'t answer: ${message}',
 			'remoteAi.empty' => 'Ask for something and the picks show up here.',
 			'aiComposer.eyebrow' => 'ASK YOUR LIBRARY',
-			'aiComposer.headline' => 'What do you feel like watching?',
-			'aiComposer.followUpHeadline' => 'Where shall we take it next?',
+			'aiComposer.headline' => 'What are we watching?',
+			'aiComposer.followUpHeadline' => 'Where next?',
 			'aiComposer.example1' => 'Action anime like Attack on Titan',
 			'aiComposer.example2' => 'Something cosy for a Sunday afternoon',
 			'aiComposer.example3' => '80s action, easy to watch',
@@ -11467,10 +11467,10 @@ extension on Translations {
 			'aiComposer.feelGoodRequest' => 'Feel-good films to lift the mood',
 			'aiComposer.random' => 'Random film',
 			'aiComposer.randomRequest' => 'Surprise me with a random great film',
-			'aiComposer.status1' => 'Reading your library…',
-			'aiComposer.status2' => 'Thinking about your taste…',
-			'aiComposer.status3' => 'Picking the best matches…',
-			'aiComposer.status4' => 'Almost there…',
+			'aiComposer.take1' => 'Take 1 · Reading your library',
+			'aiComposer.take2' => 'Take 2 · Shortlisting',
+			'aiComposer.take3' => 'Take 3 · Final cut',
+			'aiComposer.wrap' => 'That\'s a wrap',
 			'aiComposer.keepsRunning' => 'You can close this: it keeps going and lands in the AI tab.',
 			_ => null,
 		};

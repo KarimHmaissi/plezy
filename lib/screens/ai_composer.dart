@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../focus/focusable_button.dart';
@@ -10,21 +12,37 @@ import '../focus/focusable_text_field.dart';
 import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../media/media_item.dart';
+import '../theme/fork_motion.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../widgets/optimized_media_image.dart';
 import '../widgets/pressable.dart';
 
-/// Fork: the full-screen AI composer, the way into the AI feature. A slow
-/// mosaic of the user's own posters behind an accent glow, a large input
-/// with example asks typing themselves in, quick-start chips, and a
-/// "thinking" orb while the request runs. Closing never cancels a request:
-/// it carries on in the background and lands as a row as before.
-class AiComposer extends StatefulWidget {
-  const AiComposer({super.key, required this.run, this.followUpOf, this.recent = const [], this.posters = const []});
+/// Projector-lamp amber: the composer's one accent.
+const _amber = Color(0xFFE5A00D);
+const _display = 'Bebas Neue';
 
-  /// Runs a request; the orb shows until it completes.
+/// Fork: the full-screen AI composer, the way into the AI feature, themed
+/// as a cinema. It opens with a camera iris, asks in a big condensed
+/// headline over a soft wall of the user's posters, and while a request
+/// runs a strip of those posters races through a projector gate, then
+/// slows and stops with the top pick framed. Closing never cancels a
+/// request: it carries on in the background and lands as a row as before.
+class AiComposer extends StatefulWidget {
+  const AiComposer({
+    super.key,
+    required this.run,
+    this.landing,
+    this.followUpOf,
+    this.recent = const [],
+    this.posters = const [],
+  });
+
+  /// Runs a request; the film strip runs until it completes.
   final Future<void> Function(String request) run;
+
+  /// After [run], the answer's top pick to freeze on, if there is one.
+  final MediaItem? Function(String request)? landing;
 
   /// The request being followed up, if any.
   final String? followUpOf;
@@ -32,28 +50,28 @@ class AiComposer extends StatefulWidget {
   /// The user's last asks, newest first.
   final List<String> recent;
 
-  /// Library items for the backdrop mosaic.
+  /// Library items for the backdrop and the film strip.
   final List<MediaItem> posters;
 
   static Future<void> open(
     BuildContext context, {
     required Future<void> Function(String request) run,
+    MediaItem? Function(String request)? landing,
     String? followUpOf,
     List<String> recent = const [],
     List<MediaItem> posters = const [],
   }) {
+    ForkMotion.success();
     return Navigator.of(context).push(
       PageRouteBuilder<void>(
-        opaque: true,
-        transitionDuration: const Duration(milliseconds: 420),
-        reverseTransitionDuration: const Duration(milliseconds: 260),
-        pageBuilder: (_, _, _) => AiComposer(run: run, followUpOf: followUpOf, recent: recent, posters: posters),
+        opaque: false,
+        transitionDuration: const Duration(milliseconds: 260),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (_, _, _) =>
+            AiComposer(run: run, landing: landing, followUpOf: followUpOf, recent: recent, posters: posters),
         transitionsBuilder: (context, animation, _, child) {
-          final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
-          return FadeTransition(
-            opacity: curved,
-            child: ScaleTransition(scale: Tween(begin: 1.06, end: 1.0).animate(curved), child: child),
-          );
+          if (ForkMotion.reduceMotion(context)) return FadeTransition(opacity: animation, child: child);
+          return _IrisTransition(animation: animation, child: child);
         },
       ),
     );
@@ -76,17 +94,31 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   final _sendFocus = FocusNode(debugLabel: 'AiComposerSend');
   final List<FocusNode> _chipFocus = [];
 
+  /// Staggers the page in after the iris: backdrop, headline, input, chips.
+  late final AnimationController _intro = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
   late final AnimationController _drift = AnimationController(vsync: this, duration: const Duration(seconds: 90));
-  late final AnimationController _glow = AnimationController(vsync: this, duration: const Duration(seconds: 7));
-  late final AnimationController _orb = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600));
+
+  /// Freeze-frame flash when the strip lands.
+  late final AnimationController _flash = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+
+  // Film strip: its scroll position (px) advanced by a ticker.
+  late final Ticker _stripTicker = createTicker(_tickStrip);
+  final ValueNotifier<double> _stripPos = ValueNotifier(0);
+  Duration _lastTick = Duration.zero;
+  double _speed = 0;
+  _Landing? _land;
+  int? _pickSlot;
+  MediaItem? _pick;
 
   Timer? _typer;
   String _placeholder = '';
   int _exampleIndex = 0;
   bool _thinking = false;
-  int _statusIndex = 0;
-  Timer? _statusTimer;
+  bool _landed = false;
+  int _take = 0;
+  final List<Timer> _takeTimers = [];
   bool _reduceMotion = false;
+  bool _started = false;
 
   List<String> get _examples => [
     t.aiComposer.example1,
@@ -96,12 +128,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
     t.aiComposer.example5,
   ];
 
-  List<String> get _statuses => [
-    t.aiComposer.status1,
-    t.aiComposer.status2,
-    t.aiComposer.status3,
-    t.aiComposer.status4,
-  ];
+  List<String> get _takes => [t.aiComposer.take1, t.aiComposer.take2, t.aiComposer.take3];
 
   List<_QuickStart> get _quickStarts => [
     _QuickStart(Symbols.nights_stay_rounded, t.aiComposer.tonight, t.aiComposer.tonightRequest),
@@ -121,17 +148,19 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduce = MediaQuery.disableAnimationsOf(context);
-    if (reduce == _reduceMotion && (_drift.isAnimating || reduce)) return;
+    final reduce = ForkMotion.reduceMotion(context);
+    if (_started && reduce == _reduceMotion) return;
+    _started = true;
     _reduceMotion = reduce;
     if (reduce) {
+      _intro.value = 1;
       _drift.stop();
-      _glow.stop();
       _typer?.cancel();
       _placeholder = _examples.first;
     } else {
+      // A beat after the iris snaps open.
+      unawaited(Future.delayed(const Duration(milliseconds: 120), () => mounted ? _intro.forward() : null));
       _drift.repeat();
-      _glow.repeat(reverse: true);
       _startTyping();
     }
   }
@@ -139,10 +168,14 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   @override
   void dispose() {
     _typer?.cancel();
-    _statusTimer?.cancel();
+    for (final timer in _takeTimers) {
+      timer.cancel();
+    }
+    _stripTicker.dispose();
+    _stripPos.dispose();
+    _intro.dispose();
     _drift.dispose();
-    _glow.dispose();
-    _orb.dispose();
+    _flash.dispose();
     _controller.dispose();
     _fieldFocus.dispose();
     _sendFocus.dispose();
@@ -179,25 +212,106 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
     });
   }
 
+  // ---- Film strip motion ----
+
+  static const _maxSpeed = 2400.0; // px/s: a blur of frames
+  static const _accel = 6000.0;
+
+  double _pitch = 1;
+
+  void _tickStrip(Duration elapsed) {
+    final dt = (elapsed - _lastTick).inMicroseconds / 1e6;
+    _lastTick = elapsed;
+    final land = _land;
+    if (land != null) {
+      final p = ((elapsed - land.start).inMicroseconds / land.duration.inMicroseconds).clamp(0.0, 1.0);
+      _stripPos.value = lerpDouble(land.from, land.to, Curves.easeOutCubic.transform(p))!;
+      if (p >= 1) {
+        _stripTicker.stop();
+        _onLanded();
+      }
+      return;
+    }
+    _speed = math.min(_maxSpeed, _speed + _accel * dt);
+    _stripPos.value += _speed * dt;
+  }
+
+  /// Slows the strip so that a frame stops in the gate. The ease-out starts
+  /// at the strip's current speed, so there's no lurch.
+  void _startLanding() {
+    if (!_stripTicker.isActive || _speed <= 0) {
+      _onLanded();
+      return;
+    }
+    final pos = _stripPos.value;
+    // An ease-out cubic starts at 3x its average speed.
+    const minMs = 700.0;
+    final minDistance = _speed * minMs / 1000 / 3;
+    final slot = ((pos + minDistance) / _pitch).ceil();
+    final to = slot * _pitch;
+    final ms = (3 * (to - pos) / _speed * 1000).clamp(minMs, 1600.0);
+    setState(() {
+      _pickSlot = slot;
+      _land = _Landing(
+        from: pos,
+        to: to,
+        start: _lastTick,
+        duration: Duration(milliseconds: ms.round()),
+      );
+    });
+  }
+
+  void _onLanded() {
+    if (!mounted) return;
+    ForkMotion.success();
+    setState(() {
+      _landed = true;
+      _take = _takes.length; // "That's a wrap"
+    });
+    if (!_reduceMotion) unawaited(_flash.forward(from: 0));
+    unawaited(
+      Future.delayed(Duration(milliseconds: _pick != null ? 900 : 350), () {
+        if (mounted) unawaited(Navigator.of(context).maybePop());
+      }),
+    );
+  }
+
   Future<void> _send([String? text]) async {
     final request = (text ?? _controller.text).trim();
     if (request.isEmpty || _thinking) return;
-    unawaited(HapticFeedback.lightImpact());
+    ForkMotion.selection();
     FocusScope.of(context).unfocus();
     setState(() {
       _thinking = true;
       _controller.text = request;
     });
     _typer?.cancel();
-    if (!_reduceMotion) _orb.repeat();
-    _statusTimer = Timer.periodic(const Duration(milliseconds: 2200), (_) {
-      if (mounted) setState(() => _statusIndex++);
-    });
+    _takeTimers.addAll([
+      Timer(const Duration(milliseconds: 2400), () => mounted && !_landed ? setState(() => _take = 1) : null),
+      Timer(const Duration(milliseconds: 6000), () => mounted && !_landed ? setState(() => _take = 2) : null),
+    ]);
+    if (!_reduceMotion) {
+      _lastTick = Duration.zero;
+      unawaited(_stripTicker.start());
+    }
+    var ok = false;
     try {
       await widget.run(request);
+      ok = true;
     } finally {
-      _statusTimer?.cancel();
-      if (mounted) unawaited(Navigator.of(context).maybePop());
+      for (final timer in _takeTimers) {
+        timer.cancel();
+      }
+      if (mounted) {
+        final pick = ok ? widget.landing?.call(request) : null;
+        if (pick != null) setState(() => _pick = pick);
+        if (_reduceMotion || pick == null) {
+          _stripTicker.stop();
+          _onLanded();
+        } else {
+          _startLanding();
+        }
+      }
     }
   }
 
@@ -208,14 +322,27 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
     return _chipFocus[i];
   }
 
+  Animation<double> _stage(double begin, double end) => CurvedAnimation(
+    parent: _intro,
+    curve: Interval(begin, end, curve: Curves.easeOutCubic),
+  );
+
+  Widget _rise(double begin, double end, Widget child) {
+    final a = _stage(begin, end);
+    return FadeTransition(
+      opacity: a,
+      child: SlideTransition(
+        position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(a),
+        child: child,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTv = PlatformDetector.isTV();
     final size = MediaQuery.sizeOf(context);
     final wide = isTv || size.width >= 700;
-    final accent = Theme.of(context).colorScheme.primary;
-    final headlineSize = isTv ? 44.0 : (wide ? 36.0 : 28.0);
-    final inputSize = isTv ? 28.0 : (wide ? 24.0 : 20.0);
 
     return PopScope(
       child: Scaffold(
@@ -228,33 +355,29 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              _Mosaic(items: widget.posters, drift: _drift),
+              FadeTransition(
+                opacity: _stage(0, 0.6),
+                child: _Mosaic(items: widget.posters, drift: _drift),
+              ),
+              // House lights down: a heavy vignette, darkest at the edges.
               const DecoratedBox(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xCC05060A), Color(0xE605060A), Color(0xFA05060A)],
+                  gradient: RadialGradient(
+                    radius: 1.1,
+                    colors: [Color(0xB3000000), Color(0xEB000000), Color(0xFF000000)],
+                    stops: [0, 0.65, 1],
                   ),
                 ),
               ),
-              _Aurora(animation: _glow, color: accent),
-              SafeArea(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: wide ? 980 : 640),
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.symmetric(horizontal: wide ? 48 : 22, vertical: 24),
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 380),
-                        switchInCurve: Curves.easeOutCubic,
-                        child: _thinking
-                            ? _thinkingView(accent, headlineSize)
-                            : _composeView(accent, headlineSize, inputSize, isTv),
-                      ),
-                    ),
-                  ),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, a) => FadeTransition(
+                  opacity: a,
+                  child: ScaleTransition(scale: Tween(begin: 0.97, end: 1.0).animate(a), child: child),
                 ),
+                child: _thinking ? _thinkingView(size, isTv, wide) : _composeView(isTv, wide),
               ),
               SafeArea(
                 child: Align(
@@ -276,182 +399,293 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
     );
   }
 
-  Widget _composeView(Color accent, double headlineSize, double inputSize, bool isTv) {
+  Widget _composeView(bool isTv, bool wide) {
     final theme = Theme.of(context);
     final chips = _quickStarts;
     final hasText = _controller.text.trim().isNotEmpty;
-    return Column(
+    final headlineSize = isTv ? 104.0 : (wide ? 88.0 : 60.0);
+    final inputSize = isTv ? 30.0 : (wide ? 26.0 : 21.0);
+    return SafeArea(
       key: const ValueKey('compose'),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Icon(Symbols.auto_awesome_rounded, color: accent, size: headlineSize * 0.6, fill: 1),
-            const SizedBox(width: 10),
-            Text(
-              t.aiComposer.eyebrow,
-              style: theme.textTheme.labelLarge?.copyWith(color: accent, letterSpacing: 2, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Text(
-          widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline,
-          style: theme.textTheme.displaySmall?.copyWith(
-            fontSize: headlineSize,
-            fontWeight: FontWeight.w800,
-            height: 1.1,
-            color: Colors.white,
-            letterSpacing: -0.5,
-          ),
-        ),
-        if (widget.followUpOf != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            '“${widget.followUpOf}”',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleMedium?.copyWith(color: Colors.white60, fontStyle: FontStyle.italic),
-          ),
-        ],
-        const SizedBox(height: 28),
-        // The input: a glassy pill lit by the accent glow.
-        AnimatedBuilder(
-          animation: _glow,
-          builder: (context, child) => DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(28),
-              color: const Color(0x1FFFFFFF),
-              border: Border.all(color: accent.withValues(alpha: 0.35 + 0.25 * _glow.value), width: 1.5),
-              boxShadow: [
-                BoxShadow(color: accent.withValues(alpha: 0.18 + 0.14 * _glow.value), blurRadius: 40, spreadRadius: 2),
-              ],
-            ),
-            child: child,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 10, 10, 10),
-            child: Row(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: wide ? 980 : 640),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.symmetric(horizontal: wide ? 48 : 22, vertical: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: FocusableTextField(
-                    controller: _controller,
-                    focusNode: _fieldFocus,
-                    autofocus: true,
-                    minLines: 1,
-                    maxLines: 4,
-                    textInputAction: TextInputAction.send,
-                    textCapitalization: TextCapitalization.sentences,
-                    style: TextStyle(
-                      fontSize: inputSize,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                      height: 1.3,
-                    ),
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      filled: false,
-                      isCollapsed: true,
-                      hintText: _placeholder.isEmpty ? ' ' : '$_placeholder▍',
-                      hintStyle: TextStyle(fontSize: inputSize, color: Colors.white38, fontWeight: FontWeight.w400),
-                    ),
-                    onSubmitted: (_) => unawaited(_send()),
-                    onNavigateRight: _sendFocus.requestFocus,
-                    onNavigateDown: () => _chipNode(0).requestFocus(),
+                _rise(
+                  0.1,
+                  0.55,
+                  Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(color: _amber, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        t.aiComposer.eyebrow,
+                        style: TextStyle(
+                          fontFamily: _display,
+                          fontSize: isTv ? 24 : 18,
+                          letterSpacing: 4,
+                          color: _amber,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                FocusableButton(
-                  focusNode: _sendFocus,
-                  onPressed: hasText ? () => unawaited(_send()) : null,
-                  onNavigateLeft: _fieldFocus.requestFocus,
-                  onNavigateDown: () => _chipNode(0).requestFocus(),
-                  child: _SendButton(
-                    accent: accent,
-                    enabled: hasText,
-                    onTap: () => unawaited(_send()),
-                    size: inputSize * 2.4,
+                const SizedBox(height: 6),
+                _rise(
+                  0.15,
+                  0.65,
+                  Text(
+                    (widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline).toUpperCase(),
+                    style: TextStyle(
+                      fontFamily: _display,
+                      fontSize: headlineSize,
+                      height: 0.92,
+                      letterSpacing: 0.5,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                if (widget.followUpOf != null) ...[
+                  const SizedBox(height: 8),
+                  _rise(
+                    0.2,
+                    0.7,
+                    Text(
+                      '“${widget.followUpOf}”',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(color: Colors.white60, fontStyle: FontStyle.italic),
+                    ),
+                  ),
+                ],
+                SizedBox(height: wide ? 36 : 28),
+                // The input: big type on an amber rule, like a marquee line.
+                _rise(
+                  0.3,
+                  0.8,
+                  AnimatedBuilder(
+                    animation: _fieldFocus,
+                    builder: (context, child) => DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: _fieldFocus.hasFocus ? _amber : Colors.white24,
+                            width: _fieldFocus.hasFocus ? 2.5 : 1.5,
+                          ),
+                        ),
+                      ),
+                      child: child,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: TextSelectionTheme(
+                              data: const TextSelectionThemeData(cursorColor: _amber),
+                              child: FocusableTextField(
+                                controller: _controller,
+                                focusNode: _fieldFocus,
+                                autofocus: true,
+                                minLines: 1,
+                                maxLines: 4,
+                                textInputAction: TextInputAction.send,
+                                textCapitalization: TextCapitalization.sentences,
+                                style: TextStyle(
+                                  fontSize: inputSize,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                  height: 1.3,
+                                ),
+                                decoration: InputDecoration(
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  filled: false,
+                                  isCollapsed: true,
+                                  hintText: _placeholder.isEmpty ? ' ' : '$_placeholder▍',
+                                  hintStyle: TextStyle(
+                                    fontSize: inputSize,
+                                    color: Colors.white38,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                                onSubmitted: (_) => unawaited(_send()),
+                                onNavigateRight: _sendFocus.requestFocus,
+                                onNavigateDown: () => _chipNode(0).requestFocus(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          FocusableButton(
+                            focusNode: _sendFocus,
+                            onPressed: hasText ? () => unawaited(_send()) : null,
+                            onNavigateLeft: _fieldFocus.requestFocus,
+                            onNavigateDown: () => _chipNode(0).requestFocus(),
+                            child: Pressable(
+                              longPress: false,
+                              enabled: hasText,
+                              borderRadius: BorderRadius.circular(10),
+                              child: _RollButton(
+                                enabled: hasText,
+                                onTap: () => unawaited(_send()),
+                                size: inputSize * 2.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: wide ? 32 : 26),
+                _rise(
+                  0.4,
+                  0.9,
+                  Text(
+                    t.aiComposer.quickStart,
+                    style: TextStyle(
+                      fontFamily: _display,
+                      fontSize: isTv ? 22 : 17,
+                      letterSpacing: 3,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _rise(
+                  0.45,
+                  1,
+                  SizedBox(
+                    height: isTv ? 56 : 46,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      clipBehavior: Clip.none,
+                      itemCount: chips.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 10),
+                      itemBuilder: (context, i) {
+                        final chip = chips[i];
+                        return FocusableButton(
+                          focusNode: _chipNode(i),
+                          onPressed: () => unawaited(_send(chip.request)),
+                          onNavigateLeft: i > 0 ? () => _chipNode(i - 1).requestFocus() : null,
+                          onNavigateRight: i < chips.length - 1 ? () => _chipNode(i + 1).requestFocus() : null,
+                          onNavigateUp: _fieldFocus.requestFocus,
+                          child: Pressable(
+                            longPress: false,
+                            borderRadius: BorderRadius.circular(6),
+                            child: _Ticket(chip: chip, large: isTv, onTap: () => unawaited(_send(chip.request))),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 28),
-        Text(
-          t.aiComposer.quickStart,
-          style: theme.textTheme.labelLarge?.copyWith(color: Colors.white54, letterSpacing: 1.2),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: isTv ? 56 : 46,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
-            itemCount: chips.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
-            itemBuilder: (context, i) {
-              final chip = chips[i];
-              return FocusableButton(
-                focusNode: _chipNode(i),
-                onPressed: () => unawaited(_send(chip.request)),
-                onNavigateLeft: i > 0 ? () => _chipNode(i - 1).requestFocus() : null,
-                onNavigateRight: i < chips.length - 1 ? () => _chipNode(i + 1).requestFocus() : null,
-                onNavigateUp: _fieldFocus.requestFocus,
-                child: Pressable(
-                  longPress: false,
-                  borderRadius: BorderRadius.circular(40),
-                  child: _Chip(chip: chip, accent: accent, large: isTv, onTap: () => unawaited(_send(chip.request))),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _thinkingView(Color accent, double headlineSize) {
+  Widget _thinkingView(Size size, bool isTv, bool wide) {
     final theme = Theme.of(context);
-    final status = _statuses[_statusIndex % _statuses.length];
-    return Column(
+    final frameH = isTv ? 260.0 : (wide ? 230.0 : 170.0);
+    final frameW = frameH * 2 / 3;
+    _pitch = frameW + frameW * 0.12;
+    final slate = _take >= _takes.length ? t.aiComposer.wrap : _takes[_take];
+    final pick = _pick;
+    return SafeArea(
       key: const ValueKey('thinking'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox.square(
-          dimension: 180,
-          child: _Orb(animation: _orb, color: accent),
-        ),
-        const SizedBox(height: 28),
-        Text(
-          '“${_controller.text.trim()}”',
-          textAlign: TextAlign.center,
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 14),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 400),
-          child: Text(
-            status,
-            key: ValueKey(status),
-            style: theme.textTheme.titleMedium?.copyWith(color: accent.withValues(alpha: 0.9)),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            transitionBuilder: (child, a) => FadeTransition(
+              opacity: a,
+              child: SlideTransition(
+                position: Tween(begin: const Offset(0, 0.4), end: Offset.zero).animate(a),
+                child: child,
+              ),
+            ),
+            child: Text(
+              slate.toUpperCase(),
+              key: ValueKey(slate),
+              style: TextStyle(
+                fontFamily: _display,
+                fontSize: isTv ? 40 : 30,
+                letterSpacing: 3,
+                color: _landed ? _amber : Colors.white,
+              ),
+            ),
           ),
-        ),
-        const SizedBox(height: 24),
-        Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38)),
-      ],
+          SizedBox(height: isTv ? 28 : 20),
+          _FilmStrip(
+            items: widget.posters,
+            position: _stripPos,
+            frameW: frameW,
+            frameH: frameH,
+            pitch: _pitch,
+            pickSlot: _pickSlot,
+            pick: pick,
+            flash: _flash,
+            gateLit: _landed,
+          ),
+          SizedBox(height: isTv ? 28 : 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: _landed && pick != null
+                  ? Text(
+                      pick.displayTitle.toUpperCase(),
+                      key: const ValueKey('pick'),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontFamily: _display, fontSize: isTv ? 52 : 40, color: Colors.white),
+                    )
+                  : Text(
+                      '“${_controller.text.trim()}”',
+                      key: const ValueKey('request'),
+                      textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge?.copyWith(color: Colors.white70, fontStyle: FontStyle.italic),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38)),
+        ],
+      ),
     );
   }
 }
 
-class _SendButton extends StatelessWidget {
-  const _SendButton({required this.accent, required this.enabled, required this.onTap, required this.size});
-  final Color accent;
+class _Landing {
+  const _Landing({required this.from, required this.to, required this.start, required this.duration});
+  final double from;
+  final double to;
+  final Duration start;
+  final Duration duration;
+}
+
+/// Send: an amber "roll camera" key.
+class _RollButton extends StatelessWidget {
+  const _RollButton({required this.enabled, required this.onTap, required this.size});
   final bool enabled;
   final VoidCallback onTap;
   final double size;
@@ -461,43 +695,50 @@ class _SendButton extends StatelessWidget {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
         width: size,
         height: size,
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: enabled
-              ? LinearGradient(colors: [accent, Color.lerp(accent, Colors.white, 0.35)!])
-              : const LinearGradient(colors: [Color(0x33FFFFFF), Color(0x22FFFFFF)]),
-          boxShadow: enabled ? [BoxShadow(color: accent.withValues(alpha: 0.55), blurRadius: 24)] : const [],
+          borderRadius: BorderRadius.circular(10),
+          color: enabled ? _amber : const Color(0x1FFFFFFF),
         ),
-        child: Icon(Symbols.arrow_upward_rounded, color: enabled ? Colors.black : Colors.white38, size: size * 0.5),
+        child: Icon(
+          Symbols.play_arrow_rounded,
+          fill: 1,
+          color: enabled ? Colors.black : Colors.white38,
+          size: size * 0.6,
+        ),
       ),
     );
   }
 }
 
-class _Chip extends StatelessWidget {
-  const _Chip({required this.chip, required this.accent, required this.large, required this.onTap});
+/// A quick start, shaped like a cinema ticket stub.
+class _Ticket extends StatelessWidget {
+  const _Ticket({required this.chip, required this.large, required this.onTap});
   final _QuickStart chip;
-  final Color accent;
   final bool large;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    const shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(6)),
+      side: BorderSide(color: Color(0x2EFFFFFF)),
+    );
     return Material(
-      color: const Color(0x1AFFFFFF),
-      shape: StadiumBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.14))),
+      color: const Color(0x14FFFFFF),
+      shape: shape,
       child: InkWell(
-        customBorder: const StadiumBorder(),
+        customBorder: shape,
         onTap: onTap,
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: large ? 22 : 16),
+          padding: EdgeInsets.symmetric(horizontal: large ? 20 : 14),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(chip.icon, size: large ? 22 : 18, color: accent),
+              Icon(chip.icon, size: large ? 22 : 18, color: _amber),
               const SizedBox(width: 8),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 260),
@@ -514,6 +755,343 @@ class _Chip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A strip of 35mm film running through a projector gate: the user's
+/// posters as frames, sprocket holes above and below, the gate in the
+/// middle lit, the frames either side falling into the dark. Posters are
+/// fetched tiny so they're soft at speed without a live blur; the picked
+/// frame comes in sharp.
+class _FilmStrip extends StatelessWidget {
+  const _FilmStrip({
+    required this.items,
+    required this.position,
+    required this.frameW,
+    required this.frameH,
+    required this.pitch,
+    required this.pickSlot,
+    required this.pick,
+    required this.flash,
+    required this.gateLit,
+  });
+
+  final List<MediaItem> items;
+  final ValueListenable<double> position;
+  final double frameW;
+  final double frameH;
+  final double pitch;
+  final int? pickSlot;
+  final MediaItem? pick;
+  final Animation<double> flash;
+  final bool gateLit;
+
+  MediaItem? _itemAt(int slot) {
+    if (slot == pickSlot && pick != null) return pick;
+    if (items.isEmpty) return null;
+    return items[slot % items.length];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final band = frameH * 0.16;
+    final height = frameH + band * 2;
+    return SizedBox(
+      height: height,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final left = width / 2 - frameW / 2;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // The film base and its sprocket holes, scrolling with the frames.
+              Positioned.fill(
+                child: RepaintBoundary(child: CustomPaint(painter: _SprocketPainter(position, pitch, band))),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: band,
+                height: frameH,
+                child: ValueListenableBuilder<double>(
+                  valueListenable: position,
+                  builder: (context, pos, _) {
+                    final first = ((pos - left) / pitch).floor() - 1;
+                    final last = ((pos + width - left) / pitch).ceil() + 1;
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        for (var slot = first; slot <= last; slot++)
+                          Positioned(
+                            key: ValueKey(slot),
+                            left: left + slot * pitch - pos,
+                            top: 0,
+                            width: frameW,
+                            height: frameH,
+                            child: _Frame(item: _itemAt(slot), sharp: slot == pickSlot, number: slot),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              // Frames off the gate fall into the dark.
+              const Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.black, Color(0x99000000), Color(0x00000000), Color(0x99000000), Colors.black],
+                        stops: [0, 0.3, 0.5, 0.7, 1],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // The gate: corner brackets around the centre frame.
+              Positioned(
+                left: left - 8,
+                top: band - 8,
+                width: frameW + 16,
+                height: frameH + 16,
+                child: IgnorePointer(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CustomPaint(painter: _GatePainter(lit: gateLit)),
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: AnimatedBuilder(
+                          animation: flash,
+                          builder: (context, _) {
+                            final v = flash.isAnimating ? (1 - flash.value) * 0.7 : 0.0;
+                            return ColoredBox(color: Colors.white.withValues(alpha: v));
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _Frame extends StatelessWidget {
+  const _Frame({required this.item, required this.sharp, required this.number});
+  final MediaItem? item;
+  final bool sharp;
+  final int number;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = this.item;
+    final path = item?.thumbPath ?? item?.artPath;
+    Widget child;
+    if (item == null || path == null) {
+      child = ColoredBox(
+        color: const Color(0xFF15120F),
+        child: Center(
+          child: Text(
+            '${number.abs() % 99 + 1}',
+            style: const TextStyle(fontFamily: _display, fontSize: 40, color: Colors.white24),
+          ),
+        ),
+      );
+    } else {
+      final client = context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId));
+      child = sharp
+          ? OptimizedMediaImage(client: client, imagePath: path, fit: BoxFit.cover)
+          // Fetched at 40x60 and scaled up: soft, like motion blur.
+          : FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: 40,
+                height: 60,
+                child: OptimizedMediaImage(
+                  client: client,
+                  imagePath: path,
+                  width: 40,
+                  height: 60,
+                  fit: BoxFit.cover,
+                  fadeInDuration: Duration.zero,
+                ),
+              ),
+            );
+    }
+    return ClipRRect(borderRadius: BorderRadius.circular(3), child: child);
+  }
+}
+
+/// The strip's film base: a dark band with rounded sprocket holes top and
+/// bottom, scrolling with [position].
+class _SprocketPainter extends CustomPainter {
+  _SprocketPainter(this.position, this.pitch, this.band) : super(repaint: position);
+  final ValueListenable<double> position;
+  final double pitch;
+  final double band;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF1C1814));
+    final hole = Paint()..color = Colors.black;
+    // Four holes per frame, as on 35mm.
+    final step = pitch / 4;
+    final holeW = step * 0.5;
+    final holeH = band * 0.46;
+    final shift = -(position.value % step);
+    for (var x = shift; x < size.width + step; x += step) {
+      for (final y in [(band - holeH) / 2, size.height - band + (band - holeH) / 2]) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(Rect.fromLTWH(x, y, holeW, holeH), Radius.circular(holeH * 0.25)),
+          hole,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SprocketPainter old) => old.pitch != pitch || old.band != band;
+}
+
+/// Projector-gate corner brackets; amber once the strip lands.
+class _GatePainter extends CustomPainter {
+  _GatePainter({required this.lit});
+  final bool lit;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.square
+      ..color = lit ? _amber : Colors.white70;
+    final arm = size.shortestSide * 0.16;
+    final w = size.width;
+    final h = size.height;
+    final path = Path()
+      ..moveTo(0, arm)
+      ..lineTo(0, 0)
+      ..lineTo(arm, 0)
+      ..moveTo(w - arm, 0)
+      ..lineTo(w, 0)
+      ..lineTo(w, arm)
+      ..moveTo(w, h - arm)
+      ..lineTo(w, h)
+      ..lineTo(w - arm, h)
+      ..moveTo(arm, h)
+      ..lineTo(0, h)
+      ..lineTo(0, h - arm);
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_GatePainter old) => old.lit != lit;
+}
+
+/// Route transition: a seven-bladed camera iris snapping open over the
+/// page behind, and closing again on the way out.
+class _IrisTransition extends StatelessWidget {
+  const _IrisTransition({required this.animation, required this.child});
+  final Animation<double> animation;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    return AnimatedBuilder(
+      animation: curved,
+      child: child,
+      builder: (context, child) {
+        final p = curved.value;
+        if (p >= 1) return child!;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipPath(clipper: _IrisClipper(p), child: child),
+            IgnorePointer(child: CustomPaint(painter: _BladesPainter(p))),
+          ],
+        );
+      },
+    );
+  }
+}
+
+const _blades = 7;
+
+/// The aperture: a heptagon that grows and turns as the iris opens, big
+/// enough at 1 to clear the corners.
+Path _aperture(Size size, double p) {
+  final c = size.center(Offset.zero);
+  final full = size.longestSide * 0.62 / math.cos(math.pi / _blades) * 1.15;
+  final r = full * p;
+  final turn = (1 - p) * math.pi * 0.55;
+  final path = Path();
+  for (var i = 0; i < _blades; i++) {
+    final a = turn + i * 2 * math.pi / _blades;
+    final v = c + Offset(math.cos(a), math.sin(a)) * r;
+    i == 0 ? path.moveTo(v.dx, v.dy) : path.lineTo(v.dx, v.dy);
+  }
+  return path..close();
+}
+
+class _IrisClipper extends CustomClipper<Path> {
+  _IrisClipper(this.p);
+  final double p;
+
+  @override
+  Path getClip(Size size) => _aperture(size, p);
+
+  @override
+  bool shouldReclip(_IrisClipper old) => old.p != p;
+}
+
+/// The blades: graphite around the aperture, with the seams between blades
+/// running out from each corner along the next edge.
+class _BladesPainter extends CustomPainter {
+  _BladesPainter(this.p);
+  final double p;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Blades show while opening, fading as they clear the frame.
+    final opacity = (math.min(1, p * 8) * (1 - p)).clamp(0.0, 1.0);
+    if (opacity <= 0) return;
+    final aperture = _aperture(size, p);
+    final outside = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), aperture);
+    canvas.drawPath(outside, Paint()..color = const Color(0xFF0E0E10).withValues(alpha: opacity));
+
+    final metrics = aperture.computeMetrics().first;
+    final seam = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = Colors.white.withValues(alpha: 0.18 * opacity);
+    final edge = metrics.length / _blades;
+    final reach = size.longestSide;
+    for (var i = 0; i < _blades; i++) {
+      final a = metrics.getTangentForOffset(i * edge)!;
+      final b = metrics.getTangentForOffset(((i + 1) % _blades) * edge + 0.01)!;
+      final dir = b.position - a.position;
+      final len = dir.distance;
+      if (len == 0) continue;
+      // Each seam carries on past the corner where its blade's edge ends.
+      canvas.drawLine(b.position, b.position + dir / len * reach, seam);
+    }
+    canvas.drawPath(
+      aperture,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = _amber.withValues(alpha: 0.7 * opacity),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_BladesPainter old) => old.p != p;
 }
 
 /// A slowly drifting wall of the user's posters. Each tile is fetched tiny
@@ -543,7 +1121,7 @@ class _Mosaic extends StatelessWidget {
           );
         },
         child: Opacity(
-          opacity: 0.55,
+          opacity: 0.5,
           child: OverflowBox(
             alignment: Alignment.topLeft,
             maxWidth: cols * tileW,
@@ -590,95 +1168,4 @@ class _BlurTile extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Two soft accent blobs drifting behind the input.
-class _Aurora extends StatelessWidget {
-  const _Aurora({required this.animation, required this.color});
-  final Animation<double> animation;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: animation,
-        builder: (context, _) {
-          final v = Curves.easeInOut.transform(animation.value);
-          return Stack(
-            children: [
-              Align(
-                alignment: Alignment(-0.6 + 0.5 * v, -0.2 + 0.2 * v),
-                child: _blob(color.withValues(alpha: 0.30), 520),
-              ),
-              Align(
-                alignment: Alignment(0.7 - 0.4 * v, 0.4 - 0.3 * v),
-                child: _blob(Color.lerp(color, const Color(0xFF7C4DFF), 0.6)!.withValues(alpha: 0.22), 460),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _blob(Color c, double size) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      gradient: RadialGradient(colors: [c, c.withValues(alpha: 0)]),
-    ),
-  );
-}
-
-/// The "thinking" orb: a breathing core with rings rippling out.
-class _Orb extends StatelessWidget {
-  const _Orb({required this.animation, required this.color});
-  final Animation<double> animation;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, _) => CustomPaint(painter: _OrbPainter(animation.value, color)),
-    );
-  }
-}
-
-class _OrbPainter extends CustomPainter {
-  _OrbPainter(this.t, this.color);
-  final double t;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.center(Offset.zero);
-    final r = size.shortestSide / 2;
-    for (var i = 0; i < 3; i++) {
-      final p = (t + i / 3) % 1;
-      canvas.drawCircle(
-        c,
-        r * (0.35 + 0.65 * p),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = color.withValues(alpha: (1 - p) * 0.5),
-      );
-    }
-    final breath = 0.5 + 0.5 * math.sin(t * 2 * math.pi);
-    canvas.drawCircle(
-      c,
-      r * (0.30 + 0.05 * breath),
-      Paint()
-        ..shader = RadialGradient(
-          colors: [Colors.white, color, color.withValues(alpha: 0)],
-          stops: const [0, 0.45, 1],
-        ).createShader(Rect.fromCircle(center: c, radius: r * 0.4)),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_OrbPainter old) => old.t != t || old.color != color;
 }
