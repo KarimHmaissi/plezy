@@ -69,7 +69,7 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
-### "More like this" from any title (branch `feature/ai-helper`) — `HASH`
+### "More like this" from any title (branch `feature/ai-helper`) — `9ea216b38`
 - **Hold OK on any film or show** (Home, Explore, Watchlist, libraries, AI
   rows…) and pick **More like this**. Episodes and seasons use their show.
 - It jumps to the AI tab and runs in the background ("Looking for: more like
