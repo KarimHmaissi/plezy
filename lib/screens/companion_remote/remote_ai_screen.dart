@@ -38,7 +38,9 @@ class RemoteAiSession extends ChangeNotifier {
   CompanionRemoteProvider? _remote;
 
   /// [ask], completing when the TV answers (or fails, or after 3 minutes).
-  Future<void> askAndWait(CompanionRemoteProvider remote, String request) {
+  /// Sends [request] and completes with its ask once the TV answers (or
+  /// fails), or still working after three minutes.
+  Future<RemoteAiAsk> askAndWait(CompanionRemoteProvider remote, String request) {
     ask(remote, request);
     final mine = asks.first;
     final done = Completer<void>();
@@ -49,7 +51,10 @@ class RemoteAiSession extends ChangeNotifier {
     }
 
     addListener(check);
-    return done.future.timeout(const Duration(minutes: 3), onTimeout: () {}).whenComplete(() => removeListener(check));
+    return done.future
+        .timeout(const Duration(minutes: 3), onTimeout: () {})
+        .whenComplete(() => removeListener(check))
+        .then((_) => mine);
   }
 
   void ask(CompanionRemoteProvider remote, String request) {

@@ -270,6 +270,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     setState(() => _tonightRow = result.entry);
   }
 
+  final _askKey = GlobalKey(debugLabel: 'AiAskButton');
+
+  static Rect? _rectOf(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
   Future<void> _ask() async {
     if (_thinClient && !_canEditMirror) {
       // Not linked to the TV right now: say so and try to reconnect, rather
@@ -285,6 +293,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     }
     final remote = _thinClient ? context.read<CompanionRemoteProvider>() : null;
     final previous = List.of(_conversation);
+    _PendingAsk? lastFailed;
     await AiComposer.open(
       context,
       followUpOf: _conversation.isEmpty ? null : _conversation.last.request,
@@ -293,15 +302,31 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
           if (r.request != AiAgent.tonightRequest) r.request,
       }.take(5).toList(),
       posters: [for (final r in _rows.take(6)) ...r.items.take(8)],
-      landing: (text) {
-        for (final r in _rows) {
-          if (r.request == text) return r.items.isEmpty ? null : r.items.first;
+      origin: _rectOf(_askKey),
+      run: (text) async {
+        if (remote != null) {
+          final ask = await RemoteAiSession.instance.askAndWait(remote, text);
+          final items = ask.answer?.items ?? const <MediaItem>[];
+          return AiComposerOutcome(
+            pick: items.isEmpty ? null : items.first,
+            error: switch (ask.status) {
+              'done' => null,
+              'error' => (ask.error?.isNotEmpty ?? false) ? ask.error : t.aiTab.noPicks,
+              _ => t.aiComposer.timedOut,
+            },
+          );
         }
-        return null;
-      },
-      run: (text) {
-        if (remote != null) return RemoteAiSession.instance.askAndWait(remote, text);
-        return _runInBackground(_PendingAsk(text, previous: previous));
+        // A retry from the composer replaces its failed attempt's chip.
+        final failed = lastFailed;
+        if (failed != null && mounted) setState(() => _pending.remove(failed));
+        final ask = _PendingAsk(text, previous: previous);
+        await _runInBackground(ask);
+        lastFailed = ask.error != null ? ask : null;
+        if (ask.error != null) return AiComposerOutcome(error: ask.error);
+        for (final r in _rows) {
+          if (r.request == text) return AiComposerOutcome(pick: r.items.isEmpty ? null : r.items.first);
+        }
+        return const AiComposerOutcome();
       },
     );
   }
@@ -633,6 +658,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       autofocus: _rows.isEmpty,
       onPressed: _thinClient ? () => unawaited(_ask()) : (_hasKey != true ? null : () => unawaited(_ask())),
       child: Padding(
+        key: _askKey,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           mainAxisSize: MainAxisSize.min,

@@ -6917,6 +6917,15 @@ class Translations$aiComposer$en {
 	/// en: 'That's a wrap'
 	String get wrap => 'That\'s a wrap';
 
+	/// en: 'Film jammed'
+	String get jammed => 'Film jammed';
+
+	/// en: 'The TV didn't answer in time.'
+	String get timedOut => 'The TV didn\'t answer in time.';
+
+	/// en: 'Edit'
+	String get edit => 'Edit';
+
 	/// en: 'You can close this: it keeps going and lands in the AI tab.'
 	String get keepsRunning => 'You can close this: it keeps going and lands in the AI tab.';
 }
@@ -11471,6 +11480,11 @@ extension on Translations {
 			'aiComposer.take2' => 'Take 2 · Shortlisting',
 			'aiComposer.take3' => 'Take 3 · Final cut',
 			'aiComposer.wrap' => 'That\'s a wrap',
+			'aiComposer.jammed' => 'Film jammed',
+			'aiComposer.timedOut' => 'The TV didn\'t answer in time.',
+			'aiComposer.edit' => 'Edit',
+			_ => null,
+		} ?? switch (path) {
 			'aiComposer.keepsRunning' => 'You can close this: it keeps going and lands in the AI tab.',
 			_ => null,
 		};

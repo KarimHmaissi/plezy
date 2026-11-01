@@ -22,27 +22,28 @@ import '../widgets/pressable.dart';
 const _amber = Color(0xFFE5A00D);
 const _display = 'Bebas Neue';
 
+/// Jammed-film red.
+const _red = Color(0xFFE5484D);
+
 /// Fork: the full-screen AI composer, the way into the AI feature, themed
 /// as a cinema. It opens with a camera iris, asks in a big condensed
 /// headline over a soft wall of the user's posters, and while a request
 /// runs a strip of those posters races through a projector gate, then
 /// slows and stops with the top pick framed. Closing never cancels a
 /// request: it carries on in the background and lands as a row as before.
+/// How a composer request went: the answer's top pick to freeze on, or
+/// why it failed.
+class AiComposerOutcome {
+  const AiComposerOutcome({this.pick, this.error});
+  final MediaItem? pick;
+  final String? error;
+}
+
 class AiComposer extends StatefulWidget {
-  const AiComposer({
-    super.key,
-    required this.run,
-    this.landing,
-    this.followUpOf,
-    this.recent = const [],
-    this.posters = const [],
-  });
+  const AiComposer({super.key, required this.run, this.followUpOf, this.recent = const [], this.posters = const []});
 
   /// Runs a request; the film strip runs until it completes.
-  final Future<void> Function(String request) run;
-
-  /// After [run], the answer's top pick to freeze on, if there is one.
-  final MediaItem? Function(String request)? landing;
+  final Future<AiComposerOutcome> Function(String request) run;
 
   /// The request being followed up, if any.
   final String? followUpOf;
@@ -55,11 +56,13 @@ class AiComposer extends StatefulWidget {
 
   static Future<void> open(
     BuildContext context, {
-    required Future<void> Function(String request) run,
-    MediaItem? Function(String request)? landing,
+    required Future<AiComposerOutcome> Function(String request) run,
     String? followUpOf,
     List<String> recent = const [],
     List<MediaItem> posters = const [],
+
+    /// Where the iris opens from (the Ask button), in global coordinates.
+    Rect? origin,
   }) {
     ForkMotion.success();
     return Navigator.of(context).push(
@@ -67,11 +70,10 @@ class AiComposer extends StatefulWidget {
         opaque: false,
         transitionDuration: const Duration(milliseconds: 260),
         reverseTransitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (_, _, _) =>
-            AiComposer(run: run, landing: landing, followUpOf: followUpOf, recent: recent, posters: posters),
+        pageBuilder: (_, _, _) => AiComposer(run: run, followUpOf: followUpOf, recent: recent, posters: posters),
         transitionsBuilder: (context, animation, _, child) {
           if (ForkMotion.reduceMotion(context)) return FadeTransition(opacity: animation, child: child);
-          return _IrisTransition(animation: animation, child: child);
+          return _IrisTransition(animation: animation, origin: origin?.center, child: child);
         },
       ),
     );
@@ -99,6 +101,17 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   late final AnimationController _drift = AnimationController(vsync: this, duration: const Duration(seconds: 90));
 
   /// Freeze-frame flash when the strip lands.
+  /// The clapper snapping shut on send and on each new take.
+  late final AnimationController _clap = AnimationController(vsync: this, duration: const Duration(milliseconds: 170));
+
+  /// The strip shuddering when the film jams (a failed request).
+  late final AnimationController _judder = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
+  final _retryFocus = FocusNode(debugLabel: 'AiComposerRetry');
+  final _editFocus = FocusNode(debugLabel: 'AiComposerEdit');
+
   late final AnimationController _flash = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
 
   // Film strip: its scroll position (px) advanced by a ticker.
@@ -115,6 +128,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   int _exampleIndex = 0;
   bool _thinking = false;
   bool _landed = false;
+  String? _jam;
   int _take = 0;
   final List<Timer> _takeTimers = [];
   bool _reduceMotion = false;
@@ -176,6 +190,10 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
     _intro.dispose();
     _drift.dispose();
     _flash.dispose();
+    _clap.dispose();
+    _judder.dispose();
+    _retryFocus.dispose();
+    _editFocus.dispose();
     _controller.dispose();
     _fieldFocus.dispose();
     _sendFocus.dispose();
@@ -279,40 +297,103 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
   Future<void> _send([String? text]) async {
     final request = (text ?? _controller.text).trim();
     if (request.isEmpty || _thinking) return;
-    ForkMotion.selection();
     FocusScope.of(context).unfocus();
     setState(() {
       _thinking = true;
       _controller.text = request;
     });
     _typer?.cancel();
-    _takeTimers.addAll([
-      Timer(const Duration(milliseconds: 2400), () => mounted && !_landed ? setState(() => _take = 1) : null),
-      Timer(const Duration(milliseconds: 6000), () => mounted && !_landed ? setState(() => _take = 2) : null),
-    ]);
+    await _roll(request);
+  }
+
+  /// Runs [request] with the strip rolling, then lands it or jams it.
+  Future<void> _roll(String request) async {
+    setState(() {
+      _jam = null;
+      _landed = false;
+      _take = 0;
+      _pick = null;
+      _pickSlot = null;
+      _land = null;
+    });
+    _snapClapper(haptic: true);
+    for (final timer in _takeTimers) {
+      timer.cancel();
+    }
+    _takeTimers
+      ..clear()
+      ..addAll([
+        Timer(const Duration(milliseconds: 2400), () => _nextTake(1)),
+        Timer(const Duration(milliseconds: 6000), () => _nextTake(2)),
+      ]);
     if (!_reduceMotion) {
+      _speed = 0;
       _lastTick = Duration.zero;
-      unawaited(_stripTicker.start());
+      if (!_stripTicker.isActive) unawaited(_stripTicker.start());
     }
-    var ok = false;
+    AiComposerOutcome outcome;
     try {
-      await widget.run(request);
-      ok = true;
-    } finally {
-      for (final timer in _takeTimers) {
-        timer.cancel();
-      }
-      if (mounted) {
-        final pick = ok ? widget.landing?.call(request) : null;
-        if (pick != null) setState(() => _pick = pick);
-        if (_reduceMotion || pick == null) {
-          _stripTicker.stop();
-          _onLanded();
-        } else {
-          _startLanding();
-        }
-      }
+      outcome = await widget.run(request);
+    } catch (e) {
+      outcome = AiComposerOutcome(error: '$e');
     }
+    for (final timer in _takeTimers) {
+      timer.cancel();
+    }
+    if (!mounted) return;
+    final error = outcome.error;
+    if (error != null) {
+      _jamStrip(error);
+      return;
+    }
+    final pick = outcome.pick;
+    if (pick != null) setState(() => _pick = pick);
+    if (_reduceMotion || pick == null) {
+      _stripTicker.stop();
+      _onLanded();
+    } else {
+      _startLanding();
+    }
+  }
+
+  void _nextTake(int take) {
+    if (!mounted || _landed || _jam != null) return;
+    setState(() => _take = take);
+    _snapClapper(haptic: false);
+  }
+
+  void _snapClapper({required bool haptic}) {
+    if (_reduceMotion) {
+      _clap.value = 1;
+      return;
+    }
+    unawaited(
+      _clap.forward(from: 0).then((_) {
+        if (haptic) ForkMotion.selection();
+      }),
+    );
+  }
+
+  /// A failed request: the strip stops dead and shudders, the gate goes
+  /// red, and Retry takes focus.
+  void _jamStrip(String error) {
+    _stripTicker.stop();
+    _speed = 0;
+    ForkMotion.error();
+    setState(() => _jam = error);
+    if (!_reduceMotion) unawaited(_judder.forward(from: 0));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _retryFocus.canRequestFocus) _retryFocus.requestFocus();
+    });
+  }
+
+  void _backToEdit() {
+    setState(() {
+      _thinking = false;
+      _jam = null;
+    });
+    if (!_reduceMotion) _startTyping();
+    _fieldFocus.requestFocus();
   }
 
   FocusNode _chipNode(int i) {
@@ -417,23 +498,29 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _rise(
-                  0.1,
-                  0.55,
+                  0,
+                  0.3,
                   Row(
                     children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(color: _amber, shape: BoxShape.circle),
+                      SizedBox.square(
+                        dimension: isTv ? 44 : 34,
+                        child: AnimatedBuilder(
+                          animation: _intro,
+                          builder: (context, _) => CustomPaint(painter: _MarkPainter(_intro.value)),
+                        ),
                       ),
-                      const SizedBox(width: 10),
-                      Text(
-                        t.aiComposer.eyebrow,
-                        style: TextStyle(
-                          fontFamily: _display,
-                          fontSize: isTv ? 24 : 18,
-                          letterSpacing: 4,
-                          color: _amber,
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          t.aiComposer.eyebrow,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: _display,
+                            fontSize: isTv ? 24 : 18,
+                            letterSpacing: 4,
+                            color: _amber,
+                          ),
                         ),
                       ),
                     ],
@@ -604,51 +691,139 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
     final frameH = isTv ? 260.0 : (wide ? 230.0 : 170.0);
     final frameW = frameH * 2 / 3;
     _pitch = frameW + frameW * 0.12;
-    final slate = _take >= _takes.length ? t.aiComposer.wrap : _takes[_take];
+    final jam = _jam;
+    final slate = jam != null ? t.aiComposer.jammed : (_take >= _takes.length ? t.aiComposer.wrap : _takes[_take]);
     final pick = _pick;
+    final slateColor = jam != null ? _red : (_landed ? _amber : Colors.white);
     return SafeArea(
       key: const ValueKey('thinking'),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            transitionBuilder: (child, a) => FadeTransition(
-              opacity: a,
-              child: SlideTransition(
-                position: Tween(begin: const Offset(0, 0.4), end: Offset.zero).animate(a),
-                child: child,
-              ),
-            ),
-            child: Text(
-              slate.toUpperCase(),
-              key: ValueKey(slate),
-              style: TextStyle(
-                fontFamily: _display,
-                fontSize: isTv ? 40 : 30,
-                letterSpacing: 3,
-                color: _landed ? _amber : Colors.white,
-              ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: isTv ? 64 : 48,
+                  height: isTv ? 56 : 42,
+                  child: AnimatedBuilder(
+                    animation: _clap,
+                    builder: (context, _) =>
+                        CustomPaint(painter: _ClapperPainter(Curves.easeInCubic.transform(_clap.value), slateColor)),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Flexible(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    transitionBuilder: (child, a) => FadeTransition(
+                      opacity: a,
+                      child: SlideTransition(
+                        position: Tween(begin: const Offset(0, 0.4), end: Offset.zero).animate(a),
+                        child: child,
+                      ),
+                    ),
+                    child: FittedBox(
+                      key: ValueKey(slate),
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        slate.toUpperCase(),
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontFamily: _display,
+                          fontSize: isTv ? 40 : 30,
+                          letterSpacing: 3,
+                          color: slateColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           SizedBox(height: isTv ? 28 : 20),
-          _FilmStrip(
-            items: widget.posters,
-            position: _stripPos,
-            frameW: frameW,
-            frameH: frameH,
-            pitch: _pitch,
-            pickSlot: _pickSlot,
-            pick: pick,
-            flash: _flash,
-            gateLit: _landed,
+          AnimatedBuilder(
+            animation: _judder,
+            builder: (context, child) {
+              final v = _judder.value;
+              // A decaying shudder, as if the film caught in the gate.
+              final dx = _judder.isAnimating ? math.sin(v * math.pi * 9) * 14 * (1 - v) : 0.0;
+              return Transform.translate(offset: Offset(dx, 0), child: child);
+            },
+            child: _FilmStrip(
+              items: widget.posters,
+              position: _stripPos,
+              frameW: frameW,
+              frameH: frameH,
+              pitch: _pitch,
+              pickSlot: _pickSlot,
+              pick: pick,
+              flash: _flash,
+              gate: jam != null ? _red : (_landed ? _amber : Colors.white70),
+            ),
           ),
           SizedBox(height: isTv ? 28 : 20),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 220),
-              child: _landed && pick != null
+              child: jam != null
+                  ? Column(
+                      key: const ValueKey('jam'),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          jam,
+                          textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 18),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            FocusableButton(
+                              focusNode: _retryFocus,
+                              autofocus: true,
+                              onPressed: () => unawaited(_roll(_controller.text.trim())),
+                              onNavigateRight: _editFocus.requestFocus,
+                              child: Pressable(
+                                longPress: false,
+                                child: FilledButton.icon(
+                                  style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+                                  onPressed: () => unawaited(_roll(_controller.text.trim())),
+                                  icon: const Icon(Symbols.replay_rounded),
+                                  label: Text(t.common.retry),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            FocusableButton(
+                              focusNode: _editFocus,
+                              onPressed: _backToEdit,
+                              onNavigateLeft: _retryFocus.requestFocus,
+                              child: Pressable(
+                                longPress: false,
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                    side: const BorderSide(color: Colors.white38),
+                                  ),
+                                  onPressed: _backToEdit,
+                                  icon: const Icon(Symbols.edit_rounded),
+                                  label: Text(t.aiComposer.edit),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    )
+                  : _landed && pick != null
                   ? Text(
                       pick.displayTitle.toUpperCase(),
                       key: const ValueKey('pick'),
@@ -668,7 +843,8 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(height: 18),
-          Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38)),
+          if (jam == null)
+            Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38)),
         ],
       ),
     );
@@ -772,7 +948,7 @@ class _FilmStrip extends StatelessWidget {
     required this.pickSlot,
     required this.pick,
     required this.flash,
-    required this.gateLit,
+    required this.gate,
   });
 
   final List<MediaItem> items;
@@ -783,7 +959,7 @@ class _FilmStrip extends StatelessWidget {
   final int? pickSlot;
   final MediaItem? pick;
   final Animation<double> flash;
-  final bool gateLit;
+  final Color gate;
 
   MediaItem? _itemAt(int slot) {
     if (slot == pickSlot && pick != null) return pick;
@@ -858,7 +1034,7 @@ class _FilmStrip extends StatelessWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      CustomPaint(painter: _GatePainter(lit: gateLit)),
+                      CustomPaint(painter: _GatePainter(gate)),
                       Padding(
                         padding: const EdgeInsets.all(8),
                         child: AnimatedBuilder(
@@ -958,10 +1134,10 @@ class _SprocketPainter extends CustomPainter {
   bool shouldRepaint(_SprocketPainter old) => old.pitch != pitch || old.band != band;
 }
 
-/// Projector-gate corner brackets; amber once the strip lands.
+/// Projector-gate corner brackets: amber once the strip lands, red on a jam.
 class _GatePainter extends CustomPainter {
-  _GatePainter({required this.lit});
-  final bool lit;
+  _GatePainter(this.color);
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -969,7 +1145,7 @@ class _GatePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.square
-      ..color = lit ? _amber : Colors.white70;
+      ..color = color;
     final arm = size.shortestSide * 0.16;
     final w = size.width;
     final h = size.height;
@@ -990,15 +1166,18 @@ class _GatePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GatePainter old) => old.lit != lit;
+  bool shouldRepaint(_GatePainter old) => old.color != color;
 }
 
 /// Route transition: a seven-bladed camera iris snapping open over the
 /// page behind, and closing again on the way out.
 class _IrisTransition extends StatelessWidget {
-  const _IrisTransition({required this.animation, required this.child});
+  const _IrisTransition({required this.animation, required this.child, this.origin});
   final Animation<double> animation;
   final Widget child;
+
+  /// The iris's centre; the screen's centre if null.
+  final Offset? origin;
 
   @override
   Widget build(BuildContext context) {
@@ -1012,8 +1191,8 @@ class _IrisTransition extends StatelessWidget {
         return Stack(
           fit: StackFit.expand,
           children: [
-            ClipPath(clipper: _IrisClipper(p), child: child),
-            IgnorePointer(child: CustomPaint(painter: _BladesPainter(p))),
+            ClipPath(clipper: _IrisClipper(p, origin), child: child),
+            IgnorePointer(child: CustomPaint(painter: _BladesPainter(p, origin))),
           ],
         );
       },
@@ -1025,9 +1204,16 @@ const _blades = 7;
 
 /// The aperture: a heptagon that grows and turns as the iris opens, big
 /// enough at 1 to clear the corners.
-Path _aperture(Size size, double p) {
-  final c = size.center(Offset.zero);
-  final full = size.longestSide * 0.62 / math.cos(math.pi / _blades) * 1.15;
+Path _aperture(Size size, double p, Offset? origin) {
+  final c = origin ?? size.center(Offset.zero);
+  // Far enough to clear the furthest corner from the centre.
+  final corner = [
+    Offset.zero,
+    Offset(size.width, 0),
+    Offset(0, size.height),
+    Offset(size.width, size.height),
+  ].map((o) => (o - c).distance).reduce(math.max);
+  final full = corner / math.cos(math.pi / _blades);
   final r = full * p;
   final turn = (1 - p) * math.pi * 0.55;
   final path = Path();
@@ -1040,28 +1226,30 @@ Path _aperture(Size size, double p) {
 }
 
 class _IrisClipper extends CustomClipper<Path> {
-  _IrisClipper(this.p);
+  _IrisClipper(this.p, this.origin);
   final double p;
+  final Offset? origin;
 
   @override
-  Path getClip(Size size) => _aperture(size, p);
+  Path getClip(Size size) => _aperture(size, p, origin);
 
   @override
-  bool shouldReclip(_IrisClipper old) => old.p != p;
+  bool shouldReclip(_IrisClipper old) => old.p != p || old.origin != origin;
 }
 
 /// The blades: graphite around the aperture, with the seams between blades
 /// running out from each corner along the next edge.
 class _BladesPainter extends CustomPainter {
-  _BladesPainter(this.p);
+  _BladesPainter(this.p, this.origin);
   final double p;
+  final Offset? origin;
 
   @override
   void paint(Canvas canvas, Size size) {
     // Blades show while opening, fading as they clear the frame.
     final opacity = (math.min(1, p * 8) * (1 - p)).clamp(0.0, 1.0);
     if (opacity <= 0) return;
-    final aperture = _aperture(size, p);
+    final aperture = _aperture(size, p, origin);
     final outside = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), aperture);
     canvas.drawPath(outside, Paint()..color = const Color(0xFF0E0E10).withValues(alpha: opacity));
 
@@ -1091,7 +1279,120 @@ class _BladesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BladesPainter old) => old.p != p;
+  bool shouldRepaint(_BladesPainter old) => old.p != p || old.origin != origin;
+}
+
+/// The composer's mark, drawing itself as the page opens: an aperture
+/// ring, six blade lines inside it, then a play triangle that fills amber.
+class _MarkPainter extends CustomPainter {
+  _MarkPainter(this.t);
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final draw = Curves.easeOutCubic.transform((t / 0.6).clamp(0.0, 1.0));
+    final fill = ((t - 0.5) / 0.25).clamp(0.0, 1.0);
+    final c = size.center(Offset.zero);
+    final r = size.shortestSide / 2 - 1.5;
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = _amber;
+
+    final ring = Path()..addArc(Rect.fromCircle(center: c, radius: r), -math.pi / 2, math.pi * 2 - 0.0001);
+    final blades = Path();
+    for (var i = 0; i < 6; i++) {
+      final a = -math.pi / 2 + i * math.pi / 3;
+      final from = c + Offset(math.cos(a), math.sin(a)) * r;
+      final to = c + Offset(math.cos(a + math.pi * 0.62), math.sin(a + math.pi * 0.62)) * r * 0.52;
+      blades
+        ..moveTo(from.dx, from.dy)
+        ..lineTo(to.dx, to.dy);
+    }
+    final tri = r * 0.42;
+    final play = Path()
+      ..moveTo(c.dx - tri * 0.45, c.dy - tri * 0.8)
+      ..lineTo(c.dx + tri * 0.9, c.dy)
+      ..lineTo(c.dx - tri * 0.45, c.dy + tri * 0.8)
+      ..close();
+
+    // Ring first, then blades, then the triangle, each drawn along its path.
+    _trace(canvas, ring, (draw / 0.5).clamp(0.0, 1.0), stroke);
+    _trace(canvas, blades, ((draw - 0.35) / 0.4).clamp(0.0, 1.0), stroke..color = _amber.withValues(alpha: 0.55));
+    _trace(canvas, play, ((draw - 0.55) / 0.45).clamp(0.0, 1.0), stroke..color = _amber);
+    if (fill > 0) canvas.drawPath(play, Paint()..color = _amber.withValues(alpha: fill));
+  }
+
+  static void _trace(Canvas canvas, Path path, double p, Paint paint) {
+    if (p <= 0) return;
+    for (final m in path.computeMetrics()) {
+      canvas.drawPath(m.extractPath(0, m.length * p), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MarkPainter old) => old.t != t;
+}
+
+/// A clapperboard: a slate with a striped clapstick hinged at its top left,
+/// open at [closed] 0 and shut at 1.
+class _ClapperPainter extends CustomPainter {
+  _ClapperPainter(this.closed, this.color);
+  final double closed;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stickH = size.height * 0.24;
+    final board = Rect.fromLTWH(0, stickH + 2, size.width, size.height - stickH - 2);
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..color = color;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(board, const Radius.circular(3)),
+      Paint()..color = const Color(0xFF141414),
+    );
+    canvas.drawRRect(RRect.fromRectAndRadius(board, const Radius.circular(3)), line);
+    // Slate lines.
+    for (final f in [0.45, 0.72]) {
+      final y = board.top + board.height * f;
+      canvas.drawLine(
+        Offset(board.left + 5, y),
+        Offset(board.right - 5, y),
+        line..color = color.withValues(alpha: 0.5),
+      );
+    }
+    line.color = color;
+
+    // The clapstick, swung open by up to 28 degrees around its hinge.
+    canvas.save();
+    canvas.translate(0, stickH);
+    canvas.rotate(-(1 - closed) * 28 * math.pi / 180);
+    final stick = Rect.fromLTWH(0, -stickH, size.width, stickH);
+    canvas.clipRRect(RRect.fromRectAndRadius(stick, const Radius.circular(2)));
+    canvas.drawRect(stick, Paint()..color = const Color(0xFF141414));
+    final stripe = Paint()..color = color;
+    final w = size.width / 5;
+    for (var i = 0; i < 6; i += 2) {
+      final x = i * w;
+      canvas.drawPath(
+        Path()
+          ..moveTo(x, 0)
+          ..lineTo(x + w * 0.7, -stickH)
+          ..lineTo(x + w * 1.7, -stickH)
+          ..lineTo(x + w, 0)
+          ..close(),
+        stripe,
+      );
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_ClapperPainter old) => old.closed != closed || old.color != color;
 }
 
 /// A slowly drifting wall of the user's posters. Each tile is fetched tiny

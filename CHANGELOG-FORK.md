@@ -92,6 +92,20 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### AI composer, cinema cut 2 (branch `feature/ai-helper`)
+- **Iris from the Ask button:** the iris now opens centred on the button
+  you pressed, sized to clear the furthest corner.
+- **Self-drawing mark:** next to the eyebrow an amber aperture ring draws
+  itself, then six blade lines, then a play triangle that fills in
+  (about 400 ms, traced along the paths).
+- **Clapper:** on send a clapperboard beside the slate snaps shut with a
+  haptic tick, and claps again (silently) on each new take.
+- **Jam and Retry:** a failed request (or the TV not answering in three
+  minutes) stops the strip dead with a decaying shudder and a firm haptic;
+  the gate and slate turn red ("FILM JAMMED") with the reason, Retry
+  (focused, so the remote's select retries) and Edit. A retry replaces
+  the failed attempt's chip in the AI tab.
+
 ### AI composer, cinema cut (branch `feature/ai-helper`)
 - **Iris open:** Ask opens the composer through a seven-bladed camera iris
   (260 ms, light haptic); the poster wall fades in a beat later, then the
