@@ -1209,7 +1209,11 @@
     "noPicks": "No picks came back",
     "homeFull": "Home already has 10 AI rows. Remove one first.",
     "moreLikeThis": "More like this",
-    "moreLike": "more like ${title}"
+    "moreLike": "more like ${title}",
+    "findMore": "Find more",
+    "findingMore": "more: ${request}",
+    "noMoreMatches": "No more matches for ${request}",
+    "addedMore": "${count} more picks added: ${request}"
   },
   "ai": {
     "settingsTitle": "AI",

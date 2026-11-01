@@ -20,6 +20,7 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
   bool useTitle = false,
   String? keepTitle,
   String? sentRequest,
+  Set<String> excludeKeys = const {},
 }) async {
   final agent = AiAgent(index: LibraryIndex.instance, trakt: trakt, model: model);
   try {
@@ -37,7 +38,8 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
           }
         }(),
     ]);
-    final picks = [...fetched.nonNulls];
+    // Find more: the model is told what's already shown, but drop repeats anyway.
+    final picks = [...fetched.nonNulls.where((p) => !excludeKeys.contains(p.item.globalKey))];
     if (picks.isEmpty) return (answer: answer, entry: null);
     return (
       answer: answer,

@@ -3345,6 +3345,18 @@ class Translations$aiTab$en {
 
 	/// en: 'more like ${title}'
 	String moreLike({required Object title}) => 'more like ${title}';
+
+	/// en: 'Find more'
+	String get findMore => 'Find more';
+
+	/// en: 'more: ${request}'
+	String findingMore({required Object request}) => 'more: ${request}';
+
+	/// en: 'No more matches for ${request}'
+	String noMoreMatches({required Object request}) => 'No more matches for ${request}';
+
+	/// en: '${count} more picks added: ${request}'
+	String addedMore({required Object count, required Object request}) => '${count} more picks added: ${request}';
 }
 
 // Path: ai
@@ -9813,6 +9825,10 @@ extension on Translations {
 			'aiTab.homeFull' => 'Home already has 10 AI rows. Remove one first.',
 			'aiTab.moreLikeThis' => 'More like this',
 			'aiTab.moreLike' => ({required Object title}) => 'more like ${title}',
+			'aiTab.findMore' => 'Find more',
+			'aiTab.findingMore' => ({required Object request}) => 'more: ${request}',
+			'aiTab.noMoreMatches' => ({required Object request}) => 'No more matches for ${request}',
+			'aiTab.addedMore' => ({required Object count, required Object request}) => '${count} more picks added: ${request}',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10226,12 +10242,12 @@ extension on Translations {
 			'explore.badge.availableIn4k' => '4K available',
 			'explore.badge.requested' => 'Requested',
 			'explore.badge.pendingApproval' => 'Pending approval',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.processing' => 'Processing',
 			'explore.badge.declined' => 'Declined',
 			'explore.badge.requestFailed' => 'Request failed',
 			'explore.badge.requested4k' => '4K requested',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.seasonsAvailable' => ({required Object available, required Object total}) => '${available}/${total} seasons',
 			'explore.badge.nextEpisodeIn' => ({required Object episode, required Object duration}) => 'Ep ${episode} in ${duration}',
 			'explore.badge.nextAiringIn' => ({required Object duration}) => 'Next in ${duration}',
@@ -10740,12 +10756,12 @@ extension on Translations {
 			'downloads.backgroundWarning.statusTile' => 'Background downloads',
 			'downloads.backgroundWarning.statusOk' => 'Allowed to run in the background',
 			'downloads.backgroundWarning.statusBlocked' => 'Blocked by system settings',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.backgroundWarning.statusDegraded' => 'Limited by system settings',
 			'downloads.backgroundWarning.statusUnknown' => 'Not checked yet',
 			'downloads.backgroundWarning.settingsUnavailable' => 'Couldn\'t open system settings on this device',
 			'downloads.backgroundWarning.linkUnavailable' => 'Couldn\'t open dontkillmyapp.com on this device',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.options' => 'Downloads options',
 			'downloads.groupings.library' => 'Library',
 			'downloads.groupings.collections' => 'Collections',

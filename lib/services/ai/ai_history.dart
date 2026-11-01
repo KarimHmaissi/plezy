@@ -80,6 +80,9 @@ class AiHistoryEntry {
 /// Each answer is its own setting, so Home can load one without the rest.
 abstract final class AiHistory {
   static const int maxEntries = 200;
+
+  /// Most picks one answer keeps after Find more.
+  static const int maxItemsPerEntry = 200;
   static const String _indexKey = 'ai.history.index';
   static String _entryKey(String id) => 'ai.history.$id';
 

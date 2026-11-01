@@ -81,6 +81,19 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Find more on AI answers, bigger lists (branch `feature/ai-helper`)
+- **Find more** in the hold-OK menu of any saved AI answer (AI tab). It
+  re-asks the same request on Sonnet for *different* titles and puts the
+  new batch at the start of the row, keeping the old picks below. It runs in
+  the background like any request (pulsing chip, retry on failure), and if
+  nothing new fits it says "No more matches". Repeats are filtered out in
+  code too; an answer keeps at most 200 picks. Saved like any answer, so it
+  survives restarts and backups and shows on Home if the row is pinned.
+- **Bigger lists by default:** broad requests now aim for about 30–40 picks
+  and list-style asks ("every…", "all…") for 40–50. Narrow requests still
+  return only the true matches. Tonight (6–10) and Home auto-refresh (≤20)
+  are unchanged.
+
 ### AI answers sized to the request, up to 50 (branch `feature/ai-helper`)
 - **The AI decides how long a list should be**, up to 50 picks: 30–50 for
   big list-style asks (a whole genre, an era, a franchise, "all the X on my

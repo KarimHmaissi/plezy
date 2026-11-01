@@ -44,8 +44,14 @@ import 'settings/ai_settings_screen.dart';
 /// A request running in the background (or failed, waiting for Retry);
 /// [replaceId] is set when it refreshes a saved row.
 class _PendingAsk {
-  _PendingAsk(this.request, {this.replaceId, this.previous = const [], String? label, this.useTitle = false})
-    : label = label ?? request;
+  _PendingAsk(
+    this.request, {
+    this.replaceId,
+    this.previous = const [],
+    String? label,
+    this.useTitle = false,
+    this.extend,
+  }) : label = label ?? request;
 
   final String request;
 
@@ -56,6 +62,9 @@ class _PendingAsk {
 
   /// Name the row with the AI's title instead of the request.
   final bool useTitle;
+
+  /// Find more: new picks go in front of this answer's, which are kept.
+  final AiHistoryEntry? extend;
   String? error;
 }
 
@@ -216,18 +225,30 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     });
     AiActivity.running.value++;
     try {
+      final extend = ask.extend;
       final result = await _fetch(
         ask.request,
         ClaudeModel.sonnet,
         previous: ask.previous,
         id: ask.replaceId,
         useTitle: ask.useTitle,
+        keepTitle: extend?.title,
+        sentRequest: extend == null ? null : _findMoreRequest(extend),
+        excludeKeys: {...?extend?.items.map((i) => i.globalKey)},
       );
-      final entry = result.entry;
-      if (entry == null) {
+      final found = result.entry;
+      if (extend != null && found == null && result.answer.error == null) {
+        // Nothing new that fits: say so rather than leaving a retry chip.
+        if (!mounted) return;
+        setState(() => _pending.remove(ask));
+        showAppSnackBar(context, t.aiTab.noMoreMatches(request: extend.label));
+        return;
+      }
+      if (found == null) {
         if (mounted) setState(() => ask.error = result.answer.error ?? result.answer.intro ?? t.aiTab.noPicks);
         return;
       }
+      final entry = extend == null ? found : _merged(extend, found);
       if (ask.replaceId == null) {
         _conversation.add((request: ask.request, answer: result.answer));
         await AiHistory.add(entry);
@@ -247,7 +268,12 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         }
       });
       if (_visible) {
-        showAppSnackBar(context, t.aiTab.ready(request: entry.label));
+        showAppSnackBar(
+          context,
+          extend == null
+              ? t.aiTab.ready(request: entry.label)
+              : t.aiTab.addedMore(count: found.items.length, request: entry.label),
+        );
       } else {
         AiActivity.unseen.value++;
       }
@@ -271,6 +297,46 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   Future<void> _refreshRow(AiHistoryEntry entry) => _runInBackground(
     _PendingAsk(entry.request, replaceId: entry.id, label: entry.label, useTitle: entry.title != null),
   );
+
+  /// Ask the same request again for titles not already in [entry]; the new
+  /// batch goes in front and the old picks stay (see [_merged]).
+  Future<void> _findMore(AiHistoryEntry entry) => _runInBackground(
+    _PendingAsk(
+      entry.request,
+      replaceId: entry.id,
+      label: t.aiTab.findingMore(request: entry.label),
+      useTitle: entry.title != null,
+      previous: List.of(_conversation),
+      extend: entry,
+    ),
+  );
+
+  static String _findMoreRequest(AiHistoryEntry entry) {
+    final shown = entry.items.map((i) => i.year == null ? i.title : '${i.title} (${i.year})').nonNulls.join('; ');
+    return '${entry.request}\n\n'
+        'Find more: the user already has these picks for this request and wants different titles that fit it '
+        'just as well. Do not repeat any of them: $shown. If nothing else genuinely fits, call show_picks with '
+        'no picks.';
+  }
+
+  /// [found]'s new picks first, then [old]'s, without repeats, capped at
+  /// [AiHistory.maxItemsPerEntry]. Keeps the answer's name, intro and age.
+  static AiHistoryEntry _merged(AiHistoryEntry old, AiHistoryEntry found) {
+    final seen = <String>{};
+    final items = [
+      for (final item in [...found.items, ...old.items])
+        if (seen.add(item.globalKey)) item,
+    ].take(AiHistory.maxItemsPerEntry).toList();
+    return AiHistoryEntry(
+      id: old.id,
+      request: old.request,
+      title: old.title,
+      intro: old.intro,
+      createdAt: old.createdAt,
+      items: items,
+      reasons: {...old.reasons, ...found.reasons},
+    );
+  }
 
   Future<void> _deleteRow(AiHistoryEntry entry) async {
     final confirmed = await showConfirmDialog(
@@ -313,6 +379,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 onSelected: () => showAppSnackBar(context, t.aiTab.homeFull),
               )
             : e,
+      MediaMenuExtraEntry(
+        icon: Symbols.playlist_add_rounded,
+        label: t.aiTab.findMore,
+        onSelected: () => unawaited(_findMore(entry)),
+      ),
       MediaMenuExtraEntry(
         icon: Symbols.refresh_rounded,
         label: t.aiTab.refreshRow,
@@ -358,6 +429,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     List<({String request, AiAnswer answer})> previous = const [],
     String? id,
     bool useTitle = false,
+    String? keepTitle,
+    String? sentRequest,
+    Set<String> excludeKeys = const {},
   }) {
     final servers = context.read<MultiServerProvider>();
     final trakt = context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
@@ -369,6 +443,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       previous: previous,
       id: id,
       useTitle: useTitle,
+      keepTitle: keepTitle,
+      sentRequest: sentRequest,
+      excludeKeys: excludeKeys,
     );
   }
 

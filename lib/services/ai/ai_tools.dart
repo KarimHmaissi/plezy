@@ -177,7 +177,7 @@ class AiTools {
       'name': showPicksTool,
       'description':
           'Show your final picks to the user as a row of playable cards. Call exactly once, at the end, with ids '
-          'returned by the other tools only (never invented). Best first, each with one short reason. Up to 50, sized to the request: 30-50 for big lists, about 15-25 for broad requests, only the true matches for narrow ones.',
+          'returned by the other tools only (never invented). Best first, each with one short reason. Up to 50, sized to the request: 40-50 for list-style asks, about 30-40 for broad requests, only the true matches for narrow ones.',
       'strict': true,
       'input_schema': {
         'type': 'object',
