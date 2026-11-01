@@ -92,6 +92,13 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Fix: phone AI tab's Ask did nothing (branch `feature/ai-helper`)
+- Top-bar actions drawn with a custom label (Ask, Follow-up, retry chips)
+  had no tap handler, only D-pad select, so on a touch screen they did
+  nothing. They now take taps too.
+- On the phone, Ask is never a dead button: when not linked to the TV it
+  says so and reconnects.
+
 ### Mac: surround as Dolby Digital (branch `feature/ai-helper`)
 - **Why.** On the MacBook's HDMI port, 8-channel PCM reached the receiver
   with its channels rotated by a whole slot or more (centre on a front

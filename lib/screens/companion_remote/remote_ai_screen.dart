@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../../utils/app_logger.dart';
+
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -41,7 +43,9 @@ class RemoteAiSession extends ChangeNotifier {
       _remote = remote;
       _sub = remote.aiAnswers.listen(_onAnswer);
     }
-    asks.insert(0, RemoteAiAsk(remote.askAi(request), request));
+    final rid = remote.askAi(request);
+    appLogger.i('AI: request sent to the TV (rid $rid)');
+    asks.insert(0, RemoteAiAsk(rid, request));
     notifyListeners();
   }
 

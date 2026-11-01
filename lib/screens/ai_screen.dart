@@ -27,6 +27,7 @@ import '../services/customisation/customisation_store.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
 import '../services/ai/ai_history.dart';
+import '../services/settings_service.dart';
 import '../services/ai/ai_home_refresher.dart';
 import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_rows.dart';
@@ -269,6 +270,18 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   }
 
   Future<void> _ask() async {
+    if (_thinClient && !_canEditMirror) {
+      // Not linked to the TV right now: say so and try to reconnect, rather
+      // than a button that does nothing.
+      final remote = context.read<CompanionRemoteProvider>();
+      showAppSnackBar(
+        context,
+        t.cast.notConnected(name: MirrorClient.instance.hostName ?? t.companionRemote.unknownDevice),
+      );
+      final host = SettingsService.instance.read(SettingsService.companionRemoteAutoHost);
+      if (host != null && !remote.isConnected) unawaited(remote.autoConnect(host));
+      return;
+    }
     final request = await showTextInputDialog(
       context,
       title: _conversation.isEmpty ? t.aiTab.askTitle : t.aiTab.followUpTitle,
@@ -610,7 +623,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     FocusableAction(
       debugLabel: 'AiAsk',
       autofocus: _rows.isEmpty,
-      onPressed: _hasKey != true || (_thinClient && !_canEditMirror) ? null : () => unawaited(_ask()),
+      onPressed: _thinClient ? () => unawaited(_ask()) : (_hasKey != true ? null : () => unawaited(_ask())),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
