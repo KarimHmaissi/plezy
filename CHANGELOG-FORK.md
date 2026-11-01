@@ -54,6 +54,27 @@ Details of each are in the dated entries below.
 
 ## 2026-11-01
 
+### Library index and AI key (branch `feature/ai-helper`) — `HASH`
+- **Library index** (Phase 1 of the AI helper plan): every movie and show on
+  the Plex servers in a local SQLite file, `plezy_index.db` (a cache: safe to
+  delete, rebuilt automatically, not backed up). It stores title, year, dates,
+  runtime, ratings, genres, cast, director, collections, IMDb/TMDB/TVDB ids and
+  watch state, with full-text search over titles, summaries and cast, and
+  groups the same title across 4K copies and both servers.
+- Built gently in the background 30 s after Plezy starts: one request every
+  1.5 s, 500 titles per page, resuming where it stopped if interrupted. It
+  then refreshes every 6 hours with "added/updated since" checks.
+- First build on the PC: 166 requests in about 5.5 minutes. 51,894 movie
+  entries and 23,099 shows (exactly the probe's counts), which are 30,663
+  unique films and 15,466 unique shows. About 90 MB. Searches take 1–20 ms.
+- **Settings ▸ AI**: the Anthropic API key, pasted in or sent from another
+  device. **Receive key from another device** opens a one-time page on the
+  home network (LAN address and a 6-digit code shown on the TV); it saves the
+  key and closes after one use, 3 wrong codes or 5 minutes. The key is
+  checked with a free model-list call, stored encrypted on this device only,
+  shown only as its last 4 characters, and never logged, exported or backed
+  up.
+
 ### Watchlist source switch and Comfort "Carry on watching" — `ef3f7c918`
 - **Watchlist**: a Plex / Trakt switch at the top (like Explore's source
   selector), remembered on the device and included in backups. Trakt's

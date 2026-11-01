@@ -43,6 +43,8 @@ import '../profiles/profile_activation.dart';
 import '../profiles/profile_avatar.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../services/catalog/home_pins.dart';
+import '../services/library_index/library_index.dart';
+import '../services/plex_client.dart';
 import '../services/catalog/home_rows.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../services/catalog/trakt_lists_catalog_source.dart';
@@ -564,6 +566,20 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // titles when its source appears or changes.
     _catalogSources = context.read<CatalogSourcesProvider?>()?..addListener(_onCatalogSourcesChanged);
     _homePins.addListener(_onHomePinsChanged);
+    // Build or refresh the library index in the background once the
+    // servers have connected and startup has settled.
+    Future<void>.delayed(const Duration(seconds: 30), () {
+      if (!mounted) return;
+      final servers = context.read<MultiServerProvider>();
+      unawaited(
+        LibraryIndex.instance.start(
+          () => [
+            for (final id in servers.onlineServerIds)
+              if (servers.getClientForServer(ServerId(id)) case final PlexClient client) PlexIndexSource(client),
+          ],
+        ),
+      );
+    });
     unawaited(_homePins.ensureLoaded());
     _onCatalogSourcesChanged();
     _startAutoScroll();

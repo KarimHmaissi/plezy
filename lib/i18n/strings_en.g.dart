@@ -65,6 +65,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$profiles$en profiles = Translations$profiles$en.internal(_root);
 	late final Translations$connections$en connections = Translations$connections$en.internal(_root);
 	late final Translations$accountPreferences$en accountPreferences = Translations$accountPreferences$en.internal(_root);
+	late final Translations$ai$en ai = Translations$ai$en.internal(_root);
 	late final Translations$backupTransfer$en backupTransfer = Translations$backupTransfer$en.internal(_root);
 	late final Translations$homeRows$en homeRows = Translations$homeRows$en.internal(_root);
 	late final Translations$discover$en discover = Translations$discover$en.internal(_root);
@@ -3253,6 +3254,96 @@ class Translations$accountPreferences$en {
 	String get mediaReviewsVisibility => 'Ratings & reviews';
 
 	late final Translations$accountPreferences$mediaReviewsOptions$en mediaReviewsOptions = Translations$accountPreferences$mediaReviewsOptions$en.internal(_root);
+}
+
+// Path: ai
+class Translations$ai$en {
+	Translations$ai$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'AI'
+	String get settingsTitle => 'AI';
+
+	/// en: 'Anthropic API key for the AI helper'
+	String get settingsSubtitle => 'Anthropic API key for the AI helper';
+
+	/// en: 'The AI helper uses your own Anthropic API key. It's stored encrypted on this device only, never shown in full, and never included in exports or backups.'
+	String get keyExplainer => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.';
+
+	/// en: 'Paste API key'
+	String get pasteKey => 'Paste API key';
+
+	/// en: 'Replace API key'
+	String get replaceKey => 'Replace API key';
+
+	/// en: 'Anthropic API key'
+	String get keyLabel => 'Anthropic API key';
+
+	/// en: 'Anthropic keys start with sk-ant-'
+	String get keyFormat => 'Anthropic keys start with sk-ant-';
+
+	/// en: 'No key on this device yet'
+	String get noKey => 'No key on this device yet';
+
+	/// en: 'Key ${hint} saved on this device'
+	String keySet({required Object hint}) => 'Key ${hint} saved on this device';
+
+	/// en: 'Test key'
+	String get testKey => 'Test key';
+
+	/// en: 'The key works'
+	String get keyWorks => 'The key works';
+
+	/// en: 'Anthropic rejected that key; check it and try again'
+	String get keyRejected => 'Anthropic rejected that key; check it and try again';
+
+	/// en: 'Couldn't reach Anthropic to check the key; it's saved and will be checked on first use'
+	String get keyUnreachable => 'Couldn\'t reach Anthropic to check the key; it\'s saved and will be checked on first use';
+
+	/// en: 'Remove key'
+	String get removeKey => 'Remove key';
+
+	/// en: 'Remove the API key?'
+	String get removeKeyTitle => 'Remove the API key?';
+
+	/// en: 'The AI helper stops working on this device until a key is added again.'
+	String get removeKeyMessage => 'The AI helper stops working on this device until a key is added again.';
+
+	/// en: 'Receive key from another device'
+	String get receiveKey => 'Receive key from another device';
+
+	/// en: 'Open a one-time page on your home network and paste the key there from a phone or laptop'
+	String get receiveKeyDescription => 'Open a one-time page on your home network and paste the key there from a phone or laptop';
+
+	/// en: 'Send the key from another device'
+	String get receiveTitle => 'Send the key from another device';
+
+	/// en: 'On a phone or laptop on the same Wi-Fi, open:'
+	String get receiveStep1 => 'On a phone or laptop on the same Wi-Fi, open:';
+
+	/// en: 'Then enter this code with the key:'
+	String get receiveStep2 => 'Then enter this code with the key:';
+
+	/// en: 'This page works once and closes after 5 minutes or 3 wrong codes.'
+	String get receiveExpiry => 'This page works once and closes after 5 minutes or 3 wrong codes.';
+
+	/// en: 'This device isn't on a home network, so the key can't be sent from another device'
+	String get receiveNoNetwork => 'This device isn\'t on a home network, so the key can\'t be sent from another device';
+
+	/// en: 'Too many wrong codes; the page is closed'
+	String get receiveTooManyAttempts => 'Too many wrong codes; the page is closed';
+
+	/// en: 'The page closed after 5 minutes without a key'
+	String get receiveTimedOut => 'The page closed after 5 minutes without a key';
+
+	/// en: 'Models'
+	String get modelsTitle => 'Models';
+
+	/// en: 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.'
+	String get modelsDescription => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.';
 }
 
 // Path: backupTransfer
@@ -9574,6 +9665,33 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.usersOnly' => 'Users only',
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
+			'ai.settingsTitle' => 'AI',
+			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
+			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
+			'ai.pasteKey' => 'Paste API key',
+			'ai.replaceKey' => 'Replace API key',
+			'ai.keyLabel' => 'Anthropic API key',
+			'ai.keyFormat' => 'Anthropic keys start with sk-ant-',
+			'ai.noKey' => 'No key on this device yet',
+			'ai.keySet' => ({required Object hint}) => 'Key ${hint} saved on this device',
+			'ai.testKey' => 'Test key',
+			'ai.keyWorks' => 'The key works',
+			'ai.keyRejected' => 'Anthropic rejected that key; check it and try again',
+			'ai.keyUnreachable' => 'Couldn\'t reach Anthropic to check the key; it\'s saved and will be checked on first use',
+			'ai.removeKey' => 'Remove key',
+			'ai.removeKeyTitle' => 'Remove the API key?',
+			'ai.removeKeyMessage' => 'The AI helper stops working on this device until a key is added again.',
+			'ai.receiveKey' => 'Receive key from another device',
+			'ai.receiveKeyDescription' => 'Open a one-time page on your home network and paste the key there from a phone or laptop',
+			'ai.receiveTitle' => 'Send the key from another device',
+			'ai.receiveStep1' => 'On a phone or laptop on the same Wi-Fi, open:',
+			'ai.receiveStep2' => 'Then enter this code with the key:',
+			'ai.receiveExpiry' => 'This page works once and closes after 5 minutes or 3 wrong codes.',
+			'ai.receiveNoNetwork' => 'This device isn\'t on a home network, so the key can\'t be sent from another device',
+			'ai.receiveTooManyAttempts' => 'Too many wrong codes; the page is closed',
+			'ai.receiveTimedOut' => 'The page closed after 5 minutes without a key',
+			'ai.modelsTitle' => 'Models',
+			'ai.modelsDescription' => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.',
 			'backupTransfer.title' => 'Backup & transfer',
 			'backupTransfer.settingsSubtitle' => 'Move your Home rows and Comfort settings to another device',
 			'backupTransfer.description' => 'Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).',
@@ -9991,6 +10109,8 @@ extension on Translations {
 			'explore.sourceMaterial.original' => 'Original',
 			'explore.sourceMaterial.manga' => 'Manga',
 			'explore.sourceMaterial.lightNovel' => 'Light novel',
+			_ => null,
+		} ?? switch (path) {
 			'explore.sourceMaterial.novel' => 'Novel',
 			'explore.sourceMaterial.visualNovel' => 'Visual novel',
 			'explore.sourceMaterial.game' => 'Game',
@@ -10018,8 +10138,6 @@ extension on Translations {
 			'explore.detail.alsoKnownAs' => 'Also known as',
 			'explore.detail.studios' => 'Studios',
 			'explore.detail.country' => 'Country',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.language' => 'Language',
 			'explore.detail.released' => 'Released',
 			'explore.detail.physicalRelease' => 'On disc',
@@ -10505,6 +10623,8 @@ extension on Translations {
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Delete "${name}"?',
 			'companionRemote.title' => 'Companion Remote',
 			'companionRemote.connectedTo' => ({required Object name}) => 'Connected to ${name}',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.unknownDevice' => 'Unknown Device',
 			'companionRemote.session.startingServer' => 'Starting remote server...',
 			'companionRemote.session.hostAddress' => 'Host Address',
@@ -10532,8 +10652,6 @@ extension on Translations {
 			'companionRemote.pairing.connectionTimedOut' => 'Connection timed out. Use the same network on both devices.',
 			'companionRemote.pairing.sessionNotFound' => 'Device not found. Make sure Plezy is running on the host.',
 			'companionRemote.pairing.authFailed' => 'Authentication failed. Both devices need the same Plex account.',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Failed to connect: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Do you want to disconnect from the remote session?',
 			'companionRemote.remote.reconnecting' => 'Reconnecting...',
