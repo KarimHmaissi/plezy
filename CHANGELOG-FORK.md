@@ -42,6 +42,11 @@ Details of each are in the dated entries below.
   menu, ask the AI about that title ("is it scary?", "do I need to have
   seen the first one?", "more like this but lighter"), with the answer and
   any picks shown on the spot.
+- **"More like this" from any title** — a new entry in a title's hold-OK
+  menu that sends it to the AI ("titles similar to <title>"). It switches to
+  the AI tab and adds a new row of similar titles (running in the
+  background like any request), named by the AI, e.g. "Twisty mysteries
+  like Dark".
 - **"Previously on"** — when you go back to a show after a break, a short,
   spoiler-free AI recap of what's happened up to the episode you're on.
 
