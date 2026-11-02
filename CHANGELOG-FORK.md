@@ -23,7 +23,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       row anywhere in Plezy can be added; same-title rows merge (synced via
       Trakt)
 
-### AI (branch `feature/ai-helper`, not merged yet)
+### AI (merged to `main` on 2026-11-02)
 - [x] Library index of every film and show (built on first open, updated
       every 6 hours)
 - [x] AI helper core: Sonnet 5.5 for requests, Haiku 5.5 for background
@@ -46,6 +46,13 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       to the TV
 - [x] Media notification on the phone for what the TV is playing
 - [x] Mac: surround sent to the receiver as Dolby Digital
+- [x] Watch history brain: a local index of what you've watched and own,
+      with embeddings, for history questions and "like this" picks
+- [x] History page with insights, and sending Plex watches to Trakt
+- [x] AI page on phones: each answer is a tile at the start of its row,
+      opening an answer page; Tonight cards at the top (once a day)
+- [x] Phone restyle: style guide, Plex-like side drawer, calmer motion;
+      companion link survives sleep
 
 Details of each are in the dated entries below.
 
@@ -92,7 +99,30 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
-### AI answers on the AI page (branch `feature/ai-helper`)
+### Tonight on the AI page (phones and desktop)
+- Three wide cards at the top: **New episode** (a show you're partway
+  through with episodes you haven't seen, newest additions first),
+  **Tonight's pick** (the strongest unwatched match for what you love,
+  rated 7+, a film of 80-150 minutes or a show) and **From your library**
+  (rated 8+, critics 7.5+ when known, on the server a year or more).
+- Titles come from the history brain and the local library index, with no
+  server crawl; Haiku writes one line per card. Made on the host once a
+  day (about 2 s, well under a cent) and mirrored to the phone.
+- Pull to refresh reloads saved answers for free, then asks "Make a new
+  Tonight?" (No / Yes) before spending a model call. A phone asks the host.
+- Replaces the daily briefing; the TV keeps its Tonight row.
+
+### AI answers as a tile and a page (phones and desktop)
+- The answer text left the page: each answer row starts with a tile (the
+  top pick's art under a scrim, what you asked, the headline, "Read" and
+  the pick count). Running and failed requests show as the same tile.
+- The tile, or the row's title, opens the answer page: the question, the
+  headline, the overview, Top picks and Worth a closer look (poster, title,
+  year, why), notes, follow-up chips, every pick as a grid, and the row's
+  actions under ⋯.
+- Reasons that start with their own title drop it ("It has…").
+
+### AI answers on the AI page (first version, replaced by the tile above)
 - Each answer is one block on phones and desktop: the row title, what you
   asked, a 3-4 sentence overview, the top pick(s) and a few spotlighted
   titles, "worth knowing" notes and follow-up chips, then the posters.
