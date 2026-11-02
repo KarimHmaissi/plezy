@@ -1241,7 +1241,9 @@
     "tonightNewEpisode": "New episode",
     "tonightPick": "Tonight's pick",
     "tonightLibrary": "From your library",
-    "tonightUpdated": "Made ${time}"
+    "tonightUpdated": "Made ${time}",
+    "tonightConfirm": "Make a new Tonight?",
+    "tonightConfirmBody": "Three fresh cards, using one small AI call."
   },
   "ai": {
     "settingsTitle": "AI",

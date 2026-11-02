@@ -314,7 +314,44 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   /// Pull to refresh and the toolbar's refresh: new Tonight picks and a new
   /// briefing.
-  Future<void> _refreshAll() => _cardsInline ? _briefing(force: true) : _tonight(refresh: true);
+  Future<void> _refreshAll() => _cardsInline ? _pullRefresh() : _tonight(refresh: true);
+
+  bool _confirming = false;
+
+  /// Touch screens: free reloads straight away, then a confirm before
+  /// anything that costs a model call (a new Tonight).
+  Future<void> _pullRefresh() async {
+    await _loadHistory();
+    if (!mounted || _confirming) return;
+    if (_thinClient ? !_canEditMirror : _hasKey != true) return;
+    // After the refresh indicator settles.
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_confirmNewTonight()));
+  }
+
+  Future<void> _confirmNewTonight() async {
+    if (!mounted || _confirming) return;
+    _confirming = true;
+    final bool? yes;
+    try {
+      yes = await showModalBottomSheet<bool>(
+        context: context,
+        useSafeArea: true,
+        backgroundColor: tokens(context).surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(tokens(context).radiusLg)),
+        ),
+        builder: (context) => const _TonightConfirm(),
+      );
+    } finally {
+      _confirming = false;
+    }
+    if (yes != true || !mounted) return;
+    if (!_thinClient) return _briefing(force: true);
+    // The TV makes it; the new cards arrive with the next snapshot.
+    final remote = context.read<CompanionRemoteProvider>();
+    final rid = 'tonight-${DateTime.now().microsecondsSinceEpoch}';
+    remote.sendCommand(RemoteCommandType.aiAction, data: {'action': 'tonight', 'rid': rid});
+  }
 
   Future<void> _loadHistory() async {
     try {
@@ -964,6 +1001,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     );
   }
 
+  /// The row title's tap on touch screens: the same answer page as its tile.
+  VoidCallback? _answerOpener(MediaHub hub) {
+    final entry = _entryForHub(hub);
+    if (!_cardsInline || entry == null || (entry.cardText ?? '').trim().isEmpty) return null;
+    return () => _openAnswer(hub, entry);
+  }
+
   static String _firstSentence(String text) {
     final m = RegExp(r'^.+?[.!?](?=\s|$)', dotAll: true).firstMatch(text.trim());
     return m?.group(0) ?? text.trim();
@@ -1310,9 +1354,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         body: RefreshIndicator(
           // Pull to refresh does what the toolbar's refresh does: new Tonight
           // picks (a phone mirroring its TV reloads the TV's answers).
-          onRefresh: ForkMotion.refreshing(
-            () => _thinClient ? _loadHistory() : (_hasKey == true ? _refreshAll() : _start()),
-          ),
+          onRefresh: ForkMotion.refreshing(() => _thinClient || _hasKey == true ? _pullRefresh() : _start()),
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
@@ -1363,6 +1405,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                             trailingCard: _trailingCard(hubs[i]),
                             belowTitle: _tileOnly(hubs[i]),
                             leadingTile: _answerTile(hubs[i]),
+                            onTitleTap: _answerOpener(hubs[i]),
                             badgesFor: _badgesFor(hubs[i]),
                             titleTrailing: _cardsInline ? _rowMenuButton(hubs[i]) : null,
                             focusMemory: _hubFocusMemory,
@@ -1498,6 +1541,38 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The pull-to-refresh confirm: a small sheet at the thumb, No / Yes.
+class _TonightConfirm extends StatelessWidget {
+  const _TonightConfirm();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    final spacing = ForkSpacing.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(spacing.edgeInset, 20, spacing.edgeInset, 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(t.aiTab.tonightConfirm, style: theme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(t.aiTab.tonightConfirmBody, style: theme.bodyMedium?.copyWith(color: tokens(context).textMuted)),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(t.common.no)),
+              const SizedBox(width: 8),
+              FilledButton(onPressed: () => Navigator.of(context).pop(true), child: Text(t.common.yes)),
+            ],
           ),
         ],
       ),

@@ -7,6 +7,7 @@ import '../services/ai/ai_history.dart';
 import '../services/settings_service.dart';
 import '../theme/fork_spacing.dart';
 import '../theme/mono_tokens.dart';
+import '../widgets/ai_answer_card.dart' show withoutLeadingTitle;
 import '../widgets/media_card.dart';
 
 /// Fork: "Tonight" at the top of the AI page on touch screens: up to three
@@ -71,7 +72,8 @@ class AiTonightBlock extends StatelessWidget {
                   separatorBuilder: (_, _) => SizedBox(width: spacing.cardGap),
                   itemBuilder: (context, i) {
                     final item = entry.items[i];
-                    final reason = entry.reasons[item.globalKey];
+                    final raw = entry.reasons[item.globalKey];
+                    final reason = raw == null ? null : withoutLeadingTitle(raw, item.title);
                     return SizedBox(
                       width: width,
                       child: Column(

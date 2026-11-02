@@ -94,6 +94,7 @@ abstract final class BrainDebug {
         final e = await AiBriefing.today(clientFor: servers, force: true);
         return {
           'seconds': DateTime.now().difference(started).inMilliseconds / 1000,
+          'facts': AiBriefing.lastFacts,
           'cards': [
             for (final i in e?.items ?? const <MediaItem>[])
               '${e!.spotlights[i.globalKey]}: ${i.title} (${i.year}) | ${e.reasons[i.globalKey]}',

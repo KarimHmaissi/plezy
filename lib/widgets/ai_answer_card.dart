@@ -489,5 +489,31 @@ class AiAnswerTile extends StatelessWidget {
   }
 }
 
+/// [text] without [title] at its start (the model naming the title its
+/// line sits under): compared ignoring case and punctuation, the rest
+/// capitalised. Unchanged when it doesn't start with it.
+String withoutLeadingTitle(String text, String? title) {
+  bool letter(String c) => RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(c);
+  final want = [
+    for (final c in (title ?? '').toLowerCase().split(''))
+      if (letter(c)) c,
+  ];
+  if (want.isEmpty) return text;
+  var i = 0, matched = 0;
+  while (i < text.length && matched < want.length) {
+    final c = text[i].toLowerCase();
+    if (letter(c)) {
+      if (c != want[matched]) return text;
+      matched++;
+    }
+    i++;
+  }
+  // The title must end at a word break ("Fuze has", not "Fuzed").
+  if (matched < want.length || (i < text.length && letter(text[i]))) return text;
+  final rest = text.substring(i).replaceFirst(RegExp(r"^('s\b)?[\s:,;.\-–—]*"), '');
+  if (rest.isEmpty) return text;
+  return rest[0].toUpperCase() + rest.substring(1);
+}
+
 /// A title the answer says something about.
 typedef AiTitleNote = ({String title, String text, GestureRecognizer? onTap});

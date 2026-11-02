@@ -12,6 +12,7 @@ import '../theme/fork_spacing.dart';
 import '../theme/mono_tokens.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/provider_extensions.dart';
+import '../widgets/ai_answer_card.dart' show withoutLeadingTitle;
 import '../widgets/app_icon.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/desktop_app_bar.dart';
@@ -59,7 +60,7 @@ class AiAnswerPage extends StatelessWidget {
 
     List<(MediaItem, String)> noted(Map<String, String> notes) => [
       for (final item in entry.items)
-        if (notes[item.globalKey] case final text?) (item, text),
+        if (notes[item.globalKey] case final text?) (item, withoutLeadingTitle(text, item.title)),
     ];
     final topPicks = noted(entry.topPicks);
     final spotlights = noted(entry.spotlights);

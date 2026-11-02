@@ -23,8 +23,8 @@ import 'claude_client.dart';
 ///   haven't seen, newest additions first.
 /// - Tonight's pick: the strongest unwatched match for their taste that
 ///   fits an evening.
-/// - From your library: a highly rated title that's been on the server a
-///   year or more, also matching their taste.
+/// - From your library: rated 8+ by audiences (7.5+ by critics, when
+///   known) and on the server a year or more, also matching their taste.
 ///
 /// The titles come from the history brain and the local library index (no
 /// server crawl); Haiku only writes the lines. Made on the host at most
@@ -43,6 +43,9 @@ abstract final class AiBriefing {
   static const String slotLibrary = 'library';
 
   static Future<AiHistoryEntry?>? _running;
+
+  /// What the last run knew about each card (for checking by hand).
+  static List<String> lastFacts = const [];
 
   /// The saved card set, whatever its day.
   static Future<AiHistoryEntry?> cached() async {
@@ -86,6 +89,7 @@ abstract final class AiBriefing {
       if (picked.gem case final g?) (slotLibrary, g.profile, g.facts),
     ];
     if (slots.isEmpty) return cached();
+    lastFacts = [for (final (slot, p, facts) in slots) '$slot: ${p.title}: $facts'];
 
     final client = ClaudeClient(key);
     try {
@@ -165,7 +169,7 @@ abstract final class AiBriefing {
       final chunk = list.sublist(i, (i + 500).clamp(0, list.length));
       final rows = await db
           .customSelect(
-            'SELECT id, episode_count, added_at, updated_at, audience_rating, duration_minutes '
+            'SELECT id, episode_count, added_at, updated_at, audience_rating, critic_rating, duration_minutes '
             'FROM index_titles WHERE id IN (${List.filled(chunk.length, '?').join(',')})',
             variables: [for (final id in chunk) Variable<String>(id)],
             readsFrom: {db.indexTitles},
@@ -246,7 +250,8 @@ abstract final class AiBriefing {
   }
 
   /// Tonight's pick (rated 7+, a film of 80-150 minutes or a show) and a
-  /// library gem (rated 7.5+, on the server a year or more), not the same.
+  /// library gem (rated 8+, critics 7.5+ when known, on the server a year
+  /// or more), not the same.
   static Future<({({TitleProfile profile, String facts})? pick, ({TitleProfile profile, String facts})? gem})>
   _pickAndGem(List<({TitleProfile profile, double score, List<String> like})> pool, DateTime now) async {
     if (pool.isEmpty) return (pick: null, gem: null);
@@ -260,6 +265,7 @@ abstract final class AiBriefing {
         p.isMovie ? 'Film' : 'Show',
         if (minutes != null) '$minutes min${p.isMovie ? '' : ' episodes'}',
         if (rating(p) case final r?) 'rated ${r.toStringAsFixed(1)}/10',
+        if (rows[_cardId(p)]?.readNullable<double>('critic_rating') case final r?) 'critics ${r.toStringAsFixed(1)}/10',
         _genres(p),
         'Like their ${c.like.take(3).join(', ')}',
         if (p.summary case final s? when s.isNotEmpty) s.length > 280 ? '${s.substring(0, 280)}…' : s,
@@ -277,8 +283,9 @@ abstract final class AiBriefing {
     final gem = top.where((c) {
       if (identical(c, pick)) return false;
       final r = rating(c.profile);
+      final critics = rows[_cardId(c.profile)]?.readNullable<double>('critic_rating');
       final added = rows[_cardId(c.profile)]?.readNullable<int>('added_at');
-      return r != null && r >= 7.5 && added != null && added < yearAgo;
+      return r != null && r >= 8 && (critics == null || critics >= 7.5) && added != null && added < yearAgo;
     }).firstOrNull;
     return (
       pick: pick == null ? null : (profile: pick.profile, facts: facts(pick)),

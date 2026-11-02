@@ -125,6 +125,10 @@ class HubSection extends StatefulWidget {
   /// caption's under it); it scrolls with the cards and isn't a d-pad stop.
   final Widget Function(double height, double band)? leadingTile;
 
+  /// Fork: where the title (and its chevron) goes instead of the See all
+  /// page (an AI answer's page).
+  final VoidCallback? onTitleTap;
+
   const HubSection({
     super.key,
     required this.hub,
@@ -142,6 +146,7 @@ class HubSection extends StatefulWidget {
     this.titleTrailing,
     this.belowItems,
     this.leadingTile,
+    this.onTitleTap,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -504,6 +509,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
   /// from the header, not only rows the server says have more (cast rows
   /// excepted). Elsewhere unchanged.
   bool get _canSeeAll =>
+      widget.onTitleTap != null ||
       widget.hub.more ||
       (defaultTargetPlatform == TargetPlatform.android &&
           !PlatformDetector.isTV() &&
@@ -527,6 +533,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
 
   void _openSeeAll(BuildContext context) {
     ForkMotion.selection();
+    if (widget.onTitleTap case final open?) return open();
     _navigateToHubDetail(context);
   }
 

@@ -9,6 +9,7 @@ import '../../utils/app_logger.dart';
 import '../trackers/trakt/trakt_client.dart';
 import 'ai_agent.dart';
 import 'ai_activity.dart';
+import 'ai_briefing.dart';
 import 'ai_history.dart';
 import 'ai_key_store.dart';
 import 'ai_pick_reasons.dart';
@@ -113,6 +114,12 @@ abstract final class AiRemoteAsks {
       final key = data['key'] as String?;
       final text = id == null || key == null ? null : await AiPickReasons.reasonFor(id, key);
       if (rid != null) remote?.sendAiAnswer({'rid': rid, 'status': text == null ? 'error' : 'done', 'text': ?text});
+      return;
+    }
+    // Tonight's cards made afresh (the phone's pull to refresh, confirmed).
+    if (action == 'tonight') {
+      final entry = await AiBriefing.today(clientFor: clientFor, force: true);
+      if (rid != null) remote?.sendAiAnswer({'rid': rid, 'status': entry == null ? 'error' : 'done'});
       return;
     }
     var status = 'error';

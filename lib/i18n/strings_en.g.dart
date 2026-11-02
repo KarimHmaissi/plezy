@@ -3445,6 +3445,12 @@ class Translations$aiTab$en {
 
 	/// en: 'Made ${time}'
 	String tonightUpdated({required Object time}) => 'Made ${time}';
+
+	/// en: 'Make a new Tonight?'
+	String get tonightConfirm => 'Make a new Tonight?';
+
+	/// en: 'Three fresh cards, using one small AI call.'
+	String get tonightConfirmBody => 'Three fresh cards, using one small AI call.';
 }
 
 // Path: ai
@@ -10425,6 +10431,8 @@ extension on Translations {
 			'aiTab.tonightPick' => 'Tonight\'s pick',
 			'aiTab.tonightLibrary' => 'From your library',
 			'aiTab.tonightUpdated' => ({required Object time}) => 'Made ${time}',
+			'aiTab.tonightConfirm' => 'Make a new Tonight?',
+			'aiTab.tonightConfirmBody' => 'Three fresh cards, using one small AI call.',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10808,10 +10816,10 @@ extension on Translations {
 			'comfort.picking' => 'Picking an episode…',
 			'comfort.nothingToPlay' => 'None of the shows in the mix are on your servers',
 			'comfort.noEpisodes' => 'No episodes of this show are on your server',
-			'comfort.allPaused' => 'Every show is paused. Turn some on in Configure',
-			'comfort.play' => 'Play',
 			_ => null,
 		} ?? switch (path) {
+			'comfort.allPaused' => 'Every show is paused. Turn some on in Configure',
+			'comfort.play' => 'Play',
 			'comfort.pickAgain' => 'Pick again',
 			'comfort.episodeLabel' => ({required Object season, required Object episode}) => 'S${season} E${episode}',
 			'comfort.playImmediately' => 'Play immediately',
@@ -11322,10 +11330,10 @@ extension on Translations {
 			'downloads.storageFull' => 'Downloads stopped to protect available storage. Free some space or choose another download location, then retry.',
 			'downloads.storageUnavailable' => 'Downloads stopped because available storage could not be checked. Check the download location, then retry.',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
-			'downloads.downloadDeleted' => 'Download deleted',
-			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.downloadDeleted' => 'Download deleted',
+			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
 			'downloads.deleteCollectionDownloads' => 'Delete downloads',
 			'downloads.deleteCollectionDownloadsConfirm' => ({required Object title}) => 'Delete every download in "${title}" from this device?',
 			'downloads.collectionDownloadsDeleted' => 'Downloads deleted',
@@ -11836,10 +11844,10 @@ extension on Translations {
 			'addServer.serverTimedOut' => 'The server did not respond in time',
 			'addServer.responseNotJson' => 'The server response was not valid JSON',
 			'addServer.responseMissingIdentity' => ({required Object product}) => 'The response is missing an ID or server name — is this a ${product} server?',
-			'addServer.probeFailed' => ({required Object error}) => 'Could not reach the server: ${error}',
-			'addServer.enterAtLeastOneUrl' => ({required Object product}) => 'Enter at least one ${product} server URL',
 			_ => null,
 		} ?? switch (path) {
+			'addServer.probeFailed' => ({required Object error}) => 'Could not reach the server: ${error}',
+			'addServer.enterAtLeastOneUrl' => ({required Object product}) => 'Enter at least one ${product} server URL',
 			'addServer.noReachableServer' => ({required Object product}) => 'No reachable ${product} server was found',
 			'addServer.urlsPointToDifferentServers' => ({required Object product}) => 'These URLs point to different ${product} servers',
 			'addServer.urlDoesNotMatchServer' => ({required Object product}) => 'This URL does not match the ${product} server',
