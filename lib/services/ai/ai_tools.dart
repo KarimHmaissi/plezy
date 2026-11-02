@@ -43,6 +43,35 @@ class AiTools {
   List<({String id, String text})> spotlights = const [];
   List<({String id, String text})> topPicks = const [];
 
+  /// Fork: how big the request is ('narrow', 'broad' or 'list'), and every
+  /// title id the lookups returned, in order: a short broad row is topped
+  /// up from these without another turn.
+  String? scope;
+  final Set<String> _seenCandidates = {};
+
+  static final RegExp _lineId = RegExp(r'^([^\s|]+:[^\s|]+) \|', multiLine: true);
+
+  /// Remember the ids in a lookup's [result] lines. The model's own
+  /// candidates (find_titles) rank first, then titles like ones they loved,
+  /// then keyword searches.
+  void noteCandidates(String tool, String result) {
+    final rank = switch (tool) {
+      'find_titles' => 0,
+      'similar_titles' => 1,
+      _ => 2,
+    };
+    for (final m in _lineId.allMatches(result)) {
+      if (_seenCandidates.add(m.group(1)!)) _ranked.add((id: m.group(1)!, rank: rank, order: _ranked.length));
+    }
+  }
+
+  final List<({String id, int rank, int order})> _ranked = [];
+
+  /// [noteCandidates]' ids, best source first.
+  List<String> get candidates => [
+    for (final c in [..._ranked]..sort((a, b) => a.rank != b.rank ? a.rank - b.rank : a.order - b.order)) c.id,
+  ];
+
   void _readExtras(Map<String, dynamic> input) {
     List<String> strings(String key) => [
       for (final v in (input[key] as List? ?? const []))
@@ -220,12 +249,19 @@ class AiTools {
       'name': showPicksTool,
       'description':
           'Show your final picks to the user as a row of playable cards. Call exactly once, at the end, with ids '
-          'returned by the other tools only (never invented). Best first, each with one short reason. Up to 50, sized to the request: 40-50 for list-style asks, about 30-40 for broad requests, only the true matches for narrow ones.',
+          'returned by the other tools only (never invented). Best first; only the first 10 get a reason. Up to 50, sized to the request: 40-50 for list-style asks, about 30-40 for broad requests, only the true matches for narrow ones.',
       'strict': true,
       'input_schema': {
         'type': 'object',
         'properties': {
           'title': {'type': 'string', 'description': 'A short name for this row of picks, 2-6 words'},
+          'scope': {
+            'type': 'string',
+            'enum': ['narrow', 'broad', 'list'],
+            'description':
+                'narrow: a specific title, yes/no or tight constraints; broad: a genre, mood, era or "like X"; '
+                'list: every/all of something',
+          },
           'intro': {'type': 'string', 'description': 'One friendly sentence introducing the picks'},
           'writeup': {
             'type': 'string',
@@ -269,7 +305,9 @@ class AiTools {
                 'id': {'type': 'string'},
                 'reason': {
                   'type': 'string',
-                  'description': 'Why this fits the request, under 15 words, specific to the title (never a placeholder)',
+                  'description':
+                      'For the first 10 picks only: why this fits the request, under 15 words, specific to the '
+                      'title (never a placeholder). An empty string for every pick after the 10th.',
                 },
               },
               'required': ['id', 'reason'],
@@ -277,7 +315,7 @@ class AiTools {
             },
           },
         },
-        'required': ['title', 'intro', 'writeup', 'top_picks', 'spotlights', 'notes', 'follow_ups', 'picks'],
+        'required': ['title', 'scope', 'intro', 'writeup', 'top_picks', 'spotlights', 'notes', 'follow_ups', 'picks'],
         'additionalProperties': false,
       },
     },
@@ -383,6 +421,7 @@ class AiTools {
             if (p['id'] is String && '${p['text'] ?? ''}'.trim().isNotEmpty)
               (id: p['id'] as String, text: '${p['text']}'.trim()),
         ];
+        scope = input['scope'] as String?;
         topPicks = idTexts('top_picks', 2);
         spotlights = idTexts('spotlights', 3);
         final listed = [

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../../utils/app_logger.dart';
 import '../brain/history_brain.dart';
+import '../brain/history_profiles.dart';
 import '../library_index/index_database.dart';
 import '../library_index/library_index.dart';
 import '../trackers/trakt/trakt_client.dart';
@@ -133,13 +134,14 @@ How to work:
 - Ratings in the library are audience ratings (usually IMDb, 0-10). Brand-new titles often show 9-10 from a handful of votes; before calling a recent title top rated or popular, check a shortlist with get_ratings and prefer titles with many votes.
 - Only pick titles whose ids came back from the tools. Never invent ids or claim a title is available without a tool saying so.
 - Prefer one entry per title (the tools already merge 4K copies and the second server).
+- Recommendations are titles they haven't seen: leave out anything in their watching summary or marked watched, unless they ask for a rewatch or for titles they've seen.
 - Respect explicit limits: unwatched means unwatched; runtime limits; "not too long" means roughly under 2 hours.
 - Prefer films and shows from roughly the last 25 years unless the user asks for classics, a decade, or older titles; a few standout older picks are fine.
 - How many picks: let the request decide, up to 50. List-style asks ("every...", "all the X on my server", "a big list", a full franchise or filmography): 40-50. Broad or open-ended requests (a genre, a mood, an era, "something like X", "based on my history"): about 30-40; the library is big, so a broad request should normally fill a long row. Narrow requests (a specific title, a yes/no question, "a random X", tight constraints): only the titles that genuinely fit, even if that's one or two. Never pad a list with weak matches to reach a number.
-- Finish by calling show_picks exactly once, best first, each pick with one short, specific reason.
+- Finish by calling show_picks exactly once, best first.
 - Always finish with show_picks, even for yes/no questions ("is X on my server?", "do I have Y?"): put the answer in the intro and the title (or the closest matches) as picks so the user can play it. If nothing fits, call show_picks with an intro saying so and no picks.
 - Keep it quick: usually two turns. In the first, call every tool you need at once, in parallel, asking for enough candidates to fill the row after filtering: for a broad request that means find_titles with 50-60 of your own candidates, plus similar_titles (limit 30) from two or three titles they loved and/or search_library (limit 40). Then call show_picks. Take a third lookup turn only if a broad or list-style request would otherwise end with fewer than 30 picks; narrow requests never need one.
-- Keep each pick's reason under 15 words.''';
+- Give reasons (under 15 words) to the first 10 picks only; leave the rest empty.''';
 
   /// Fork: added when the history brain is available.
   static const String historyPrompt = '''
@@ -193,6 +195,7 @@ Questions about the user's own watching:
     } catch (e) {
       appLogger.d('AI: no taste summary', error: e);
     }
+    final aliases = _IdAliases();
     final messages = <Map<String, Object?>>[
       {
         'role': 'user',
@@ -281,12 +284,16 @@ Questions about the user's own watching:
           for (final use in uses)
             () async {
               final name = use['name'] as String;
-              final args = (use['input'] as Map?)?.cast<String, dynamic>() ?? const {};
+              final args = aliases.decode((use['input'] as Map?)?.cast<String, dynamic>() ?? const {});
               String result;
               var isError = false;
               final toolStarted = DateTime.now();
               try {
                 result = await tools.run(name, args);
+                if (!AiTools.finalTools.contains(name)) {
+                  tools.noteCandidates(name, result);
+                  result = aliases.encode(result);
+                }
                 appLogger.d('AI: tool $name took ${DateTime.now().difference(toolStarted).inMilliseconds} ms');
               } catch (e) {
                 appLogger.w('AI: tool $name failed', error: e);
@@ -361,6 +368,27 @@ Questions about the user's own watching:
       final t = await (db.select(db.indexTitles)..where((r) => r.id.equals(p.id))).getSingleOrNull();
       t == null ? unknown.add(p.id) : picks.add((title: t, reason: p.reason));
     }
+    // A broad or list request that came back short is topped up from what
+    // the lookups already found (best first, as they ranked it), without
+    // another turn. Unwatched only, when the picks are.
+    final target = switch (tools.scope) {
+      'broad' => 30,
+      'list' => 40,
+      _ => 0,
+    };
+    if (picks.isNotEmpty && picks.length < target) {
+      final unwatchedOnly = picks.where((p) => p.title.lastViewedAt == null).length >= picks.length * 0.8;
+      final groups = {for (final p in picks) p.title.groupKey};
+      final before = picks.length;
+      for (final id in tools.candidates) {
+        if (picks.length >= target) break;
+        final t = await (db.select(db.indexTitles)..where((r) => r.id.equals(id))).getSingleOrNull();
+        if (t == null || (t.audienceRating ?? 7) < 6.5) continue;
+        if ((unwatchedOnly && await _watched(t)) || !groups.add(t.groupKey)) continue;
+        picks.add((title: t, reason: ''));
+      }
+      appLogger.d('AI: topped up ${picks.length - before} picks from the lookups (${tools.scope})');
+    }
     return AiAnswer(
       title: tools.title,
       intro: tools.intro,
@@ -384,5 +412,44 @@ Questions about the user's own watching:
     );
   }
 
+  /// Watched here or (via the history brain) anywhere, e.g. on Trakt.
+  Future<bool> _watched(IndexedTitle t) async {
+    if (t.lastViewedAt != null) return true;
+    final brain = this.brain;
+    if (brain == null) return false;
+    return (await brain.store).profile(LibraryRef.of(t).titleId)?.watched ?? false;
+  }
+
   void close() => _client?.close();
+}
+
+/// Fork: short handles ("t12") for the long title ids in tool results, so
+/// the model reads and writes a few tokens per title instead of ~30; its
+/// tool inputs are mapped back before the tools run.
+class _IdAliases {
+  final Map<String, String> _toAlias = {};
+  final Map<String, String> _toId = {};
+
+  static final RegExp _lineId = RegExp(r'^([^\s|]+:[^\s|]+)(?= \|)', multiLine: true);
+
+  String encode(String result) => result.replaceAllMapped(_lineId, (m) {
+    final id = m.group(1)!;
+    return _toAlias.putIfAbsent(id, () {
+      final alias = 't${_toAlias.length + 1}';
+      _toId[alias] = id;
+      return alias;
+    });
+  });
+
+  Map<String, dynamic> decode(Map<String, dynamic> input) => {
+    for (final e in input.entries) e.key: _decode(e.key, e.value),
+  };
+
+  Object? _decode(String key, Object? value) => switch (value) {
+    final String s when key == 'id' => _toId[s] ?? s,
+    final List l when key == 'ids' => [for (final v in l) v is String ? _toId[v] ?? v : v],
+    final List l => [for (final v in l) v is Map ? decode(v.cast<String, dynamic>()) : v],
+    final Map m => decode(m.cast<String, dynamic>()),
+    _ => value,
+  };
 }
