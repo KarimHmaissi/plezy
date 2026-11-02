@@ -616,7 +616,13 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                         AppIcon(widget.icon, fill: 1, size: isTv ? 28 : spacing?.titleSize),
                         SizedBox(width: isTv ? 12 : 8),
                         Flexible(
-                          child: Text(widget.hub.title, style: titleStyle, overflow: .ellipsis, maxLines: 1),
+                          child: Text(
+                            widget.hub.title,
+                            style: titleStyle,
+                            overflow: .ellipsis,
+                            // Fork: an AI answer's title may wrap (its ⋯ stays top-right).
+                            maxLines: widget.titleTrailing == null ? 1 : 2,
+                          ),
                         ),
                         if (widget.totalResults case final totalResults?) ...[
                           SizedBox(width: isTv ? 12 : 8),
@@ -959,9 +965,11 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
   Widget _withTitleTrailing(Widget title) => widget.titleTrailing == null
       ? title
       : Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Flexible(child: title),
-            const Spacer(),
+            Expanded(
+              child: Align(alignment: AlignmentDirectional.centerStart, child: title),
+            ),
             widget.titleTrailing!,
           ],
         );

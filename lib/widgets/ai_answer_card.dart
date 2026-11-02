@@ -69,7 +69,7 @@ class AiAnswerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final mono = tokens(context);
     final theme = Theme.of(context).textTheme;
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final muted = tokens(context).textMuted;
     final body = text?.trim();
     final hasBody = body != null && body.isNotEmpty;
     final open = expanded || running || error != null;
@@ -133,10 +133,7 @@ class AiAnswerCard extends StatelessWidget {
           SizedBox(height: hasBody ? 10 : 8),
           Row(
             children: [
-              SizedBox.square(
-                dimension: 14,
-                child: CircularProgressIndicator(strokeWidth: 2, color: muted),
-              ),
+              SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: muted)),
               const SizedBox(width: 10),
               Flexible(
                 child: Text(step!, style: theme.bodySmall?.copyWith(color: muted)),
@@ -189,13 +186,18 @@ class AiAnswerCard extends StatelessWidget {
       ],
     );
 
-    return AnimatedSize(duration: duration, curve: ForkMotion.enterCurve, alignment: Alignment.topCenter, child: column);
+    return AnimatedSize(
+      duration: duration,
+      curve: ForkMotion.enterCurve,
+      alignment: Alignment.topCenter,
+      child: column,
+    );
   }
 
   /// Top picks, spotlights and notes: compact, titles semibold and tappable.
   Widget _details(BuildContext context) {
     final theme = Theme.of(context).textTheme;
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final muted = tokens(context).textMuted;
     final mono = tokens(context);
     final textStyle = theme.bodyMedium?.copyWith(height: 1.4, color: mono.text);
 
@@ -209,8 +211,15 @@ class AiAnswerCard extends StatelessWidget {
               style: textStyle?.copyWith(fontWeight: FontWeight.w600),
               recognizer: p.onTap,
             ),
-            if (label != null) TextSpan(text: '  $label', style: theme.labelSmall?.copyWith(color: muted)),
-            TextSpan(text: '\n${p.text}', style: textStyle?.copyWith(color: muted)),
+            if (label != null)
+              TextSpan(
+                text: '  $label',
+                style: theme.labelSmall?.copyWith(color: muted),
+              ),
+            TextSpan(
+              text: '\n${p.text}',
+              style: textStyle?.copyWith(color: muted),
+            ),
           ],
         ),
       ),
