@@ -92,6 +92,10 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### Library rows to Home on the phone (branch `feature/ai-helper`)
+- Long-press any card in a library's Recommended rows (Rediscover, Recently
+  added, …) for "Add to Home" / "Manage Home", as the TV already had.
+
 ### Companion link survives sleep (branch `feature/ai-helper`)
 - **Cause:** after the Mac slept, its remote server kept listening but the
   LAN beacon the phone uses to find it was gone (no UDP sockets left in the
