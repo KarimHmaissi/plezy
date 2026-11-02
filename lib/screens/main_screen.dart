@@ -16,6 +16,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import '../i18n/strings.g.dart';
+import '../services/lab/lab_export.dart';
 import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_remote_asks.dart';
 import '../services/companion_remote/host_media_notification.dart';
@@ -568,6 +569,8 @@ class _MainScreenState extends State<MainScreen>
     // so _buildScreens and _hasLiveTv getter agree from the start.
     try {
       _lastHasLiveTv = context.read<MultiServerProvider>().hasLiveTv;
+      // Fork, debug Mac builds only: subtitle export for indexing experiments.
+      LabExport.attach(context.read<MultiServerProvider>());
     } catch (_) {
       _lastHasLiveTv = false;
     }
