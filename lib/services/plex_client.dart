@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:async';
 import '../utils/isolate_helper.dart';
 import '../utils/json_utils.dart';
@@ -4057,30 +4056,6 @@ class PlexClient
   /// actually be burned; a row it rejects still cannot survive a transcode, so the
   /// two must not be confused where the decision is about what was *asked* for.
   bool _requestsSubtitleBurn(MediaSubtitleTrack? track) => track != null && (track.key == null || track.key!.isEmpty);
-
-  /// Fork: a server path's JSON (`MediaContainer` and all), for callers
-  /// that read fields the typed models drop (the subtitle indexer).
-  Future<Map<String, dynamic>?> getJson(String path) async {
-    final response = await _http.get(path);
-    final data = response.data;
-    return data is Map ? data.cast<String, dynamic>() : null;
-  }
-
-  /// Fork: a small text resource on this server (a sidecar subtitle file),
-  /// decoded as UTF-8.
-  Future<String> getText(String path, {Map<String, String>? query}) async {
-    final uri = Uri.parse('${_http.baseUrl}$path').replace(queryParameters: query);
-    final bytes = await _http.getBytes(uri.toString(), timeout: const Duration(seconds: 60));
-    return utf8.decode(bytes, allowMalformed: true);
-  }
-
-  /// Fork: an authenticated URL for a media part, for local tools (ffmpeg)
-  /// that read it directly. Carries the token: never log it.
-  String? partFileUrl(String partKey) {
-    final token = config.token;
-    if (token == null) return null;
-    return '${config.baseUrl}$partKey?X-Plex-Token=$token';
-  }
 
   /// Build the absolute URL for an external subtitle track on this Plex
   /// server. Returns `null` for tracks that aren't external (no `/library/

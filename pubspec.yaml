@@ -51,6 +51,9 @@ dependencies:
   crypto: ^3.0.7
   cryptography: ^2.9.0
   file_picker: ^11.0.2
+  # Fork: the content brain (dialogue indexing), kept apart from the app.
+  plezy_brain:
+    path: packages/plezy_brain
   saf_util:
     # Vendored 3.1.0: fixes upstream's duplicate MethodChannel result.
     path: packages/saf_util

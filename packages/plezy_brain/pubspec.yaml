@@ -1,0 +1,11 @@
+name: plezy_brain
+description: Plezy fork's content brain. Fetches, parses and chunks dialogue (subtitles) for indexing. Talks to a media server only through MediaSource.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^5.0.0

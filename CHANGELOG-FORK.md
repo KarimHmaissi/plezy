@@ -92,6 +92,17 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### Content brain groundwork (debug only)
+
+- New `packages/plezy_brain`: picks and reads a title's English dialogue
+  (sidecar subtitle files; embedded text tracks via ffmpeg, opt-in), cleans
+  and chunks it into scene-sized pieces, and runs a resumable, idempotent
+  export job. It reaches a server only through its `MediaSource` interface.
+- Plezy supplies one adapter (`PlexBrainSource`, on the app's existing
+  connection, so credentials stay in the app) and a debug-only Mac hook,
+  `ext.plezy.labSubtitles`, that exports to a lab folder outside the repo.
+  Release builds never register it. See `docs/fork/BRAIN.md`.
+
 ### More air under the top bar on phones
 
 - Every page with the standard top bar (AI, Comfort, Explore, Watchlist,
