@@ -511,8 +511,12 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
             if (name is! String) continue;
             devices.add(AudioDevice(name: name, description: description is String ? description : ''));
           }
+          final changed =
+              _state.audioDevices.isNotEmpty &&
+              !listEquals([for (final d in _state.audioDevices) d.name], [for (final d in devices) d.name]);
           _state = _state.copyWith(audioDevices: devices);
           audioDevicesController.add(devices);
+          if (changed) _reopenDolbyOutput();
         }
         break;
 
@@ -1404,8 +1408,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
   String _normalizationAf = '';
   String _dolbyEncodeAf = '';
 
-  Future<void> _applyAf() =>
-      setProperty('af', [_normalizationAf, _dolbyEncodeAf].where((f) => f.isNotEmpty).join(','));
+  Future<void> _applyAf() => setProperty('af', [_normalizationAf, _dolbyEncodeAf].where((f) => f.isNotEmpty).join(','));
 
   @override
   Future<void> setAudioNormalization(bool enabled) async {
@@ -1427,6 +1430,24 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
     // know it is set.
     if (enabled) await setProperty('audio-spdif', '');
     await _applyAf();
+  }
+
+  Timer? _dolbyReopen;
+
+  /// Fork: the outputs changed (the receiver woke, or its HDMI link
+  /// re-synced) while Dolby encoding is on. If audio opened while the
+  /// receiver wasn't there, coreaudio_exclusive declined and the AVFoundation
+  /// fallback took the bitstream, which macOS decodes and sends on as
+  /// multichannel PCM: the scrambled path Dolby encoding avoids. Reopen the
+  /// output once the burst of hotplug events settles, so the bitstream goes
+  /// to the receiver again.
+  void _reopenDolbyOutput() {
+    if (!Platform.isMacOS || _dolbyEncodeAf.isEmpty) return;
+    _dolbyReopen?.cancel();
+    _dolbyReopen = Timer(const Duration(milliseconds: 1500), () {
+      appLogger.i('MPV: audio outputs changed, reopening the Dolby output');
+      unawaited(command(['ao-reload']).catchError((Object e) => appLogger.w('MPV: ao-reload failed', error: e)));
+    });
   }
 
   /// mpv's `audio-channels` for each limit. The 5.1 limit is a list so stereo
@@ -1689,6 +1710,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
 
   @override
   Future<void> dispose({bool preserveDisplayMode = false}) async {
+    _dolbyReopen?.cancel();
     if (_disposed) return;
     _disposed = true;
 
