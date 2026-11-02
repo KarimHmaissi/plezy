@@ -1232,7 +1232,16 @@
     "details": "Details",
     "badgeWatched": "Watched",
     "badgeInProgress": "In progress",
-    "badgeRewatch": "Rewatch"
+    "badgeRewatch": "Rewatch",
+    "read": "Read",
+    "picksCount": "${count} picks",
+    "topPicks": "Top picks",
+    "allPicks": "All picks",
+    "askedLabel": "You asked",
+    "tonightNewEpisode": "New episode",
+    "tonightPick": "Tonight's pick",
+    "tonightLibrary": "From your library",
+    "tonightUpdated": "Made ${time}"
   },
   "ai": {
     "settingsTitle": "AI",

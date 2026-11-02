@@ -52,6 +52,10 @@ import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
 import '../theme/mono_tokens.dart';
 import '../widgets/ai_answer_card.dart';
+import '../widgets/media_card.dart';
+import 'ai_answer_page.dart';
+import 'ai_tonight.dart';
+import '../services/brain/brain_debug.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/desktop_app_bar.dart';
@@ -163,12 +167,6 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// browsing carries on meanwhile.
   final List<_PendingAsk> _pending = [];
 
-  /// Answer cards the user opened or closed, by entry id; otherwise the
-  /// newest is open and the rest show their first line.
-  final Map<String, bool> _cardOpen = {};
-
-  /// Answers whose details (top picks, spotlights, notes) are showing.
-  final Set<String> _detailsOpen = {};
   bool _visible = true;
   bool _busy = false;
   bool? _hasKey;
@@ -294,8 +292,12 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     if (!mounted) return;
     setState(() => _hasKey = key != null);
     if (key != null) {
-      unawaited(_briefing());
-      await _tonight();
+      // Touch screens show Tonight's cards; TV keeps its Tonight row.
+      if (_cardsInline) {
+        unawaited(_briefing());
+      } else {
+        await _tonight();
+      }
     }
   }
 
@@ -312,7 +314,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   /// Pull to refresh and the toolbar's refresh: new Tonight picks and a new
   /// briefing.
-  Future<void> _refreshAll() => Future.wait([_tonight(refresh: true), _briefing(force: true)]);
+  Future<void> _refreshAll() => _cardsInline ? _briefing(force: true) : _tonight(refresh: true);
 
   Future<void> _loadHistory() async {
     try {
@@ -479,8 +481,6 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       }
       final entry = extend == null ? found : mergeFindMore(extend, found);
       if (ask.replaceId == null) {
-        // A new answer opens; earlier cards fold to their first line.
-        _cardOpen.clear();
         _conversation.add((request: ask.request, answer: result.answer));
         await AiHistory.add(entry);
       } else {
@@ -676,9 +676,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// Rows in order: today's briefing, this visit's answers, Tonight, then
   /// older saved ones.
   List<AiHistoryEntry> get _rows => [
-    ?_briefingRow,
     ..._saved.take(_askedThisVisit),
-    ?_tonightRow,
+    if (!_cardsInline) ?_tonightRow,
     ..._saved.skip(_askedThisVisit),
   ];
 
@@ -828,39 +827,63 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   String? get _headline => _rows.firstOrNull?.answer ?? _rows.firstOrNull?.intro;
 
+  /// Tonight's cards, when there are any to show (touch screens).
+  AiHistoryEntry? get _tonightCards => _cardsInline && (_briefingRow?.items.isNotEmpty ?? false) ? _briefingRow : null;
+
   /// Touch screens and desktop show the answer cards (TV keeps its spotlight).
   static bool get _cardsInline => !PlatformDetector.isTV();
 
-  /// Requests still running (or failed) as cards above the answers.
+  /// Requests still running (or failed) as tiles above the answers.
   List<Widget> _pendingCards() {
     if (!_cardsInline) return const [];
+    Widget tile(
+      Key key,
+      String question,
+      String? partial,
+      String? step,
+      bool running,
+      String? error,
+      VoidCallback retry,
+    ) => _rowSizedTile(
+      (height, band) => AiAnswerTile(
+        key: key,
+        question: question,
+        headline: partial == null || partial.trim().isEmpty ? null : _firstSentence(partial),
+        step: step ?? t.aiTab.starting,
+        running: running,
+        error: error,
+        height: height,
+        band: band,
+        onTap: error == null ? null : retry,
+      ),
+    );
     if (_thinClient) {
       final remote = context.read<CompanionRemoteProvider>();
       final session = RemoteAiSession.instance;
       return [
         for (final a in session.asks)
           if (a.status != 'done')
-            AiAnswerCard(
-              key: ValueKey('ask-${a.rid}'),
-              question: a.request,
-              text: a.partial,
-              step: a.step ?? t.aiTab.starting,
-              running: a.status == 'working',
-              error: a.status == 'error' ? ((a.error?.isNotEmpty ?? false) ? a.error : t.aiTab.noPicks) : null,
-              onRetry: () => session.retry(remote, a),
+            tile(
+              ValueKey('ask-${a.rid}'),
+              a.request,
+              a.partial,
+              a.step,
+              a.status == 'working',
+              a.status == 'error' ? ((a.error?.isNotEmpty ?? false) ? a.error : t.aiTab.noPicks) : null,
+              () => session.retry(remote, a),
             ),
       ];
     }
     return [
       for (final ask in _pending)
-        AiAnswerCard(
-          key: ObjectKey(ask),
-          question: ask.label,
-          text: ask.partial,
-          step: ask.step ?? t.aiTab.starting,
-          running: ask.error == null,
-          error: ask.error == null ? null : (ask.error!.isEmpty ? t.aiTab.noPicks : ask.error),
-          onRetry: () => unawaited(_runInBackground(ask)),
+        tile(
+          ObjectKey(ask),
+          ask.label,
+          ask.partial,
+          ask.step,
+          ask.error == null,
+          ask.error == null ? null : (ask.error!.isEmpty ? t.aiTab.noPicks : ask.error),
+          () => unawaited(_runInBackground(ask)),
         ),
     ];
   }
@@ -922,45 +945,80 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     ];
   }
 
-  /// The answer's text inside its row: its write-up, notes and follow-ups.
-  Widget? _answerCard(MediaHub hub) {
+  /// The answer as the first tile of its row; a tap opens its page.
+  Widget Function(double height, double band)? _answerTile(MediaHub hub) {
     final entry = _entryForHub(hub);
     final text = entry?.cardText;
     if (entry == null || text == null || text.trim().isEmpty) return null;
-    final newest = _rows.firstWhere((e) => (e.cardText ?? '').trim().isNotEmpty) == entry;
-    final open = _cardOpen[entry.id] ?? newest;
-    return AiAnswerCard(
-      key: ValueKey('card-${entry.id}'),
+    final top =
+        entry.items.where((i) => entry.topPicks.containsKey(i.globalKey)).firstOrNull ?? entry.items.firstOrNull;
+    return (height, band) => AiAnswerTile(
+      key: ValueKey('tile-${entry.id}'),
       question: entry.request == AiAgent.tonightRequest ? t.aiTab.tonight : entry.request,
-      text: text,
-      headline: entry.headline,
-      notes: entry.notes,
-      expanded: open,
-      detailsOpen: _detailsOpen.contains(entry.id),
-      onToggle: () => setState(() => _cardOpen[entry.id] = !open),
-      onDetails: () =>
-          setState(() => _detailsOpen.contains(entry.id) ? _detailsOpen.remove(entry.id) : _detailsOpen.add(entry.id)),
-      topPicks: _titleNotes(entry, entry.topPicks),
-      spotlights: _titleNotes(entry, entry.spotlights),
-      // Titles named in it open on tap (on TV the cards do).
-      linkify: (text, style) {
-        final link = style?.copyWith(fontWeight: FontWeight.w600);
-        return [
-          for (final (piece, item) in linkTitles(text, entry.items))
-            item == null ? TextSpan(text: piece) : TextSpan(text: piece, style: link, recognizer: _tapRecognizer(item)),
-        ];
-      },
+      headline: (entry.headline?.trim().isNotEmpty ?? false) ? entry.headline : _firstSentence(text),
+      art: top,
+      count: entry.items.length,
+      height: height,
+      band: band,
+      onTap: () => _openAnswer(hub, entry),
     );
   }
 
-  /// Under the posters of an open answer: its follow-up refinements.
-  Widget? _followUps(MediaHub hub) {
-    final entry = _entryForHub(hub);
-    if (entry == null || entry.followUps.isEmpty || entry.cardText == null) return null;
-    final newest = _rows.firstWhere((e) => (e.cardText ?? '').trim().isNotEmpty) == entry;
-    if (!(_cardOpen[entry.id] ?? newest)) return null;
-    return AiFollowUpChips(followUps: entry.followUps, onFollowUp: (f) => unawaited(_followUp(entry, f)));
+  static String _firstSentence(String text) {
+    final m = RegExp(r'^.+?[.!?](?=\s|$)', dotAll: true).firstMatch(text.trim());
+    return m?.group(0) ?? text.trim();
   }
+
+  /// The answer page, with the row's menus (long-press, ⋯) as on this page.
+  void _openAnswer(MediaHub hub, AiHistoryEntry entry) {
+    final rowEntries = _rowMenuEntries(hub);
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ItemMenuEntries(
+          build: _pickMenuEntries,
+          child: ItemMenuHeader(
+            build: (item) => _thinClient ? _peekHeader(hub, item) : null,
+            child: AiAnswerPage(
+              entry: entry,
+              onPick: (item) => unawaited(_openPick(item)),
+              onFollowUp: (f) => unawaited(_followUp(entry, f)),
+              rowEntries: rowEntries,
+              badgesFor: _badgesFor(hub),
+              linkify: (text, style) {
+                final link = style?.copyWith(fontWeight: FontWeight.w600);
+                return [
+                  for (final (piece, item) in linkTitles(text, entry.items))
+                    item == null
+                        ? TextSpan(text: piece)
+                        : TextSpan(text: piece, style: link, recognizer: _tapRecognizer(item)),
+                ];
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// An answer without titles: just its tile, at a row's height.
+  Widget? _tileOnly(MediaHub hub) {
+    if (hub.items.isNotEmpty) return null;
+    final tile = _answerTile(hub);
+    if (tile == null) return null;
+    return _rowSizedTile(tile);
+  }
+
+  /// A tile sized as a poster row's cards would be at this width.
+  Widget _rowSizedTile(Widget Function(double height, double band) tile) => LayoutBuilder(
+    builder: (context, constraints) {
+      final spacing = ForkSpacing.of(context);
+      final width = spacing.cardWidth(constraints.maxWidth + 2 * spacing.edgeInset, wide: false);
+      return Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: tile((width - 6) * 1.5, MediaCard.rowCaptionBandHeight(context)),
+      );
+    },
+  );
 
   /// The ⋯ next to an answer's title: its row actions (Add to Home, Find
   /// more, Replace, Delete), as the long-press menu also lists them.
@@ -981,11 +1039,6 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       },
     );
   }
-
-  List<AiTitleNote> _titleNotes(AiHistoryEntry entry, Map<String, String> notes) => [
-    for (final item in entry.items)
-      if (notes[item.globalKey] case final text?) (title: item.title ?? '', text: text, onTap: _tapRecognizer(item)),
-  ];
 
   /// A follow-up chip: a new request that carries the answer it refines.
   Future<void> _followUp(AiHistoryEntry entry, String followUp) async {
@@ -1161,7 +1214,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         ),
       );
     }
-    if (_rows.isEmpty) {
+    if (_rows.isEmpty && _tonightCards == null) {
       return Center(
         child: _busy
             ? Column(
@@ -1243,6 +1296,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   @override
   Widget build(BuildContext context) {
+    if (kDebugMode) BrainDebug.clientFor ??= context.read<MultiServerProvider>().getClientForServer;
     if (_thinClient) {
       context.watch<CompanionRemoteProvider>();
       if (!Customisation.isMirror) return const RemoteAiScreen();
@@ -1280,10 +1334,21 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
               else ...[
                 // One block per answer: title, what was asked and the write-up,
                 // then its posters; a hairline between blocks.
+                if (_tonightCards case final tonight?)
+                  SliverToBoxAdapter(
+                    child: ItemMenuEntries(
+                      build: _pickMenuEntries,
+                      child: AiTonightBlock(
+                        entry: tonight,
+                        onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                      ),
+                    ),
+                  ),
                 for (final (n, card) in pendingCards.indexed)
-                  SliverToBoxAdapter(child: _pendingBlock(card, divider: n > 0)),
+                  SliverToBoxAdapter(child: _pendingBlock(card, divider: n > 0 || _tonightCards != null)),
                 for (var i = 0; i < hubs.length; i++) ...[
-                  if (i > 0 || pendingCards.isNotEmpty) SliverToBoxAdapter(child: _blockDivider()),
+                  if (i > 0 || pendingCards.isNotEmpty || _tonightCards != null)
+                    SliverToBoxAdapter(child: _blockDivider()),
                   SliverToBoxAdapter(
                     child: RowMenuEntries(
                       entries: _rowMenuEntries(hubs[i]),
@@ -1296,10 +1361,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                             key: _hubKey(hubs[i]),
                             hub: hubs[i],
                             trailingCard: _trailingCard(hubs[i]),
-                            belowTitle: _answerCard(hubs[i]),
+                            belowTitle: _tileOnly(hubs[i]),
+                            leadingTile: _answerTile(hubs[i]),
                             badgesFor: _badgesFor(hubs[i]),
                             titleTrailing: _cardsInline ? _rowMenuButton(hubs[i]) : null,
-                            belowItems: _followUps(hubs[i]),
                             focusMemory: _hubFocusMemory,
                             icon: Symbols.auto_awesome_rounded,
                             // Phone: a tap plays (on the TV while casting); shows open.

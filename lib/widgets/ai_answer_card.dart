@@ -3,9 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../i18n/strings.g.dart';
+import '../media/ids.dart';
+import '../media/media_item.dart';
 import '../theme/fork_motion.dart';
 import '../theme/mono_tokens.dart';
+import '../utils/media_image_helper.dart';
+import '../utils/provider_extensions.dart';
 import 'app_icon.dart';
+import 'optimized_media_image.dart';
+import 'pressable.dart';
 
 /// Fork: an AI answer's text inside its row, between the row title and the
 /// posters, on touch screens and desktop. No surface of its own: it belongs
@@ -291,6 +297,193 @@ class AiFollowUpChips extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Fork: an AI answer as the first tile of its row on touch screens: the
+/// top pick's art under a scrim, what was asked, the headline, and "Read"
+/// in the caption band. A tap opens the answer page. While the request
+/// runs it shows the step and the overview's first sentence as it streams;
+/// a failed one says so and retries on tap.
+class AiAnswerTile extends StatelessWidget {
+  const AiAnswerTile({
+    super.key,
+    required this.question,
+    required this.height,
+    required this.band,
+    this.headline,
+    this.art,
+    this.count = 0,
+    this.step,
+    this.error,
+    this.running = false,
+    this.onTap,
+  });
+
+  final String question;
+
+  /// The row's artwork height, and its caption band under it.
+  final double height;
+  final double band;
+  final String? headline;
+
+  /// Whose backdrop sits behind the text (the top pick).
+  final MediaItem? art;
+  final int count;
+  final String? step;
+  final String? error;
+  final bool running;
+  final VoidCallback? onTap;
+
+  /// Wide enough for a 12-word headline in four lines on a Fold cover.
+  static double widthFor(double height) => (height * 1.12).clamp(150.0, 260.0);
+
+  @override
+  Widget build(BuildContext context) {
+    final mono = tokens(context);
+    final theme = Theme.of(context).textTheme;
+    final width = widthFor(height);
+    final path = art?.artPath ?? art?.thumbPath;
+    final gist = headline?.trim() ?? '';
+    final radius = BorderRadius.circular(mono.radiusSm);
+
+    final artwork = ClipRRect(
+      borderRadius: radius,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(color: mono.surface),
+            if (path != null)
+              OptimizedMediaImage(
+                client: context.tryGetMediaClientWithFallback(serverIdOrNull(art!.serverId)),
+                imagePath: path,
+                width: width,
+                height: height,
+                imageType: ImageType.art,
+              ),
+            // The page's own background as the scrim, heavier where the text sits.
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [mono.bg.withValues(alpha: 0.55), mono.bg.withValues(alpha: 0.92)],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (running)
+                    Row(
+                      children: [
+                        SizedBox.square(
+                          dimension: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: mono.textMuted),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            step ?? t.aiTab.starting,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.labelSmall?.copyWith(color: mono.textMuted),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    Text(
+                      question,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.labelSmall?.copyWith(color: mono.textMuted, height: 1.3),
+                    ),
+                  const Spacer(),
+                  if (error != null)
+                    Text(
+                      error!,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error),
+                    )
+                  else if (gist.isNotEmpty)
+                    AnimatedSwitcher(
+                      duration: ForkMotion.reduceMotion(context) ? Duration.zero : ForkMotion.sheetIn,
+                      child: Text(
+                        gist,
+                        key: ValueKey(gist.length > 40 ? gist.substring(0, 40) : gist),
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.titleSmall?.copyWith(
+                          color: running ? mono.textMuted : mono.text,
+                          fontWeight: FontWeight.w600,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final caption = SizedBox(
+      width: width,
+      height: band,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8, left: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    error != null ? t.common.retry : (running ? t.aiTab.working : t.aiTab.read),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.bodyLarge?.copyWith(fontSize: 15, height: 1.25, color: mono.text),
+                  ),
+                ),
+                if (!running && error == null) ...[
+                  const SizedBox(width: 2),
+                  AppIcon(Symbols.chevron_right_rounded, fill: 1, size: 18, color: mono.text),
+                ],
+              ],
+            ),
+            if (count > 0)
+              Text(
+                t.aiTab.picksCount(count: count),
+                maxLines: 1,
+                style: theme.bodySmall?.copyWith(fontSize: 13, height: 1.35, color: mono.textMuted),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    return Pressable(
+      enabled: onTap != null,
+      longPress: false,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap == null
+            ? null
+            : () {
+                ForkMotion.selection();
+                onTap!();
+              },
+        child: Column(mainAxisSize: MainAxisSize.min, children: [artwork, caption]),
       ),
     );
   }

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/fork_motion.dart';
 import '../theme/fork_spacing.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/rendering.dart' show RenderProxyBox, ScrollCacheExtent;
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:plezy/widgets/pressable.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -120,6 +120,11 @@ class HubSection extends StatefulWidget {
   /// Fork: labels on a card's artwork ("Top pick", "Watched").
   final List<String> Function(MediaItem item)? badgesFor;
 
+  /// Fork: a tile before the first card on touch screens (an AI answer),
+  /// built at the row's card height ([height] is the artwork's, [band] the
+  /// caption's under it); it scrolls with the cards and isn't a d-pad stop.
+  final Widget Function(double height, double band)? leadingTile;
+
   const HubSection({
     super.key,
     required this.hub,
@@ -136,6 +141,7 @@ class HubSection extends StatefulWidget {
     this.badgesFor,
     this.titleTrailing,
     this.belowItems,
+    this.leadingTile,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -171,6 +177,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
   final SliverChildMemo<MediaItem> _cardMemo = SliverChildMemo<MediaItem>();
 
   double _itemExtent = 0;
+
+  /// Width of [HubSection.leadingTile] in the row, for scroll offsets.
+  double _leadExtent = 0;
   double _leadingPaddingFor(bool isTv) => widget.inset
       ? 0.0
       : isTv
@@ -327,7 +336,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
       _scrollController,
       index,
       itemExtent: _itemExtent,
-      leadingPadding: _leadingPadding,
+      leadingPadding: _leadingPadding + _leadExtent,
       animate: animate,
       duration: _navigationScrollDuration,
       curve: Curves.easeOutCubic,
@@ -748,7 +757,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                         ? EdgeInsets.only(right: cardGap)
                         : EdgeInsets.symmetric(horizontal: cardGap / 2);
 
-                    final containerHeight = posterHeight + (isTv ? 48 : MediaCard.rowCaptionBandHeight(context));
+                    final captionBand = isTv ? 48.0 : MediaCard.rowCaptionBandHeight(context);
+                    final containerHeight = posterHeight + captionBand;
+                    final lead = widget.leadingTile != null && !isTv ? 1 : 0;
                     final focusBorderWidth = FocusTheme.focusBorderWidth;
                     final focusExtra = focusBorderWidth * 2; // border on both sides
                     _itemExtent = cardWidth + focusExtra + cardGap;
@@ -798,10 +809,22 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                                       : spacing.edgeInset - cardGap / 2,
                                   vertical: isTv ? 6 : 2,
                                 ),
-                          itemCount: isKeyboardMode
-                              ? _totalItemCount
-                              : widget.hub.items.length + (widget.trailingCard != null ? 1 : 0),
+                          itemCount:
+                              lead +
+                              (isKeyboardMode
+                                  ? _totalItemCount
+                                  : widget.hub.items.length + (widget.trailingCard != null ? 1 : 0)),
                           itemBuilder: (context, index) {
+                            if (lead == 1 && index == 0) {
+                              return Padding(
+                                padding: cardPadding,
+                                child: _MeasureWidth(
+                                  onWidth: (w) => _leadExtent = w + cardGap,
+                                  child: widget.leadingTile!(posterHeight, captionBand),
+                                ),
+                              );
+                            }
+                            index -= lead;
                             final isItemFocused = hasFocus && index == _focusedIndex;
 
                             final card = widget.trailingCard;
@@ -985,6 +1008,31 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     _notifyFocusedItemChanged();
     _scrollToIndex(clamped);
     _hubFocusNode.requestFocus();
+  }
+}
+
+/// Reports its child's laid-out width (the leading tile's, for scrolling).
+class _MeasureWidth extends SingleChildRenderObjectWidget {
+  const _MeasureWidth({required this.onWidth, super.child});
+
+  final ValueChanged<double> onWidth;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderMeasureWidth(onWidth);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderMeasureWidth renderObject) => renderObject.onWidth = onWidth;
+}
+
+class _RenderMeasureWidth extends RenderProxyBox {
+  _RenderMeasureWidth(this.onWidth);
+
+  ValueChanged<double> onWidth;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    onWidth(size.width);
   }
 }
 

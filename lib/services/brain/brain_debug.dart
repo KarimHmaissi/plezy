@@ -3,9 +3,16 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:provider/provider.dart';
 import 'package:plezy_brain/plezy_brain.dart';
 
+import '../../media/ids.dart';
+import '../../media/media_item.dart';
+import '../../media/media_server_client.dart';
+import '../../providers/multi_server_provider.dart';
 import '../ai/ai_agent.dart';
+import '../ai/ai_briefing.dart';
 import '../ai/ai_history.dart';
 import '../ai/ai_pick_reasons.dart';
 import '../library_index/library_index.dart';
@@ -21,6 +28,9 @@ abstract final class BrainDebug {
   static const extensionName = 'ext.plezy.brain';
   static bool _registered = false;
 
+  /// Set by the AI page: how `tonight` loads its titles.
+  static MediaServerClient? Function(ServerId serverId)? clientFor;
+
   static void register() {
     if (kReleaseMode || _registered) return;
     _registered = true;
@@ -34,6 +44,24 @@ abstract final class BrainDebug {
         );
       }
     });
+  }
+
+  /// The app's server clients, found under the main screen when the AI page
+  /// hasn't been built yet.
+  static MediaServerClient? Function(ServerId)? _findClients() {
+    Element? found;
+    void visit(Element e) {
+      if (found != null) return;
+      if (e.widget.runtimeType.toString() == 'MainScreen') {
+        found = e;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    WidgetsBinding.instance.rootElement?.visitChildren(visit);
+    final element = found;
+    return element == null ? null : Provider.of<MultiServerProvider>(element, listen: false).getClientForServer;
   }
 
   static Future<Map<String, Object?>> _run(Map<String, String> params) async {
@@ -58,6 +86,19 @@ abstract final class BrainDebug {
       'score': double.parse(h.score.toStringAsFixed(3)),
     };
     switch (params['op']) {
+      case 'tonight':
+        // Tonight's cards made afresh, as pull to refresh does.
+        final servers = clientFor ?? _findClients();
+        if (servers == null) return {'error': 'no servers yet'};
+        final started = DateTime.now();
+        final e = await AiBriefing.today(clientFor: servers, force: true);
+        return {
+          'seconds': DateTime.now().difference(started).inMilliseconds / 1000,
+          'cards': [
+            for (final i in e?.items ?? const <MediaItem>[])
+              '${e!.spotlights[i.globalKey]}: ${i.title} (${i.year}) | ${e.reasons[i.globalKey]}',
+          ],
+        };
       case 'reason':
         // A pick reason made as the peek sheet would, on a hidden copy of the
         // newest answer (not in the history list), removed afterwards.

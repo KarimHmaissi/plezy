@@ -3418,6 +3418,33 @@ class Translations$aiTab$en {
 
 	/// en: 'Rewatch'
 	String get badgeRewatch => 'Rewatch';
+
+	/// en: 'Read'
+	String get read => 'Read';
+
+	/// en: '${count} picks'
+	String picksCount({required Object count}) => '${count} picks';
+
+	/// en: 'Top picks'
+	String get topPicks => 'Top picks';
+
+	/// en: 'All picks'
+	String get allPicks => 'All picks';
+
+	/// en: 'You asked'
+	String get askedLabel => 'You asked';
+
+	/// en: 'New episode'
+	String get tonightNewEpisode => 'New episode';
+
+	/// en: 'Tonight's pick'
+	String get tonightPick => 'Tonight\'s pick';
+
+	/// en: 'From your library'
+	String get tonightLibrary => 'From your library';
+
+	/// en: 'Made ${time}'
+	String tonightUpdated({required Object time}) => 'Made ${time}';
 }
 
 // Path: ai
@@ -10389,6 +10416,15 @@ extension on Translations {
 			'aiTab.badgeWatched' => 'Watched',
 			'aiTab.badgeInProgress' => 'In progress',
 			'aiTab.badgeRewatch' => 'Rewatch',
+			'aiTab.read' => 'Read',
+			'aiTab.picksCount' => ({required Object count}) => '${count} picks',
+			'aiTab.topPicks' => 'Top picks',
+			'aiTab.allPicks' => 'All picks',
+			'aiTab.askedLabel' => 'You asked',
+			'aiTab.tonightNewEpisode' => 'New episode',
+			'aiTab.tonightPick' => 'Tonight\'s pick',
+			'aiTab.tonightLibrary' => 'From your library',
+			'aiTab.tonightUpdated' => ({required Object time}) => 'Made ${time}',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10774,6 +10810,8 @@ extension on Translations {
 			'comfort.noEpisodes' => 'No episodes of this show are on your server',
 			'comfort.allPaused' => 'Every show is paused. Turn some on in Configure',
 			'comfort.play' => 'Play',
+			_ => null,
+		} ?? switch (path) {
 			'comfort.pickAgain' => 'Pick again',
 			'comfort.episodeLabel' => ({required Object season, required Object episode}) => 'S${season} E${episode}',
 			'comfort.playImmediately' => 'Play immediately',
@@ -10783,8 +10821,6 @@ extension on Translations {
 			'comfort.addShow' => 'Add a show',
 			'comfort.searchHint' => 'Search Trakt for a show',
 			'comfort.remove' => 'Remove',
-			_ => null,
-		} ?? switch (path) {
 			'comfort.added' => ({required Object title}) => 'Added ${title}',
 			'comfort.connectTrakt' => 'Connect Trakt',
 			'watchlist.films' => 'Films',
@@ -11288,6 +11324,8 @@ extension on Translations {
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
 			'downloads.downloadDeleted' => 'Download deleted',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.deleteCollectionDownloads' => 'Delete downloads',
 			'downloads.deleteCollectionDownloadsConfirm' => ({required Object title}) => 'Delete every download in "${title}" from this device?',
 			'downloads.collectionDownloadsDeleted' => 'Downloads deleted',
@@ -11297,8 +11335,6 @@ extension on Translations {
 			'downloads.resumeDownload' => 'Resume download',
 			'downloads.cancelledDownload' => 'Canceled download',
 			'downloads.syncingFile' => ({required Object file, required Object status}) => '${file} (syncing ${status})',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.downloadedFileClickToComplete' => ({required Object file}) => 'Downloaded ${file} - Click to complete',
 			'downloads.partialDownloadClickToComplete' => 'Partially downloaded - Click to complete',
 			'downloads.deleting' => 'Deleting...',
@@ -11802,6 +11838,8 @@ extension on Translations {
 			'addServer.responseMissingIdentity' => ({required Object product}) => 'The response is missing an ID or server name — is this a ${product} server?',
 			'addServer.probeFailed' => ({required Object error}) => 'Could not reach the server: ${error}',
 			'addServer.enterAtLeastOneUrl' => ({required Object product}) => 'Enter at least one ${product} server URL',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.noReachableServer' => ({required Object product}) => 'No reachable ${product} server was found',
 			'addServer.urlsPointToDifferentServers' => ({required Object product}) => 'These URLs point to different ${product} servers',
 			'addServer.urlDoesNotMatchServer' => ({required Object product}) => 'This URL does not match the ${product} server',
@@ -11811,8 +11849,6 @@ extension on Translations {
 			'addServer.redirectUnsupportedEnterFinal' => ({required Object product}) => 'The server redirected to an unsupported URL. Enter the final ${product} URL directly.',
 			'deepLinks.invalid' => 'This Plezy link isn\'t valid.',
 			'deepLinks.profileNotFound' => ({required Object profile}) => 'No profile matches "${profile}".',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.serverUnavailable' => 'Couldn\'t reach the server for this link.',
 			'deepLinks.notFound' => 'Couldn\'t find this title in your libraries.',
 			'deepLinks.unsupportedItem' => 'This link can\'t be played.',
