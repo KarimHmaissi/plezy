@@ -11,6 +11,7 @@ import 'ai_agent.dart';
 import 'ai_activity.dart';
 import 'ai_history.dart';
 import 'ai_key_store.dart';
+import 'ai_pick_reasons.dart';
 import 'ai_rows.dart';
 import 'claude_client.dart';
 
@@ -107,6 +108,13 @@ abstract final class AiRemoteAsks {
     final action = data['action'] as String?;
     final id = data['id'] as String?;
     final rid = data['rid'] as String?;
+    // A pick's reason for the phone's peek sheet.
+    if (action == 'reason') {
+      final key = data['key'] as String?;
+      final text = id == null || key == null ? null : await AiPickReasons.reasonFor(id, key);
+      if (rid != null) remote?.sendAiAnswer({'rid': rid, 'status': text == null ? 'error' : 'done', 'text': ?text});
+      return;
+    }
     var status = 'error';
     try {
       status = await _runAction(action, id, clientFor: clientFor, trakt: trakt);

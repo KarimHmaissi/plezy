@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:plezy_brain/plezy_brain.dart';
 
 import '../ai/ai_agent.dart';
+import '../ai/ai_history.dart';
+import '../ai/ai_pick_reasons.dart';
 import '../library_index/library_index.dart';
 import 'history_brain.dart';
 
@@ -56,6 +58,30 @@ abstract final class BrainDebug {
       'score': double.parse(h.score.toStringAsFixed(3)),
     };
     switch (params['op']) {
+      case 'reason':
+        // A pick reason made as the peek sheet would, on a hidden copy of the
+        // newest answer (not in the history list), removed afterwards.
+        final e = (await AiHistory.page(limit: 1)).firstOrNull;
+        final item = e?.items.lastOrNull;
+        if (e == null || item == null) return {'error': 'no answers'};
+        final copy = AiHistoryEntry.fromJson({
+          ...e.toJson(),
+          'id': 'debug-reason',
+          'items': [
+            for (final i in e.toJson()['items'] as List)
+              {...(i as Map), if (identical(i, (e.toJson()['items'] as List).last)) 'reason': null},
+          ],
+        })!;
+        await AiHistory.replace(copy.withReason(item.globalKey, ''));
+        final started = DateTime.now();
+        final text = await AiPickReasons.reasonFor('debug-reason', item.globalKey);
+        final saved = (await AiHistory.get('debug-reason'))?.reasons[item.globalKey];
+        await AiHistory.remove('debug-reason');
+        return {
+          'seconds': DateTime.now().difference(started).inMilliseconds / 1000,
+          'text': text,
+          'saved': saved == text,
+        };
       case 'syncLag':
         // How long the app's isolate went without a turn during a sync.
         if (params['rebuild'] == '1') (await brain.store).setMeta('library.signature', '');

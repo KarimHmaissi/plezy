@@ -1227,7 +1227,9 @@
     "youAsked": "You asked: ${question}",
     "topPick": "Top pick",
     "working": "Working on it",
-    "spotlight": "Worth a closer look"
+    "spotlight": "Worth a closer look",
+    "writingReason": "Writing why it fits…",
+    "details": "Details"
   },
   "ai": {
     "settingsTitle": "AI",

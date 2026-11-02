@@ -68,6 +68,24 @@ class AiHistoryEntry {
   /// replacing it.
   final bool extended;
 
+  /// This entry with [reason] for the item [key].
+  AiHistoryEntry withReason(String key, String reason) => AiHistoryEntry(
+    id: id,
+    request: request,
+    title: title,
+    intro: intro,
+    answer: answer,
+    writeup: writeup,
+    notes: notes,
+    followUps: followUps,
+    spotlights: spotlights,
+    topPicks: topPicks,
+    createdAt: createdAt,
+    items: items,
+    reasons: {...reasons, key: reason},
+    extended: extended,
+  );
+
   Map<String, Object?> toJson() => {
     'id': id,
     'request': request,

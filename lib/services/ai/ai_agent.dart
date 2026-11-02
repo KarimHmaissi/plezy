@@ -226,7 +226,8 @@ Questions about the user's own watching:
               if (taste.isNotEmpty)
                 {
                   'type': 'text',
-                  'text': "The user's watching, from their history (for taste; use the tools for exact counts):\n$taste",
+                  'text':
+                      "The user's watching, from their history (for taste; use the tools for exact counts):\n$taste",
                   'cache_control': {'type': 'ephemeral'},
                 },
             ],

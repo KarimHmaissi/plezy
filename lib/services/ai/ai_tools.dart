@@ -281,7 +281,8 @@ class AiTools {
               '1-2 spoiler-free sentences of insight about this title: what makes it stand out, its tone, pacing, '
               'where to start. Not the pick reason again',
             ),
-            'description': '2-3 picks worth a closer look (not the top picks); empty for narrow requests with 1-2 picks',
+            'description':
+                '2-3 picks worth a closer look (not the top picks); empty for narrow requests with 1-2 picks',
           },
           'notes': {
             'type': 'array',
@@ -431,8 +432,7 @@ class AiTools {
         // Top picks lead the row (added if the model left them out of picks).
         final top = {for (final p in topPicks) p.id};
         picks = [
-          for (final t in topPicks)
-            listed.where((p) => p.id == t.id).firstOrNull ?? (id: t.id, reason: t.text),
+          for (final t in topPicks) listed.where((p) => p.id == t.id).firstOrNull ?? (id: t.id, reason: t.text),
           for (final p in listed)
             if (!top.contains(p.id)) p,
         ];
@@ -527,7 +527,9 @@ class AiTools {
         .customSelect(
           'SELECT * FROM index_titles WHERE lower(title) IN ($marks) OR lower(original_title) IN ($marks) '
           'ORDER BY audience_rating DESC',
-          variables: [for (final n in [...names, ...names]) Variable<String>(n)],
+          variables: [
+            for (final n in [...names, ...names]) Variable<String>(n),
+          ],
           readsFrom: {db.indexTitles},
         )
         .get();

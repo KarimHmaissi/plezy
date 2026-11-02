@@ -3403,6 +3403,12 @@ class Translations$aiTab$en {
 
 	/// en: 'Worth a closer look'
 	String get spotlight => 'Worth a closer look';
+
+	/// en: 'Writing why it fits…'
+	String get writingReason => 'Writing why it fits…';
+
+	/// en: 'Details'
+	String get details => 'Details';
 }
 
 // Path: ai
@@ -10369,6 +10375,8 @@ extension on Translations {
 			'aiTab.topPick' => 'Top pick',
 			'aiTab.working' => 'Working on it',
 			'aiTab.spotlight' => 'Worth a closer look',
+			'aiTab.writingReason' => 'Writing why it fits…',
+			'aiTab.details' => 'Details',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10766,10 +10774,10 @@ extension on Translations {
 			'comfort.added' => ({required Object title}) => 'Added ${title}',
 			'comfort.connectTrakt' => 'Connect Trakt',
 			'watchlist.films' => 'Films',
-			'watchlist.tv' => 'TV',
-			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
 			_ => null,
 		} ?? switch (path) {
+			'watchlist.tv' => 'TV',
+			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
 			'watchlist.genreTv' => ({required Object genre}) => '${genre} TV',
 			'watchlist.otherFilms' => 'Other Films',
 			'watchlist.otherTv' => 'Other TV',
@@ -11280,10 +11288,10 @@ extension on Translations {
 			'downloads.downloadedFileClickToComplete' => ({required Object file}) => 'Downloaded ${file} - Click to complete',
 			'downloads.partialDownloadClickToComplete' => 'Partially downloaded - Click to complete',
 			'downloads.deleting' => 'Deleting...',
-			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Deleting ${title}... (${current} of ${total})',
-			'downloads.queuedTooltip' => 'Queued',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Deleting ${title}... (${current} of ${total})',
+			'downloads.queuedTooltip' => 'Queued',
 			'downloads.queuedFilesTooltip' => ({required Object files}) => 'Queued ${files}',
 			'downloads.downloadingTooltip' => 'Downloading...',
 			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Downloading ${files}',
@@ -11794,10 +11802,10 @@ extension on Translations {
 			'deepLinks.serverUnavailable' => 'Couldn\'t reach the server for this link.',
 			'deepLinks.notFound' => 'Couldn\'t find this title in your libraries.',
 			'deepLinks.unsupportedItem' => 'This link can\'t be played.',
-			'deepLinks.noLiveTv' => 'No Live TV server is available for this link.',
-			'deepLinks.channelNotFound' => ({required Object channel}) => 'Couldn\'t find channel "${channel}".',
 			_ => null,
 		} ?? switch (path) {
+			'deepLinks.noLiveTv' => 'No Live TV server is available for this link.',
+			'deepLinks.channelNotFound' => ({required Object channel}) => 'Couldn\'t find channel "${channel}".',
 			'deepLinks.showLink' => 'Show link',
 			'deepLinks.showProfileLink' => 'Show profile link',
 			'deepLinks.dialogTitle' => 'Link',

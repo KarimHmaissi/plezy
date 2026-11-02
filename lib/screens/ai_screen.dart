@@ -35,6 +35,8 @@ import '../services/ai/ai_briefing.dart';
 import '../services/ai/ai_history.dart';
 import 'ai_composer.dart';
 import 'ai_pick_open.dart';
+import 'ai_pick_peek.dart';
+import '../services/ai/ai_pick_reasons.dart';
 import '../services/settings_service.dart';
 import '../services/ai/ai_home_refresher.dart';
 import '../services/ai/ai_more_like_this.dart';
@@ -1152,6 +1154,42 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   Future<void> _openPick(MediaItem item) => openAiPick(context, item);
 
+  /// The pick's peek sheet; a reason the answer didn't write is made on the
+  /// TV (or here, on a host) and saved with the answer.
+  Future<void> _peek(MediaHub hub, MediaItem item) async {
+    final entry = _entryForHub(hub);
+    final key = item.globalKey;
+    final reason = entry?.reasons[key];
+    Future<String?> Function()? load;
+    if (entry != null && (reason == null || reason.trim().isEmpty)) {
+      load = _thinClient ? () => _remoteReason(entry.id, key) : () => AiPickReasons.reasonFor(entry.id, key);
+    }
+    await showAiPickPeek(
+      context,
+      item: item,
+      reason: reason,
+      loadReason: load,
+      topPick: entry?.topPicks[key],
+      spotlight: entry?.spotlights[key],
+      onPlay: () => _playPick(item),
+      onDetails: () => unawaited(_openPick(item)),
+    );
+  }
+
+  Future<String?> _remoteReason(String entryId, String key) async {
+    final remote = context.read<CompanionRemoteProvider>();
+    if (!remote.isConnected) return null;
+    final rid = 'reason-${DateTime.now().microsecondsSinceEpoch}';
+    final reply = remote.aiAnswers.firstWhere((d) => d['rid'] == rid).timeout(const Duration(seconds: 45));
+    remote.sendCommand(RemoteCommandType.aiAction, data: {'action': 'reason', 'id': entryId, 'key': key, 'rid': rid});
+    try {
+      final data = await reply;
+      return data['status'] == 'done' ? data['text'] as String? : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Phones don't run the AI themselves: requests go to the TV app they're
   /// connected to (its key, index and history).
   static bool get _thinClient =>
@@ -1216,6 +1254,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                           icon: Symbols.auto_awesome_rounded,
                           // Phone: a tap plays (on the TV while casting); shows open.
                           onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                          // Phone: long-press peeks (why it was picked, Play, Watchlist, Details).
+                          onItemLongPress: _thinClient ? (item) => unawaited(_peek(hubs[i], item)) : null,
                           onVerticalNavigation: (isUp) => navigateVerticalHubRows(
                             hubCount: hubs.length,
                             hubIndex: i,
