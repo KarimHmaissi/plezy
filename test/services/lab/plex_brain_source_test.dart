@@ -23,6 +23,7 @@ void main() {
     final seen = <http.Request>[];
     final source = PlexBrainSource(
       testPlexClient(baseUrl: 'https://plex.example.com', token: 'tok'),
+      minInterval: Duration.zero,
       httpClient: MockClient((request) async {
         seen.add(request);
         return switch (request.url.path) {

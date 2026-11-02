@@ -106,6 +106,20 @@ void main() {
       expect(source.fetched, hasLength(1), reason: 'finished leaves are not fetched again');
     });
 
+    test('backs off exponentially when the server is busy and stops after three', () async {
+      final sleeps = <Duration>[];
+      final job = DialogueExportJob(
+        source: _BusySource(),
+        outDir: dir,
+        sleep: (d) async => sleeps.add(d),
+        busyBackoff: const Duration(seconds: 5),
+      );
+      final summary = await job.run(['movie1']);
+      expect(summary.stopped, isTrue);
+      expect(summary.busy, 3);
+      expect(sleeps, [const Duration(seconds: 5), const Duration(seconds: 10)]);
+    });
+
     test('waits while the host says to pause', () async {
       var pauses = 2;
       final sleeps = <Duration>[];
@@ -121,4 +135,11 @@ void main() {
       expect(sleeps.where((d) => d == const Duration(seconds: 30)), hasLength(2));
     });
   });
+}
+
+class _BusySource extends _FakeSource {
+  _BusySource() : super(const {});
+
+  @override
+  Future<List<SubtitleStream>> subtitleStreams(String id) async => throw const ServerBusyException(429);
 }

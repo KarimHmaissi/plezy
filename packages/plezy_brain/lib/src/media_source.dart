@@ -74,6 +74,15 @@ class SubtitleStream {
   bool get isSidecar => sidecarKey != null && sidecarKey!.isNotEmpty;
 }
 
+/// Thrown by a [MediaSource] when the server says to slow down (HTTP 429)
+/// or is failing (5xx): the export job backs off, and stops after a few.
+class ServerBusyException implements Exception {
+  const ServerBusyException(this.statusCode);
+  final int statusCode;
+  @override
+  String toString() => 'ServerBusyException($statusCode)';
+}
+
 /// Everything the brain needs from a media server. The host app implements
 /// it on its own client, so credentials stay with the app; a headless
 /// service can implement it with its own sign-in.

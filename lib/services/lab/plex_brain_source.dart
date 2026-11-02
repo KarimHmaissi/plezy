@@ -9,10 +9,32 @@ import '../plex_client.dart';
 /// existing [PlexClient]'s connection, so the server's credentials stay
 /// inside the app; the brain never sees Plezy's internals.
 class PlexBrainSource implements MediaSource {
-  PlexBrainSource(this._client, {http.Client? httpClient}) : _http = httpClient ?? http.Client();
+  PlexBrainSource(this._client, {http.Client? httpClient, this.minInterval = const Duration(milliseconds: 1500)})
+    : _http = httpClient ?? http.Client();
 
   final PlexClient _client;
   final http.Client _http;
+
+  /// At least this long between requests, one at a time: a big export stays
+  /// polite to the server (it may not be ours).
+  final Duration minInterval;
+  DateTime? _last;
+
+  Future<http.Response> _get(Uri uri) async {
+    final last = _last;
+    if (last != null) {
+      final wait = minInterval - DateTime.now().difference(last);
+      if (wait > Duration.zero) await Future<void>.delayed(wait);
+    }
+    try {
+      final res = await _http.get(uri, headers: _headers);
+      if (res.statusCode == 429 || res.statusCode >= 500) throw ServerBusyException(res.statusCode);
+      if (res.statusCode != 200) throw http.ClientException('HTTP ${res.statusCode}');
+      return res;
+    } finally {
+      _last = DateTime.now();
+    }
+  }
 
   Uri _uri(String path, [Map<String, String>? query]) =>
       Uri.parse('${_client.config.baseUrl}$path').replace(queryParameters: query);
@@ -24,8 +46,7 @@ class PlexBrainSource implements MediaSource {
   };
 
   Future<List<Map<String, dynamic>>> _metadata(String path) async {
-    final res = await _http.get(_uri(path), headers: _headers);
-    if (res.statusCode != 200) throw http.ClientException('HTTP ${res.statusCode}');
+    final res = await _get(_uri(path));
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     final list = (body['MediaContainer'] as Map?)?['Metadata'] as List? ?? const [];
     return [for (final m in list.whereType<Map>()) m.cast<String, dynamic>()];
@@ -74,8 +95,7 @@ class PlexBrainSource implements MediaSource {
 
   @override
   Future<String> fetchSidecar(SubtitleStream stream) async {
-    final res = await _http.get(_uri('${stream.sidecarKey}.srt', {'encoding': 'utf-8'}), headers: _headers);
-    if (res.statusCode != 200) throw http.ClientException('HTTP ${res.statusCode}');
+    final res = await _get(_uri('${stream.sidecarKey}.srt', {'encoding': 'utf-8'}));
     return utf8.decode(res.bodyBytes, allowMalformed: true);
   }
 

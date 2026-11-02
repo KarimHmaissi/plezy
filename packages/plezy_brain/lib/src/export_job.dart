@@ -11,7 +11,10 @@ enum LeafStatus { done, noSubtitles, failed }
 
 class ExportSummary {
   ExportSummary();
-  int done = 0, skipped = 0, noSubtitles = 0, failed = 0, sidecar = 0, embedded = 0, chunks = 0;
+  int done = 0, skipped = 0, noSubtitles = 0, failed = 0, sidecar = 0, embedded = 0, chunks = 0, busy = 0;
+
+  /// The run stopped early because the server kept saying it was busy.
+  bool stopped = false;
 
   Map<String, int> toJson() => {
     'done': done,
@@ -21,6 +24,8 @@ class ExportSummary {
     'sidecar': sidecar,
     'embedded': embedded,
     'chunks': chunks,
+    'busy': busy,
+    'stopped': stopped ? 1 : 0,
   };
 }
 
@@ -37,6 +42,8 @@ class DialogueExportJob {
     this.ffmpeg = 'ffmpeg',
     this.gap = const Duration(milliseconds: 250),
     this.shouldPause,
+    this.maxBusy = 3,
+    this.busyBackoff = const Duration(seconds: 5),
     Future<void> Function(Duration)? sleep,
     SubtitleReader? reader,
   }) : _sleep = sleep ?? Future<void>.delayed,
@@ -48,6 +55,11 @@ class DialogueExportJob {
   final String ffmpeg;
   final Duration gap;
   final bool Function()? shouldPause;
+
+  /// Busy answers (429/5xx) tolerated in a run, each followed by an
+  /// exponentially longer wait ([busyBackoff], doubled each time).
+  final int maxBusy;
+  final Duration busyBackoff;
   final Future<void> Function(Duration) _sleep;
   final SubtitleReader _reader;
 
@@ -84,7 +96,22 @@ class DialogueExportJob {
         first = false;
 
         try {
-          final dialogue = await _reader.read(leaf.id);
+          Dialogue? dialogue;
+          while (true) {
+            try {
+              dialogue = await _reader.read(leaf.id);
+              break;
+            } on ServerBusyException {
+              summary.busy++;
+              if (summary.busy >= maxBusy) {
+                summary.stopped = true;
+                await save();
+                await _writeManifest(status);
+                return summary;
+              }
+              await _sleep(busyBackoff * (1 << (summary.busy - 1)));
+            }
+          }
           if (dialogue == null) {
             status[leaf.id] = {'status': LeafStatus.noSubtitles.name};
             summary.noSubtitles++;
