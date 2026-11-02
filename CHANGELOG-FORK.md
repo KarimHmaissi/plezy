@@ -92,6 +92,26 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### AI answers on the AI page (branch `feature/ai-helper`)
+- Each answer is one block on phones and desktop: the row title, what you
+  asked, a 3-4 sentence overview, the top pick(s) and a few spotlighted
+  titles, "worth knowing" notes and follow-up chips, then the posters.
+  Older answers fold to their first sentence. A hairline separates blocks.
+- Answers stream: the block appears as soon as you send, shows what the
+  helper is doing, and writes the overview as it comes. Failures say so
+  with Retry. The phone gets the same progress from the TV.
+- Posters carry "Top pick" and Watched / In progress / Rewatch badges (from
+  the history brain).
+- Long-press a pick on the phone for a peek: why it was picked (written on
+  demand with a small Haiku call for picks past the first ten, saved with
+  the answer), Play, Watchlist and Details.
+- Faster: your watching is summarised in the first prompt, lookups run in
+  parallel, tool results use short title handles, and only the first ten
+  picks get reasons. A broad ask fills 30+ picks in about 15-20 s (it was
+  30-60 s); short rows are topped up from what the lookups found.
+- The brain's heavy work (embedding, vector search, building profiles) runs
+  off the app's isolate, and warms up 30 s after start.
+
 ### Watch history brain (branch `feature/ai-helper`)
 - A local index of everything you've watched and everything on your servers,
   built on the host (Mac, PC, TV) and kept up to date as watches arrive.
