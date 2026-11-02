@@ -5040,7 +5040,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     final cardWidth = _getResponsiveCardWidth();
     // 16:9 aspect ratio for clip thumbnails (cardWidth includes 8px padding on each side)
     final posterHeight = (cardWidth - 16) * (9 / 16);
-    final containerHeight = posterHeight + 52;
+    // Fork: never shorter than the card's caption band (roomier on touch).
+    final containerHeight = posterHeight + math.max(52.0, MediaCard.rowCaptionBandHeight(context) + 12);
 
     return Focus(
       focusNode: _extrasFocusNode,

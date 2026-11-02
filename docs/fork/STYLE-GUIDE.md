@@ -44,7 +44,8 @@ no custom display faces.
 | Role | Style |
 | --- | --- |
 | Page title | `DesktopSliverAppBar(title: Text(...))` (appBarTheme: 18 sp, w700) |
-| Row / section title | `textTheme.titleLarge` + `fontWeight: w700`, `fontSize: ForkSpacing.titleSize` (20 phone, 22 tablet/desktop; 26 TV) — as `HubSection` |
+| Row / section title | `ForkSpacing.of(context).titleStyle(context)`: `titleLarge`, w600, 17 phone / 19 tablet / 20 desktop (TV: 26, w700) — as `HubSection`; its icon and chevron match the title size |
+| Card caption (under artwork) | `MediaCard`: title 15 regular (height 1.25), subtitle 13 muted (height 1.35), 8 dp poster→title gap on touch and desktop; TV keeps 13 w600 / 11 with a 2 dp gap. Rows size cards with `MediaCard.rowCaptionBandHeight` |
 | Big stat number | `textTheme.headlineMedium` / `displaySmall`, w700 |
 | Card title | `textTheme.titleSmall` / `bodyLarge` w600 |
 | Body | `textTheme.bodyMedium` |
@@ -85,9 +86,21 @@ the app.
 
 ## Motion
 
-Keep the fork's motion: `Pressable` press-and-spring, `ForkMotion` haptics
-(touch only), the AI composer's iris and film-strip loaders. Motion is the
-signature; colour and type stay native.
+One set of tokens, in `ForkMotion` (`lib/theme/fork_motion.dart`):
+
+| Motion | Tokens |
+| --- | --- |
+| Page push/pop | the theme's `pageTransitionsTheme`: Android's fade-forwards for every `MaterialPageRoute`; no per-screen route animations on touch |
+| Overlay in/out (AI composer, full-screen sheets) | `ForkMotion.riseTransition`: fade + 24 dp rise, `sheetIn` 260 ms `Easing.emphasizedDecelerate`, `sheetOut` 200 ms `Easing.emphasizedAccelerate` |
+| Press / release | `Pressable` (`pressIn` 100 ms, `release` 260 ms spring) |
+| Haptics | `ForkMotion.selection / longPress / success / error` (touch only) |
+
+Rules: animate opacity and translation, never scale text or clip-reveal a
+page; open the keyboard (focus a field) only after the route has settled,
+so the resize doesn't fight the motion; honour `ForkMotion.reduceMotion`
+(fade only). Inside the composer the film-strip loader, clapper and
+self-drawing mark stay: motion is the signature, colour and type stay
+native.
 
 ## Do / don't
 

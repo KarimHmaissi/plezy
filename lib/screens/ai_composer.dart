@@ -24,7 +24,7 @@ import '../widgets/pressable.dart';
 
 /// Fork: the full-screen AI composer, the way into the AI feature. Its
 /// motion is cinema (see docs/fork/STYLE-GUIDE.md); its colours and type
-/// come from the theme. It opens with a camera iris, asks in a big
+/// come from the theme. It rises in calmly (ForkMotion.riseTransition), asks in a big
 /// headline over a soft wall of the user's posters, and while a request
 /// runs a strip of those posters races through a projector gate, then
 /// slows and stops with the top pick framed. Closing never cancels a
@@ -91,15 +91,16 @@ class AiComposer extends StatefulWidget {
     String? autoRequest,
     String? notesTitle,
 
-    /// Where the iris opens from (the Ask button), in global coordinates.
+    /// Where the Ask button is, in global coordinates (unused since the
+    /// iris was replaced by a plain rise; kept for callers).
     Rect? origin,
   }) {
     ForkMotion.success();
     return Navigator.of(context).push(
       PageRouteBuilder<void>(
         opaque: false,
-        transitionDuration: const Duration(milliseconds: 260),
-        reverseTransitionDuration: const Duration(milliseconds: 220),
+        transitionDuration: ForkMotion.sheetIn,
+        reverseTransitionDuration: ForkMotion.sheetOut,
         pageBuilder: (_, _, _) => AiComposer(
           run: run,
           followUpOf: followUpOf,
@@ -112,7 +113,7 @@ class AiComposer extends StatefulWidget {
         ),
         transitionsBuilder: (context, animation, _, child) {
           if (ForkMotion.reduceMotion(context)) return FadeTransition(opacity: animation, child: child);
-          return _IrisTransition(animation: animation, origin: origin?.center, child: child);
+          return ForkMotion.riseTransition(animation, child);
         },
       ),
     );
@@ -135,8 +136,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   final _sendFocus = FocusNode(debugLabel: 'AiComposerSend');
   final List<FocusNode> _chipFocus = [];
 
-  /// Staggers the page in after the iris: backdrop, headline, input, chips.
-  late final AnimationController _intro = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+  /// Staggers the page in with the route's rise: backdrop, headline, input,
+  /// chips.
+  late final AnimationController _intro = AnimationController(vsync: this, duration: const Duration(milliseconds: 450));
   late final AnimationController _drift = AnimationController(vsync: this, duration: const Duration(seconds: 90));
 
   /// Freeze-frame flash when the strip lands.
@@ -220,6 +222,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
         if (mounted) unawaited(_send(widget.autoRequest));
       });
     }
+    if (!_started && widget.autoRequest == null) _focusFieldWhenSettled();
     _started = true;
     _reduceMotion = reduce;
     if (reduce) {
@@ -228,11 +231,35 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
       _typer?.cancel();
       _placeholder = _examples.first;
     } else {
-      // A beat after the iris snaps open.
-      unawaited(Future.delayed(const Duration(milliseconds: 120), () => mounted ? _intro.forward() : null));
+      _intro.forward();
       _drift.repeat();
       _startTyping();
     }
+  }
+
+  /// Focus the input (and so open the keyboard) only once the route has
+  /// finished rising: the keyboard resizing the page mid-transition is what
+  /// made opening look like a lurch.
+  void _focusFieldWhenSettled() {
+    void focus() {
+      if (mounted && _fieldFocus.canRequestFocus && !_fieldFocus.hasFocus) _fieldFocus.requestFocus();
+    }
+
+    final animation = ModalRoute.of(context)?.animation;
+    if (animation == null || animation.isCompleted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => focus());
+      return;
+    }
+    late final AnimationStatusListener listener;
+    listener = (status) {
+      if (status.isCompleted) {
+        animation.removeStatusListener(listener);
+        focus();
+      } else if (status.isDismissed) {
+        animation.removeStatusListener(listener);
+      }
+    };
+    animation.addStatusListener(listener);
   }
 
   @override
@@ -631,7 +658,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   /// A section title, as `HubSection` styles a row's title.
   TextStyle? _sectionTitle(bool isTv, {Color? color}) => Theme.of(context).textTheme.titleLarge?.copyWith(
     fontSize: isTv ? 26 : ForkSpacing.of(context).titleSize,
-    fontWeight: FontWeight.w700,
+    fontWeight: isTv ? FontWeight.w700 : FontWeight.w600,
     color: color,
   );
 
@@ -769,7 +796,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                       child: FocusableTextField(
                         controller: _controller,
                         focusNode: _fieldFocus,
-                        autofocus: widget.autoRequest == null,
+                        // Focused once the route settles (_focusFieldWhenSettled).
                         minLines: 1,
                         maxLines: 4,
                         textInputAction: TextInputAction.send,
@@ -1474,134 +1501,6 @@ class _GatePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_GatePainter old) => old.color != color;
-}
-
-/// Route transition: a seven-bladed camera iris snapping open over the
-/// page behind, and closing again on the way out.
-class _IrisTransition extends StatelessWidget {
-  const _IrisTransition({required this.animation, required this.child, this.origin});
-  final Animation<double> animation;
-  final Widget child;
-
-  /// The iris's centre; the screen's centre if null.
-  final Offset? origin;
-
-  @override
-  Widget build(BuildContext context) {
-    final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-    final tk = tokens(context);
-    return AnimatedBuilder(
-      animation: curved,
-      child: child,
-      builder: (context, child) {
-        final p = curved.value;
-        // The same tree at every value: swapping it out once open would
-        // rebuild the composer (and lose its focus and keyboard).
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            ClipPath(
-              clipper: p >= 1 ? null : _IrisClipper(p, origin),
-              clipBehavior: p >= 1 ? Clip.none : Clip.antiAlias,
-              child: child,
-            ),
-            IgnorePointer(
-              child: CustomPaint(
-                painter: p >= 1 ? null : _BladesPainter(p, origin, blade: tk.surface, seam: tk.text, edge: tk.accent),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-const _blades = 7;
-
-/// The aperture: a heptagon that grows and turns as the iris opens, big
-/// enough at 1 to clear the corners.
-Path _aperture(Size size, double p, Offset? origin) {
-  final c = origin ?? size.center(Offset.zero);
-  // Far enough to clear the furthest corner from the centre.
-  final corner = [
-    Offset.zero,
-    Offset(size.width, 0),
-    Offset(0, size.height),
-    Offset(size.width, size.height),
-  ].map((o) => (o - c).distance).reduce(math.max);
-  final full = corner / math.cos(math.pi / _blades);
-  final r = full * p;
-  final turn = (1 - p) * math.pi * 0.55;
-  final path = Path();
-  for (var i = 0; i < _blades; i++) {
-    final a = turn + i * 2 * math.pi / _blades;
-    final v = c + Offset(math.cos(a), math.sin(a)) * r;
-    i == 0 ? path.moveTo(v.dx, v.dy) : path.lineTo(v.dx, v.dy);
-  }
-  return path..close();
-}
-
-class _IrisClipper extends CustomClipper<Path> {
-  _IrisClipper(this.p, this.origin);
-  final double p;
-  final Offset? origin;
-
-  @override
-  Path getClip(Size size) => _aperture(size, p, origin);
-
-  @override
-  bool shouldReclip(_IrisClipper old) => old.p != p || old.origin != origin;
-}
-
-/// The blades: [blade] around the aperture, with the seams between blades
-/// running out from each corner along the next edge, and the aperture's
-/// rim in [edge].
-class _BladesPainter extends CustomPainter {
-  _BladesPainter(this.p, this.origin, {required this.blade, required this.seam, required this.edge});
-  final double p;
-  final Offset? origin;
-  final Color blade;
-  final Color seam;
-  final Color edge;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Blades show while opening, fading as they clear the frame.
-    final opacity = (math.min(1, p * 8) * (1 - p)).clamp(0.0, 1.0);
-    if (opacity <= 0) return;
-    final aperture = _aperture(size, p, origin);
-    final outside = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), aperture);
-    canvas.drawPath(outside, Paint()..color = blade.withValues(alpha: opacity));
-
-    final metrics = aperture.computeMetrics().first;
-    final seam = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
-      ..color = this.seam.withValues(alpha: 0.18 * opacity);
-    final edge = metrics.length / _blades;
-    final reach = size.longestSide;
-    for (var i = 0; i < _blades; i++) {
-      final a = metrics.getTangentForOffset(i * edge)!;
-      final b = metrics.getTangentForOffset(((i + 1) % _blades) * edge + 0.01)!;
-      final dir = b.position - a.position;
-      final len = dir.distance;
-      if (len == 0) continue;
-      // Each seam carries on past the corner where its blade's edge ends.
-      canvas.drawLine(b.position, b.position + dir / len * reach, seam);
-    }
-    canvas.drawPath(
-      aperture,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = this.edge.withValues(alpha: 0.7 * opacity),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_BladesPainter old) =>
-      old.p != p || old.origin != origin || old.blade != blade || old.seam != seam || old.edge != edge;
 }
 
 /// The composer's mark, drawing itself as the page opens: an aperture

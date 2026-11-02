@@ -283,7 +283,20 @@ class MediaCard extends StatefulWidget {
   /// Inset between a captioned grid card's cell and its artwork.
   static const EdgeInsets gridCardPadding = EdgeInsets.fromLTRB(3, 3, 3, 1);
 
-  static const TextStyle _gridTitleStyle = TextStyle(fontWeight: .w600, fontSize: 13, height: 1.1);
+  /// Fork: the caption rhythm under artwork. Touch and desktop take Plex's
+  /// roomier one (a regular-weight title with air above and below it); TV
+  /// keeps the compact band its shelf metrics are built on.
+  static bool get _roomyCaptions => !PlatformDetector.isTV();
+
+  static TextStyle get _gridTitleStyle => _roomyCaptions
+      ? const TextStyle(fontWeight: .w400, fontSize: 15, height: 1.25)
+      : const TextStyle(fontWeight: .w600, fontSize: 13, height: 1.1);
+
+  /// Poster→title gap: fixed-height row cards use [_rowPosterTitleGap]; grid
+  /// cells grow it with the grid-spacing setting (#2083).
+  static double get _rowPosterTitleGap => _roomyCaptions ? 8 : 2;
+  static double _gridPosterTitleGap(BuildContext context) =>
+      context.settingsRead(SettingsService.gridSpacing).posterTitleGap + (_roomyCaptions ? 6 : 0);
 
   /// Height a captioned grid card spends outside its artwork: the vertical
   /// [gridCardPadding], the poster→title gap, and one title plus one caption
@@ -292,7 +305,15 @@ class MediaCard extends StatefulWidget {
   /// Grid cells are sized as artwork plus this band. A fixed cell aspect ratio
   /// cannot hold the artwork's shape: the band does not shrink with the cell,
   /// so narrow (dense) cells squeezed the artwork and cropped it (#2830).
-  static double gridCaptionBandHeight(BuildContext context) {
+  static double gridCaptionBandHeight(BuildContext context) =>
+      gridCardPadding.vertical + _gridPosterTitleGap(context) + _captionLinesHeight(context);
+
+  /// The same band for a fixed-height row card (hub rows size their cards
+  /// as artwork plus this).
+  static double rowCaptionBandHeight(BuildContext context) =>
+      gridCardPadding.vertical + _rowPosterTitleGap + _captionLinesHeight(context);
+
+  static double _captionLinesHeight(BuildContext context) {
     final defaultTextStyle = DefaultTextStyle.of(context);
     final textDirection = Directionality.of(context);
     final textScaler = MediaQuery.textScalerOf(context);
@@ -311,10 +332,7 @@ class MediaCard extends StatefulWidget {
       return height;
     }
 
-    return gridCardPadding.vertical +
-        context.settingsRead(SettingsService.gridSpacing).posterTitleGap +
-        lineHeight(_gridTitleStyle) +
-        lineHeight(_MediaCardHelpers._captionMetricsStyle(context));
+    return lineHeight(_gridTitleStyle) + lineHeight(_MediaCardHelpers._captionMetricsStyle(context));
   }
 
   @override
@@ -712,7 +730,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
               // shape. Fixed-height hub-row cards keep 2px — their fixed text
               // band cannot absorb more.
               SizedBox(
-                height: posterHeight != null ? 2 : context.settingsRead(SettingsService.gridSpacing).posterTitleGap,
+                height: posterHeight != null ? MediaCard._rowPosterTitleGap : MediaCard._gridPosterTitleGap(context),
               ),
               if (widget.onTap == null && item is MediaItem && !_impliesShowTitle(item) && _hasClickableTitle(item))
                 _ClickableText(
@@ -1219,7 +1237,10 @@ class _MediaCardHelpers {
   /// The caption's metrics without its color, so grid geometry can measure it
   /// without depending on the theme's color tokens.
   static TextStyle? _captionMetricsStyle(BuildContext context) =>
-      Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11, height: 1.1);
+      Theme.of(context).textTheme.bodySmall?.copyWith(
+        fontSize: MediaCard._roomyCaptions ? 13 : 11,
+        height: MediaCard._roomyCaptions ? 1.35 : 1.1,
+      );
 
   static TextStyle? _captionStyle(BuildContext context) =>
       _captionMetricsStyle(context)?.copyWith(color: tokens(context).textMuted);

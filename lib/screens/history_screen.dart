@@ -200,8 +200,10 @@ Widget historyPreview(HistoryState state, {int? year}) => Scaffold(
   return (edge: s.edgeInset, gap: s.titleGap, rowGap: s.rowGap, titleSize: s.titleSize);
 }
 
-TextStyle? _sectionStyle(BuildContext context) =>
-    Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, fontSize: _rhythm(context).titleSize);
+TextStyle? _sectionStyle(BuildContext context) => Theme.of(context).textTheme.titleLarge?.copyWith(
+  fontWeight: PlatformDetector.isTV() ? FontWeight.w700 : FontWeight.w600,
+  fontSize: _rhythm(context).titleSize,
+);
 
 class _HistoryBody extends StatelessWidget {
   const _HistoryBody({

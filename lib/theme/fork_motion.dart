@@ -1,7 +1,7 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../utils/platform_detector.dart';
 
@@ -21,6 +21,31 @@ abstract final class ForkMotion {
   /// Scale while pressed, and once a long press is recognised.
   static const pressedScale = 0.96;
   static const longPressedScale = 0.93;
+
+  /// Overlays that rise over the page (the AI composer, sheets): in with
+  /// M3's emphasized-decelerate, out faster with emphasized-accelerate.
+  static const sheetIn = Duration(milliseconds: 260);
+  static const sheetOut = Duration(milliseconds: 200);
+  static const enterCurve = Easing.emphasizedDecelerate;
+  static const exitCurve = Easing.emphasizedAccelerate;
+
+  /// How far a rising overlay travels, in logical pixels.
+  static const riseDistance = 24.0;
+
+  /// Fade in with a short rise; reversed on the way out. Translation and
+  /// opacity only (no scaling or clipping), so text and layout hold still.
+  static Widget riseTransition(Animation<double> animation, Widget child) {
+    final curved = CurvedAnimation(parent: animation, curve: enterCurve, reverseCurve: exitCurve);
+    return FadeTransition(
+      opacity: curved,
+      child: AnimatedBuilder(
+        animation: curved,
+        child: child,
+        builder: (context, child) =>
+            Transform.translate(offset: Offset(0, (1 - curved.value) * riseDistance), child: child),
+      ),
+    );
+  }
 
   static bool reduceMotion(BuildContext context) => MediaQuery.maybeDisableAnimationsOf(context) ?? false;
 

@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../utils/platform_detector.dart';
 
@@ -31,7 +31,13 @@ class ForkSpacing {
   /// Space between neighbouring cards.
   final double cardGap;
 
+  /// Row (section) title size; titles are semibold ([titleStyle]).
   final double titleSize;
+
+  /// The row-title style: Plex's balance of a modest, semibold heading over
+  /// the cards (TV keeps its own 26/w700 shelf titles).
+  TextStyle? titleStyle(BuildContext context) =>
+      Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: titleSize, fontWeight: FontWeight.w600);
 
   /// How many poster (2:3) / wide (16:9) cards fit across, including a peek
   /// of the next one so the row reads as scrollable.
@@ -44,7 +50,7 @@ class ForkSpacing {
     rowGap: 36,
     titleGap: 10,
     cardGap: 12,
-    titleSize: 20,
+    titleSize: 17,
     postersAcross: 3.2,
     widesAcross: 1.7,
   );
@@ -55,7 +61,7 @@ class ForkSpacing {
     rowGap: 32,
     titleGap: 12,
     cardGap: 14,
-    titleSize: 22,
+    titleSize: 19,
     postersAcross: 5.3,
     widesAcross: 3.2,
   );
@@ -66,7 +72,7 @@ class ForkSpacing {
     rowGap: 32,
     titleGap: 12,
     cardGap: 16,
-    titleSize: 22,
+    titleSize: 20,
     postersAcross: 7.3,
     widesAcross: 4.3,
   );

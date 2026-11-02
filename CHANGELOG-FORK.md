@@ -92,6 +92,19 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### Calmer motion and Plex-like card text
+
+- Ask opens with a short fade-and-rise (260 ms in, 200 ms out, Material 3
+  emphasized curves) instead of the camera-iris expand; the keyboard opens
+  once the motion has settled. Shared motion tokens in `ForkMotion`; Android
+  page pushes use one explicit transition (fade forwards).
+- Card captions on touch and desktop follow Plex: a regular-weight 15 title
+  8 dp below the artwork and a 13 muted subtitle with room to breathe; rows
+  size their cards from the measured caption band. TV unchanged.
+- Row titles are smaller and semibold (17 phone, 19 tablet, 20 desktop);
+  icon and chevron match. History and AI section titles follow.
+- Style guide: motion tokens and caption metrics.
+
 ### One visual language: style guide, AI and History restyled (branch `feature/ai-helper`)
 - `docs/fork/STYLE-GUIDE.md`: where styling lives (theme, palette tokens,
   ForkSpacing, TV constants), colour roles, type per role, spacing and

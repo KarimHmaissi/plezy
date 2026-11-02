@@ -564,10 +564,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     final leadingPadding = _leadingPaddingFor(isTv);
     // Fork: touch screens use the shared row rhythm (see ForkSpacing).
     final spacing = !isTv && !widget.inset ? ForkSpacing.of(context) : null;
-    final titleStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
-      fontSize: isTv ? 26 : spacing?.titleSize,
-      fontWeight: isTv || spacing != null ? FontWeight.w700 : null,
-    );
+    final titleStyle = isTv
+        ? Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 26, fontWeight: FontWeight.w700)
+        : spacing?.titleStyle(context) ?? Theme.of(context).textTheme.titleLarge;
 
     return Padding(
       padding: .only(
@@ -633,7 +632,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                       ],
                       if (_canSeeAll && !isKeyboardMode) ...[
                         const SizedBox(width: 4),
-                        AppIcon(Symbols.chevron_right_rounded, fill: 1, size: isTv ? 26 : 20),
+                        AppIcon(Symbols.chevron_right_rounded, fill: 1, size: isTv ? 26 : spacing?.titleSize ?? 20),
                       ],
                     ],
                   ),
@@ -716,7 +715,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                         ? EdgeInsets.only(right: cardGap)
                         : EdgeInsets.symmetric(horizontal: cardGap / 2);
 
-                    final containerHeight = posterHeight + (isTv ? 48 : 33);
+                    final containerHeight = posterHeight + (isTv ? 48 : MediaCard.rowCaptionBandHeight(context));
                     final focusBorderWidth = FocusTheme.focusBorderWidth;
                     final focusExtra = focusBorderWidth * 2; // border on both sides
                     _itemExtent = cardWidth + focusExtra + cardGap;
