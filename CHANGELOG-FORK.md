@@ -104,6 +104,8 @@ Details of each are in the dated entries below.
   the row's long-press entries (Add to Home, Play on TV…) carry over.
 - `HubDetailScreen` gains `liveHub`, `footer` and `onItemTap`. TV and Mac
   unchanged.
+- One Back leaves See all on phones and tablets (before, the first Back
+  only scrolled the grid to the top). TV keeps its app-bar-first Back.
 
 ### Previously on (branch `feature/ai-helper`, backlog #42)
 - **Where:** a "Previously on" button on a show's page (for the episode

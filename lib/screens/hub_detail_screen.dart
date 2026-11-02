@@ -527,6 +527,12 @@ class _HubDetailScreenState extends State<HubDetailScreen>
         canPop: PlatformDetector.isHandheldIOS(context),
         onSystemBack: () {
           if (BackKeyCoordinator.consumeIfHandled()) return;
+          // Touch phones/tablets leave at once; focusing the app bar first
+          // (a D-pad step) scrolled the grid to the top and needed a 2nd back.
+          if (PlatformDetector.isMobile(context)) {
+            if (mounted) Navigator.pop(context);
+            return;
+          }
           if (handleBackNavigation() && mounted) Navigator.pop(context);
         },
         child: Scaffold(
