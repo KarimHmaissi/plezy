@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../connection/connection.dart';
 import '../connection/connection_registry.dart';
@@ -18,6 +19,7 @@ import '../services/companion_remote/companion_remote_peer_service.dart';
 import '../services/companion_remote/lan_discovery_service.dart';
 import '../services/companion_remote/remote_auth_context.dart';
 import '../services/companion_remote/remote_auth_service.dart';
+import '../services/connectivity_probe.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/device_identity.dart';
@@ -48,6 +50,26 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   CompanionRemoteProvider._(this._peerServiceFactory, this._discoveryServiceFactory) {
     WidgetsBinding.instance.addObserver(this);
     _initializeDeviceInfo();
+    _connectivitySub = ConnectivityProbe.changes.listen((_) => _onNetworkChanged('network change'));
+  }
+
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+
+  /// Fork: a Wi-Fi change or app resume. The host re-checks its beacon; the
+  /// phone looks for its remembered host again.
+  void _onNetworkChanged(String reason) {
+    if (isDisposed) return;
+    if (isHostServerRunning) {
+      unawaited(_discoveryService?.checkBroadcastHealth(reason: reason));
+      return;
+    }
+    if (isInSession || _autoConnecting || !isCryptoReady) return;
+    final host = SettingsService.instanceOrNull?.read(SettingsService.companionRemoteAutoHost);
+    if (host == null) return;
+    appLogger.d('CompanionRemote: $reason, looking for the remembered host');
+    _autoConnectRetries = 0;
+    _autoConnectRetryTimer?.cancel();
+    unawaited(autoConnect(host));
   }
 
   final CompanionRemotePeerServiceFactory _peerServiceFactory;
@@ -200,15 +222,26 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
         final host = hosts.where((h) => h.clientId == hostClientId).firstOrNull;
         if (host != null && !found.isCompleted) found.complete(host);
       });
-      final host = await found.future.timeout(const Duration(seconds: 12), onTimeout: () => null);
+      final host = await found.future.timeout(autoConnectDiscoveryTimeout, onTimeout: () => null);
       await sub.cancel();
       sub = null;
       stopDiscovery();
-      if (host == null || isInSession || isDisposed) return;
-      appLogger.d('CompanionRemote: auto-connecting to ${host.name}');
-      await connectToDiscoveredHost(host);
+      if (isInSession || isDisposed) return;
+      if (host != null) {
+        appLogger.d('CompanionRemote: auto-connecting to ${host.name}');
+        await connectToDiscoveredHost(host);
+      } else {
+        // Fork: no beacon heard (host's discovery down, or the network drops
+        // broadcasts) — try the address that worked last time directly.
+        final address = SettingsService.instanceOrNull?.read(SettingsService.companionRemoteAutoHostAddress);
+        if (address == null) throw StateError('host not found on the LAN');
+        appLogger.d('CompanionRemote: auto-connect: host not discovered, trying last address');
+        await connectToManualHost(address, expectedHostClientId: hostClientId);
+      }
+      _autoConnectRetries = 0;
     } catch (e) {
       appLogger.d('CompanionRemote: auto-connect failed', error: e);
+      _scheduleAutoConnectRetry(hostClientId);
     } finally {
       await sub?.cancel();
       _autoConnecting = false;
@@ -216,6 +249,33 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   }
 
   bool _autoConnecting = false;
+
+  /// How long auto-connect listens for the host's beacon before trying its
+  /// last address.
+  @visibleForTesting
+  Duration autoConnectDiscoveryTimeout = const Duration(seconds: 12);
+
+  @visibleForTesting
+  bool get debugAutoConnectRetryPending => _autoConnectRetryTimer?.isActive ?? false;
+  int _autoConnectRetries = 0;
+  Timer? _autoConnectRetryTimer;
+
+  /// Fork: keep looking for the remembered host with backoff (15 s doubling
+  /// to 2 min) while the app is in the foreground.
+  void _scheduleAutoConnectRetry(String hostClientId) {
+    if (isDisposed || _appBackgrounded || isInSession || isHostServerRunning) return;
+    final delay = Duration(seconds: (15 << _autoConnectRetries.clamp(0, 3)));
+    _autoConnectRetries++;
+    appLogger.d('CompanionRemote: auto-connect retry $_autoConnectRetries in ${delay.inSeconds}s');
+    _autoConnectRetryTimer?.cancel();
+    _autoConnectRetryTimer = Timer(delay, () {
+      _autoConnectRetryTimer = null;
+      if (isDisposed || _appBackgrounded || isInSession) return;
+      final saved = SettingsService.instanceOrNull?.read(SettingsService.companionRemoteAutoHost);
+      if (saved != hostClientId) return; // disconnected by hand meanwhile
+      unawaited(autoConnect(hostClientId));
+    });
+  }
 
   /// Phone side: the host's progress and picks for AI requests sent with
   /// [askAi] (the raw `aiAnswer` data).
@@ -738,6 +798,14 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       // Start LAN discovery broadcasting
       _discoveryService ??= _discoveryServiceFactory();
       final localIps = result.addresses.map((a) => a.split(':').first).toList();
+      final hostPort = result.port;
+      // Fork: after sleep/wake or a Wi-Fi change the beacon re-advertises
+      // the new addresses; keep the shown ones in step.
+      _discoveryService!.onAdvertisedIpsChanged = (ips) {
+        if (!identical(_peerService, peer)) return;
+        _hostServerAddresses = [for (final ip in ips) '$ip:$hostPort'];
+        safeNotifyListeners();
+      };
       await _discoveryService!.startBroadcastingForContexts(
         contexts: contexts,
         deviceName: _deviceName,
@@ -859,7 +927,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
         _lastAuthContextId = peer.selectedAuthContextId ?? authContext.id;
         _lastHostClientId = peer.selectedHostClientId ?? host.clientId;
         _session = _session?.copyWith(status: RemoteSessionStatus.connected);
-        unawaited(_rememberAutoHost(_lastHostClientId));
+        unawaited(_rememberAutoHost(_lastHostClientId, address: winner));
       },
       failureLog: 'CompanionRemote: Failed to connect to host',
       onFailure: _failRemoteConnectSession,
@@ -870,7 +938,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   }
 
   /// Connect to a host by manual IP:port entry.
-  Future<void> connectToManualHost(String hostAddress) async {
+  Future<void> connectToManualHost(String hostAddress, {String expectedHostClientId = ''}) async {
     if (!isCryptoReady) {
       throw RemotePeerError(type: RemotePeerErrorType.authFailed, message: t.companionRemote.pairing.cryptoInitFailed);
     }
@@ -889,11 +957,20 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       generation: generation,
       seedConnectingSession: true,
       rethrowOnFailure: true,
-      join: (peer) => peer.joinSessionWithContexts(_deviceName, _platform, hostAddress, _authContexts),
+      join: (peer) => peer.joinSessionWithContexts(
+        _deviceName,
+        _platform,
+        hostAddress,
+        _authContexts,
+        expectedHostClientId: expectedHostClientId,
+      ),
       onConnected: (peer) {
         _lastAuthContextId = peer.selectedAuthContextId;
         _lastHostClientId = peer.selectedHostClientId ?? '';
         _session = _session?.copyWith(status: RemoteSessionStatus.connected);
+        if (expectedHostClientId.isNotEmpty) {
+          unawaited(_rememberAutoHost(_lastHostClientId, address: hostAddress));
+        }
       },
       failureLog: 'CompanionRemote: Failed to connect to manual host',
       onFailure: _failRemoteConnectSession,
@@ -1000,10 +1077,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
           _aiAnswers.add(command.data ?? const {});
         } else if (command.type == RemoteCommandType.castResult) {
           castResults.value = null; // so a repeat result still notifies
-          castResults.value = (
-            ok: command.data?['ok'] == true,
-            message: command.data?['message'] as String? ?? '',
-          );
+          castResults.value = (ok: command.data?['ok'] == true, message: command.data?['message'] as String? ?? '');
         } else if (command.type != RemoteCommandType.ping &&
             command.type != RemoteCommandType.pong &&
             command.type != RemoteCommandType.ack) {
@@ -1202,6 +1276,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
 
   void _handleAppResumed() {
     if (isDisposed) return;
+    if (isHostServerRunning) unawaited(_discoveryService?.checkBroadcastHealth(reason: 'app resumed'));
     if (_resumeReconnectPending) {
       _resumeReconnectPending = false;
       if (_resumeReconnectGeneration == _remoteGeneration && _session?.status == RemoteSessionStatus.reconnecting) {
@@ -1313,10 +1388,11 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     }
   }
 
-  Future<void> _rememberAutoHost(String? clientId) async {
+  Future<void> _rememberAutoHost(String? clientId, {String? address}) async {
     try {
       final settings = await SettingsService.getInstance();
       await settings.write(SettingsService.companionRemoteAutoHost, clientId);
+      await settings.write(SettingsService.companionRemoteAutoHostAddress, clientId == null ? null : address);
     } catch (e) {
       appLogger.d('CompanionRemote: could not save the host', error: e);
     }
@@ -1347,6 +1423,8 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_connectivitySub?.cancel());
+    _autoConnectRetryTimer?.cancel();
     _remoteGeneration++;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;

@@ -949,8 +949,12 @@ class SettingsService extends BaseSharedPreferencesService {
 
   /// Fork: the host this phone reconnects to on its own (its client id);
   /// cleared by a manual disconnect.
-  static final companionRemoteAutoHost = NullableStringPref(
-    'companion_remote_auto_host',
+  static final companionRemoteAutoHost = NullableStringPref('companion_remote_auto_host', transform: _trimEmptyAsNull);
+
+  /// Fork: the auto host's last working ip:port, tried directly when its
+  /// beacon isn't heard.
+  static final companionRemoteAutoHostAddress = NullableStringPref(
+    'companion_remote_auto_host_address',
     transform: _trimEmptyAsNull,
   );
 
@@ -1650,6 +1654,7 @@ class SettingsService extends BaseSharedPreferencesService {
     watchPartyRelayUrl,
     companionRemoteLastHostAddress,
     companionRemoteAutoHost,
+    companionRemoteAutoHostAddress,
     rememberedBrightnessLevel,
     refusedVideoCodecs,
     audioOutputDevice,

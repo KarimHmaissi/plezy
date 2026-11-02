@@ -90,6 +90,23 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-02
+
+### Companion link survives sleep (branch `feature/ai-helper`)
+- **Cause:** after the Mac slept, its remote server kept listening but the
+  LAN beacon the phone uses to find it was gone (no UDP sockets left in the
+  process), and the phone only ever looked for that beacon for 12 s, so it
+  never reconnected. A fresh app process brought the beacon back.
+- **Host:** the beacon now re-binds and re-advertises by itself when the OS
+  closes its sockets, a send fails, the LAN address changes, connectivity
+  changes, the app resumes, or a wake is detected (a beacon tick arriving
+  late), with a 30 s address check as a backstop. Each re-bind logs why.
+  The shown host addresses follow a new IP.
+- **Phone:** auto-connect falls back to the host's last working ip:port
+  (saved per host, checked against its id) when no beacon is heard, then
+  retries with backoff (15 s doubling to 2 min) while the app is open, and
+  starts again on resume and on Wi-Fi changes.
+
 ## 2026-11-01
 
 ### Phone: tap a row's title for See all (branch `feature/ai-helper`)
