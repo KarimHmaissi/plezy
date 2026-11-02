@@ -1,8 +1,7 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/screens/ai_composer.dart';
+import 'package:plezy/theme/mono_theme.dart';
 
 Future<void> _frames(WidgetTester tester, int n) async {
   for (var i = 0; i < n; i++) {
@@ -14,6 +13,8 @@ void main() {
   testWidgets('composer keeps the keyboard through the iris and the IME opening', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
+        // The composer reads its colours from the app theme's tokens.
+        theme: monoTheme(MonoPalette.dark),
         home: Builder(
           builder: (context) => Scaffold(
             body: Center(

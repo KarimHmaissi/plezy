@@ -87,6 +87,9 @@ void main() {
       final plays = [...imported('2020-01-01T10:00:00Z', 15, HistorySource.trakt), _movie('2020-01-01T10:01:00Z')];
       markBulkDates(plays);
       expect(plays.every((p) => p.bulk), isTrue);
+      final season = imported('2020-01-01T10:00:00Z', 6, HistorySource.trakt);
+      markBulkDates(season);
+      expect(season.every((p) => p.bulk), isTrue, reason: 'a season marked watched at once');
       final few = imported('2020-01-01T10:00:00Z', 3, HistorySource.trakt);
       markBulkDates(few);
       expect(few.any((p) => p.bulk), isFalse);

@@ -92,6 +92,22 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### One visual language: style guide, AI and History restyled (branch `feature/ai-helper`)
+- `docs/fork/STYLE-GUIDE.md`: where styling lives (theme, palette tokens,
+  ForkSpacing, TV constants), colour roles, type per role, spacing and
+  radii, which component to use for what, and do/don't. New screens use
+  theme values only, no colour or font literals.
+- History and the AI screens (composer, answers, Ask about this, Previously
+  on) now use the theme font and text styles, the palette's colours and
+  accent (no amber, no Bebas, no pure black), the standard tab header and
+  spacing, and the standard chips, cards and buttons. Their motion (iris,
+  film strip, Pressable, haptics) is unchanged.
+- Phone: History no longer appears as a sixth bottom-nav tab while open; it
+  opens from Home's top bar and Home stays highlighted.
+- History: a season or show marked watched at once (4+ watches within 2
+  minutes) now counts as a bulk date too, so it no longer fills the
+  timeline with "random" episodes.
+
 ### History: send Plex watches to Trakt (branch `feature/ai-helper`)
 - A "Send Plex watches to Trakt" button under the History hero (Trakt
   connected) opens a preview first: how many films and episodes would be

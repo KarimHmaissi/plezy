@@ -6,6 +6,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
 import '../focus/focusable_action_bar.dart';
+import '../focus/hub_vertical_navigation.dart';
 import '../focus/locked_hub_controller.dart';
 import '../i18n/strings.g.dart';
 import '../media/ids.dart';
@@ -24,6 +25,7 @@ import '../utils/video_player_navigation.dart';
 import '../models/companion_remote/remote_command.dart';
 import '../services/companion_remote/mirror_sync.dart';
 import '../theme/fork_motion.dart';
+import '../theme/fork_spacing.dart';
 import '../services/customisation/customisation_store.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
@@ -43,11 +45,12 @@ import '../utils/dialogs.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
-import '../widgets/focused_scroll_scaffold.dart';
+import '../widgets/desktop_app_bar.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/hub_section.dart';
 import '../widgets/media_context_menu.dart' show ItemMenuEntries, MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/side_navigation_rail.dart';
+import '../widgets/system_bottom_inset.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
@@ -125,6 +128,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   final _actionBarKey = GlobalKey<FocusableActionBarState>();
   final _tvBrowseRailKey = GlobalKey<TvBrowseRailState>();
   final _hubFocusMemory = HubFocusMemory();
+
+  /// Touch/desktop rows by hub id: rows come and go at the top, so keys
+  /// follow the row rather than its position.
+  final Map<String, GlobalKey<HubSectionState>> _hubKeys = {};
+  GlobalKey<HubSectionState> _hubKey(MediaHub hub) => _hubKeys.putIfAbsent(hub.id, GlobalKey.new);
   final TvSpotlightController _spotlight = TvSpotlightController();
   final ValueNotifier<bool> _tvRowsExpanded = ValueNotifier(false);
 
@@ -726,13 +734,22 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   @override
   void focusActiveTabIfReady() {
     if (_rows.isNotEmpty) {
-      _tvBrowseRailKey.currentState?.requestFocus();
+      if (PlatformDetector.isTV()) {
+        _tvBrowseRailKey.currentState?.requestFocus();
+      } else {
+        _focusFirstHub();
+      }
     } else {
       _actionBarKey.currentState?.requestFocusOnFirst();
     }
   }
 
   void _navigateToSidebar() => MainScreenFocusScope.focusSidebarOf(context);
+
+  void _focusFirstHub() {
+    final first = _hubs.firstOrNull;
+    if (first != null) _hubKeys[first.id]?.currentState?.requestFocusFromMemory();
+  }
 
   /// Phone: its own requests still running on the TV (or failed), and
   /// whether the TV is busy with others (asked on the TV, Find more...).
@@ -887,44 +904,77 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     final message = _message();
     final color = Theme.of(context).colorScheme.onSurface;
     if (!PlatformDetector.isTV()) {
-      return FocusedScrollScaffold(
-        title: Text(t.navigation.ai),
-        actions: [FocusableActionBar(key: _actionBarKey, actions: _actions(color))],
-        slivers: [
-          if (message != null)
-            SliverFillRemaining(child: message)
-          else
-            for (final hub in hubs)
-              SliverToBoxAdapter(
-                child: RowMenuEntries(
-                  entries: _rowMenuEntries(hub),
-                  child: ItemMenuEntries(
-                    build: _pickMenuEntries,
-                    child: HubSection(
-                      hub: hub,
-                      trailingCard: _trailingCard(hub),
-                      focusMemory: _hubFocusMemory,
-                      icon: Symbols.auto_awesome_rounded,
-                      // Phone: a tap plays (on the TV while casting); shows open.
-                      onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+      return Scaffold(
+        body: RefreshIndicator(
+          // Pull to refresh does what the toolbar's refresh does: new Tonight
+          // picks (a phone mirroring its TV reloads the TV's answers).
+          onRefresh: ForkMotion.refreshing(
+            () => _thinClient ? _loadHistory() : (_hasKey == true ? _tonight(refresh: true) : _start()),
+          ),
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              DesktopSliverAppBar(
+                title: Text(t.navigation.ai),
+                pinned: false,
+                floating: true,
+                snap: true,
+                backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                surfaceTintColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                scrolledUnderElevation: 0,
+                actions: [
+                  FocusableActionBar(key: _actionBarKey, onNavigateDown: _focusFirstHub, actions: _actions(color)),
+                ],
+              ),
+              if (message != null)
+                SliverFillRemaining(child: message)
+              else
+                for (var i = 0; i < hubs.length; i++)
+                  SliverToBoxAdapter(
+                    child: RowMenuEntries(
+                      entries: _rowMenuEntries(hubs[i]),
+                      child: ItemMenuEntries(
+                        build: _pickMenuEntries,
+                        child: HubSection(
+                          key: _hubKey(hubs[i]),
+                          hub: hubs[i],
+                          trailingCard: _trailingCard(hubs[i]),
+                          focusMemory: _hubFocusMemory,
+                          icon: Symbols.auto_awesome_rounded,
+                          // Phone: a tap plays (on the TV while casting); shows open.
+                          onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                          onVerticalNavigation: (isUp) => navigateVerticalHubRows(
+                            hubCount: hubs.length,
+                            hubIndex: i,
+                            isUp: isUp,
+                            onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
+                            requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
+                          ),
+                          onNavigateToSidebar: _navigateToSidebar,
+                        ),
+                      ),
+                    ),
+                  ),
+              if (message == null && _hasMore)
+                SliverToBoxAdapter(
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(ForkSpacing.of(context).edgeInset),
+                      child: TextButton.icon(
+                        onPressed: () => unawaited(_loadMore()),
+                        icon: const Icon(Symbols.expand_more_rounded),
+                        label: Text(t.aiTab.loadMore),
+                      ),
                     ),
                   ),
                 ),
-              ),
-          if (message == null && _hasMore)
-            SliverToBoxAdapter(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: TextButton.icon(
-                    onPressed: () => unawaited(_loadMore()),
-                    icon: const Icon(Symbols.expand_more_rounded),
-                    label: Text(t.aiTab.loadMore),
-                  ),
-                ),
-              ),
-            ),
-        ],
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+              // Clear of the Android navigation bar / iOS home indicator.
+              const SliverSystemBottomInset(),
+            ],
+          ),
+        ),
       );
     }
     return TvSpotlightScaffold(

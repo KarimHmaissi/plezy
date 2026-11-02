@@ -275,7 +275,9 @@ List<NavigationTab> mainScreenBottomNavigationTabs({
     // Fork: five items like Plex; Search and Downloads live in Home's top
     // bar instead (shown here only while open, or Downloads offline).
     if (tab.id == NavigationTabId.search) return currentTab == tab.id;
-    if (tab.id == NavigationTabId.history) return currentTab == tab.id;
+    // History opens from Home's top bar and never takes a bottom-nav slot
+    // (Home stays highlighted while it's open).
+    if (tab.id == NavigationTabId.history) return false;
     if (tab.id == NavigationTabId.downloads) return isOffline || currentTab == tab.id;
     if (tab.id != NavigationTabId.settings) return true;
     return isOffline || currentTab == NavigationTabId.settings;

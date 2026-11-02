@@ -127,6 +127,18 @@ void main() {
       expect(_ids(tabs), isNot(contains(NavigationTabId.settings)));
     });
 
+    test('mobile never gives History a bottom-nav slot, even while it is open', () {
+      for (final current in [NavigationTabId.discover, NavigationTabId.history]) {
+        final tabs = mainScreenBottomNavigationTabs(
+          visibleTabs: allNavigationTabs,
+          isMobile: true,
+          isOffline: false,
+          currentTab: current,
+        );
+        expect(_ids(tabs), isNot(contains(NavigationTabId.history)));
+      }
+    });
+
     test('mobile offline includes Downloads and Settings', () {
       final offlineTabs = allNavigationTabs
           .where((tab) => tab.id == NavigationTabId.downloads || tab.id == NavigationTabId.settings)

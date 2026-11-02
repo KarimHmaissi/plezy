@@ -21,17 +21,19 @@ import '../services/history/trakt_copy.dart';
 import '../services/library_index/library_index.dart' show IndexSource, PlexIndexSource;
 import '../services/plex_client.dart';
 import '../theme/fork_motion.dart';
+import '../theme/fork_spacing.dart';
+import '../theme/mono_tokens.dart';
 import '../utils/app_logger.dart';
 import '../utils/catalog_navigation_helper.dart';
 import '../utils/dialogs.dart';
 import '../utils/snackbar_helper.dart';
 import '../utils/media_navigation_helper.dart';
+import '../utils/platform_detector.dart';
+import '../widgets/app_icon.dart';
+import '../widgets/desktop_app_bar.dart';
+import '../widgets/focusable_tab_chip.dart';
 import '../widgets/optimized_media_image.dart';
 import '../widgets/pressable.dart';
-
-/// Projector-lamp amber, the page's one accent.
-const _amber = Color(0xFFE5A00D);
-const _display = 'Bebas Neue';
 
 /// Fork: everything watched, from Plex and Trakt merged, with a year's (or
 /// all time's) numbers on top and a month-by-month timeline below.
@@ -136,31 +138,23 @@ class HistoryScreenState extends State<HistoryScreen>
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Colors.black,
-      child: ValueListenableBuilder<HistoryState>(
-        valueListenable: _service.state,
-        builder: (context, state, _) {
-          final history = state.history;
-          if (history == null) {
-            return _Message(
-              text: state.loading || state.error == null ? t.history.loading : t.history.failed,
-              busy: state.loading || state.error == null,
-              onRetry: state.error != null ? () => _load(force: true) : null,
-            );
-          }
-          final years = HistoryStats.yearsOf(history.plays);
-          if (!_yearChosen && years.isNotEmpty) _year = years.first;
-          final stats = HistoryStats.compute(history.plays, year: _year);
-          return RefreshIndicator(
-            color: _amber,
+    return ValueListenableBuilder<HistoryState>(
+      valueListenable: _service.state,
+      builder: (context, state, _) {
+        final history = state.history;
+        final years = history == null ? const <int>[] : HistoryStats.yearsOf(history.plays);
+        if (!_yearChosen && years.isNotEmpty) _year = years.first;
+        final trakt = _trakt;
+        return Scaffold(
+          body: RefreshIndicator(
             onRefresh: ForkMotion.refreshing(() => _load(force: true)),
             child: _HistoryBody(
               state: state,
-              stats: stats,
+              stats: history == null ? null : HistoryStats.compute(history.plays, year: _year),
               years: years,
               year: _year,
               firstFocus: _firstFocus,
+              onRetry: () => _load(force: true),
               onYear: (y) {
                 ForkMotion.selection();
                 setState(() {
@@ -169,38 +163,45 @@ class HistoryScreenState extends State<HistoryScreen>
                 });
               },
               onOpen: _open,
-              traktCopy: _trakt == null
+              traktCopy: trakt == null || history == null
                   ? null
                   : _TraktCopyBar(
                       history: history,
-                      copier: TraktCopier(TraktClientHistoryWriter(_trakt!.client)),
+                      copier: TraktCopier(TraktClientHistoryWriter(trakt.client)),
                       onChanged: () => _load(force: true),
                     ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }
 
 /// Tests and previews: the page body for [state], without loading.
 @visibleForTesting
-Widget historyPreview(HistoryState state, {int? year}) {
-  final stats = HistoryStats.compute(state.history!.plays, year: year);
-  return ColoredBox(
-    color: Colors.black,
-    child: _HistoryBody(
-      state: state,
-      stats: stats,
-      years: HistoryStats.yearsOf(state.history!.plays),
-      year: year,
-      firstFocus: FocusNode(),
-      onYear: (_) {},
-      onOpen: (_) {},
-    ),
-  );
+Widget historyPreview(HistoryState state, {int? year}) => Scaffold(
+  body: _HistoryBody(
+    state: state,
+    stats: HistoryStats.compute(state.history!.plays, year: year),
+    years: HistoryStats.yearsOf(state.history!.plays),
+    year: year,
+    firstFocus: FocusNode(),
+    onRetry: () {},
+    onYear: (_) {},
+    onOpen: (_) {},
+  ),
+);
+
+/// Gutters and gaps: the shared touch rhythm, TV's wider shelf insets.
+({double edge, double gap, double rowGap, double titleSize}) _rhythm(BuildContext context) {
+  if (PlatformDetector.isTV()) return (edge: 48, gap: 14, rowGap: 32, titleSize: 26);
+  final s = ForkSpacing.of(context);
+  return (edge: s.edgeInset, gap: s.titleGap, rowGap: s.rowGap, titleSize: s.titleSize);
 }
+
+TextStyle? _sectionStyle(BuildContext context) =>
+    Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, fontSize: _rhythm(context).titleSize);
 
 class _HistoryBody extends StatelessWidget {
   const _HistoryBody({
@@ -209,128 +210,130 @@ class _HistoryBody extends StatelessWidget {
     required this.years,
     required this.year,
     required this.firstFocus,
+    required this.onRetry,
     required this.onYear,
     required this.onOpen,
     this.traktCopy,
   });
 
-  /// "Send Plex watches to Trakt", when Trakt is connected.
-  final Widget? traktCopy;
   final HistoryState state;
-  final HistoryStats stats;
+
+  /// Null until the first load lands.
+  final HistoryStats? stats;
   final List<int> years;
   final int? year;
   final FocusNode firstFocus;
+  final VoidCallback onRetry;
   final ValueChanged<int?> onYear;
   final ValueChanged<HistoryPlay> onOpen;
 
+  /// "Send Plex watches to Trakt", when Trakt is connected.
+  final Widget? traktCopy;
+
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final gutter = width < 420 ? 16.0 : 28.0;
-    final groups = _byMonth(stats.plays);
-    final history = state.history!;
+    final r = _rhythm(context);
+    final stats = this.stats;
+    final history = state.history;
+    final textTheme = Theme.of(context).textTheme;
+    final tk = tokens(context);
+
+    Widget boxed(Widget child, {double top = 0}) => SliverPadding(
+      padding: EdgeInsets.fromLTRB(r.edge, top, r.edge, 0),
+      sliver: SliverToBoxAdapter(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: _PageWidth(child: child),
+        ),
+      ),
+    );
+
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
-        SliverSafeArea(
-          bottom: false,
-          sliver: SliverPadding(
-            padding: EdgeInsets.fromLTRB(gutter, 16, gutter, 0),
-            sliver: SliverToBoxAdapter(
-              child: Center(
-                child: _PageWidth(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              year == null ? t.history.title.toUpperCase() : '${t.history.title.toUpperCase()} · $year',
-                              style: const TextStyle(
-                                fontFamily: _display,
-                                fontSize: 40,
-                                color: Colors.white,
-                                height: 1,
-                              ),
-                            ),
-                          ),
-                          if (state.loading)
-                            const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: _amber),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _YearPicker(years: years, year: year, onYear: onYear, firstFocus: firstFocus),
-                      const SizedBox(height: 20),
-                      _StatsHero(stats: stats, wide: width >= 600),
-                      if (traktCopy != null) ...[const SizedBox(height: 12), traktCopy!],
-                      if (stats.byMonth.isNotEmpty) ...[
-                        const SizedBox(height: 28),
-                        _SectionTitle(t.history.byMonth),
-                        const SizedBox(height: 10),
-                        _MonthStrip(stats: stats, year: year),
-                      ],
-                      ..._insightSections(stats, onOpen),
-                      const SizedBox(height: 28),
-                      _SectionTitle(t.history.timeline),
-                    ],
-                  ),
+        DesktopSliverAppBar(
+          title: Text(t.history.title),
+          pinned: false,
+          floating: true,
+          snap: true,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          scrolledUnderElevation: 0,
+          actions: [
+            if (state.loading)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: tk.textMuted),
                 ),
               ),
-            ),
-          ),
+          ],
         ),
-        if (stats.plays.isEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Text(
-                t.history.empty,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white54),
-              ),
+        if (history == null || stats == null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: _Message(
+              text: state.error == null ? t.history.loading : t.history.failed,
+              busy: state.error == null,
+              onRetry: state.error != null ? onRetry : null,
             ),
-          ),
-        for (final group in groups) ...[
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(gutter, 18, gutter, 6),
-            sliver: SliverToBoxAdapter(
-              child: Center(
-                child: _PageWidth(
-                  child: Text(
-                    '${_monthName(group.month.month)} ${group.month.year}'.toUpperCase(),
-                    style: const TextStyle(fontFamily: _display, fontSize: 22, color: _amber, letterSpacing: 1),
+          )
+        else ...[
+          boxed(_YearPicker(years: years, year: year, onYear: onYear, firstFocus: firstFocus), top: 4),
+          boxed(_StatsHero(stats: stats), top: r.gap + 6),
+          if (traktCopy != null) boxed(traktCopy!, top: 12),
+          if (stats.byMonth.isNotEmpty) ...[
+            boxed(Text(t.history.byMonth, style: _sectionStyle(context)), top: r.rowGap),
+            boxed(
+              _MonthStrip(stats: stats, year: year),
+              top: r.gap,
+            ),
+          ],
+          for (final section in _insightSections(context, stats, onOpen)) ...[
+            boxed(Text(section.title, style: _sectionStyle(context)), top: r.rowGap),
+            boxed(section.child, top: r.gap),
+          ],
+          boxed(Text(t.history.timeline, style: _sectionStyle(context)), top: r.rowGap),
+          if (stats.plays.isEmpty)
+            boxed(
+              Text(t.history.empty, style: textTheme.bodyMedium?.copyWith(color: tk.textMuted)),
+              top: r.gap,
+            ),
+          for (final group in _byMonth(stats.plays)) ...[
+            boxed(
+              Text(
+                '${_monthName(group.month.month)} ${group.month.year}',
+                style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: tk.textMuted),
+              ),
+              top: r.gap + 8,
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(r.edge, 6, r.edge, 0),
+              sliver: SliverList.builder(
+                itemCount: group.plays.length,
+                itemBuilder: (context, i) => Align(
+                  alignment: Alignment.topCenter,
+                  child: _PageWidth(
+                    child: _PlayRow(play: group.plays[i], onOpen: onOpen),
                   ),
                 ),
               ),
             ),
-          ),
+          ],
           SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: gutter),
-            sliver: SliverList.builder(
-              itemCount: group.plays.length,
-              itemBuilder: (context, i) => Center(
+            padding: EdgeInsets.fromLTRB(r.edge, r.rowGap, r.edge, 48),
+            sliver: SliverToBoxAdapter(
+              child: Align(
+                alignment: Alignment.topCenter,
                 child: _PageWidth(
-                  child: _PlayRow(play: group.plays[i], onOpen: onOpen),
+                  child: _Notes(state: state, stats: stats, undated: history.undated),
                 ),
               ),
             ),
           ),
         ],
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(gutter, 28, gutter, 48),
-          sliver: SliverToBoxAdapter(
-            child: Center(
-              child: _PageWidth(
-                child: _Notes(state: state, stats: stats, undated: history.undated),
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -362,14 +365,15 @@ String _monthName(int month) => const [
   'December',
 ][month - 1];
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text);
-  final String text;
+/// The page's content column: full width up to 1100, centred beyond.
+class _PageWidth extends StatelessWidget {
+  const _PageWidth({required this.child});
+  final Widget child;
 
   @override
-  Widget build(BuildContext context) => Text(
-    text.toUpperCase(),
-    style: const TextStyle(fontFamily: _display, fontSize: 22, color: Colors.white70, letterSpacing: 1),
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 1100),
+    child: SizedBox(width: double.infinity, child: child),
   );
 }
 
@@ -384,57 +388,41 @@ class _YearPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final options = <(int?, String)>[for (final y in years) (y, '$y'), (null, t.history.allTime)];
-    return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: options.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final (value, label) = options[i];
-          final selected = value == year;
-          return Pressable(
-            borderRadius: BorderRadius.circular(20),
-            longPress: false,
-            child: Material(
-              color: selected ? _amber : Colors.white.withValues(alpha: 0.08),
-              shape: const StadiumBorder(),
-              child: InkWell(
-                focusNode: i == 0 ? firstFocus : null,
-                customBorder: const StadiumBorder(),
-                focusColor: _amber.withValues(alpha: 0.45),
-                onTap: () => onYear(value),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Center(
-                    child: Text(
-                      label.toUpperCase(),
-                      style: TextStyle(
-                        fontFamily: _display,
-                        fontSize: 18,
-                        letterSpacing: 1,
-                        color: selected ? Colors.black : Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+    final selected = options.indexWhere((o) => o.$1 == year);
+    void step(int delta) {
+      final i = selected + delta;
+      if (i >= 0 && i < options.length) onYear(options[i].$1);
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TabChipStrip(
+        children: [
+          for (final (i, (value, label)) in options.indexed)
+            FocusableTabChip(
+              label: label,
+              isSelected: value == year,
+              focusNode: i == 0 ? firstFocus : null,
+              onSelect: () => onYear(value),
+              onNavigateLeft: () => step(-1),
+              onNavigateRight: () => step(1),
             ),
-          );
-        },
+        ],
       ),
     );
   }
 }
 
 class _StatsHero extends StatelessWidget {
-  const _StatsHero({required this.stats, required this.wide});
+  const _StatsHero({required this.stats});
 
   final HistoryStats stats;
-  final bool wide;
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final textTheme = Theme.of(context).textTheme;
+    final wide = MediaQuery.sizeOf(context).width >= 600;
     final tiles = [
       _Stat(value: _grouped(stats.hours), label: t.history.hours, hero: true),
       _Stat(value: _grouped(stats.films), label: t.history.films),
@@ -446,67 +434,57 @@ class _StatsHero extends StatelessWidget {
       ),
     ];
     final split = stats.minutes == 0 ? 0.0 : stats.filmMinutes / stats.minutes;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [_amber.withValues(alpha: 0.18), Colors.white.withValues(alpha: 0.03)],
-        ),
-        border: Border.all(color: _amber.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (wide)
-            Row(children: [for (final tile in tiles) Expanded(child: tile)])
-          else
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                tiles.first,
-                const SizedBox(height: 12),
-                Row(children: [for (final tile in tiles.skip(1)) Expanded(child: tile)]),
-              ],
-            ),
-          if (stats.minutes > 0) ...[
-            const SizedBox(height: 18),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(3),
-              child: SizedBox(
-                height: 6,
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: math.max(1, (split * 1000).round()),
-                      child: const ColoredBox(color: _amber, child: SizedBox.expand()),
-                    ),
-                    Expanded(
-                      flex: math.max(1, ((1 - split) * 1000).round()),
-                      child: ColoredBox(color: Colors.white.withValues(alpha: 0.25), child: const SizedBox.expand()),
-                    ),
-                  ],
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (wide)
+              Row(children: [for (final tile in tiles) Expanded(child: tile)])
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  tiles.first,
+                  const SizedBox(height: 14),
+                  Row(children: [for (final tile in tiles.skip(1)) Expanded(child: tile)]),
+                ],
+              ),
+            if (stats.minutes > 0) ...[
+              const SizedBox(height: 18),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(tk.radiusXs),
+                child: SizedBox(
+                  height: 6,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: math.max(1, (split * 1000).round()),
+                        child: ColoredBox(color: tk.accent, child: const SizedBox.expand()),
+                      ),
+                      Expanded(
+                        flex: math.max(1, ((1 - split) * 1000).round()),
+                        child: ColoredBox(color: tk.text.withValues(alpha: 0.18), child: const SizedBox.expand()),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Text(
-                  '${t.history.films.toUpperCase()} ${stats.filmHours}H',
-                  style: const TextStyle(fontFamily: _display, fontSize: 15, color: _amber, letterSpacing: 1),
-                ),
-                const Spacer(),
-                Text(
-                  'TV ${stats.tvHours}H',
-                  style: const TextStyle(fontFamily: _display, fontSize: 15, color: Colors.white60, letterSpacing: 1),
-                ),
-              ],
-            ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Text(
+                    '${t.history.films} · ${stats.filmHours} h',
+                    style: textTheme.bodySmall?.copyWith(color: tk.text),
+                  ),
+                  const Spacer(),
+                  Text('TV · ${stats.tvHours} h', style: textTheme.bodySmall),
+                ],
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -532,6 +510,8 @@ class _Stat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final tk = tokens(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -540,31 +520,21 @@ class _Stat extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: Text(
             value,
-            style: TextStyle(
-              fontFamily: _display,
-              fontSize: hero ? 64 : 40,
-              height: 1,
-              color: hero ? _amber : Colors.white,
+            style: (hero ? textTheme.displaySmall : textTheme.headlineSmall)?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: hero ? tk.accent : tk.text,
+              height: 1.1,
             ),
           ),
         ),
-        Text(
-          label.toUpperCase(),
-          style: const TextStyle(fontFamily: _display, fontSize: 15, letterSpacing: 1.2, color: Colors.white60),
-        ),
-        if (sub != null)
-          Text(
-            sub!,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: Colors.white38),
-          ),
+        Text(label, style: textTheme.labelLarge?.copyWith(color: tk.textMuted)),
+        if (sub != null) Text(sub!, maxLines: 1, overflow: TextOverflow.ellipsis, style: textTheme.bodySmall),
       ],
     );
   }
 }
 
-/// One bar per month (a year), or per year (all time), amber by count.
+/// One bar per month (a year), or per year (all time), by count.
 class _MonthStrip extends StatelessWidget {
   const _MonthStrip({required this.stats, required this.year});
 
@@ -583,9 +553,24 @@ class _MonthStrip extends StatelessWidget {
       final last = perYear.keys.isEmpty ? DateTime.now().year : perYear.keys.reduce(math.max);
       bars = [for (var y = first; y <= last; y++) ("'${'$y'.substring(2)}", perYear[y] ?? 0)];
     }
+    return _Bars(bars: bars, height: 96);
+  }
+}
+
+/// Vertical bars with a count above and a label below.
+class _Bars extends StatelessWidget {
+  const _Bars({required this.bars, required this.height});
+
+  final List<(String, int)> bars;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final small = Theme.of(context).textTheme.labelSmall?.copyWith(color: tk.textMuted);
     final peak = bars.map((b) => b.$2).fold(0, math.max);
     return SizedBox(
-      height: 96,
+      height: height,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
@@ -596,21 +581,19 @@ class _MonthStrip extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    if (n > 0) Text('$n', style: const TextStyle(fontSize: 10, color: Colors.white54)),
+                    if (n > 0) Text('$n', maxLines: 1, style: small),
                     const SizedBox(height: 2),
                     Container(
-                      height: peak == 0 ? 2 : math.max(2, 56 * n / peak),
+                      height: peak == 0 ? 2 : math.max(2, (height - 40) * n / peak),
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(3),
-                        color: n == 0 ? Colors.white12 : Color.lerp(_amber.withValues(alpha: 0.35), _amber, n / peak),
+                        borderRadius: BorderRadius.circular(tk.radiusXs),
+                        color: n == 0
+                            ? tk.text.withValues(alpha: 0.08)
+                            : tk.accent.withValues(alpha: 0.35 + 0.65 * n / peak),
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      style: const TextStyle(fontFamily: _display, fontSize: 13, color: Colors.white54),
-                    ),
+                    Text(label, maxLines: 1, style: small),
                   ],
                 ),
               ),
@@ -629,6 +612,8 @@ class _PlayRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final textTheme = Theme.of(context).textTheme;
     final local = play.watchedAt.toLocal();
     final subtitle = play.isMovie
         ? [
@@ -641,33 +626,32 @@ class _PlayRow extends StatelessWidget {
             ?play.episodeTitle,
           ].join(' · ');
     return Pressable(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(tk.radiusMd),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          focusColor: _amber.withValues(alpha: 0.22),
+          borderRadius: BorderRadius.circular(tk.radiusMd),
           onTap: () => onOpen(play),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
             child: Row(
               children: [
                 SizedBox(
-                  width: 44,
+                  width: 40,
                   child: Column(
                     children: [
                       Text(
                         '${local.day}',
-                        style: const TextStyle(fontFamily: _display, fontSize: 26, height: 1, color: Colors.white),
+                        style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, height: 1),
                       ),
                       Text(
-                        _monthName(local.month).substring(0, 3).toUpperCase(),
-                        style: const TextStyle(fontFamily: _display, fontSize: 12, color: Colors.white38),
+                        _monthName(local.month).substring(0, 3),
+                        style: textTheme.labelSmall?.copyWith(color: tk.textMuted),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 _Poster(play: play, width: 44),
                 const SizedBox(width: 12),
                 Expanded(
@@ -678,15 +662,10 @@ class _PlayRow extends StatelessWidget {
                         play.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                        style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
                       ),
                       if (subtitle.isNotEmpty)
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white54, fontSize: 13),
-                        ),
+                        Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: textTheme.bodySmall),
                     ],
                   ),
                 ),
@@ -707,23 +686,22 @@ class _Sources extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget badge(String text, Color color) => Container(
+    final tk = tokens(context);
+    final style = Theme.of(context).textTheme.labelSmall?.copyWith(color: tk.textMuted);
+    Widget badge(String text) => Container(
       margin: const EdgeInsets.only(left: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        border: Border.all(color: color),
-        borderRadius: BorderRadius.circular(4),
+        color: tk.text.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(tk.radiusXs),
       ),
-      child: Text(
-        text,
-        style: TextStyle(fontFamily: _display, fontSize: 12, color: color, letterSpacing: 1),
-      ),
+      child: Text(text, style: style),
     );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (sources.contains(HistorySource.plex)) badge('PLEX', _amber),
-        if (sources.contains(HistorySource.trakt)) badge('TRAKT', Colors.white54),
+        if (sources.contains(HistorySource.plex)) badge('Plex'),
+        if (sources.contains(HistorySource.trakt)) badge('Trakt'),
       ],
     );
   }
@@ -745,13 +723,14 @@ class _Notes extends StatelessWidget {
       if (undated > 0) t.history.undatedNote(n: undated),
       if (!state.hasTrakt) t.history.noTraktNote,
     ];
+    final style = Theme.of(context).textTheme.bodySmall;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final note in notes)
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
-            child: Text(note, style: const TextStyle(fontSize: 12, color: Colors.white38)),
+            child: Text(note, style: style),
           ),
       ],
     );
@@ -771,30 +750,14 @@ class _Message extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (busy) const CircularProgressIndicator(color: _amber),
+          if (busy) const CircularProgressIndicator(),
           const SizedBox(height: 16),
-          Text(text, style: const TextStyle(color: Colors.white70)),
-          if (onRetry != null)
-            TextButton(
-              onPressed: onRetry,
-              child: Text(t.history.retry, style: const TextStyle(color: _amber)),
-            ),
+          Text(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: tokens(context).textMuted)),
+          if (onRetry != null) TextButton(onPressed: onRetry, child: Text(t.history.retry)),
         ],
       ),
     );
   }
-}
-
-/// The page's content column: full width up to 1100, centred beyond.
-class _PageWidth extends StatelessWidget {
-  const _PageWidth({required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => ConstrainedBox(
-    constraints: const BoxConstraints(maxWidth: 1100),
-    child: SizedBox(width: double.infinity, child: child),
-  );
 }
 
 /// A title's poster: Trakt's when known, else Plex's from its server.
@@ -811,7 +774,7 @@ class _Poster extends StatelessWidget {
         ? context.read<MultiServerProvider>().getClientForServer(ServerId(play.plexServerId!))
         : null;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(width < 50 ? 6 : 8),
+      borderRadius: BorderRadius.circular(width < 50 ? tokens(context).radiusSm : tokens(context).radiusMd),
       child: SizedBox(
         width: width,
         height: height,
@@ -829,7 +792,11 @@ class _Poster extends StatelessWidget {
 
 /// The sections between the month strip and the timeline: the longest
 /// binge, top genres, directors and actors, rewatches and decades.
-List<Widget> _insightSections(HistoryStats stats, ValueChanged<HistoryPlay> onOpen) {
+List<({String title, Widget child})> _insightSections(
+  BuildContext context,
+  HistoryStats stats,
+  ValueChanged<HistoryPlay> onOpen,
+) {
   List<HistoryPlay> titlesWith(bool Function(HistoryPlay p) test) {
     final seen = <String>{};
     return [
@@ -838,40 +805,39 @@ List<Widget> _insightSections(HistoryStats stats, ValueChanged<HistoryPlay> onOp
     ];
   }
 
-  Widget section(String title, Widget child) => Padding(
-    padding: const EdgeInsets.only(top: 28),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [_SectionTitle(title), const SizedBox(height: 12), child],
-    ),
-  );
-
   final binge = stats.longestBinge;
   return [
-    if (binge != null) section(t.history.longestBinge, _BingeCard(binge: binge, onOpen: onOpen)),
+    if (binge != null) (title: t.history.longestBinge, child: _BingeCard(binge: binge, onOpen: onOpen)),
     if (stats.topGenres.isNotEmpty)
-      section(t.history.topGenres, _RankedBars(entries: stats.topGenres.take(6).toList())),
+      (title: t.history.topGenres, child: _RankedBars(entries: stats.topGenres.take(6).toList())),
     if (stats.topDirectors.isNotEmpty)
-      section(
-        t.history.directors,
-        _PeopleRow(
+      (
+        title: t.history.directors,
+        child: _PeopleRow(
           entries: stats.topDirectors.take(8).toList(),
           postersFor: (name) => titlesWith((p) => p.directors.contains(name)),
           onOpen: onOpen,
         ),
       ),
     if (stats.topCast.isNotEmpty)
-      section(
-        t.history.actors,
-        _PeopleRow(
+      (
+        title: t.history.actors,
+        child: _PeopleRow(
           entries: stats.topCast.take(8).toList(),
           postersFor: (name) => titlesWith((p) => p.cast.contains(name)),
           onOpen: onOpen,
         ),
       ),
     if (stats.rewatches.isNotEmpty)
-      section(t.history.rewatches, _RewatchRow(rewatches: stats.rewatches, onOpen: onOpen)),
-    if (stats.decades.length > 1) section(t.history.decades, _DecadeStrip(decades: stats.decades)),
+      (title: t.history.rewatches, child: _RewatchRow(rewatches: stats.rewatches, onOpen: onOpen)),
+    if (stats.decades.length > 1)
+      (
+        title: t.history.decades,
+        child: _Bars(
+          bars: [for (final e in stats.decades.entries) ("'${'${e.key}'.substring(2)}s", e.value)],
+          height: 90,
+        ),
+      ),
   ];
 }
 
@@ -883,15 +849,14 @@ class _BingeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final textTheme = Theme.of(context).textTheme;
     final local = binge.play.watchedAt.toLocal();
     return Pressable(
       borderRadius: BorderRadius.circular(14),
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
+      child: Card(
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          focusColor: _amber.withValues(alpha: 0.22),
           onTap: () => onOpen(binge.play),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -905,23 +870,19 @@ class _BingeCard extends StatelessWidget {
                     children: [
                       Text(
                         '${binge.episodes}',
-                        style: const TextStyle(fontFamily: _display, fontSize: 56, height: 1, color: _amber),
-                      ),
-                      Text(
-                        t.history.bingeLine(n: binge.episodes).toUpperCase(),
-                        style: const TextStyle(
-                          fontFamily: _display,
-                          fontSize: 16,
-                          color: Colors.white70,
-                          letterSpacing: 1,
+                        style: textTheme.displaySmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: tk.accent,
+                          height: 1.1,
                         ),
                       ),
+                      Text(t.history.bingeLine(n: binge.episodes), style: textTheme.titleSmall),
                       const SizedBox(height: 4),
                       Text(
                         '${binge.play.title} · ${local.day} ${_monthName(local.month)} ${local.year}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white54, fontSize: 13),
+                        style: textTheme.bodySmall,
                       ),
                     ],
                   ),
@@ -943,33 +904,30 @@ class _RankedBars extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final textTheme = Theme.of(context).textTheme;
     final peak = entries.first.value;
     return Column(
       children: [
-        for (final (i, e) in entries.indexed)
+        for (final e in entries)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(
               children: [
                 SizedBox(
                   width: 120,
-                  child: Text(
-                    e.key,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: i == 0 ? Colors.white : Colors.white70, fontSize: 14),
-                  ),
+                  child: Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis, style: textTheme.bodyMedium),
                 ),
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, c) => Align(
                       alignment: Alignment.centerLeft,
                       child: Container(
-                        height: 10,
+                        height: 8,
                         width: math.max(4, c.maxWidth * e.value / peak),
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(5),
-                          color: Color.lerp(_amber.withValues(alpha: 0.35), _amber, e.value / peak),
+                          borderRadius: BorderRadius.circular(tk.radiusXs),
+                          color: tk.accent.withValues(alpha: 0.35 + 0.65 * e.value / peak),
                         ),
                       ),
                     ),
@@ -977,11 +935,7 @@ class _RankedBars extends StatelessWidget {
                 ),
                 SizedBox(
                   width: 44,
-                  child: Text(
-                    '${e.value}',
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(fontFamily: _display, fontSize: 18, color: Colors.white60),
-                  ),
+                  child: Text('${e.value}', textAlign: TextAlign.right, style: textTheme.bodySmall),
                 ),
               ],
             ),
@@ -1001,24 +955,26 @@ class _PeopleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final textTheme = Theme.of(context).textTheme;
     return SizedBox(
-      height: 168,
+      height: 172,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.none,
         itemCount: entries.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 14),
+        separatorBuilder: (_, _) => SizedBox(width: ForkSpacing.of(context).cardGap),
         itemBuilder: (context, i) {
           final e = entries[i];
           final posters = postersFor(e.key).take(3).toList();
           return SizedBox(
             width: 112,
             child: Pressable(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(tk.radiusMd),
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  focusColor: _amber.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(tk.radiusMd),
                   onTap: posters.isEmpty ? null : () => onOpen(posters.first),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1038,7 +994,7 @@ class _PeopleRow extends StatelessWidget {
                                 ),
                               ),
                             if (posters.isEmpty)
-                              const Center(child: Icon(Symbols.person_rounded, color: Colors.white24, size: 40)),
+                              Center(child: Icon(Symbols.person_rounded, color: tk.textMuted, size: 40)),
                           ],
                         ),
                       ),
@@ -1047,12 +1003,9 @@ class _PeopleRow extends StatelessWidget {
                         e.key,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.15),
+                        style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, height: 1.2),
                       ),
-                      Text(
-                        t.history.watchCount(n: e.value),
-                        style: const TextStyle(color: Colors.white38, fontSize: 11),
-                      ),
+                      Text(t.history.watchCount(n: e.value), style: textTheme.bodySmall),
                     ],
                   ),
                 ),
@@ -1073,22 +1026,24 @@ class _RewatchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final scheme = Theme.of(context).colorScheme;
     final films = rewatches.take(12).toList();
     return SizedBox(
       height: 132,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.none,
         itemCount: films.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        separatorBuilder: (_, _) => SizedBox(width: ForkSpacing.of(context).cardGap),
         itemBuilder: (context, i) {
           final e = films[i];
           return Pressable(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(tk.radiusMd),
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                focusColor: _amber.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(tk.radiusMd),
                 onTap: () => onOpen(e.key),
                 child: Stack(
                   children: [
@@ -1097,11 +1052,16 @@ class _RewatchRow extends StatelessWidget {
                       right: 4,
                       bottom: 4,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                        decoration: BoxDecoration(color: _amber, borderRadius: BorderRadius.circular(4)),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: scheme.primary,
+                          borderRadius: BorderRadius.circular(tk.radiusXs),
+                        ),
                         child: Text(
                           t.history.timesWatched(n: e.value),
-                          style: const TextStyle(fontFamily: _display, fontSize: 16, color: Colors.black),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.labelMedium?.copyWith(color: scheme.onPrimary, fontWeight: FontWeight.w700),
                         ),
                       ),
                     ),
@@ -1111,50 +1071,6 @@ class _RewatchRow extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _DecadeStrip extends StatelessWidget {
-  const _DecadeStrip({required this.decades});
-
-  final Map<int, int> decades;
-
-  @override
-  Widget build(BuildContext context) {
-    final peak = decades.values.fold(0, math.max);
-    return SizedBox(
-      height: 90,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          for (final e in decades.entries)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Text('${e.value}', style: const TextStyle(fontSize: 10, color: Colors.white54)),
-                    const SizedBox(height: 2),
-                    Container(
-                      height: math.max(2, 50 * e.value / peak),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(3),
-                        color: Color.lerp(Colors.white24, _amber, e.value / peak),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "'${'${e.key}'.substring(2)}S",
-                      style: const TextStyle(fontFamily: _display, fontSize: 13, color: Colors.white54),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }
@@ -1192,7 +1108,7 @@ class _TraktCopyBarState extends State<_TraktCopyBar> {
     final sent = await showModalBottomSheet<TraktSendRecord>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF111111),
+      showDragHandle: true,
       builder: (_) => _TraktCopySheet(plan: plan, copier: widget.copier),
     );
     if (sent == null || !mounted) return;
@@ -1226,47 +1142,29 @@ class _TraktCopyBarState extends State<_TraktCopyBar> {
 
   @override
   Widget build(BuildContext context) {
-    Widget button(String label, IconData icon, VoidCallback onTap, {bool primary = false}) => Pressable(
-      borderRadius: BorderRadius.circular(22),
-      longPress: false,
-      child: Material(
-        color: primary ? _amber.withValues(alpha: 0.14) : Colors.white.withValues(alpha: 0.06),
-        shape: StadiumBorder(side: BorderSide(color: primary ? _amber : Colors.white24)),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          focusColor: _amber.withValues(alpha: 0.35),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 18, color: primary ? _amber : Colors.white70),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    label.toUpperCase(),
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: _display,
-                      fontSize: 16,
-                      letterSpacing: 1,
-                      color: primary ? _amber : Colors.white70,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        button(t.history.copy.button, Symbols.cloud_upload_rounded, _preview, primary: true),
-        if (_last != null) button(t.history.copy.undoButton, Symbols.undo_rounded, _undo),
+        Pressable(
+          longPress: false,
+          borderRadius: BorderRadius.circular(MonoTokens.radiusFull),
+          child: OutlinedButton.icon(
+            onPressed: _preview,
+            icon: const AppIcon(Symbols.cloud_upload_rounded, size: 18),
+            label: Text(t.history.copy.button),
+          ),
+        ),
+        if (_last != null)
+          Pressable(
+            longPress: false,
+            borderRadius: BorderRadius.circular(MonoTokens.radiusFull),
+            child: TextButton.icon(
+              onPressed: _undo,
+              icon: const AppIcon(Symbols.undo_rounded, size: 18),
+              label: Text(t.history.copy.undoButton),
+            ),
+          ),
       ],
     );
   }
@@ -1317,39 +1215,38 @@ class _TraktCopySheetState extends State<_TraktCopySheet> {
   @override
   Widget build(BuildContext context) {
     final plan = widget.plan;
-    const label = TextStyle(fontFamily: _display, fontSize: 18, color: Colors.white70, letterSpacing: 1);
-    const body = TextStyle(color: Colors.white70, fontSize: 14, height: 1.35);
-    const muted = TextStyle(color: Colors.white38, fontSize: 12, height: 1.35);
+    final textTheme = Theme.of(context).textTheme;
+    final tk = tokens(context);
+    final label = textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700);
+    final body = textTheme.bodyMedium;
     final sending = _progress != null;
+    Widget gap([double h = 14]) => SizedBox(height: h);
     return SafeArea(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                t.history.copy.title.toUpperCase(),
-                style: const TextStyle(fontFamily: _display, fontSize: 30, color: Colors.white, height: 1),
-              ),
-              const SizedBox(height: 10),
+              Text(t.history.copy.title, style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+              gap(8),
               Text(
                 plan.toSend.isEmpty
                     ? t.history.copy.nothing
                     : t.history.copy.adds(films: plan.films, episodes: plan.episodes),
-                style: const TextStyle(color: _amber, fontSize: 16, fontWeight: FontWeight.w600),
+                style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600, color: tk.accent),
               ),
               if (plan.toSend.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text(t.history.copy.byYear.toUpperCase(), style: label),
+                gap(),
+                Text(t.history.copy.byYear, style: label),
                 for (final e in plan.byYear.entries)
                   Text(
                     '${e.key}: ${t.history.copy.yearLine(films: e.value.films, episodes: e.value.episodes)}',
                     style: body,
                   ),
-                const SizedBox(height: 14),
-                Text(t.history.copy.sample.toUpperCase(), style: label),
+                gap(),
+                Text(t.history.copy.sample, style: label),
                 for (final p in plan.toSend.take(8))
                   Text(
                     [
@@ -1363,25 +1260,22 @@ class _TraktCopySheetState extends State<_TraktCopySheet> {
                     style: body,
                   ),
               ],
-              const SizedBox(height: 14),
-              Text(t.history.copy.skipped.toUpperCase(), style: label),
+              gap(),
+              Text(t.history.copy.skipped, style: label),
               Text(t.history.copy.alreadyOnTrakt(n: plan.alreadyOnTrakt), style: body),
               if (plan.bulkDates > 0) Text(t.history.copy.bulk(n: plan.bulkDates), style: body),
               if (plan.noIds > 0) Text(t.history.copy.noIds(n: plan.noIds), style: body),
-              const SizedBox(height: 14),
-              Text(t.history.copy.howItWorks, style: muted),
+              gap(),
+              Text(t.history.copy.howItWorks, style: textTheme.bodySmall),
               if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!, style: const TextStyle(color: Color(0xFFE5484D))),
+                gap(10),
+                Text(_error!, style: body?.copyWith(color: Theme.of(context).colorScheme.error)),
               ],
-              const SizedBox(height: 18),
+              gap(18),
               if (sending)
                 Row(
                   children: [
-                    const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: _amber),
-                    ),
+                    const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                     const SizedBox(width: 12),
                     Text(
                       t.history.copy.sending(done: _progress!.$1, total: _progress!.$2),
@@ -1393,17 +1287,9 @@ class _TraktCopySheetState extends State<_TraktCopySheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text(t.history.copy.cancel, style: const TextStyle(color: Colors.white70)),
-                    ),
+                    TextButton(onPressed: () => Navigator.pop(context), child: Text(t.history.copy.cancel)),
                     const SizedBox(width: 8),
-                    if (plan.toSend.isNotEmpty)
-                      FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
-                        onPressed: _send,
-                        child: Text(t.history.copy.confirm),
-                      ),
+                    if (plan.toSend.isNotEmpty) FilledButton(onPressed: _send, child: Text(t.history.copy.confirm)),
                   ],
                 ),
             ],

@@ -152,16 +152,33 @@ class HistoryPlay {
 /// Entries with no real date (Trakt stores "unknown" as 1970).
 bool isUndatedWatch(DateTime at) => at.year < 1971;
 
-/// Flag watches whose date is shared by many others, minutes apart: an
-/// import into Trakt or a "mark as watched" in Plex, not a real viewing.
-void markBulkDates(List<HistoryPlay> plays, {int threshold = 15, Duration bucket = const Duration(minutes: 10)}) {
-  final counts = <int, int>{};
-  int keyOf(HistoryPlay p) => p.watchedAt.millisecondsSinceEpoch ~/ bucket.inMilliseconds;
-  for (final p in plays) {
-    counts.update(keyOf(p), (n) => n + 1, ifAbsent: () => 1);
+/// Flag watches whose date is shared by others minutes apart: an import
+/// into Trakt or a "mark as watched" of a season or show, not a viewing.
+/// Two rules: [threshold] or more within one [bucket] (imports), or
+/// [tightThreshold] or more within one [tightBucket] (nobody watches four
+/// episodes in two minutes).
+void markBulkDates(
+  List<HistoryPlay> plays, {
+  int threshold = 15,
+  Duration bucket = const Duration(minutes: 10),
+  int tightThreshold = 4,
+  Duration tightBucket = const Duration(minutes: 2),
+}) {
+  Map<int, int> count(Duration size) {
+    final counts = <int, int>{};
+    for (final p in plays) {
+      counts.update(p.watchedAt.millisecondsSinceEpoch ~/ size.inMilliseconds, (n) => n + 1, ifAbsent: () => 1);
+    }
+    return counts;
   }
+
+  final wide = count(bucket), tight = count(tightBucket);
   for (final p in plays) {
-    p.bulk = p.datedAtRelease || counts[keyOf(p)]! >= threshold;
+    final ms = p.watchedAt.millisecondsSinceEpoch;
+    p.bulk =
+        p.datedAtRelease ||
+        wide[ms ~/ bucket.inMilliseconds]! >= threshold ||
+        tight[ms ~/ tightBucket.inMilliseconds]! >= tightThreshold;
   }
 }
 

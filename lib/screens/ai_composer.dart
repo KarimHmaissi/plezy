@@ -14,20 +14,17 @@ import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../media/media_item.dart';
 import '../theme/fork_motion.dart';
+import '../theme/fork_spacing.dart';
+import '../theme/mono_tokens.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
+import '../widgets/focusable_filter_chip.dart';
 import '../widgets/optimized_media_image.dart';
 import '../widgets/pressable.dart';
 
-/// Projector-lamp amber: the composer's one accent.
-const _amber = Color(0xFFE5A00D);
-const _display = 'Bebas Neue';
-
-/// Jammed-film red.
-const _red = Color(0xFFE5484D);
-
-/// Fork: the full-screen AI composer, the way into the AI feature, themed
-/// as a cinema. It opens with a camera iris, asks in a big condensed
+/// Fork: the full-screen AI composer, the way into the AI feature. Its
+/// motion is cinema (see docs/fork/STYLE-GUIDE.md); its colours and type
+/// come from the theme. It opens with a camera iris, asks in a big
 /// headline over a soft wall of the user's posters, and while a request
 /// runs a strip of those posters races through a projector gate, then
 /// slows and stops with the top pick framed. Closing never cancels a
@@ -554,13 +551,13 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     final isTv = PlatformDetector.isTV();
     final size = MediaQuery.sizeOf(context);
     final wide = isTv || size.width >= 700;
+    final tk = tokens(context);
 
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) _dropKeyboard();
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
         resizeToAvoidBottomInset: true,
         body: GestureDetector(
           onVerticalDragEnd: (d) {
@@ -573,24 +570,25 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                 opacity: _stage(0, 0.6),
                 child: _Mosaic(items: widget.posters, drift: _drift),
               ),
-              // House lights down: a heavy vignette, darkest at the edges.
-              const DecoratedBox(
+              // House lights down: the page colour as a heavy vignette,
+              // strongest at the edges.
+              DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
                     radius: 1.1,
-                    colors: [Color(0xB3000000), Color(0xEB000000), Color(0xFF000000)],
-                    stops: [0, 0.65, 1],
+                    colors: [tk.bg.withValues(alpha: 0.7), tk.bg.withValues(alpha: 0.92), tk.bg],
+                    stops: const [0, 0.65, 1],
                   ),
                 ),
               ),
-              // And darker still behind the content at the bottom.
-              const DecoratedBox(
+              // And stronger still behind the content at the bottom.
+              DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Color(0x00000000), Color(0x8C000000), Color(0xE6000000)],
-                    stops: [0, 0.45, 1],
+                    colors: [tk.bg.withValues(alpha: 0), tk.bg.withValues(alpha: 0.55), tk.bg.withValues(alpha: 0.9)],
+                    stops: const [0, 0.45, 1],
                   ),
                 ),
               ),
@@ -614,7 +612,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                     child: IconButton(
                       constraints: const BoxConstraints.tightFor(width: 48, height: 48),
                       tooltip: t.common.close,
-                      icon: const Icon(Symbols.close_rounded, color: Colors.white70),
+                      icon: Icon(Symbols.close_rounded, color: tk.textMuted),
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),
                   ),
@@ -627,6 +625,16 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     );
   }
 
+  /// Left/right gutter: the app's touch rhythm, TV's overscan-safe inset.
+  double _gutter(bool isTv) => isTv ? 48 : ForkSpacing.of(context).edgeInset;
+
+  /// A section title, as `HubSection` styles a row's title.
+  TextStyle? _sectionTitle(bool isTv, {Color? color}) => Theme.of(context).textTheme.titleLarge?.copyWith(
+    fontSize: isTv ? 26 : ForkSpacing.of(context).titleSize,
+    fontWeight: FontWeight.w700,
+    color: color,
+  );
+
   Widget _composeView(bool isTv, bool wide) {
     return SafeArea(
       key: const ValueKey('compose'),
@@ -637,6 +645,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
           final h = constraints.maxHeight;
           final short = !isTv && h < 620;
           final tiny = !isTv && h < 470;
+          final gutter = _gutter(isTv);
           return Align(
             alignment: short ? Alignment.bottomCenter : Alignment.center,
             child: ConstrainedBox(
@@ -644,7 +653,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
               child: SingleChildScrollView(
                 reverse: short,
                 // Clear of the close button above.
-                padding: EdgeInsets.fromLTRB(wide ? 48 : 20, 52, wide ? 48 : 20, short ? 12 : 24),
+                padding: EdgeInsets.fromLTRB(gutter, 52, gutter, short ? 12 : 24),
                 child: _composeColumn(isTv, wide, short, tiny),
               ),
             ),
@@ -656,15 +665,20 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
 
   Widget _composeColumn(bool isTv, bool wide, bool short, bool tiny) {
     final theme = Theme.of(context);
+    final tk = tokens(context);
     final chips = _quickStarts;
     final hasText = _controller.text.trim().isNotEmpty;
-    final headlineSize = isTv ? 104.0 : (tiny ? 36.0 : (short ? 46.0 : (wide ? 88.0 : 60.0)));
-    final inputSize = isTv ? 30.0 : (tiny ? 19.0 : (wide ? 26.0 : 21.0));
-    final headline =
-        (widget.about != null
-                ? t.aiComposer.aboutHeadline
-                : (widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline))
-            .toUpperCase();
+    final headlineStyle =
+        (tiny
+                ? theme.textTheme.headlineSmall
+                : (short
+                      ? theme.textTheme.headlineMedium
+                      : (wide ? theme.textTheme.displaySmall : theme.textTheme.headlineMedium)))
+            ?.copyWith(fontWeight: FontWeight.w700, color: tk.text, height: 1.1);
+    final inputSize = isTv ? 28.0 : (tiny ? 18.0 : (wide ? 24.0 : 20.0));
+    final headline = widget.about != null
+        ? t.aiComposer.aboutHeadline
+        : (widget.followUpOf == null ? t.aiComposer.headline : t.aiComposer.followUpHeadline);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -679,7 +693,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                   dimension: isTv ? 44 : 34,
                   child: AnimatedBuilder(
                     animation: _intro,
-                    builder: (context, _) => CustomPaint(painter: _MarkPainter(_intro.value)),
+                    builder: (context, _) => CustomPaint(painter: _MarkPainter(_intro.value, tk.accent)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -688,7 +702,10 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                     widget.about != null ? t.aiComposer.aboutEyebrow : t.aiComposer.eyebrow,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 18, letterSpacing: 4, color: _amber),
+                    style: (isTv ? theme.textTheme.titleLarge : theme.textTheme.titleMedium)?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: tk.textMuted,
+                    ),
                   ),
                 ),
               ],
@@ -703,22 +720,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
               ? FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    headline,
-                    maxLines: 1,
-                    style: TextStyle(fontFamily: _display, fontSize: headlineSize, height: 1, color: Colors.white),
-                  ),
+                  child: Text(headline, maxLines: 1, style: headlineStyle),
                 )
-              : Text(
-                  headline,
-                  style: TextStyle(
-                    fontFamily: _display,
-                    fontSize: headlineSize,
-                    height: 0.92,
-                    letterSpacing: 0.5,
-                    color: Colors.white,
-                  ),
-                ),
+              : Text(headline, style: headlineStyle),
         ),
         if (widget.about case final about?) ...[
           SizedBox(height: tiny ? 6 : 12),
@@ -732,12 +736,12 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
               '“${widget.followUpOf}”',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleMedium?.copyWith(color: Colors.white60, fontStyle: FontStyle.italic),
+              style: theme.textTheme.titleMedium?.copyWith(color: tk.textMuted, fontStyle: FontStyle.italic),
             ),
           ),
         ],
         SizedBox(height: tiny ? 14 : (short ? 20 : (wide ? 36 : 28))),
-        // The input: big type on an amber rule, like a marquee line.
+        // The input: big type on a rule that lights up in the accent.
         _rise(
           0.3,
           0.8,
@@ -747,7 +751,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
               decoration: BoxDecoration(
                 border: Border(
                   bottom: BorderSide(
-                    color: _fieldFocus.hasFocus ? _amber : Colors.white24,
+                    color: _fieldFocus.hasFocus ? tk.accent : tk.outline,
                     width: _fieldFocus.hasFocus ? 2.5 : 1.5,
                   ),
                 ),
@@ -761,7 +765,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                 children: [
                   Expanded(
                     child: TextSelectionTheme(
-                      data: const TextSelectionThemeData(cursorColor: _amber),
+                      data: TextSelectionThemeData(cursorColor: tk.accent),
                       child: FocusableTextField(
                         controller: _controller,
                         focusNode: _fieldFocus,
@@ -770,9 +774,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                         maxLines: 4,
                         textInputAction: TextInputAction.send,
                         textCapitalization: TextCapitalization.sentences,
-                        style: TextStyle(
+                        style: theme.textTheme.titleLarge?.copyWith(
                           fontSize: inputSize,
-                          color: Colors.white,
+                          color: tk.text,
                           fontWeight: FontWeight.w500,
                           height: 1.3,
                         ),
@@ -783,7 +787,11 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                           filled: false,
                           isCollapsed: true,
                           hintText: _placeholder.isEmpty ? ' ' : '$_placeholder▍',
-                          hintStyle: TextStyle(fontSize: inputSize, color: Colors.white38, fontWeight: FontWeight.w400),
+                          hintStyle: theme.textTheme.titleLarge?.copyWith(
+                            fontSize: inputSize,
+                            color: tk.textMuted,
+                            fontWeight: FontWeight.w400,
+                          ),
                         ),
                         onSubmitted: (_) => unawaited(_send()),
                         onNavigateRight: _sendFocus.requestFocus,
@@ -800,7 +808,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                     child: Pressable(
                       longPress: false,
                       enabled: hasText,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(tk.radiusMd),
                       child: _RollButton(enabled: hasText, onTap: () => unawaited(_send()), size: inputSize * 2.3),
                     ),
                   ),
@@ -810,38 +818,33 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
           ),
         ),
         SizedBox(height: short ? 14 : (wide ? 32 : 26)),
-        if (!short)
-          _rise(
-            0.4,
-            0.9,
-            Text(
-              t.aiComposer.quickStart,
-              style: TextStyle(fontFamily: _display, fontSize: isTv ? 22 : 17, letterSpacing: 3, color: Colors.white54),
-            ),
-          ),
-        if (!short) const SizedBox(height: 10),
+        if (!short) _rise(0.4, 0.9, Text(t.aiComposer.quickStart, style: _sectionTitle(isTv, color: tk.text))),
+        if (!short) SizedBox(height: isTv ? 12 : ForkSpacing.of(context).titleGap),
         _rise(
           0.45,
           1,
           SizedBox(
-            height: isTv ? 56 : 46,
+            height: 44,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               clipBehavior: Clip.none,
               itemCount: chips.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, i) {
                 final chip = chips[i];
-                return FocusableButton(
-                  focusNode: _chipNode(i),
-                  onPressed: () => unawaited(_send(chip.request)),
-                  onNavigateLeft: i > 0 ? () => _chipNode(i - 1).requestFocus() : null,
-                  onNavigateRight: i < chips.length - 1 ? () => _chipNode(i + 1).requestFocus() : null,
-                  onNavigateUp: _fieldFocus.requestFocus,
+                return Center(
                   child: Pressable(
                     longPress: false,
-                    borderRadius: BorderRadius.circular(6),
-                    child: _Ticket(chip: chip, large: isTv, onTap: () => unawaited(_send(chip.request))),
+                    borderRadius: BorderRadius.circular(MonoTokens.radiusFull),
+                    child: FocusableFilterChip(
+                      focusNode: _chipNode(i),
+                      icon: chip.icon,
+                      label: chip.label,
+                      onPressed: () => unawaited(_send(chip.request)),
+                      onNavigateLeft: i > 0 ? () => _chipNode(i - 1).requestFocus() : null,
+                      onNavigateRight: i < chips.length - 1 ? () => _chipNode(i + 1).requestFocus() : null,
+                      onNavigateUp: _fieldFocus.requestFocus,
+                    ),
                   ),
                 );
               },
@@ -856,14 +859,16 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   /// another.
   Widget _answerView(bool isTv, bool wide) {
     final theme = Theme.of(context);
+    final tk = tokens(context);
     final pick = _pick;
+    final gutter = _gutter(isTv);
     return SafeArea(
       key: const ValueKey('answer'),
       child: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: wide ? 820 : 640),
           child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(wide ? 48 : 20, 56, wide ? 48 : 20, 24),
+            padding: EdgeInsets.fromLTRB(gutter, 56, gutter, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -871,22 +876,17 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                 Row(
                   children: [
                     SizedBox(
-                      width: isTv ? 64 : 48,
-                      height: isTv ? 56 : 42,
-                      child: CustomPaint(painter: _ClapperPainter(1, _amber)),
+                      width: isTv ? 40 : 32,
+                      height: isTv ? 35 : 28,
+                      child: CustomPaint(painter: _ClapperPainter(1, tk.accent, tk.surface)),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 12),
                     Flexible(
                       child: Text(
-                        (widget.notesTitle ?? t.aiComposer.programNotes).toUpperCase(),
+                        widget.notesTitle ?? t.aiComposer.programNotes,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontFamily: _display,
-                          fontSize: isTv ? 40 : 30,
-                          letterSpacing: 3,
-                          color: _amber,
-                        ),
+                        style: _sectionTitle(isTv, color: tk.text),
                       ),
                     ),
                   ],
@@ -898,20 +898,20 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                 const SizedBox(height: 16),
                 Text(
                   '“${_controller.text.trim()}”',
-                  style: theme.textTheme.titleMedium?.copyWith(color: Colors.white60, fontStyle: FontStyle.italic),
+                  style: theme.textTheme.titleMedium?.copyWith(color: tk.textMuted, fontStyle: FontStyle.italic),
                 ),
                 const SizedBox(height: 14),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: const Color(0xF2141210),
-                    borderRadius: BorderRadius.circular(4),
-                    border: const Border(left: BorderSide(color: _amber, width: 3)),
-                  ),
+                Card(
+                  margin: EdgeInsets.zero,
                   child: Padding(
                     padding: EdgeInsets.all(isTv ? 28 : 20),
                     child: Text(
                       _answer ?? '',
-                      style: TextStyle(color: Colors.white, fontSize: isTv ? 24 : (wide ? 20 : 17), height: 1.45),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: tk.text,
+                        fontSize: isTv ? 22 : (wide ? 18 : 16),
+                        height: 1.45,
+                      ),
                     ),
                   ),
                 ),
@@ -919,12 +919,12 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                   const SizedBox(height: 14),
                   Row(
                     children: [
-                      const Icon(Symbols.movie_rounded, color: _amber, size: 20),
+                      Icon(Symbols.movie_rounded, color: tk.textMuted, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           t.aiComposer.picksInTab,
-                          style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white60),
+                          style: theme.textTheme.bodyMedium?.copyWith(color: tk.textMuted),
                         ),
                       ),
                     ],
@@ -942,20 +942,8 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                       onNavigateRight: _askAnotherFocus.requestFocus,
                       child: Pressable(
                         longPress: false,
-                        borderRadius: BorderRadius.circular(6),
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _amber,
-                            foregroundColor: Colors.black,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                            padding: EdgeInsets.symmetric(horizontal: isTv ? 32 : 26, vertical: isTv ? 16 : 12),
-                          ),
-                          onPressed: _closeAnswer,
-                          child: Text(
-                            t.aiComposer.done.toUpperCase(),
-                            style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 20, letterSpacing: 2.5),
-                          ),
-                        ),
+                        borderRadius: BorderRadius.circular(MonoTokens.radiusFull),
+                        child: FilledButton(onPressed: _closeAnswer, child: Text(t.aiComposer.done)),
                       ),
                     ),
                     FocusableButton(
@@ -964,20 +952,8 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                       onNavigateLeft: _doneFocus.requestFocus,
                       child: Pressable(
                         longPress: false,
-                        borderRadius: BorderRadius.circular(6),
-                        child: OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Colors.white38, width: 1.5),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                            padding: EdgeInsets.symmetric(horizontal: isTv ? 28 : 22, vertical: isTv ? 16 : 12),
-                          ),
-                          onPressed: _askAnother,
-                          child: Text(
-                            t.aiComposer.askAnother.toUpperCase(),
-                            style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 20, letterSpacing: 2.5),
-                          ),
-                        ),
+                        borderRadius: BorderRadius.circular(MonoTokens.radiusFull),
+                        child: OutlinedButton(onPressed: _askAnother, child: Text(t.aiComposer.askAnother)),
                       ),
                     ),
                   ],
@@ -1001,7 +977,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     final jam = _jam;
     final slate = jam != null ? t.aiComposer.jammed : (_take >= _takes.length ? t.aiComposer.wrap : _takes[_take]);
     final pick = _pick;
-    final slateColor = jam != null ? _red : (_landed ? _amber : Colors.white);
+    final tk = tokens(context);
+    final error = theme.colorScheme.error;
+    final slateColor = jam != null ? error : (_landed ? tk.accent : tk.text);
     return SafeArea(
       key: const ValueKey('thinking'),
       child: Column(
@@ -1013,12 +991,13 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
               mainAxisSize: MainAxisSize.min,
               children: [
                 SizedBox(
-                  width: isTv ? 64 : 48,
-                  height: isTv ? 56 : 42,
+                  width: isTv ? 48 : 36,
+                  height: isTv ? 42 : 32,
                   child: AnimatedBuilder(
                     animation: _clap,
-                    builder: (context, _) =>
-                        CustomPaint(painter: _ClapperPainter(Curves.easeInCubic.transform(_clap.value), slateColor)),
+                    builder: (context, _) => CustomPaint(
+                      painter: _ClapperPainter(Curves.easeInCubic.transform(_clap.value), slateColor, tk.surface),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -1035,16 +1014,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                     child: FittedBox(
                       key: ValueKey(slate),
                       fit: BoxFit.scaleDown,
-                      child: Text(
-                        slate.toUpperCase(),
-                        maxLines: 1,
-                        style: TextStyle(
-                          fontFamily: _display,
-                          fontSize: isTv ? 40 : 30,
-                          letterSpacing: 3,
-                          color: slateColor,
-                        ),
-                      ),
+                      child: Text(slate, maxLines: 1, style: _sectionTitle(isTv, color: slateColor)),
                     ),
                   ),
                 ),
@@ -1069,12 +1039,12 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
               pickSlot: _pickSlot,
               pick: pick,
               flash: _flash,
-              gate: jam != null ? _red : (_landed ? _amber : Colors.white70),
+              gate: jam != null ? error : (_landed ? tk.accent : tk.text.withValues(alpha: 0.7)),
             ),
           ),
           SizedBox(height: isTv ? 28 : 20),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: EdgeInsets.symmetric(horizontal: _gutter(isTv)),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 220),
               child: jam != null
@@ -1087,7 +1057,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                           textAlign: TextAlign.center,
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
+                          style: theme.textTheme.titleMedium?.copyWith(color: tk.textMuted),
                         ),
                         const SizedBox(height: 18),
                         Row(
@@ -1101,7 +1071,6 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                               child: Pressable(
                                 longPress: false,
                                 child: FilledButton.icon(
-                                  style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
                                   onPressed: () => unawaited(_roll(_controller.text.trim())),
                                   icon: const Icon(Symbols.replay_rounded),
                                   label: Text(t.common.retry),
@@ -1116,10 +1085,6 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                               child: Pressable(
                                 longPress: false,
                                 child: OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.white,
-                                    side: const BorderSide(color: Colors.white38),
-                                  ),
                                   onPressed: _backToEdit,
                                   icon: const Icon(Symbols.edit_rounded),
                                   label: Text(t.aiComposer.edit),
@@ -1132,12 +1097,15 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                     )
                   : _landed && pick != null
                   ? Text(
-                      pick.displayTitle.toUpperCase(),
+                      pick.displayTitle,
                       key: const ValueKey('pick'),
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontFamily: _display, fontSize: isTv ? 52 : 40, color: Colors.white),
+                      style: (isTv ? theme.textTheme.displaySmall : theme.textTheme.headlineMedium)?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: tk.text,
+                      ),
                     )
                   : Text(
                       '“${_controller.text.trim()}”',
@@ -1145,7 +1113,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                       textAlign: TextAlign.center,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleLarge?.copyWith(color: Colors.white70, fontStyle: FontStyle.italic),
+                      style: theme.textTheme.titleLarge?.copyWith(color: tk.textMuted, fontStyle: FontStyle.italic),
                     ),
             ),
           ),
@@ -1157,24 +1125,12 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
               onPressed: _continueBrowsing,
               child: Pressable(
                 longPress: false,
-                borderRadius: BorderRadius.circular(6),
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _amber,
-                    side: const BorderSide(color: _amber, width: 1.5),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                    padding: EdgeInsets.symmetric(horizontal: isTv ? 28 : 22, vertical: isTv ? 16 : 12),
-                  ),
-                  onPressed: _continueBrowsing,
-                  child: Text(
-                    t.aiComposer.continueBrowsing.toUpperCase(),
-                    style: TextStyle(fontFamily: _display, fontSize: isTv ? 24 : 20, letterSpacing: 2.5),
-                  ),
-                ),
+                borderRadius: BorderRadius.circular(MonoTokens.radiusFull),
+                child: OutlinedButton(onPressed: _continueBrowsing, child: Text(t.aiComposer.continueBrowsing)),
               ),
             ),
             const SizedBox(height: 10),
-            Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38)),
+            Text(t.aiComposer.keepsRunning, style: theme.textTheme.bodySmall?.copyWith(color: tk.textMuted)),
           ],
         ],
       ),
@@ -1190,29 +1146,29 @@ class _AboutChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
+    final textTheme = Theme.of(context).textTheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(40),
-        border: Border.all(color: _amber, width: 1.5),
+        color: tk.surface,
+        borderRadius: BorderRadius.circular(MonoTokens.radiusFull),
+        border: Border.all(color: tk.outline),
       ),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: large ? 18 : 14, vertical: large ? 8 : 6),
+        padding: EdgeInsets.symmetric(horizontal: large ? 16 : 12, vertical: large ? 8 : 6),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Symbols.local_movies_rounded, color: _amber, size: large ? 22 : 18, fill: 1),
+            Icon(Symbols.local_movies_rounded, color: tk.accent, size: large ? 20 : 16, fill: 1),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
-                t.aiComposer.aboutChip(title: title).toUpperCase(),
+                t.aiComposer.aboutChip(title: title),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontFamily: _display,
-                  fontSize: large ? 24 : 19,
-                  letterSpacing: 1.5,
-                  color: Colors.white,
+                style: (large ? textTheme.titleMedium : textTheme.labelLarge)?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: tk.text,
                 ),
               ),
             ),
@@ -1231,7 +1187,7 @@ class _Landing {
   final Duration duration;
 }
 
-/// Send: an amber "roll camera" key.
+/// Send: a "roll camera" key, filled with the accent once there's text.
 class _RollButton extends StatelessWidget {
   const _RollButton({required this.enabled, required this.onTap, required this.size});
   final bool enabled;
@@ -1240,6 +1196,7 @@ class _RollButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tk = tokens(context);
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: AnimatedContainer(
@@ -1248,59 +1205,16 @@ class _RollButton extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(tk.radiusMd),
           // Solid either way, so posters never show through it.
-          color: enabled ? _amber : Colors.black,
-          border: Border.all(color: _amber, width: 1.5),
+          color: enabled ? tk.accent : Color.alphaBlend(tk.text.withValues(alpha: 0.08), tk.bg),
+          border: Border.all(color: enabled ? tk.accent : tk.outline, width: 1.5),
         ),
         child: Icon(
           Symbols.play_arrow_rounded,
           fill: 1,
-          color: enabled ? Colors.black : _amber.withValues(alpha: 0.7),
+          color: enabled ? Theme.of(context).colorScheme.onPrimary : tk.textMuted,
           size: size * 0.6,
-        ),
-      ),
-    );
-  }
-}
-
-/// A quick start, shaped like a cinema ticket stub.
-class _Ticket extends StatelessWidget {
-  const _Ticket({required this.chip, required this.large, required this.onTap});
-  final _QuickStart chip;
-  final bool large;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    const shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(6)),
-      side: BorderSide(color: Color(0x2EFFFFFF)),
-    );
-    return Material(
-      color: const Color(0x14FFFFFF),
-      shape: shape,
-      child: InkWell(
-        customBorder: shape,
-        onTap: onTap,
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: large ? 20 : 14),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(chip.icon, size: large ? 22 : 18, color: _amber),
-              const SizedBox(width: 8),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 260),
-                child: Text(
-                  chip.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.white, fontSize: large ? 18 : 15, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -1345,6 +1259,7 @@ class _FilmStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final band = frameH * 0.16;
     final height = frameH + band * 2;
+    final tk = tokens(context);
     return SizedBox(
       height: height,
       child: LayoutBuilder(
@@ -1356,7 +1271,11 @@ class _FilmStrip extends StatelessWidget {
             children: [
               // The film base and its sprocket holes, scrolling with the frames.
               Positioned.fill(
-                child: RepaintBoundary(child: CustomPaint(painter: _SprocketPainter(position, pitch, band))),
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    painter: _SprocketPainter(position, pitch, band, base: tk.surface, hole: tk.bg),
+                  ),
+                ),
               ),
               Positioned(
                 left: 0,
@@ -1385,14 +1304,20 @@ class _FilmStrip extends StatelessWidget {
                   },
                 ),
               ),
-              // Frames off the gate fall into the dark.
-              const Positioned.fill(
+              // Frames off the gate fade into the page.
+              Positioned.fill(
                 child: IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Colors.black, Color(0x99000000), Color(0x00000000), Color(0x99000000), Colors.black],
-                        stops: [0, 0.3, 0.5, 0.7, 1],
+                        colors: [
+                          tk.bg,
+                          tk.bg.withValues(alpha: 0.6),
+                          tk.bg.withValues(alpha: 0),
+                          tk.bg.withValues(alpha: 0.6),
+                          tk.bg,
+                        ],
+                        stops: const [0, 0.3, 0.5, 0.7, 1],
                       ),
                     ),
                   ),
@@ -1415,7 +1340,7 @@ class _FilmStrip extends StatelessWidget {
                           animation: flash,
                           builder: (context, _) {
                             final v = flash.isAnimating ? (1 - flash.value) * 0.7 : 0.0;
-                            return ColoredBox(color: Colors.white.withValues(alpha: v));
+                            return ColoredBox(color: tk.text.withValues(alpha: v));
                           },
                         ),
                       ),
@@ -1443,12 +1368,15 @@ class _Frame extends StatelessWidget {
     final path = item?.thumbPath ?? item?.artPath;
     Widget child;
     if (item == null || path == null) {
+      final tk = tokens(context);
       child = ColoredBox(
-        color: const Color(0xFF15120F),
+        color: Color.alphaBlend(tk.text.withValues(alpha: 0.06), tk.surface),
         child: Center(
           child: Text(
             '${number.abs() % 99 + 1}',
-            style: const TextStyle(fontFamily: _display, fontSize: 40, color: Colors.white24),
+            style: Theme.of(
+              context,
+            ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700, color: tk.text.withValues(alpha: 0.24)),
           ),
         ),
       );
@@ -1477,18 +1405,21 @@ class _Frame extends StatelessWidget {
   }
 }
 
-/// The strip's film base: a dark band with rounded sprocket holes top and
+/// The strip's film base: a [base] band with rounded sprocket holes top and
 /// bottom, scrolling with [position].
 class _SprocketPainter extends CustomPainter {
-  _SprocketPainter(this.position, this.pitch, this.band) : super(repaint: position);
+  _SprocketPainter(this.position, this.pitch, this.band, {required this.base, required this.hole})
+    : super(repaint: position);
   final ValueListenable<double> position;
   final double pitch;
   final double band;
+  final Color base;
+  final Color hole;
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF1C1814));
-    final hole = Paint()..color = Colors.black;
+    canvas.drawRect(Offset.zero & size, Paint()..color = base);
+    final hole = Paint()..color = this.hole;
     // Four holes per frame, as on 35mm.
     final step = pitch / 4;
     final holeW = step * 0.5;
@@ -1505,10 +1436,12 @@ class _SprocketPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_SprocketPainter old) => old.pitch != pitch || old.band != band;
+  bool shouldRepaint(_SprocketPainter old) =>
+      old.pitch != pitch || old.band != band || old.base != base || old.hole != hole;
 }
 
-/// Projector-gate corner brackets: amber once the strip lands, red on a jam.
+/// Projector-gate corner brackets: the accent once the strip lands, the
+/// error colour on a jam.
 class _GatePainter extends CustomPainter {
   _GatePainter(this.color);
   final Color color;
@@ -1556,6 +1489,7 @@ class _IrisTransition extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final tk = tokens(context);
     return AnimatedBuilder(
       animation: curved,
       child: child,
@@ -1571,7 +1505,11 @@ class _IrisTransition extends StatelessWidget {
               clipBehavior: p >= 1 ? Clip.none : Clip.antiAlias,
               child: child,
             ),
-            IgnorePointer(child: CustomPaint(painter: p >= 1 ? null : _BladesPainter(p, origin))),
+            IgnorePointer(
+              child: CustomPaint(
+                painter: p >= 1 ? null : _BladesPainter(p, origin, blade: tk.surface, seam: tk.text, edge: tk.accent),
+              ),
+            ),
           ],
         );
       },
@@ -1616,12 +1554,16 @@ class _IrisClipper extends CustomClipper<Path> {
   bool shouldReclip(_IrisClipper old) => old.p != p || old.origin != origin;
 }
 
-/// The blades: graphite around the aperture, with the seams between blades
-/// running out from each corner along the next edge.
+/// The blades: [blade] around the aperture, with the seams between blades
+/// running out from each corner along the next edge, and the aperture's
+/// rim in [edge].
 class _BladesPainter extends CustomPainter {
-  _BladesPainter(this.p, this.origin);
+  _BladesPainter(this.p, this.origin, {required this.blade, required this.seam, required this.edge});
   final double p;
   final Offset? origin;
+  final Color blade;
+  final Color seam;
+  final Color edge;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1630,13 +1572,13 @@ class _BladesPainter extends CustomPainter {
     if (opacity <= 0) return;
     final aperture = _aperture(size, p, origin);
     final outside = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), aperture);
-    canvas.drawPath(outside, Paint()..color = const Color(0xFF0E0E10).withValues(alpha: opacity));
+    canvas.drawPath(outside, Paint()..color = blade.withValues(alpha: opacity));
 
     final metrics = aperture.computeMetrics().first;
     final seam = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5
-      ..color = Colors.white.withValues(alpha: 0.18 * opacity);
+      ..color = this.seam.withValues(alpha: 0.18 * opacity);
     final edge = metrics.length / _blades;
     final reach = size.longestSide;
     for (var i = 0; i < _blades; i++) {
@@ -1653,19 +1595,22 @@ class _BladesPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
-        ..color = _amber.withValues(alpha: 0.7 * opacity),
+        ..color = this.edge.withValues(alpha: 0.7 * opacity),
     );
   }
 
   @override
-  bool shouldRepaint(_BladesPainter old) => old.p != p || old.origin != origin;
+  bool shouldRepaint(_BladesPainter old) =>
+      old.p != p || old.origin != origin || old.blade != blade || old.seam != seam || old.edge != edge;
 }
 
 /// The composer's mark, drawing itself as the page opens: an aperture
-/// ring, six blade lines inside it, then a play triangle that fills amber.
+/// ring, six blade lines inside it, then a play triangle that fills, all
+/// in [color].
 class _MarkPainter extends CustomPainter {
-  _MarkPainter(this.t);
+  _MarkPainter(this.t, this.color);
   final double t;
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1678,7 +1623,7 @@ class _MarkPainter extends CustomPainter {
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..color = _amber;
+      ..color = color;
 
     final ring = Path()..addArc(Rect.fromCircle(center: c, radius: r), -math.pi / 2, math.pi * 2 - 0.0001);
     final blades = Path();
@@ -1699,9 +1644,9 @@ class _MarkPainter extends CustomPainter {
 
     // Ring first, then blades, then the triangle, each drawn along its path.
     _trace(canvas, ring, (draw / 0.5).clamp(0.0, 1.0), stroke);
-    _trace(canvas, blades, ((draw - 0.35) / 0.4).clamp(0.0, 1.0), stroke..color = _amber.withValues(alpha: 0.55));
-    _trace(canvas, play, ((draw - 0.55) / 0.45).clamp(0.0, 1.0), stroke..color = _amber);
-    if (fill > 0) canvas.drawPath(play, Paint()..color = _amber.withValues(alpha: fill));
+    _trace(canvas, blades, ((draw - 0.35) / 0.4).clamp(0.0, 1.0), stroke..color = color.withValues(alpha: 0.55));
+    _trace(canvas, play, ((draw - 0.55) / 0.45).clamp(0.0, 1.0), stroke..color = color);
+    if (fill > 0) canvas.drawPath(play, Paint()..color = color.withValues(alpha: fill));
   }
 
   static void _trace(Canvas canvas, Path path, double p, Paint paint) {
@@ -1712,15 +1657,16 @@ class _MarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_MarkPainter old) => old.t != t;
+  bool shouldRepaint(_MarkPainter old) => old.t != t || old.color != color;
 }
 
 /// A clapperboard: a slate with a striped clapstick hinged at its top left,
-/// open at [closed] 0 and shut at 1.
+/// open at [closed] 0 and shut at 1, drawn in [color] on a [fill] slate.
 class _ClapperPainter extends CustomPainter {
-  _ClapperPainter(this.closed, this.color);
+  _ClapperPainter(this.closed, this.color, this.fill);
   final double closed;
   final Color color;
+  final Color fill;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1730,10 +1676,7 @@ class _ClapperPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.6
       ..color = color;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(board, const Radius.circular(3)),
-      Paint()..color = const Color(0xFF141414),
-    );
+    canvas.drawRRect(RRect.fromRectAndRadius(board, const Radius.circular(3)), Paint()..color = fill);
     canvas.drawRRect(RRect.fromRectAndRadius(board, const Radius.circular(3)), line);
     // Slate lines.
     for (final f in [0.45, 0.72]) {
@@ -1752,7 +1695,7 @@ class _ClapperPainter extends CustomPainter {
     canvas.rotate(-(1 - closed) * 28 * math.pi / 180);
     final stick = Rect.fromLTWH(0, -stickH, size.width, stickH);
     canvas.clipRRect(RRect.fromRectAndRadius(stick, const Radius.circular(2)));
-    canvas.drawRect(stick, Paint()..color = const Color(0xFF141414));
+    canvas.drawRect(stick, Paint()..color = fill);
     final stripe = Paint()..color = color;
     final w = size.width / 5;
     for (var i = 0; i < 6; i += 2) {
@@ -1771,7 +1714,7 @@ class _ClapperPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ClapperPainter old) => old.closed != closed || old.color != color;
+  bool shouldRepaint(_ClapperPainter old) => old.closed != closed || old.color != color || old.fill != fill;
 }
 
 /// 75% desaturated, then dimmed to 40%.

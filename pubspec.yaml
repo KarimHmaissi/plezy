@@ -184,10 +184,6 @@ flutter:
   # Registered as UI font families so the Linux build, whose fontconfig may
   # lack CJK fonts, can fall back to the bundled subtitle fonts (mono_theme).
   fonts:
-    # Fork: the AI composer's display face (OFL, licence alongside).
-    - family: Bebas Neue
-      fonts:
-        - asset: assets/fonts/bebas_neue/BebasNeue-Regular.ttf
     - family: Go Noto Current
       fonts:
         - asset: assets/go-noto-current-regular.ttf
