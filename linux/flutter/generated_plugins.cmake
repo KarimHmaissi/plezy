@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  flutter_onnxruntime
   os_media_controls
   screen_retriever_linux
   sentry_flutter

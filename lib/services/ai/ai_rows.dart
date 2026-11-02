@@ -40,7 +40,8 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
     ]);
     // Find more: the model is told what's already shown, but drop repeats anyway.
     final picks = [...fetched.nonNulls.where((p) => !excludeKeys.contains(p.item.globalKey))];
-    if (picks.isEmpty) return (answer: answer, entry: null);
+    // A written answer stands without cards ("you've seen 23 of them").
+    if (picks.isEmpty && answer.answer == null) return (answer: answer, entry: null);
     return (
       answer: answer,
       entry: AiHistoryEntry(
@@ -48,6 +49,7 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
         request: request,
         title: keepTitle ?? (useTitle ? answer.title : null),
         intro: answer.intro,
+        answer: answer.answer,
         createdAt: DateTime.now(),
         items: [for (final p in picks) p.item],
         reasons: {for (final p in picks) p.item.globalKey: p.reason},
@@ -83,6 +85,7 @@ AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime
     request: old.request,
     title: old.title,
     intro: old.intro,
+    answer: old.answer,
     createdAt: createdAt ?? old.createdAt,
     items: items,
     reasons: {...old.reasons, ...found.reasons},

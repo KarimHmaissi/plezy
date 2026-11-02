@@ -40,6 +40,22 @@ HistoryPlay _episode(String at, {int season = 1, int episode = 1, HistorySource 
 
 void main() {
   group('mergeHistory', () {
+    test('one watch reported by two servers counts once, even when their ids differ', () {
+      final a = _episode('2024-07-09T20:00:00Z', source: HistorySource.plex);
+      final b = HistoryPlay(
+        kind: HistoryKind.episode,
+        watchedAt: DateTime.parse('2024-07-09T20:00:30Z'),
+        title: 'Show A',
+        season: 1,
+        episode: 1,
+        sources: {HistorySource.plex},
+      );
+      final rewatch = _episode('2024-08-01T20:00:00Z', source: HistorySource.plex);
+      final merged = mergeHistory(trakt: const [], plex: [b, a, rewatch]);
+      expect(merged.plays, hasLength(2));
+      expect(merged.plays.last.tvdb, '100', reason: 'the copy with ids is kept');
+    });
+
     test('a Plex watch close to a Trakt watch of the same film is listed once, with both sources', () {
       final merged = mergeHistory(
         trakt: [_movie('2025-03-01T20:00:00Z')],

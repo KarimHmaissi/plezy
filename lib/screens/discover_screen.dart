@@ -45,6 +45,8 @@ import '../profiles/profile_avatar.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../services/ai/ai_history.dart';
 import '../services/ai/ai_home_refresher.dart';
+import '../services/brain/brain_debug.dart';
+import '../services/brain/history_brain.dart';
 import '../services/catalog/home_pins.dart';
 import '../services/library_index/library_index.dart';
 import '../services/plex_client.dart';
@@ -586,14 +588,22 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       );
       // A phone is a remote for the TV's AI: no index of its own.
       if (PlatformDetector.isMobile(context)) return;
+      List<IndexSource> plexSources() => [
+        for (final id in servers.onlineServerIds)
+          if (servers.getClientForServer(ServerId(id)) case final PlexClient client) PlexIndexSource(client),
+      ];
+      // The history brain follows the index: it reads titles from it.
       unawaited(
-        LibraryIndex.instance.start(
-          () => [
-            for (final id in servers.onlineServerIds)
-              if (servers.getClientForServer(ServerId(id)) case final PlexClient client) PlexIndexSource(client),
-          ],
-        ),
+        LibraryIndex.instance
+            .start(plexSources)
+            .whenComplete(
+              () => HistoryBrain.instance.start(
+                plex: plexSources,
+                trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
+              ),
+            ),
       );
+      BrainDebug.register();
     });
     unawaited(_homePins.ensureLoaded());
     _onCatalogSourcesChanged();

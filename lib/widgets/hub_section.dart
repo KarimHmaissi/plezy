@@ -109,6 +109,9 @@ class HubSection extends StatefulWidget {
   /// in place of the View All card.
   final HubTrailingCard? trailingCard;
 
+  /// Fork: shown between the title and the cards (an AI answer's text).
+  final Widget? belowTitle;
+
   const HubSection({
     super.key,
     required this.hub,
@@ -121,6 +124,7 @@ class HubSection extends StatefulWidget {
     this.showServerName = false,
     this.loadMoreItems,
     this.trailingCard,
+    this.belowTitle,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -641,6 +645,16 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
             ),
           ),
 
+          if (widget.belowTitle case final below?)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                spacing?.edgeInset ?? leadingPadding,
+                0,
+                spacing?.edgeInset ?? leadingPadding,
+                widget.hub.items.isEmpty ? 0 : spacing?.titleGap ?? 8,
+              ),
+              child: below,
+            ),
           if (widget.hub.items.isNotEmpty)
             Focus(
               focusNode: _hubFocusNode,

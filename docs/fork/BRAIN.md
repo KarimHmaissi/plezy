@@ -1,9 +1,29 @@
 # Plezy brain (content indexing)
 
-The groundwork for AI features that know what actually happens in a title
-(search by memory, scene-accurate recaps, reasons behind picks). It reads
-dialogue from subtitles, cleans it and cuts it into scene-sized chunks for
-an embedding index.
+The AI helper's own knowledge, kept apart from Plezy's core:
+
+1. **Watch history brain** (live): a profile and an embedding for every
+   title the user has watched or owns, with structured history queries.
+2. **Dialogue** (parked): subtitles cleaned and cut into scene-sized chunks,
+   for "what did I miss" later. Too costly to fetch for a whole library for
+   now.
+
+## Watch history brain
+
+| Piece | Where | Knows about |
+| --- | --- | --- |
+| `TitleProfile` | `packages/plezy_brain/lib/src/title_profile.dart` | One film or show: details, watch dates, plays, episodes watched / total, rating, Comfort, watchlist. `embedText` holds only what the title *is* (no watch data), so similar titles cluster whatever the user did with them |
+| `Embedder` / `TransformerEmbedder` / `WordPieceTokenizer` | `embedder.dart`, `wordpiece.dart` | Tokenising (token-identical to Hugging Face's BERT tokenizer), CLS pooling, normalising. The host supplies only "run this batch through the model" |
+| `BrainStore` | `brain_store.dart` | SQLite (`package:sqlite3`): profiles plus 8-bit vectors per model, brute-force search in memory, incremental (only changed profiles and changed text are touched) |
+| `BrainIndexer` | `brain_indexer.dart` | Embeds what's missing, watched titles first, a batch at a time; waits while the host says to pause |
+| `HistoryQuery`, `historyStats` | `history_query.dart` | Filters (dates, genres, people, collection, rewatched, show progress, rating, Comfort, watchlist) and grouped counts, for exact answers |
+| Plezy adapters | `lib/services/brain/` | `history_profiles.dart` (history + library index → profiles, without loading the whole library at once), `trakt_details_cache.dart`, `onnx_embedder.dart` (flutter_onnxruntime, pinned model download), `history_brain.dart` (the host service), `brain_debug.dart` |
+| AI tools | `lib/services/ai/ai_history_tools.dart` | `history_query`, `history_stats`, `similar_titles` for the helper |
+
+Runs on hosts only (Mac, PC, Android TV); a phone mirroring a host asks it.
+The index lives in the app's support folder (`brain/`), never in the repo.
+
+## Dialogue (parked)
 
 ## Layout
 
@@ -15,9 +35,9 @@ an embedding index.
 | Debug hook | `lib/services/lab/lab_export.dart` | `ext.plezy.labSubtitles`, registered only in debug Mac builds |
 
 Plezy's core gains only the adapter and one line registering the hook
-(`main_screen.dart`). Nothing else in the app depends on the brain.
+(`main_screen.dart`).
 
-## Getting dialogue
+### Getting dialogue
 
 - **Sidecar file** (`/library/streams/{id}.srt?encoding=utf-8`): a small
   download, no playback session. Preferred.
@@ -29,7 +49,7 @@ Plezy's core gains only the adapter and one line registering the hook
 - **Image tracks** (PGS, VobSub) and forced (signs-only) tracks are skipped.
   English only for now; plain dialogue is preferred over SDH.
 
-## The export job
+### The export job
 
 `DialogueExportJob` writes, per movie or episode, `<id>.srt` and
 `<id>.chunks.json`, plus `manifest.jsonl` and `status.json` to an output

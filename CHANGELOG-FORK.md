@@ -92,6 +92,26 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### Watch history brain (branch `feature/ai-helper`)
+- A local index of everything you've watched and everything on your servers,
+  built on the host (Mac, PC, TV) and kept up to date as watches arrive.
+- One profile per film or show, from the merged Plex + Trakt history the
+  History page shows: watch dates (imports and "mark as watched" bursts
+  counted as undated), plays, rewatches, episodes watched against the total
+  (finished, in progress, dropped), your Trakt rating, Comfort and watchlist.
+  Details come from the library index; only titles not on the servers ask
+  Trakt (once, cached, at most one request a second, backing off on 429).
+- Unwatched library titles get profiles too, so "like this" finds things
+  you own.
+- Embeddings run in the app with ONNX Runtime (bge-small-en-v1.5, 384
+  dimensions, downloaded once and checked by SHA-256), stored in SQLite as
+  8-bit vectors and searched in memory. Indexing pauses while something
+  plays. Phones don't index; they ask the host.
+- The engine lives in `packages/plezy_brain` (tokenizer, embedder
+  interface, store, indexer, history queries); Plezy supplies the adapters
+  in `lib/services/brain`. Debug builds expose `ext.plezy.brain` for raw
+  queries.
+
 ### Content brain groundwork (debug only)
 
 - New `packages/plezy_brain`: picks and reads a title's English dialogue

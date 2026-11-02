@@ -258,7 +258,6 @@ class ComfortShowsController extends ChangeNotifier {
     'tvdb': ?s.ids.tvdb,
   };
 
-  @visibleForTesting
   static List<CatalogItem> decodeShows(String? encoded) {
     if (encoded == null) return const [];
     try {

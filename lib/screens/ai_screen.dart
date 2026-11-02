@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -30,6 +31,7 @@ import '../theme/fork_spacing.dart';
 import '../services/customisation/customisation_store.dart';
 import '../services/ai/ai_activity.dart';
 import '../services/ai/ai_agent.dart';
+import '../services/ai/ai_briefing.dart';
 import '../services/ai/ai_history.dart';
 import 'ai_composer.dart';
 import 'ai_pick_open.dart';
@@ -58,6 +60,33 @@ import '../widgets/tv_spotlight_scaffold.dart';
 import 'companion_remote/remote_ai_screen.dart';
 import 'libraries/state_messages.dart';
 import 'settings/ai_settings_screen.dart';
+
+/// Fork: [text] cut into pieces, each title of [items] it names (longest
+/// first, first mention only) paired with its item.
+List<(String, MediaItem?)> linkTitles(String text, List<MediaItem> items) {
+  final titles = [...items]..sort((a, b) => (b.title ?? '').length.compareTo((a.title ?? '').length));
+  final marks = <(int, int, MediaItem)>[];
+  final lower = text.toLowerCase();
+  for (final item in titles) {
+    final name = (item.title ?? '').toLowerCase();
+    if (name.length < 2) continue;
+    var at = lower.indexOf(name);
+    while (at >= 0 && marks.any((m) => at < m.$2 && at + name.length > m.$1)) {
+      at = lower.indexOf(name, at + 1);
+    }
+    if (at >= 0) marks.add((at, at + name.length, item));
+  }
+  marks.sort((a, b) => a.$1.compareTo(b.$1));
+  final out = <(String, MediaItem?)>[];
+  var pos = 0;
+  for (final (start, end, item) in marks) {
+    if (start > pos) out.add((text.substring(pos, start), null));
+    out.add((text.substring(start, end), item));
+    pos = end;
+  }
+  if (pos < text.length) out.add((text.substring(pos), null));
+  return out;
+}
 
 /// A request running in the background (or failed, waiting for Retry);
 /// [replaceId] is set when it refreshes a saved row.
@@ -107,6 +136,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   static const int _pageSize = 10;
 
   AiHistoryEntry? _tonightRow;
+
+  /// Fork: today's briefing (made on the host once a day, mirrored to phones).
+  AiHistoryEntry? _briefingRow;
 
   /// Saved answers loaded so far, newest first.
   final List<AiHistoryEntry> _saved = [];
@@ -206,6 +238,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     AiRemoteAsks.landed.removeListener(_onLanded);
     Customisation.changed.removeListener(_onDataChanged);
     RemoteAiSession.instance.removeListener(_onRemoteAsks);
+    for (final r in _taps.values) {
+      r.dispose();
+    }
     _spotlight.dispose();
     _tvRowsExpanded.dispose();
     _focusedReason.dispose();
@@ -241,16 +276,37 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     final key = await AiKeyStore.read();
     if (!mounted) return;
     setState(() => _hasKey = key != null);
-    if (key != null) await _tonight();
+    if (key != null) {
+      unawaited(_briefing());
+      await _tonight();
+    }
   }
+
+  /// Today's briefing; [force] writes a new one (pull to refresh).
+  Future<void> _briefing({bool force = false}) async {
+    if (!AiBriefing.enabled) return;
+    final servers = context.read<MultiServerProvider>();
+    final cached = await AiBriefing.cached();
+    if (mounted && cached != null && _briefingRow == null) setState(() => _briefingRow = cached);
+    if (_thinClient) return;
+    final entry = await AiBriefing.today(clientFor: servers.getClientForServer, force: force);
+    if (mounted && entry != null) setState(() => _briefingRow = entry);
+  }
+
+  /// Pull to refresh and the toolbar's refresh: new Tonight picks and a new
+  /// briefing.
+  Future<void> _refreshAll() => Future.wait([_tonight(refresh: true), _briefing(force: true)]);
 
   Future<void> _loadHistory() async {
     try {
       final total = await AiHistory.count();
       final page = await AiHistory.page(limit: _pageSize);
+      final briefing = AiBriefing.enabled ? await AiBriefing.cached() : null;
+      if (_thinClient) RemoteAiSession.instance.reconcile(page);
       if (!mounted) return;
       setState(() {
         _historyLoaded = true;
+        _briefingRow = briefing ?? _briefingRow;
         _savedTotal = total;
         _saved
           ..clear()
@@ -481,7 +537,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   List<MediaMenuExtraEntry> _rowMenuEntries(MediaHub hub) {
     final entry = _entryForHub(hub);
-    if (entry == null || entry.request == AiAgent.tonightRequest) return const [];
+    if (entry == null || entry.request == AiAgent.tonightRequest || entry.id == AiBriefing.entryId) return const [];
     if (_thinClient && !_canEditMirror) return const [];
     final homeRow = _homeRow(entry);
     final homeFull =
@@ -567,8 +623,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     );
   }
 
-  /// Rows in order: this visit's answers, Tonight, then older saved ones.
-  List<AiHistoryEntry> get _rows => [..._saved.take(_askedThisVisit), ?_tonightRow, ..._saved.skip(_askedThisVisit)];
+  /// Rows in order: today's briefing, this visit's answers, Tonight, then
+  /// older saved ones.
+  List<AiHistoryEntry> get _rows => [
+    ?_briefingRow,
+    ..._saved.take(_askedThisVisit),
+    ?_tonightRow,
+    ..._saved.skip(_askedThisVisit),
+  ];
 
   static String _hubId(AiHistoryEntry entry) => 'aitab:${entry.id}';
 
@@ -578,7 +640,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// The answer [hub] shows when it can take a Load more card.
   AiHistoryEntry? _loadMoreEntry(MediaHub hub) {
     final entry = _entryForHub(hub);
-    if (entry == null || entry.request == AiAgent.tonightRequest) return null;
+    // Tonight, the briefing and written answers aren't lists to grow.
+    if (entry == null || entry.request == AiAgent.tonightRequest || entry.answer != null) return null;
     if (_thinClient && !_canEditMirror) return null;
     if (entry.items.length >= AiHistory.maxItemsPerEntry) return null;
     return entry;
@@ -708,18 +771,43 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   void _onFocused(MediaHub hub, MediaItem item) {
     _spotlight.select(item);
-    _focusedReason.value = _entryForHub(hub)?.reasons[item.globalKey];
+    final entry = _entryForHub(hub);
+    // An answered question keeps its answer up; a pick shows its reason.
+    _focusedReason.value = entry?.answer ?? entry?.reasons[item.globalKey];
   }
 
-  String? get _headline => _rows.firstOrNull?.intro;
+  String? get _headline => _rows.firstOrNull?.answer ?? _rows.firstOrNull?.intro;
+
+  /// Fork: a history question's written answer, between its title and cards.
+  /// Titles named in it open on tap (touch and mouse; on TV the cards do).
+  Widget? _answerText(MediaHub hub) {
+    final entry = _entryForHub(hub);
+    final answer = entry?.answer;
+    if (entry == null || answer == null || answer.isEmpty) return null;
+    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.4);
+    final link = style?.copyWith(fontWeight: FontWeight.w600, decoration: TextDecoration.underline);
+    return Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          for (final (text, item) in linkTitles(answer, entry.items))
+            item == null ? TextSpan(text: text) : TextSpan(text: text, style: link, recognizer: _tapRecognizer(item)),
+        ],
+      ),
+    );
+  }
+
+  final Map<String, TapGestureRecognizer> _taps = {};
+  TapGestureRecognizer _tapRecognizer(MediaItem item) =>
+      _taps.putIfAbsent(item.globalKey, () => TapGestureRecognizer()..onTap = () => unawaited(_openPick(item)));
 
   bool get _hasMore => _saved.length < _savedTotal;
 
   @override
-  void manualRefresh() => unawaited(_tonight(refresh: true));
+  void manualRefresh() => unawaited(_refreshAll());
 
   @override
-  void fullRefresh() => unawaited(_tonight(refresh: true));
+  void fullRefresh() => unawaited(_refreshAll());
 
   @override
   void onTabShown() {
@@ -822,7 +910,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         ...phoneTabActions(
           context,
           color: color,
-          onRefresh: canRefresh ? () => unawaited(_tonight(refresh: true)) : null,
+          onRefresh: canRefresh ? () => unawaited(_refreshAll()) : null,
           extras: [
             if (_conversation.isNotEmpty) (Symbols.add_comment_rounded, t.aiTab.newConversation, _newConversation),
             if (_hasMore) (Symbols.expand_more_rounded, t.aiTab.loadMore, () => unawaited(_loadMore())),
@@ -840,7 +928,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
           icon: Symbols.refresh_rounded,
           iconColor: color,
           tooltip: t.aiTab.refreshTonight,
-          onPressed: _busy || _hasKey != true ? null : () => unawaited(_tonight(refresh: true)),
+          onPressed: _busy || _hasKey != true ? null : () => unawaited(_refreshAll()),
         ),
       if (!phone && _hasMore)
         FocusableAction(
@@ -926,7 +1014,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
           // Pull to refresh does what the toolbar's refresh does: new Tonight
           // picks (a phone mirroring its TV reloads the TV's answers).
           onRefresh: ForkMotion.refreshing(
-            () => _thinClient ? _loadHistory() : (_hasKey == true ? _tonight(refresh: true) : _start()),
+            () => _thinClient ? _loadHistory() : (_hasKey == true ? _refreshAll() : _start()),
           ),
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -957,6 +1045,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                           key: _hubKey(hubs[i]),
                           hub: hubs[i],
                           trailingCard: _trailingCard(hubs[i]),
+                          belowTitle: _answerText(hubs[i]),
                           focusMemory: _hubFocusMemory,
                           icon: Symbols.auto_awesome_rounded,
                           // Phone: a tap plays (on the TV while casting); shows open.
@@ -994,10 +1083,15 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         ),
       );
     }
+    // The TV rail needs cards; an answer without any shows as the headline.
+    final tvHubs = [
+      for (final h in hubs)
+        if (h.items.isNotEmpty) h,
+    ];
     return TvSpotlightScaffold(
-      hubs: hubs,
+      hubs: tvHubs,
       spotlightListenable: _spotlight,
-      resolveSpotlight: () => _spotlight.resolve(hubs),
+      resolveSpotlight: () => _spotlight.resolve(tvHubs),
       resolveClient: (spotlight) => context.tryGetMediaClientForServer(serverIdOrNull(spotlight?.serverId)),
       condensedListenable: _tvRowsExpanded,
       foreground: Stack(
@@ -1005,14 +1099,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         clipBehavior: Clip.none,
         children: [
           ?message,
-          if (hubs.isNotEmpty)
+          if (tvHubs.isNotEmpty)
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: TvBrowseRail(
                 key: _tvBrowseRailKey,
-                hubs: hubs,
+                hubs: tvHubs,
                 focusMemory: _hubFocusMemory,
                 iconForHub: (_, _) => Symbols.auto_awesome_rounded,
                 rowMenuEntriesForHub: _rowMenuEntries,
@@ -1060,7 +1154,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                               Expanded(
                                 child: Text(
                                   text,
-                                  maxLines: 2,
+                                  maxLines: 3,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color),
                                 ),

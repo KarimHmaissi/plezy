@@ -449,6 +449,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_onnxruntime:
+    dependency: "direct main"
+    description:
+      name: flutter_onnxruntime
+      sha256: "94565ad2a3f6f92b2e09c1b274c8e5f47f7c0cda0675c5484d5e16a2c4761123"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.9.0"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
@@ -898,7 +906,7 @@ packages:
       path: "packages/plezy_brain"
       relative: true
     source: path
-    version: "0.1.0"
+    version: "0.2.0"
   plugin_platform_interface:
     dependency: "direct dev"
     description:

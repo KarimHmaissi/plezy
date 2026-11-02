@@ -182,6 +182,22 @@ void markBulkDates(
   }
 }
 
+/// The same watch reported by two servers (a title on both, watch state
+/// shared through plex.tv): same film or episode by name, same minute. The
+/// copies' ids can differ (one server's agent may not match), so names
+/// decide; the copy with the most ids is kept.
+List<HistoryPlay> dedupeServerCopies(List<HistoryPlay> plays) {
+  int ids(HistoryPlay p) => [p.imdb, p.tmdb, p.tvdb].where((v) => v != null && v.isNotEmpty).length;
+  final byKey = <String, HistoryPlay>{};
+  for (final p in plays) {
+    final what = p.isMovie ? 'm:${p.year ?? ''}' : 'e:${p.season ?? 0}x${p.episode ?? 0}';
+    final key = '${p.title.toLowerCase().trim()}|$what@${p.watchedAt.millisecondsSinceEpoch ~/ 60000}';
+    final kept = byKey[key];
+    if (kept == null || ids(p) > ids(kept)) byKey[key] = p;
+  }
+  return byKey.length == plays.length ? plays : byKey.values.toList();
+}
+
 /// Merge Trakt's history with Plex's last-viewed dates, one entry per watch.
 ///
 /// - A Plex watch within [sameWatchWindow] of a Trakt watch of the same film
@@ -201,6 +217,7 @@ MergedHistory mergeHistory({
   Duration sameWatchWindow = const Duration(hours: 36),
 }) {
   final undated = trakt.where((p) => isUndatedWatch(p.watchedAt)).length;
+  plex = dedupeServerCopies(plex);
   final traktPlays = [
     for (final p in trakt)
       if (!isUndatedWatch(p.watchedAt)) p,

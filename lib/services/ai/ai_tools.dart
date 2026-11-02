@@ -8,6 +8,7 @@ import '../library_index/index_search.dart';
 import '../library_index/library_index.dart';
 import '../trackers/trakt/trakt_client.dart';
 import '../trackers/trakt/trakt_constants.dart';
+import 'ai_history_tools.dart';
 
 /// One pick the model chose for the user: an index title id and why.
 typedef AiPick = ({String id, String reason});
@@ -16,17 +17,28 @@ typedef AiPick = ({String id, String reason});
 /// ratings for a shortlist). All read-only except [showPicksTool], which is
 /// how the model hands back its final picks.
 class AiTools {
-  AiTools({required this.index, this.trakt});
+  AiTools({required this.index, this.trakt, this.history});
 
   final LibraryIndex index;
   final TraktClient? trakt;
+
+  /// Fork: tools over the history brain, on hosts that have one.
+  final AiHistoryTools? history;
 
   /// Picks from the last `show_picks` call, its intro line and row name.
   List<AiPick> picks = const [];
   String? intro;
   String? title;
 
+  /// Fork: the written answer from `answer_question`.
+  String? answer;
+  bool _askedHistory = false;
+
   static const String showPicksTool = 'show_picks';
+  static const String answerTool = 'answer_question';
+
+  /// Tools that end the answer.
+  static const Set<String> finalTools = {showPicksTool, answerTool};
 
   /// Hard cap on one answer's picks; the prompt lets the model size the list.
   static const int maxPicks = 50;
@@ -173,6 +185,7 @@ class AiTools {
         'additionalProperties': false,
       },
     },
+    ...?history?.definitions(),
     {
       'name': showPicksTool,
       'description':
@@ -201,6 +214,42 @@ class AiTools {
         'additionalProperties': false,
       },
     },
+    if (history != null)
+      {
+        'name': answerTool,
+        'description':
+            'Answer a question about the user\'s own watching (what, when, how many, which) in writing, with the '
+            'titles it mentions as cards. Call exactly once, at the end, instead of show_picks. Only state facts the '
+            'history tools returned; if they don\'t settle it, say what you don\'t know.',
+        'strict': true,
+        'input_schema': {
+          'type': 'object',
+          'properties': {
+            'title': {'type': 'string', 'description': 'A short name for this answer, 2-6 words'},
+            'answer': {
+              'type': 'string',
+              'description': 'Plain text, no markdown: 1-4 short sentences, numbers exact. Mention titles by name.',
+            },
+            'titles': {
+              'type': 'array',
+              'description':
+                  'Ids (from the tools) of the titles the answer is about, most relevant first, up to 20. '
+                  'Titles "not on servers" have no id; name them in the answer instead.',
+              'items': {
+                'type': 'object',
+                'properties': {
+                  'id': {'type': 'string'},
+                  'note': {'type': 'string', 'description': 'A few words: when watched, how far, why it fits'},
+                },
+                'required': ['id', 'note'],
+                'additionalProperties': false,
+              },
+            },
+          },
+          'required': ['title', 'answer', 'titles'],
+          'additionalProperties': false,
+        },
+      },
   ];
 
   /// Run one tool call; returns the text for its `tool_result`.
@@ -226,8 +275,22 @@ class AiTools {
         return _list(await _continueWatching(), withWatched: true);
       case 'get_ratings':
         return _ratings([...(input['ids'] as List? ?? const []).whereType<String>()].take(20).toList());
+      case final n when history != null && AiHistoryTools.names.contains(n):
+        if (n != AiHistoryTools.similarTool) _askedHistory = true;
+        return history!.run(n, input);
+      case answerTool:
+        title = input['title'] as String?;
+        answer = (input['answer'] as String?)?.trim();
+        picks = [
+          for (final p in (input['titles'] as List? ?? const []).whereType<Map>().take(20))
+            if (p['id'] is String) (id: p['id'] as String, reason: p['note'] as String? ?? ''),
+        ];
+        return 'Shown to the user.';
       case showPicksTool:
         intro = input['intro'] as String?;
+        // A question about their history gets a written answer even when the
+        // model reached for picks: the intro is that answer.
+        if (_askedHistory && intro != null) answer = intro;
         title = input['title'] as String?;
         picks = [
           for (final p in (input['picks'] as List? ?? const []).whereType<Map>().take(maxPicks))

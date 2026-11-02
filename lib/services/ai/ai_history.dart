@@ -9,7 +9,8 @@ import '../catalog/home_pins.dart';
 import '../customisation/customisation_store.dart';
 
 /// One saved answer: the request, the helper's intro, and the picks as
-/// playable items with their reasons.
+/// playable items with their reasons. A question about the user's history
+/// also has a written [answer] (its cards may be empty).
 class AiHistoryEntry {
   AiHistoryEntry({
     required this.id,
@@ -19,6 +20,7 @@ class AiHistoryEntry {
     required this.items,
     required this.reasons,
     this.title,
+    this.answer,
     this.extended = false,
   });
 
@@ -29,6 +31,10 @@ class AiHistoryEntry {
   /// rows (whose request is a long prompt).
   final String? title;
   final String? intro;
+
+  /// Fork: the written answer to a question ("how many…", "what was that
+  /// film…"), shown above the cards.
+  final String? answer;
 
   /// What the row is called on the AI tab and Home.
   String get label => title ?? request;
@@ -47,6 +53,7 @@ class AiHistoryEntry {
     'request': request,
     'title': title,
     'intro': intro,
+    if (answer != null) 'answer': answer,
     'createdAt': createdAt.millisecondsSinceEpoch,
     if (extended) 'extended': true,
     'items': [
@@ -69,6 +76,7 @@ class AiHistoryEntry {
         request: json['request'] as String,
         title: json['title'] as String?,
         intro: json['intro'] as String?,
+        answer: json['answer'] as String?,
         createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int? ?? 0),
         items: items,
         reasons: reasons,

@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import '../../utils/app_logger.dart';
+import '../brain/history_brain.dart';
 import '../library_index/index_database.dart';
 import '../library_index/library_index.dart';
 import '../trackers/trakt/trakt_client.dart';
+import 'ai_history_tools.dart';
 import 'ai_key_store.dart';
 import 'ai_spend.dart';
 import 'ai_tools.dart';
@@ -26,6 +28,7 @@ class AiAnswer {
     required this.outputTokens,
     required this.cachedTokens,
     required this.unknownPickIds,
+    this.answer,
     this.error,
   });
 
@@ -38,6 +41,9 @@ class AiAnswer {
 
   /// Any text the model wrote besides the picks.
   final String text;
+
+  /// Fork: the written answer to a question about the user's history.
+  final String? answer;
   final List<AiToolCall> toolCalls;
   final Duration elapsed;
   final double cost;
@@ -54,11 +60,20 @@ class AiAnswer {
 /// tools the model asks for on this device, send the results back, and stop
 /// once it calls `show_picks` (or answers in text).
 class AiAgent {
-  AiAgent({required this.index, this.trakt, this.model = ClaudeModel.sonnet, ClaudeClient? claudeClient})
-    : _client = claudeClient;
+  AiAgent({
+    required this.index,
+    this.trakt,
+    this.model = ClaudeModel.sonnet,
+    ClaudeClient? claudeClient,
+    HistoryBrain? brain,
+  }) : _client = claudeClient,
+       brain = brain ?? (HistoryBrain.instance.status.value.profiles > 0 ? HistoryBrain.instance : null);
 
   final LibraryIndex index;
   final TraktClient? trakt;
+
+  /// Fork: the watch history brain, when this host has built one.
+  final HistoryBrain? brain;
   final ClaudeModel model;
   ClaudeClient? _client;
 
@@ -82,11 +97,29 @@ How to work:
 - Always finish with show_picks, even for yes/no questions ("is X on my server?", "do I have Y?"): put the answer in the intro and the title (or the closest matches) as picks so the user can play it. If nothing fits, call show_picks with an intro saying so and no picks.
 - Keep it quick: a few well-chosen tool calls, not exhaustive searching.''';
 
+  /// Fork: added when the history brain is available.
+  static const String historyPrompt = '''
+
+Questions about the user's own watching:
+- Show progress: "dropped" means a real go then nothing for 6+ months; recent unfinished shows are "paused" or in progress, and caught-up shows (even if still airing) are "finished". Say which you mean.
+- "What was that film I watched...", "how many X have I seen", "which shows did I drop", "what did I watch most in 2024", "when did I last watch Y": use history_query (with `about` for a half-remembered plot or theme) and history_stats, then finish with answer_question instead of show_picks. That holds when the answer is a list ("which shows did I drop"): write a short summary (how many, the pattern) and put the titles in as cards.
+- Cards: the titles the answer is about, up to 20 (for a count, the counted titles, most relevant first).
+- Numbers come from history_stats or history_query totals, never from your own estimate. Dates are real viewing dates; "undated" plays were imported or marked as watched, so say so if they matter.
+- "Watched last summer" means June to August of the most recent summer before today unless they say otherwise; seasons are northern hemisphere.
+- For a franchise or studio ("Marvel films", "Pixar"), use the metadata first: the studio filter (e.g. "Marvel Studios" for the MCU; it can also catch non-MCU titles, so check the list), then collection. Only if those find nothing, fall back to your own knowledge of the titles with title_contains, and say the count covers what you could match.
+- If the tools don't show it, say you don't know or can't find it. Never invent a title, a date or a count.
+- Recommendation requests that lean on history ("something like what I loved last year") still end with show_picks; similar_titles with watched=false finds unwatched titles on the servers like one they watched.''';
+
   /// [previous] carries earlier turns of this conversation (request and
   /// picks), so follow-ups like "lighter" or "only films" make sense.
   Future<AiAnswer> ask(String request, {List<({String request, AiAnswer answer})> previous = const []}) async {
     final started = DateTime.now();
-    final tools = AiTools(index: index, trakt: trakt);
+    final brain = this.brain;
+    final tools = AiTools(
+      index: index,
+      trakt: trakt,
+      history: brain == null ? null : AiHistoryTools(brain: brain, index: index),
+    );
     final calls = <AiToolCall>[];
     var cost = 0.0;
     var input = 0;
@@ -118,7 +151,7 @@ How to work:
           'system': [
             {
               'type': 'text',
-              'text': systemPrompt,
+              'text': brain == null ? systemPrompt : '$systemPrompt$historyPrompt',
               'cache_control': {'type': 'ephemeral'},
             },
           ],
@@ -177,7 +210,7 @@ How to work:
         ]);
         messages.add({'role': 'user', 'content': results});
         // The picks are the answer; no need for another round trip.
-        if (uses.any((u) => u['name'] == AiTools.showPicksTool)) break;
+        if (uses.any((u) => AiTools.finalTools.contains(u['name']))) break;
       }
     } on ClaudeApiException catch (e) {
       error = e.isAuth ? 'The API key was rejected; check Settings ▸ AI.' : 'Claude API error: ${e.message}';
@@ -235,6 +268,7 @@ How to work:
       outputTokens: output,
       cachedTokens: cached,
       unknownPickIds: unknown,
+      answer: tools.answer,
       error: error,
     );
   }

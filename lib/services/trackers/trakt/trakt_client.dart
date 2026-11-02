@@ -198,6 +198,15 @@ class TraktClient implements DisposableTrackerClient {
     );
   }
 
+  /// Fork: a title's full details (`GET /{movies|shows}/{id}?extended=full`): overview, genres, runtime,
+  /// rating, and for shows `aired_episodes`. Null when Trakt does not know the title. [id] is a Trakt id, slug or
+  /// IMDb id.
+  Future<Map<String, dynamic>?> getSummary(TraktCatalogType type, String id) async {
+    final res = await _getOrNull('/${type.name}/$id?extended=full');
+    final decoded = res == null ? null : TrackerHttpClient.decodeJson(res.body);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  }
+
   /// The Trakt id a TMDB or TVDB id ([idType]) names (`GET /search/{tmdb|tvdb}/{id}?type=movie|show`,
   /// "ID Lookup"), from the first result of [type]'s kind; null when Trakt does not know the title.
   Future<int?> lookupTraktId(String idType, int id, TraktCatalogType type) async {

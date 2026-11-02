@@ -20,10 +20,11 @@ import '../ai_pick_open.dart';
 
 /// One request sent from this phone and what the TV has said about it.
 class RemoteAiAsk {
-  RemoteAiAsk(this.rid, this.request);
+  RemoteAiAsk(this.rid, this.request) : sentAt = DateTime.now();
 
   final String rid;
   final String request;
+  final DateTime sentAt;
   String status = 'working';
   String? error;
   AiHistoryEntry? answer;
@@ -53,9 +54,44 @@ class RemoteAiSession extends ChangeNotifier {
 
     addListener(check);
     return done.future
-        .timeout(const Duration(minutes: 3), onTimeout: () {})
+        .timeout(
+          const Duration(minutes: 3),
+          onTimeout: () {
+            // Never left "looking for" forever: the reply may have been lost
+            // in a reconnect (the answer still arrives with the TV's data).
+            if (mine.status == 'working') {
+              mine
+                ..status = 'error'
+                ..error = t.aiComposer.timedOut;
+              notifyListeners();
+            }
+          },
+        )
         .whenComplete(() => removeListener(check))
         .then((_) => mine);
+  }
+
+  /// The TV's saved answers arrived (a mirror snapshot): any request still
+  /// waiting whose answer is among them is done, even if its reply was lost
+  /// while the connection dropped.
+  void reconcile(List<AiHistoryEntry> saved) {
+    var changed = false;
+    for (final ask in asks) {
+      if (ask.status != 'working') continue;
+      final answer = saved
+          .where(
+            (e) =>
+                e.request.trim() == ask.request.trim() &&
+                !e.createdAt.isBefore(ask.sentAt.subtract(const Duration(minutes: 1))),
+          )
+          .firstOrNull;
+      if (answer == null) continue;
+      ask
+        ..status = 'done'
+        ..answer = answer;
+      changed = true;
+    }
+    if (changed) notifyListeners();
   }
 
   void ask(CompanionRemoteProvider remote, String request) {
