@@ -48,7 +48,9 @@ import '../utils/dialogs.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
+import '../theme/mono_tokens.dart';
 import '../widgets/ai_answer_card.dart';
+import '../widgets/app_icon.dart';
 import '../widgets/desktop_app_bar.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/hub_section.dart';
@@ -857,7 +859,53 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     ];
   }
 
-  /// The card above a saved answer's row: its write-up, notes and follow-ups.
+  /// The hairline between answer blocks; with the row's own bottom gap it
+  /// leaves about 48 dp between one block's posters and the next title.
+  Widget _blockDivider() {
+    final spacing = ForkSpacing.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(spacing.edgeInset, 0, spacing.edgeInset, 12),
+      child: Divider(height: 1, thickness: 1, color: tokens(context).outline),
+    );
+  }
+
+  /// A running (or failed) request's block: a title like a row's, then the
+  /// card, and its posters once they land.
+  Widget _pendingBlock(Widget card, {required bool divider}) {
+    final spacing = ForkSpacing.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (divider) _blockDivider(),
+        Padding(
+          padding: EdgeInsets.fromLTRB(spacing.edgeInset, 0, spacing.edgeInset, spacing.rowGap),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  AppIcon(Symbols.auto_awesome_rounded, fill: 1, size: spacing.titleSize),
+                  const SizedBox(width: 8),
+                  Flexible(child: Text(t.aiTab.working, style: spacing.titleStyle(context), maxLines: 1)),
+                ],
+              ),
+              SizedBox(height: spacing.titleGap),
+              card,
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// "Top pick" on the strongest matches' posters.
+  List<String> Function(MediaItem item)? _badgesFor(MediaHub hub) {
+    final top = _entryForHub(hub)?.topPicks ?? const {};
+    if (top.isEmpty) return null;
+    return (item) => top.containsKey(item.globalKey) ? [t.aiTab.topPick] : const [];
+  }
+
+  /// The answer's text inside its row: its write-up, notes and follow-ups.
   Widget? _answerCard(MediaHub hub) {
     final entry = _entryForHub(hub);
     final text = entry?.cardText;
@@ -873,6 +921,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       expanded: open,
       onToggle: () => setState(() => _cardOpen[entry.id] = !open),
       onFollowUp: (f) => unawaited(_followUp(entry, f)),
+      topPicks: _titleNotes(entry, entry.topPicks),
+      spotlights: _titleNotes(entry, entry.spotlights),
       // Titles named in it open on tap (on TV the cards do).
       linkify: (text, style) {
         final link = style?.copyWith(fontWeight: FontWeight.w600, decoration: TextDecoration.underline);
@@ -883,6 +933,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       },
     );
   }
+
+  List<AiTitleNote> _titleNotes(AiHistoryEntry entry, Map<String, String> notes) => [
+    for (final item in entry.items)
+      if (notes[item.globalKey] case final text?) (title: item.title ?? '', text: text, onTap: _tapRecognizer(item)),
+  ];
 
   /// A follow-up chip: a new request that carries the answer it refines.
   Future<void> _followUp(AiHistoryEntry entry, String followUp) async {
@@ -1140,35 +1195,39 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
               if (message != null)
                 SliverFillRemaining(child: message)
               else ...[
-                for (final card in pendingCards) SliverToBoxAdapter(child: card),
+                // One block per answer: title, what was asked and the write-up,
+                // then its posters; a hairline between blocks.
+                for (final (n, card) in pendingCards.indexed)
+                  SliverToBoxAdapter(child: _pendingBlock(card, divider: n > 0)),
                 for (var i = 0; i < hubs.length; i++) ...[
-                  if (_answerCard(hubs[i]) case final card?) SliverToBoxAdapter(child: card),
-                  if (hubs[i].items.isNotEmpty)
-                    SliverToBoxAdapter(
-                      child: RowMenuEntries(
-                        entries: _rowMenuEntries(hubs[i]),
-                        child: ItemMenuEntries(
-                          build: _pickMenuEntries,
-                          child: HubSection(
-                            key: _hubKey(hubs[i]),
-                            hub: hubs[i],
-                            trailingCard: _trailingCard(hubs[i]),
-                            focusMemory: _hubFocusMemory,
-                            icon: Symbols.auto_awesome_rounded,
-                            // Phone: a tap plays (on the TV while casting); shows open.
-                            onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
-                            onVerticalNavigation: (isUp) => navigateVerticalHubRows(
-                              hubCount: hubs.length,
-                              hubIndex: i,
-                              isUp: isUp,
-                              onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
-                              requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
-                            ),
-                            onNavigateToSidebar: _navigateToSidebar,
+                  if (i > 0 || pendingCards.isNotEmpty) SliverToBoxAdapter(child: _blockDivider()),
+                  SliverToBoxAdapter(
+                    child: RowMenuEntries(
+                      entries: _rowMenuEntries(hubs[i]),
+                      child: ItemMenuEntries(
+                        build: _pickMenuEntries,
+                        child: HubSection(
+                          key: _hubKey(hubs[i]),
+                          hub: hubs[i],
+                          trailingCard: _trailingCard(hubs[i]),
+                          belowTitle: _answerCard(hubs[i]),
+                          badgesFor: _badgesFor(hubs[i]),
+                          focusMemory: _hubFocusMemory,
+                          icon: Symbols.auto_awesome_rounded,
+                          // Phone: a tap plays (on the TV while casting); shows open.
+                          onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                          onVerticalNavigation: (isUp) => navigateVerticalHubRows(
+                            hubCount: hubs.length,
+                            hubIndex: i,
+                            isUp: isUp,
+                            onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
+                            requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
                           ),
+                          onNavigateToSidebar: _navigateToSidebar,
                         ),
                       ),
                     ),
+                  ),
                 ],
               ],
               if (message == null && _hasMore)

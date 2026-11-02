@@ -38,6 +38,11 @@ class AiTools {
   List<String> notes = const [];
   List<String> followUps = const [];
 
+  /// Fork: picks worth a closer look (title-specific insight), and the
+  /// strongest matches, by pick id.
+  List<({String id, String text})> spotlights = const [];
+  List<({String id, String text})> topPicks = const [];
+
   void _readExtras(Map<String, dynamic> input) {
     List<String> strings(String key) => [
       for (final v in (input[key] as List? ?? const []))
@@ -48,6 +53,16 @@ class AiTools {
   }
 
   bool _askedHistory = false;
+
+  static Map<String, Object?> _idText(String text) => {
+    'type': 'object',
+    'properties': {
+      'id': {'type': 'string', 'description': 'A pick id'},
+      'text': {'type': 'string', 'description': text},
+    },
+    'required': ['id', 'text'],
+    'additionalProperties': false,
+  };
 
   static const String showPicksTool = 'show_picks';
   static const String answerTool = 'answer_question';
@@ -136,7 +151,7 @@ class AiTools {
         'properties': {
           'titles': {
             'type': 'array',
-            'maxItems': 50,
+            'maxItems': 60,
             'items': {
               'type': 'object',
               'properties': {
@@ -215,7 +230,22 @@ class AiTools {
           'writeup': {
             'type': 'string',
             'description':
-                '2-4 sentences, plain text: why these picks and what ties them together, specific to the request',
+                'The overview, written first: 3-4 full sentences (60-90 words), plain text, no markdown: what ties the '
+                'picks together and how they fit this '
+                "user's taste. Draw on their watching when it's relevant (\"you finished X, so...\"). Spoiler-free.",
+          },
+          'top_picks': {
+            'type': 'array',
+            'items': _idText('Why this is the strongest match for them, one sentence'),
+            'description': '1-2 picks you rate the strongest match, for recommendation requests; else empty',
+          },
+          'spotlights': {
+            'type': 'array',
+            'items': _idText(
+              '1-2 spoiler-free sentences of insight about this title: what makes it stand out, its tone, pacing, '
+              'where to start. Not the pick reason again',
+            ),
+            'description': '2-3 picks worth a closer look (not the top picks); empty for narrow requests with 1-2 picks',
           },
           'notes': {
             'type': 'array',
@@ -224,18 +254,6 @@ class AiTools {
                 'Up to 2 short spoiler-free "worth knowing" notes (pace, where to start, intensity), only if useful; '
                 'else empty',
           },
-          'picks': {
-            'type': 'array',
-            'items': {
-              'type': 'object',
-              'properties': {
-                'id': {'type': 'string'},
-                'reason': {'type': 'string', 'description': 'One short sentence: why this fits the request'},
-              },
-              'required': ['id', 'reason'],
-              'additionalProperties': false,
-            },
-          },
           'follow_ups': {
             'type': 'array',
             'items': {'type': 'string'},
@@ -243,8 +261,23 @@ class AiTools {
                 '2-3 short refinements the user might tap next, phrased as their request, 2-5 words each '
                 '("Only films", "Something lighter", "More like <a pick>")',
           },
+          'picks': {
+            'type': 'array',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'id': {'type': 'string'},
+                'reason': {
+                  'type': 'string',
+                  'description': 'Why this fits the request, under 15 words, specific to the title (never a placeholder)',
+                },
+              },
+              'required': ['id', 'reason'],
+              'additionalProperties': false,
+            },
+          },
         },
-        'required': ['title', 'intro', 'writeup', 'notes', 'picks', 'follow_ups'],
+        'required': ['title', 'intro', 'writeup', 'top_picks', 'spotlights', 'notes', 'follow_ups', 'picks'],
         'additionalProperties': false,
       },
     },
@@ -262,7 +295,9 @@ class AiTools {
             'title': {'type': 'string', 'description': 'A short name for this answer, 2-6 words'},
             'answer': {
               'type': 'string',
-              'description': 'Plain text, no markdown: 1-4 short sentences, numbers exact. Mention titles by name.',
+              'description':
+                  'Plain text, no markdown: a direct answer, up to a short paragraph (1-6 sentences), numbers exact. '
+                  'Mention titles by name.',
             },
             'titles': {
               'type': 'array',
@@ -343,9 +378,24 @@ class AiTools {
         // model reached for picks: the intro is that answer.
         if (_askedHistory) answer = writeup ?? intro;
         title = input['title'] as String?;
-        picks = [
+        List<({String id, String text})> idTexts(String key, int max) => [
+          for (final p in (input[key] as List? ?? const []).whereType<Map>().take(max))
+            if (p['id'] is String && '${p['text'] ?? ''}'.trim().isNotEmpty)
+              (id: p['id'] as String, text: '${p['text']}'.trim()),
+        ];
+        topPicks = idTexts('top_picks', 2);
+        spotlights = idTexts('spotlights', 3);
+        final listed = [
           for (final p in (input['picks'] as List? ?? const []).whereType<Map>().take(maxPicks))
             if (p['id'] is String) (id: p['id'] as String, reason: p['reason'] as String? ?? ''),
+        ];
+        // Top picks lead the row (added if the model left them out of picks).
+        final top = {for (final p in topPicks) p.id};
+        picks = [
+          for (final t in topPicks)
+            listed.where((p) => p.id == t.id).firstOrNull ?? (id: t.id, reason: t.text),
+          for (final p in listed)
+            if (!top.contains(p.id)) p,
         ];
         return 'Shown to the user.';
       default:
@@ -425,7 +475,7 @@ class AiTools {
   Future<String> _findTitles(Map<String, dynamic> input) async {
     final db = await index.database;
     final wanted = [
-      for (final t in (input['titles'] as List? ?? const []).whereType<Map>().take(50))
+      for (final t in (input['titles'] as List? ?? const []).whereType<Map>().take(60))
         if ((t['title'] as String? ?? '').trim() case final title when title.isNotEmpty)
           (title: title, year: (t['year'] as num?)?.toInt()),
     ];

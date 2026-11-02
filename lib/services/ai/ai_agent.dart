@@ -52,6 +52,8 @@ class AiAnswer {
     this.writeup,
     this.notes = const [],
     this.followUps = const [],
+    this.spotlights = const {},
+    this.topPicks = const {},
     this.timing = '',
     this.error,
   });
@@ -69,11 +71,16 @@ class AiAnswer {
   /// Fork: the written answer to a question about the user's history.
   final String? answer;
 
-  /// Fork: why these picks and what ties them together (2-4 sentences),
+  /// Fork: why these picks and what ties them together (3-4 sentences),
   /// "worth knowing" notes, and refinements to offer next.
   final String? writeup;
   final List<String> notes;
   final List<String> followUps;
+
+  /// Fork: insight on a few picks, and why the strongest matches are, by
+  /// index id (top picks lead [picks]).
+  final Map<String, String> spotlights;
+  final Map<String, String> topPicks;
 
   /// Fork: where the time went ("model 12.1s (3 calls), tools 1.4s").
   final String timing;
@@ -131,7 +138,7 @@ How to work:
 - How many picks: let the request decide, up to 50. List-style asks ("every...", "all the X on my server", "a big list", a full franchise or filmography): 40-50. Broad or open-ended requests (a genre, a mood, an era, "something like X", "based on my history"): about 30-40; the library is big, so a broad request should normally fill a long row. Narrow requests (a specific title, a yes/no question, "a random X", tight constraints): only the titles that genuinely fit, even if that's one or two. Never pad a list with weak matches to reach a number.
 - Finish by calling show_picks exactly once, best first, each pick with one short, specific reason.
 - Always finish with show_picks, even for yes/no questions ("is X on my server?", "do I have Y?"): put the answer in the intro and the title (or the closest matches) as picks so the user can play it. If nothing fits, call show_picks with an intro saying so and no picks.
-- Keep it quick: usually two turns. In the first, call every tool you need at once, in parallel (e.g. find_titles for your candidates, plus search_library or similar_titles); then call show_picks. Only take another turn if the results leave real gaps.
+- Keep it quick: usually two turns. In the first, call every tool you need at once, in parallel, asking for enough candidates to fill the row after filtering: for a broad request that means find_titles with 50-60 of your own candidates, plus similar_titles (limit 30) from two or three titles they loved and/or search_library (limit 40). Then call show_picks. Take a third lookup turn only if a broad or list-style request would otherwise end with fewer than 30 picks; narrow requests never need one.
 - Keep each pick's reason under 15 words.''';
 
   /// Fork: added when the history brain is available.
@@ -370,6 +377,8 @@ Questions about the user's own watching:
       writeup: tools.writeup ?? tools.answer,
       notes: tools.notes,
       followUps: tools.followUps,
+      spotlights: {for (final p in tools.spotlights) p.id: p.text},
+      topPicks: {for (final p in tools.topPicks) p.id: p.text},
       timing: timing,
       error: error,
     );

@@ -32,7 +32,7 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
         () async {
           try {
             final item = await clientFor(ServerId(pick.title.serverId))?.fetchItem(pick.title.ratingKey);
-            return item == null ? null : (item: item, reason: pick.reason);
+            return item == null ? null : (item: item, reason: pick.reason, id: pick.title.id);
           } catch (e) {
             appLogger.d('AI: fetching ${pick.title.title} failed', error: e);
             return null;
@@ -57,6 +57,8 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
         createdAt: DateTime.now(),
         items: [for (final p in picks) p.item],
         reasons: {for (final p in picks) p.item.globalKey: p.reason},
+        spotlights: {for (final p in picks) p.item.globalKey: ?answer.spotlights[p.id]},
+        topPicks: {for (final p in picks) p.item.globalKey: ?answer.topPicks[p.id]},
       ),
     );
   } finally {
@@ -93,6 +95,8 @@ AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime
     writeup: old.writeup,
     notes: old.notes,
     followUps: old.followUps,
+    spotlights: old.spotlights,
+    topPicks: old.topPicks,
     createdAt: createdAt ?? old.createdAt,
     items: items,
     reasons: {...old.reasons, ...found.reasons},

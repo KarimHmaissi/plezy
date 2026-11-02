@@ -253,6 +253,9 @@ class MediaCard extends StatefulWidget {
   /// surface supplies this for music libraries.
   final CardShape? cardShapeOverride;
 
+  /// Fork: extra labels on the artwork, after any catalog ones ("Top pick").
+  final List<String> badges;
+
   const MediaCard({
     super.key,
     required this.item,
@@ -273,6 +276,7 @@ class MediaCard extends StatefulWidget {
     this.showServerName = false,
     this.libraryName,
     this.episodePosterModeOverride,
+    this.badges = const [],
     this.fullBleedImage = false,
     this.showTitleImplied = false,
     this.showTimeLeft = false,
@@ -581,7 +585,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
   }) {
     final catalogItem = _catalogItem;
     final now = catalogItem?.nextEpisode == null ? null : DateTime.now();
-    final badgeLabels = _buildCatalogBadgeLabels(catalogItem, now);
+    final badgeLabels = [..._buildCatalogBadgeLabels(catalogItem, now), ...widget.badges];
     final Widget card;
     if (widget.fullBleedImage) {
       card = LayoutBuilder(

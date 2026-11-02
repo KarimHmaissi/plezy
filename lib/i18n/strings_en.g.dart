@@ -3391,6 +3391,18 @@ class Translations$aiTab$en {
 
 	/// en: 'Starting'
 	String get starting => 'Starting';
+
+	/// en: 'You asked: ${question}'
+	String youAsked({required Object question}) => 'You asked: ${question}';
+
+	/// en: 'Top pick'
+	String get topPick => 'Top pick';
+
+	/// en: 'Working on it'
+	String get working => 'Working on it';
+
+	/// en: 'Worth a closer look'
+	String get spotlight => 'Worth a closer look';
 }
 
 // Path: ai
@@ -10353,6 +10365,10 @@ extension on Translations {
 			'aiTab.more' => 'More',
 			'aiTab.less' => 'Less',
 			'aiTab.starting' => 'Starting',
+			'aiTab.youAsked' => ({required Object question}) => 'You asked: ${question}',
+			'aiTab.topPick' => 'Top pick',
+			'aiTab.working' => 'Working on it',
+			'aiTab.spotlight' => 'Worth a closer look',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10752,12 +10768,12 @@ extension on Translations {
 			'watchlist.films' => 'Films',
 			'watchlist.tv' => 'TV',
 			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
+			_ => null,
+		} ?? switch (path) {
 			'watchlist.genreTv' => ({required Object genre}) => '${genre} TV',
 			'watchlist.otherFilms' => 'Other Films',
 			'watchlist.otherTv' => 'Other TV',
 			'watchlist.emptyTitle' => 'Your watchlist is empty',
-			_ => null,
-		} ?? switch (path) {
 			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
 			'watchlist.noSourceTitle' => 'No watchlist connected',
 			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
@@ -11266,12 +11282,12 @@ extension on Translations {
 			'downloads.deleting' => 'Deleting...',
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Deleting ${title}... (${current} of ${total})',
 			'downloads.queuedTooltip' => 'Queued',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.queuedFilesTooltip' => ({required Object files}) => 'Queued ${files}',
 			'downloads.downloadingTooltip' => 'Downloading...',
 			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Downloading ${files}',
 			'downloads.noDownloadsTree' => 'No downloads',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.pauseAll' => 'Pause all',
 			'downloads.resumeAll' => 'Resume all',
 			'downloads.retryAll' => 'Retry all',
@@ -11780,12 +11796,12 @@ extension on Translations {
 			'deepLinks.unsupportedItem' => 'This link can\'t be played.',
 			'deepLinks.noLiveTv' => 'No Live TV server is available for this link.',
 			'deepLinks.channelNotFound' => ({required Object channel}) => 'Couldn\'t find channel "${channel}".',
+			_ => null,
+		} ?? switch (path) {
 			'deepLinks.showLink' => 'Show link',
 			'deepLinks.showProfileLink' => 'Show profile link',
 			'deepLinks.dialogTitle' => 'Link',
 			'deepLinks.showHint' => 'Opening this link plays the next episode. Add &mode=shuffle to play the show on shuffle.',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.movieHint' => 'Opening this link plays the movie.',
 			'deepLinks.episodeHint' => 'Opening this link plays this episode.',
 			'deepLinks.profileHint' => 'Opening this link switches to this profile.',

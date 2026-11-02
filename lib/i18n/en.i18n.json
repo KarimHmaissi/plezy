@@ -1223,7 +1223,11 @@
     "addedMore": "${count} more picks added: ${request}",
     "more": "More",
     "less": "Less",
-    "starting": "Starting"
+    "starting": "Starting",
+    "youAsked": "You asked: ${question}",
+    "topPick": "Top pick",
+    "working": "Working on it",
+    "spotlight": "Worth a closer look"
   },
   "ai": {
     "settingsTitle": "AI",

@@ -112,6 +112,9 @@ class HubSection extends StatefulWidget {
   /// Fork: shown between the title and the cards (an AI answer's text).
   final Widget? belowTitle;
 
+  /// Fork: labels on a card's artwork ("Top pick", "Watched").
+  final List<String> Function(MediaItem item)? badgesFor;
+
   const HubSection({
     super.key,
     required this.hub,
@@ -125,6 +128,7 @@ class HubSection extends StatefulWidget {
     this.loadMoreItems,
     this.trailingCard,
     this.belowTitle,
+    this.badgesFor,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -915,6 +919,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                                     usesContinueWatchingAction: widget.usesContinueWatchingAction,
                                     mixedHubContext: isMixedHub,
                                     episodePosterModeOverride: episodePosterMode,
+                                    badges: widget.badgesFor?.call(item) ?? const [],
                                   ),
                                 ),
                               ),
