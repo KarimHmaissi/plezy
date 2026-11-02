@@ -11,6 +11,26 @@ import 'ai_spend.dart';
 import 'ai_tools.dart';
 import 'claude_client.dart';
 
+/// Fork: what a running request is doing: a short step, or the answer's
+/// text so far.
+class AiProgress {
+  const AiProgress({this.step, this.text});
+  final String? step;
+  final String? text;
+}
+
+/// Fork: a step line for the tool the model is calling.
+String? _stepFor(String? tool) => switch (tool) {
+  'search_library' || 'text_search' || 'find_titles' => 'Searching your library',
+  'get_title' => 'Reading up on a title',
+  'get_history' || 'get_continue_watching' => 'Looking at what you watch',
+  'history_query' || 'history_stats' => 'Checking your history',
+  'similar_titles' => 'Finding similar titles',
+  'get_ratings' => 'Checking ratings',
+  'show_picks' || 'answer_question' => 'Writing it up',
+  _ => null,
+};
+
 /// One tool call the model made, for the eval report.
 typedef AiToolCall = ({String name, String input, int resultChars});
 
@@ -29,6 +49,10 @@ class AiAnswer {
     required this.cachedTokens,
     required this.unknownPickIds,
     this.answer,
+    this.writeup,
+    this.notes = const [],
+    this.followUps = const [],
+    this.timing = '',
     this.error,
   });
 
@@ -44,6 +68,15 @@ class AiAnswer {
 
   /// Fork: the written answer to a question about the user's history.
   final String? answer;
+
+  /// Fork: why these picks and what ties them together (2-4 sentences),
+  /// "worth knowing" notes, and refinements to offer next.
+  final String? writeup;
+  final List<String> notes;
+  final List<String> followUps;
+
+  /// Fork: where the time went ("model 12.1s (3 calls), tools 1.4s").
+  final String timing;
   final List<AiToolCall> toolCalls;
   final Duration elapsed;
   final double cost;
@@ -112,7 +145,15 @@ Questions about the user's own watching:
 
   /// [previous] carries earlier turns of this conversation (request and
   /// picks), so follow-ups like "lighter" or "only films" make sense.
-  Future<AiAnswer> ask(String request, {List<({String request, AiAnswer answer})> previous = const []}) async {
+  ///
+  /// Fork: [onProgress] hears what's happening while it runs: a short step
+  /// ("Checking your history") and, as the final tool is written, its text
+  /// so far (streamed).
+  Future<AiAnswer> ask(
+    String request, {
+    List<({String request, AiAnswer answer})> previous = const [],
+    void Function(AiProgress progress)? onProgress,
+  }) async {
     final started = DateTime.now();
     final brain = this.brain;
     final tools = AiTools(
@@ -127,6 +168,8 @@ Questions about the user's own watching:
     var cached = 0;
     final texts = <String>[];
     String? error;
+    var modelTime = Duration.zero, toolTime = Duration.zero;
+    var modelCalls = 0;
     final key = await AiKeyStore.read();
     if (key == null) {
       return _answer(tools, texts, calls, started, 0, 0, 0, 0, 'No API key; add one in Settings ▸ AI.');
@@ -143,24 +186,47 @@ Questions about the user's own watching:
     ];
     try {
       for (var step = 0; step < maxSteps; step++) {
-        final response = await client.createMessage({
-          'model': model.id,
-          'max_tokens': 16000,
-          'thinking': {'type': 'adaptive'},
-          'output_config': {'effort': 'medium'},
-          'system': [
-            {
-              'type': 'text',
-              'text': brain == null ? systemPrompt : '$systemPrompt$historyPrompt',
-              'cache_control': {'type': 'ephemeral'},
-            },
-          ],
-          'tools': tools.definitions(),
-          'messages': messages,
-          // Caches the growing conversation between tool steps.
-          'cache_control': {'type': 'ephemeral'},
-          if (model == ClaudeModel.sonnet) 'fallbacks': 'default',
-        }, betas: model == ClaudeModel.sonnet ? const ['server-side-fallback-2026-07-01'] : const []);
+        final modelStart = DateTime.now();
+        final stream = StreamedMessage();
+        String? streamed;
+        final response = await client.streamMessage(
+          {
+            'model': model.id,
+            'max_tokens': 16000,
+            'thinking': {'type': 'adaptive'},
+            'output_config': {'effort': 'medium'},
+            'system': [
+              {
+                'type': 'text',
+                'text': brain == null ? systemPrompt : '$systemPrompt$historyPrompt',
+                'cache_control': {'type': 'ephemeral'},
+              },
+            ],
+            'tools': tools.definitions(),
+            'messages': messages,
+            // Caches the growing conversation between tool steps.
+            'cache_control': {'type': 'ephemeral'},
+            if (model == ClaudeModel.sonnet) 'fallbacks': 'default',
+          },
+          betas: model == ClaudeModel.sonnet ? const ['server-side-fallback-2026-07-01'] : const [],
+          onEvent: (event) {
+            stream.add(event);
+            // The final tool's text, shown as it's written.
+            if (event['type'] == 'content_block_delta' && (event['delta'] as Map?)?['type'] == 'input_json_delta') {
+              final json = stream.partialInput(event['index'] as int);
+              final text = partialJsonString(json, 'writeup') ?? partialJsonString(json, 'answer');
+              if (text != null && text.isNotEmpty && text != streamed) {
+                streamed = text;
+                onProgress?.call(AiProgress(step: null, text: text));
+              }
+            } else if (event['type'] == 'content_block_start') {
+              final block = event['content_block'] as Map?;
+              if (block?['type'] == 'tool_use') onProgress?.call(AiProgress(step: _stepFor(block?['name'] as String?)));
+            }
+          },
+        );
+        modelTime += DateTime.now().difference(modelStart);
+        modelCalls++;
         final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const {};
         cost += await AiSpend.record(model, usage);
         input +=
@@ -185,6 +251,7 @@ Questions about the user's own watching:
         if (stop != 'tool_use') break;
 
         final uses = content.where((b) => b['type'] == 'tool_use').toList();
+        final toolStart = DateTime.now();
         final results = await Future.wait([
           for (final use in uses)
             () async {
@@ -208,6 +275,7 @@ Questions about the user's own watching:
               };
             }(),
         ]);
+        toolTime += DateTime.now().difference(toolStart);
         messages.add({'role': 'user', 'content': results});
         // The picks are the answer; no need for another round trip.
         if (uses.any((u) => AiTools.finalTools.contains(u['name']))) break;
@@ -217,7 +285,15 @@ Questions about the user's own watching:
     } catch (e) {
       error = 'Request failed: $e';
     }
-    return _answer(tools, texts, calls, started, cost, input, output, cached, error);
+    final timing =
+        'model ${(modelTime.inMilliseconds / 1000).toStringAsFixed(1)}s ($modelCalls calls), '
+        'tools ${(toolTime.inMilliseconds / 1000).toStringAsFixed(1)}s';
+    appLogger.i(
+      'AI: ${DateTime.now().toIso8601String()} ask done in '
+      '${(DateTime.now().difference(started).inMilliseconds / 1000).toStringAsFixed(1)}s: $timing, '
+      '${calls.length} tools, \$${cost.toStringAsFixed(4)}${error == null ? '' : ', failed'}',
+    );
+    return _answer(tools, texts, calls, started, cost, input, output, cached, error, timing: timing);
   }
 
   static String _previousContext(List<({String request, AiAnswer answer})> previous) {
@@ -247,8 +323,9 @@ Questions about the user's own watching:
     int input,
     int output,
     int cached,
-    String? error,
-  ) async {
+    String? error, {
+    String timing = '',
+  }) async {
     final db = await index.database;
     final picks = <({IndexedTitle title, String reason})>[];
     final unknown = <String>[];
@@ -269,6 +346,10 @@ Questions about the user's own watching:
       cachedTokens: cached,
       unknownPickIds: unknown,
       answer: tools.answer,
+      writeup: tools.writeup ?? tools.answer,
+      notes: tools.notes,
+      followUps: tools.followUps,
+      timing: timing,
       error: error,
     );
   }

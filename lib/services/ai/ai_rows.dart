@@ -21,10 +21,11 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
   String? keepTitle,
   String? sentRequest,
   Set<String> excludeKeys = const {},
+  void Function(AiProgress progress)? onProgress,
 }) async {
   final agent = AiAgent(index: LibraryIndex.instance, trakt: trakt, model: model);
   try {
-    final answer = await agent.ask(sentRequest ?? request, previous: previous);
+    final answer = await agent.ask(sentRequest ?? request, previous: previous, onProgress: onProgress);
     if (answer.error != null) return (answer: answer, entry: null);
     final fetched = await Future.wait([
       for (final pick in answer.picks)
@@ -50,6 +51,9 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
         title: keepTitle ?? (useTitle ? answer.title : null),
         intro: answer.intro,
         answer: answer.answer,
+        writeup: answer.writeup,
+        notes: answer.notes,
+        followUps: answer.followUps,
         createdAt: DateTime.now(),
         items: [for (final p in picks) p.item],
         reasons: {for (final p in picks) p.item.globalKey: p.reason},
@@ -86,6 +90,9 @@ AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime
     title: old.title,
     intro: old.intro,
     answer: old.answer,
+    writeup: old.writeup,
+    notes: old.notes,
+    followUps: old.followUps,
     createdAt: createdAt ?? old.createdAt,
     items: items,
     reasons: {...old.reasons, ...found.reasons},

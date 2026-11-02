@@ -3382,6 +3382,15 @@ class Translations$aiTab$en {
 
 	/// en: '${count} more picks added: ${request}'
 	String addedMore({required Object count, required Object request}) => '${count} more picks added: ${request}';
+
+	/// en: 'More'
+	String get more => 'More';
+
+	/// en: 'Less'
+	String get less => 'Less';
+
+	/// en: 'Starting'
+	String get starting => 'Starting';
 }
 
 // Path: ai
@@ -10341,6 +10350,9 @@ extension on Translations {
 			'aiTab.findingMore' => ({required Object request}) => 'more: ${request}',
 			'aiTab.noMoreMatches' => ({required Object request}) => 'No more matches for ${request}',
 			'aiTab.addedMore' => ({required Object count, required Object request}) => '${count} more picks added: ${request}',
+			'aiTab.more' => 'More',
+			'aiTab.less' => 'Less',
+			'aiTab.starting' => 'Starting',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10744,11 +10756,11 @@ extension on Translations {
 			'watchlist.otherFilms' => 'Other Films',
 			'watchlist.otherTv' => 'Other TV',
 			'watchlist.emptyTitle' => 'Your watchlist is empty',
+			_ => null,
+		} ?? switch (path) {
 			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
 			'watchlist.noSourceTitle' => 'No watchlist connected',
 			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
-			_ => null,
-		} ?? switch (path) {
 			'explore.allCopies' => 'Details and all copies',
 			'explore.traktLists.boxOffice' => 'Box Office',
 			'explore.traktLists.mostWatchedMovies' => 'Most Watched Movies This Week',
@@ -11258,11 +11270,11 @@ extension on Translations {
 			'downloads.downloadingTooltip' => 'Downloading...',
 			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Downloading ${files}',
 			'downloads.noDownloadsTree' => 'No downloads',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.pauseAll' => 'Pause all',
 			'downloads.resumeAll' => 'Resume all',
 			'downloads.retryAll' => 'Retry all',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.retryFailed' => 'Retry failed downloads',
 			'downloads.deleteAll' => 'Delete all',
 			'downloads.selectVersion' => 'Select Version',
@@ -11772,11 +11784,11 @@ extension on Translations {
 			'deepLinks.showProfileLink' => 'Show profile link',
 			'deepLinks.dialogTitle' => 'Link',
 			'deepLinks.showHint' => 'Opening this link plays the next episode. Add &mode=shuffle to play the show on shuffle.',
+			_ => null,
+		} ?? switch (path) {
 			'deepLinks.movieHint' => 'Opening this link plays the movie.',
 			'deepLinks.episodeHint' => 'Opening this link plays this episode.',
 			'deepLinks.profileHint' => 'Opening this link switches to this profile.',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',

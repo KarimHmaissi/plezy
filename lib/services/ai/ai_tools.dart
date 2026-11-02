@@ -32,6 +32,21 @@ class AiTools {
 
   /// Fork: the written answer from `answer_question`.
   String? answer;
+
+  /// Fork: the write-up, notes and follow-up refinements of the final call.
+  String? writeup;
+  List<String> notes = const [];
+  List<String> followUps = const [];
+
+  void _readExtras(Map<String, dynamic> input) {
+    List<String> strings(String key) => [
+      for (final v in (input[key] as List? ?? const []))
+        if ('$v'.trim().isNotEmpty) '$v'.trim(),
+    ];
+    notes = strings('notes').take(2).toList();
+    followUps = strings('follow_ups').take(3).toList();
+  }
+
   bool _askedHistory = false;
 
   static const String showPicksTool = 'show_picks';
@@ -197,6 +212,18 @@ class AiTools {
         'properties': {
           'title': {'type': 'string', 'description': 'A short name for this row of picks, 2-6 words'},
           'intro': {'type': 'string', 'description': 'One friendly sentence introducing the picks'},
+          'writeup': {
+            'type': 'string',
+            'description':
+                '2-4 sentences, plain text: why these picks and what ties them together, specific to the request',
+          },
+          'notes': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'description':
+                'Up to 2 short spoiler-free "worth knowing" notes (pace, where to start, intensity), only if useful; '
+                'else empty',
+          },
           'picks': {
             'type': 'array',
             'items': {
@@ -209,8 +236,15 @@ class AiTools {
               'additionalProperties': false,
             },
           },
+          'follow_ups': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'description':
+                '2-3 short refinements the user might tap next, phrased as their request, 2-5 words each '
+                '("Only films", "Something lighter", "More like <a pick>")',
+          },
         },
-        'required': ['title', 'intro', 'picks'],
+        'required': ['title', 'intro', 'writeup', 'notes', 'picks', 'follow_ups'],
         'additionalProperties': false,
       },
     },
@@ -245,8 +279,22 @@ class AiTools {
                 'additionalProperties': false,
               },
             },
+            'notes': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description':
+                  'Up to 2 short spoiler-free "worth knowing" notes (pace, where to start, intensity), only if useful; '
+                  'else empty',
+            },
+            'follow_ups': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description':
+                  '2-3 short refinements the user might tap next, phrased as their request, 2-5 words each '
+                  '("Only films", "Something lighter", "More like <a pick>")',
+            },
           },
-          'required': ['title', 'answer', 'titles'],
+          'required': ['title', 'answer', 'titles', 'notes', 'follow_ups'],
           'additionalProperties': false,
         },
       },
@@ -281,6 +329,7 @@ class AiTools {
       case answerTool:
         title = input['title'] as String?;
         answer = (input['answer'] as String?)?.trim();
+        _readExtras(input);
         picks = [
           for (final p in (input['titles'] as List? ?? const []).whereType<Map>().take(20))
             if (p['id'] is String) (id: p['id'] as String, reason: p['note'] as String? ?? ''),
@@ -288,9 +337,11 @@ class AiTools {
         return 'Shown to the user.';
       case showPicksTool:
         intro = input['intro'] as String?;
+        writeup = (input['writeup'] as String?)?.trim();
+        _readExtras(input);
         // A question about their history gets a written answer even when the
         // model reached for picks: the intro is that answer.
-        if (_askedHistory && intro != null) answer = intro;
+        if (_askedHistory) answer = writeup ?? intro;
         title = input['title'] as String?;
         picks = [
           for (final p in (input['picks'] as List? ?? const []).whereType<Map>().take(maxPicks))

@@ -28,6 +28,10 @@ class RemoteAiAsk {
   String status = 'working';
   String? error;
   AiHistoryEntry? answer;
+
+  /// What the TV says it's doing, and the answer's text as it's written.
+  String? step;
+  String? partial;
 }
 
 /// The phone's AI requests for this app run; the TV keeps the saved history.
@@ -71,6 +75,18 @@ class RemoteAiSession extends ChangeNotifier {
         .then((_) => mine);
   }
 
+  /// Send a failed [failed] again (its card's Retry).
+  void retry(CompanionRemoteProvider remote, RemoteAiAsk failed) {
+    asks.remove(failed);
+    ask(remote, failed.request);
+  }
+
+  /// Requests still running or failed: their cards sit above the answers.
+  List<RemoteAiAsk> get pending => [
+    for (final a in asks)
+      if (a.status != 'done') a,
+  ];
+
   /// The TV's saved answers arrived (a mirror snapshot): any request still
   /// waiting whose answer is among them is done, even if its reply was lost
   /// while the connection dropped.
@@ -110,7 +126,10 @@ class RemoteAiSession extends ChangeNotifier {
     final ask = asks.where((a) => a.rid == data['rid']).firstOrNull;
     if (ask == null) return;
     ask.status = data['status'] as String? ?? 'error';
-    if (ask.status == 'done') {
+    if (ask.status == 'working') {
+      ask.step = data['step'] as String? ?? ask.step;
+      ask.partial = data['text'] as String? ?? ask.partial;
+    } else if (ask.status == 'done') {
       ask.answer = AiHistoryEntry.fromJson(data);
       if (ask.answer == null) ask.status = 'error';
     } else if (ask.status == 'error') {

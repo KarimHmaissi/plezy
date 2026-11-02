@@ -21,6 +21,9 @@ class AiHistoryEntry {
     required this.reasons,
     this.title,
     this.answer,
+    this.writeup,
+    this.notes = const [],
+    this.followUps = const [],
     this.extended = false,
   });
 
@@ -35,6 +38,16 @@ class AiHistoryEntry {
   /// Fork: the written answer to a question ("how many…", "what was that
   /// film…"), shown above the cards.
   final String? answer;
+
+  /// Fork: the answer card's text: why these picks and what ties them
+  /// together (the [answer] for a history question), with up to two
+  /// "worth knowing" notes and refinements to offer next.
+  final String? writeup;
+  final List<String> notes;
+  final List<String> followUps;
+
+  /// What the answer card shows.
+  String? get cardText => writeup ?? answer;
 
   /// What the row is called on the AI tab and Home.
   String get label => title ?? request;
@@ -54,6 +67,9 @@ class AiHistoryEntry {
     'title': title,
     'intro': intro,
     if (answer != null) 'answer': answer,
+    if (writeup != null) 'writeup': writeup,
+    if (notes.isNotEmpty) 'notes': notes,
+    if (followUps.isNotEmpty) 'followUps': followUps,
     'createdAt': createdAt.millisecondsSinceEpoch,
     if (extended) 'extended': true,
     'items': [
@@ -77,6 +93,9 @@ class AiHistoryEntry {
         title: json['title'] as String?,
         intro: json['intro'] as String?,
         answer: json['answer'] as String?,
+        writeup: json['writeup'] as String?,
+        notes: [...(json['notes'] as List? ?? const []).whereType<String>()],
+        followUps: [...(json['followUps'] as List? ?? const []).whereType<String>()],
         createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int? ?? 0),
         items: items,
         reasons: reasons,

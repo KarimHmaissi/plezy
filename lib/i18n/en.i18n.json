@@ -1220,7 +1220,10 @@
     "findMore": "Find more (add titles)",
     "findingMore": "more: ${request}",
     "noMoreMatches": "No more matches for ${request}",
-    "addedMore": "${count} more picks added: ${request}"
+    "addedMore": "${count} more picks added: ${request}",
+    "more": "More",
+    "less": "Less",
+    "starting": "Starting"
   },
   "ai": {
     "settingsTitle": "AI",

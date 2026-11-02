@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../media/ids.dart';
@@ -5,6 +7,7 @@ import '../../media/media_server_client.dart';
 import '../../providers/companion_remote_provider.dart';
 import '../../utils/app_logger.dart';
 import '../trackers/trakt/trakt_client.dart';
+import 'ai_agent.dart';
 import 'ai_activity.dart';
 import 'ai_history.dart';
 import 'ai_key_store.dart';
@@ -39,13 +42,34 @@ abstract final class AiRemoteAsks {
     reply('working');
     AiActivity.running.value++;
     try {
+      // The phone shows the step and the answer as it's written, a few
+      // updates a second at most.
+      DateTime? lastSent;
+      AiProgress? held;
+      Timer? flush;
+      void send(AiProgress p) => reply('working', {'step': ?p.step, 'text': ?p.text});
       final result = await buildAiRow(
         request: request,
         model: ClaudeModel.sonnet,
         clientFor: clientFor,
         trakt: trakt,
         useTitle: true,
+        onProgress: (p) {
+          final now = DateTime.now();
+          if (lastSent == null || now.difference(lastSent!) > const Duration(milliseconds: 250)) {
+            lastSent = now;
+            flush?.cancel();
+            send(p);
+          } else {
+            held = p;
+            flush ??= Timer(const Duration(milliseconds: 250), () {
+              flush = null;
+              if (held case final h?) send(h);
+            });
+          }
+        },
       );
+      flush?.cancel();
       final entry = result.entry;
       final answer = result.answer;
       final text = (answer.intro?.trim().isNotEmpty ?? false) ? answer.intro : answer.text;

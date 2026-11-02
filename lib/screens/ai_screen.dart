@@ -48,6 +48,7 @@ import '../utils/dialogs.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/ai_answer_card.dart';
 import '../widgets/desktop_app_bar.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/hub_section.dart';
@@ -113,6 +114,10 @@ class _PendingAsk {
   /// Find more: new picks go in front of this answer's, which are kept.
   final AiHistoryEntry? extend;
   String? error;
+
+  /// What the helper is doing, and its answer as it's written.
+  String? step;
+  String? partial;
 }
 
 /// The AI helper tab: a hello with "Tonight" picks on opening, then any
@@ -152,6 +157,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// Requests running in the background, shown as chips in the toolbar;
   /// browsing carries on meanwhile.
   final List<_PendingAsk> _pending = [];
+
+  /// Answer cards the user opened or closed, by entry id; otherwise the
+  /// newest is open and the rest show their first line.
+  final Map<String, bool> _cardOpen = {};
   bool _visible = true;
   bool _busy = false;
   bool? _hasKey;
@@ -371,31 +380,52 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       posters: [for (final r in _rows.take(6)) ...r.items.take(8)],
       origin: _rectOf(_askKey),
       run: (text) async {
+        // The composer's send moment, then the answer card takes over: as
+        // soon as text streams in, or after [_handoff] at most.
         if (remote != null) {
-          final ask = await RemoteAiSession.instance.askAndWait(remote, text);
-          final items = ask.answer?.items ?? const <MediaItem>[];
-          return AiComposerOutcome(
-            pick: items.isEmpty ? null : items.first,
-            error: switch (ask.status) {
-              'done' => null,
-              'error' => (ask.error?.isNotEmpty ?? false) ? ask.error : t.aiTab.noPicks,
-              _ => t.aiComposer.timedOut,
-            },
-          );
+          final session = RemoteAiSession.instance;
+          session.ask(remote, text);
+          final mine = session.asks.first;
+          await _waitFor(session, () => mine.partial != null || mine.status != 'working');
+          if (mine.status == 'error') {
+            return AiComposerOutcome(error: (mine.error?.isNotEmpty ?? false) ? mine.error : t.aiTab.noPicks);
+          }
+          return const AiComposerOutcome();
         }
-        // A retry from the composer replaces its failed attempt's chip.
+        // A retry from the composer replaces its failed attempt.
         final failed = lastFailed;
         if (failed != null && mounted) setState(() => _pending.remove(failed));
         final ask = _PendingAsk(text, previous: previous);
-        await _runInBackground(ask);
+        final running = _runInBackground(ask);
+        final progress = ValueNotifier(0);
+        void tick() => progress.value++;
+        _progressTick = tick;
+        await Future.any([running, _waitFor(progress, () => ask.partial != null || ask.error != null)]);
+        _progressTick = null;
+        progress.dispose();
         lastFailed = ask.error != null ? ask : null;
         if (ask.error != null) return AiComposerOutcome(error: ask.error);
-        for (final r in _rows) {
-          if (r.request == text) return AiComposerOutcome(pick: r.items.isEmpty ? null : r.items.first);
-        }
         return const AiComposerOutcome();
       },
     );
+  }
+
+  /// How long the composer's send moment lasts at most before the inline
+  /// card takes over.
+  static const Duration _handoff = Duration(milliseconds: 1500);
+  VoidCallback? _progressTick;
+
+  /// Completes when [done] holds (checked on every change of [source]) or
+  /// after [_handoff].
+  static Future<void> _waitFor(Listenable source, bool Function() done) {
+    if (done()) return Future.value();
+    final completer = Completer<void>();
+    void check() {
+      if (done() && !completer.isCompleted) completer.complete();
+    }
+
+    source.addListener(check);
+    return completer.future.timeout(_handoff, onTimeout: () {}).whenComplete(() => source.removeListener(check));
   }
 
   /// Run [ask] while the user keeps browsing; the answer is saved and
@@ -418,6 +448,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         keepTitle: extend?.title,
         sentRequest: extend == null ? null : findMoreRequest(extend),
         excludeKeys: {...?extend?.items.map((i) => i.globalKey)},
+        onProgress: (p) {
+          if (!mounted) return;
+          setState(() {
+            ask.step = p.step ?? ask.step;
+            ask.partial = p.text ?? ask.partial;
+          });
+          _progressTick?.call();
+        },
       );
       final found = result.entry;
       if (extend != null && found == null && result.answer.error == null) {
@@ -433,6 +471,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       }
       final entry = extend == null ? found : mergeFindMore(extend, found);
       if (ask.replaceId == null) {
+        // A new answer opens; earlier cards fold to their first line.
+        _cardOpen.clear();
         _conversation.add((request: ask.request, answer: result.answer));
         await AiHistory.add(entry);
       } else {
@@ -606,6 +646,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     String? keepTitle,
     String? sentRequest,
     Set<String> excludeKeys = const {},
+    void Function(AiProgress progress)? onProgress,
   }) {
     final servers = context.read<MultiServerProvider>();
     final trakt = context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
@@ -620,6 +661,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       keepTitle: keepTitle,
       sentRequest: sentRequest,
       excludeKeys: excludeKeys,
+      onProgress: onProgress,
     );
   }
 
@@ -778,23 +820,80 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   String? get _headline => _rows.firstOrNull?.answer ?? _rows.firstOrNull?.intro;
 
-  /// Fork: a history question's written answer, between its title and cards.
-  /// Titles named in it open on tap (touch and mouse; on TV the cards do).
-  Widget? _answerText(MediaHub hub) {
+  /// Touch screens and desktop show the answer cards (TV keeps its spotlight).
+  static bool get _cardsInline => !PlatformDetector.isTV();
+
+  /// Requests still running (or failed) as cards above the answers.
+  List<Widget> _pendingCards() {
+    if (!_cardsInline) return const [];
+    if (_thinClient) {
+      final remote = context.read<CompanionRemoteProvider>();
+      final session = RemoteAiSession.instance;
+      return [
+        for (final a in session.asks)
+          if (a.status != 'done')
+            AiAnswerCard(
+              key: ValueKey('ask-${a.rid}'),
+              question: a.request,
+              text: a.partial,
+              step: a.step ?? t.aiTab.starting,
+              running: a.status == 'working',
+              error: a.status == 'error' ? ((a.error?.isNotEmpty ?? false) ? a.error : t.aiTab.noPicks) : null,
+              onRetry: () => session.retry(remote, a),
+            ),
+      ];
+    }
+    return [
+      for (final ask in _pending)
+        AiAnswerCard(
+          key: ObjectKey(ask),
+          question: ask.label,
+          text: ask.partial,
+          step: ask.step ?? t.aiTab.starting,
+          running: ask.error == null,
+          error: ask.error == null ? null : (ask.error!.isEmpty ? t.aiTab.noPicks : ask.error),
+          onRetry: () => unawaited(_runInBackground(ask)),
+        ),
+    ];
+  }
+
+  /// The card above a saved answer's row: its write-up, notes and follow-ups.
+  Widget? _answerCard(MediaHub hub) {
     final entry = _entryForHub(hub);
-    final answer = entry?.answer;
-    if (entry == null || answer == null || answer.isEmpty) return null;
-    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.4);
-    final link = style?.copyWith(fontWeight: FontWeight.w600, decoration: TextDecoration.underline);
-    return Text.rich(
-      TextSpan(
-        style: style,
-        children: [
-          for (final (text, item) in linkTitles(answer, entry.items))
-            item == null ? TextSpan(text: text) : TextSpan(text: text, style: link, recognizer: _tapRecognizer(item)),
-        ],
-      ),
+    final text = entry?.cardText;
+    if (entry == null || text == null || text.trim().isEmpty) return null;
+    final newest = _rows.firstWhere((e) => (e.cardText ?? '').trim().isNotEmpty) == entry;
+    final open = _cardOpen[entry.id] ?? newest;
+    return AiAnswerCard(
+      key: ValueKey('card-${entry.id}'),
+      question: entry.request == AiAgent.tonightRequest ? t.aiTab.tonight : entry.request,
+      text: text,
+      notes: entry.notes,
+      followUps: entry.followUps,
+      expanded: open,
+      onToggle: () => setState(() => _cardOpen[entry.id] = !open),
+      onFollowUp: (f) => unawaited(_followUp(entry, f)),
+      // Titles named in it open on tap (on TV the cards do).
+      linkify: (text, style) {
+        final link = style?.copyWith(fontWeight: FontWeight.w600, decoration: TextDecoration.underline);
+        return [
+          for (final (piece, item) in linkTitles(text, entry.items))
+            item == null ? TextSpan(text: piece) : TextSpan(text: piece, style: link, recognizer: _tapRecognizer(item)),
+        ];
+      },
     );
+  }
+
+  /// A follow-up chip: a new request that carries the answer it refines.
+  Future<void> _followUp(AiHistoryEntry entry, String followUp) async {
+    final request = '$followUp (refining: ${entry.request})';
+    if (_thinClient) {
+      if (!_canEditMirror) return _ask();
+      RemoteAiSession.instance.ask(context.read<CompanionRemoteProvider>(), request);
+      return;
+    }
+    if (_hasKey != true) return;
+    await _runInBackground(_PendingAsk(request, previous: List.of(_conversation)));
   }
 
   final Map<String, TapGestureRecognizer> _taps = {};
@@ -845,11 +944,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   List<_PendingAsk> get _remotePending {
     final remote = context.read<CompanionRemoteProvider>();
     final mine = [
+      // With cards inline the phone's own requests are cards, not chips.
       for (final a in RemoteAiSession.instance.asks)
-        if (a.status != 'done') _PendingAsk(a.request)..error = a.status == 'error' ? (a.error ?? '') : null,
+        if (a.status != 'done' && !_cardsInline)
+          _PendingAsk(a.request)..error = a.status == 'error' ? (a.error ?? '') : null,
     ];
     final running = remote.hostAiActivity.value?['running'] as int? ?? 0;
-    final working = mine.where((a) => a.error == null).length;
+    final working = RemoteAiSession.instance.asks.where((a) => a.status == 'working').length;
     return [
       ...mine,
       if (_canEditMirror && running > working)
@@ -872,6 +973,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
             style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color.withValues(alpha: 0.7)),
           ),
         ),
+      // Touch and desktop show requests as cards above the answers; the
+      // toolbar keeps only "the TV is busy with others".
       if (_thinClient)
         for (final ask in _remotePending)
           FocusableAction(
@@ -879,13 +982,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
             onPressed: null,
             child: _PendingChip(ask: ask, color: color),
           ),
-      for (final ask in _pending)
-        FocusableAction(
-          debugLabel: 'AiPending',
-          // Running requests just show progress; a failed one retries.
-          onPressed: ask.error == null ? null : () => unawaited(_runInBackground(ask)),
-          child: _PendingChip(ask: ask, color: color),
-        ),
+      if (!_cardsInline)
+        for (final ask in _pending)
+          FocusableAction(
+            debugLabel: 'AiPending',
+            // Running requests just show progress; a failed one retries.
+            onPressed: ask.error == null ? null : () => unawaited(_runInBackground(ask)),
+            child: _PendingChip(ask: ask, color: color),
+          ),
       FocusableAction(
         debugLabel: 'AiAsk',
         autofocus: _rows.isEmpty,
@@ -1006,7 +1110,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       if (!Customisation.isMirror) return const RemoteAiScreen();
     }
     final hubs = _hubs;
-    final message = _message();
+    final pendingCards = _pendingCards();
+    final message = pendingCards.isEmpty ? _message() : null;
     final color = Theme.of(context).colorScheme.onSurface;
     if (!PlatformDetector.isTV()) {
       return Scaffold(
@@ -1034,34 +1139,38 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
               ),
               if (message != null)
                 SliverFillRemaining(child: message)
-              else
-                for (var i = 0; i < hubs.length; i++)
-                  SliverToBoxAdapter(
-                    child: RowMenuEntries(
-                      entries: _rowMenuEntries(hubs[i]),
-                      child: ItemMenuEntries(
-                        build: _pickMenuEntries,
-                        child: HubSection(
-                          key: _hubKey(hubs[i]),
-                          hub: hubs[i],
-                          trailingCard: _trailingCard(hubs[i]),
-                          belowTitle: _answerText(hubs[i]),
-                          focusMemory: _hubFocusMemory,
-                          icon: Symbols.auto_awesome_rounded,
-                          // Phone: a tap plays (on the TV while casting); shows open.
-                          onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
-                          onVerticalNavigation: (isUp) => navigateVerticalHubRows(
-                            hubCount: hubs.length,
-                            hubIndex: i,
-                            isUp: isUp,
-                            onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
-                            requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
+              else ...[
+                for (final card in pendingCards) SliverToBoxAdapter(child: card),
+                for (var i = 0; i < hubs.length; i++) ...[
+                  if (_answerCard(hubs[i]) case final card?) SliverToBoxAdapter(child: card),
+                  if (hubs[i].items.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: RowMenuEntries(
+                        entries: _rowMenuEntries(hubs[i]),
+                        child: ItemMenuEntries(
+                          build: _pickMenuEntries,
+                          child: HubSection(
+                            key: _hubKey(hubs[i]),
+                            hub: hubs[i],
+                            trailingCard: _trailingCard(hubs[i]),
+                            focusMemory: _hubFocusMemory,
+                            icon: Symbols.auto_awesome_rounded,
+                            // Phone: a tap plays (on the TV while casting); shows open.
+                            onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                            onVerticalNavigation: (isUp) => navigateVerticalHubRows(
+                              hubCount: hubs.length,
+                              hubIndex: i,
+                              isUp: isUp,
+                              onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
+                              requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
+                            ),
+                            onNavigateToSidebar: _navigateToSidebar,
                           ),
-                          onNavigateToSidebar: _navigateToSidebar,
                         ),
                       ),
                     ),
-                  ),
+                ],
+              ],
               if (message == null && _hasMore)
                 SliverToBoxAdapter(
                   child: Center(
