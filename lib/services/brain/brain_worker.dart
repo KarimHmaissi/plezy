@@ -52,6 +52,9 @@ class BrainWorker {
     );
   }
 
+  /// Open the model and load the vectors now, so the first search is quick.
+  Future<void> warm() => _call('warm');
+
   void pause(bool paused) => _port.send(('pause', {'on': paused}, null));
 
   /// Profiles changed on another connection: re-read vectors and flags.
@@ -102,6 +105,13 @@ class BrainWorker {
           final Object? result = switch (op) {
             'pause' => paused = args['on'] as bool,
             'reload' => _run(store.reload),
+            'warm' => await () async {
+              final e = await embedderNow();
+              await e.embed(['warm up'], query: true);
+              // Loads the vector cache (an unknown id finds nothing).
+              store.similar(e.modelId, '', limit: 1);
+              return null;
+            }(),
             'close' => _run(store.close),
             'index' => await () async {
               final r = await BrainIndexer(

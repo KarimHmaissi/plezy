@@ -65,7 +65,9 @@ abstract final class BrainDebug {
           final now = DateTime.now();
           final gap = now.difference(last);
           if (gap > worst) worst = gap;
-          if (gap.inMilliseconds > 100) debugPrint('BRAINLAG ${now.toIso8601String()} stalled ${gap.inMilliseconds} ms');
+          if (gap.inMilliseconds > 100) {
+            debugPrint('BRAINLAG ${now.toIso8601String()} stalled ${gap.inMilliseconds} ms');
+          }
           last = now;
         });
         final started = DateTime.now();

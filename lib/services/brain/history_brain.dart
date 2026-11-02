@@ -156,6 +156,27 @@ class HistoryBrain {
     _listen();
     _timer ??= Timer.periodic(resyncEvery, (_) => unawaited(sync()));
     if (_lastSyncAt == null) unawaited(sync());
+    _warmTimer ??= Timer(warmAfter, _warm);
+  }
+
+  /// Fork: after start-up settles, spawn the brain's isolate and load the
+  /// model and vectors, so the first Ask doesn't wait for them. Not while
+  /// something plays (tried again later).
+  static const Duration warmAfter = Duration(seconds: 30);
+  Timer? _warmTimer;
+
+  Future<void> _warm() async {
+    if (LocalMediaSession.active.value) {
+      _warmTimer = Timer(const Duration(minutes: 5), _warm);
+      return;
+    }
+    try {
+      final started = DateTime.now();
+      await (await worker)?.warm();
+      appLogger.d('Brain: warmed in ${DateTime.now().difference(started).inMilliseconds} ms');
+    } catch (e) {
+      appLogger.d('Brain: warm-up failed', error: e);
+    }
   }
 
   void _listen() {
@@ -498,7 +519,8 @@ class HistoryBrain {
   void stop() {
     _timer?.cancel();
     _debounce?.cancel();
-    _timer = _debounce = null;
+    _warmTimer?.cancel();
+    _timer = _debounce = _warmTimer = null;
     if (_historyListener case final l?) HistoryService.instance.state.removeListener(l);
     _historyListener = null;
   }
