@@ -55,6 +55,7 @@ class AiAnswer {
     this.followUps = const [],
     this.spotlights = const {},
     this.topPicks = const {},
+    this.headline,
     this.timing = '',
     this.error,
   });
@@ -82,6 +83,9 @@ class AiAnswer {
   /// index id (top picks lead [picks]).
   final Map<String, String> spotlights;
   final Map<String, String> topPicks;
+
+  /// Fork: the gist in a few words, shown when the answer is folded.
+  final String? headline;
 
   /// Fork: where the time went ("model 12.1s (3 calls), tools 1.4s").
   final String timing;
@@ -408,6 +412,7 @@ Questions about the user's own watching:
       followUps: tools.followUps,
       spotlights: {for (final p in tools.spotlights) p.id: p.text},
       topPicks: {for (final p in tools.topPicks) p.id: p.text},
+      headline: tools.headline,
       timing: timing,
       error: error,
     );

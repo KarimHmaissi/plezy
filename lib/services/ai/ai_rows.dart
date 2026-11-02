@@ -65,6 +65,7 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
         spotlights: {for (final p in picks) p.item.globalKey: ?answer.spotlights[p.id]},
         topPicks: {for (final p in picks) p.item.globalKey: ?answer.topPicks[p.id]},
         watchState: await _watchState(picks),
+        headline: answer.headline,
       ),
     );
   } finally {
@@ -104,6 +105,7 @@ AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime
     spotlights: old.spotlights,
     topPicks: old.topPicks,
     watchState: {...old.watchState, ...found.watchState},
+    headline: old.headline,
     createdAt: createdAt ?? old.createdAt,
     items: items,
     reasons: {...old.reasons, ...found.reasons},

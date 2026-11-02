@@ -53,10 +53,11 @@ import '../utils/snackbar_helper.dart';
 import '../theme/mono_tokens.dart';
 import '../widgets/ai_answer_card.dart';
 import '../widgets/app_icon.dart';
+import '../widgets/app_menu.dart';
 import '../widgets/desktop_app_bar.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/hub_section.dart';
-import '../widgets/media_context_menu.dart' show ItemMenuEntries, MediaMenuExtraEntry, RowMenuEntries;
+import '../widgets/media_context_menu.dart' show ItemMenuEntries, ItemMenuHeader, MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/side_navigation_rail.dart';
 import '../widgets/system_bottom_inset.dart';
 import '../widgets/toolbar_scrim.dart';
@@ -165,6 +166,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// Answer cards the user opened or closed, by entry id; otherwise the
   /// newest is open and the rest show their first line.
   final Map<String, bool> _cardOpen = {};
+
+  /// Answers whose details (top picks, spotlights, notes) are showing.
+  final Set<String> _detailsOpen = {};
   bool _visible = true;
   bool _busy = false;
   bool? _hasKey;
@@ -929,20 +933,51 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       key: ValueKey('card-${entry.id}'),
       question: entry.request == AiAgent.tonightRequest ? t.aiTab.tonight : entry.request,
       text: text,
+      headline: entry.headline,
       notes: entry.notes,
-      followUps: entry.followUps,
       expanded: open,
+      detailsOpen: _detailsOpen.contains(entry.id),
       onToggle: () => setState(() => _cardOpen[entry.id] = !open),
-      onFollowUp: (f) => unawaited(_followUp(entry, f)),
+      onDetails: () =>
+          setState(() => _detailsOpen.contains(entry.id) ? _detailsOpen.remove(entry.id) : _detailsOpen.add(entry.id)),
       topPicks: _titleNotes(entry, entry.topPicks),
       spotlights: _titleNotes(entry, entry.spotlights),
       // Titles named in it open on tap (on TV the cards do).
       linkify: (text, style) {
-        final link = style?.copyWith(fontWeight: FontWeight.w600, decoration: TextDecoration.underline);
+        final link = style?.copyWith(fontWeight: FontWeight.w600);
         return [
           for (final (piece, item) in linkTitles(text, entry.items))
             item == null ? TextSpan(text: piece) : TextSpan(text: piece, style: link, recognizer: _tapRecognizer(item)),
         ];
+      },
+    );
+  }
+
+  /// Under the posters of an open answer: its follow-up refinements.
+  Widget? _followUps(MediaHub hub) {
+    final entry = _entryForHub(hub);
+    if (entry == null || entry.followUps.isEmpty || entry.cardText == null) return null;
+    final newest = _rows.firstWhere((e) => (e.cardText ?? '').trim().isNotEmpty) == entry;
+    if (!(_cardOpen[entry.id] ?? newest)) return null;
+    return AiFollowUpChips(followUps: entry.followUps, onFollowUp: (f) => unawaited(_followUp(entry, f)));
+  }
+
+  /// The ⋯ next to an answer's title: its row actions (Add to Home, Find
+  /// more, Replace, Delete), as the long-press menu also lists them.
+  Widget? _rowMenuButton(MediaHub hub) {
+    if (_rowMenuEntries(hub).isEmpty) return null;
+    return IconButton(
+      tooltip: t.aiTab.more,
+      visualDensity: VisualDensity.compact,
+      icon: AppIcon(Symbols.more_horiz_rounded, fill: 1, size: ForkSpacing.of(context).titleSize),
+      onPressed: () async {
+        final entries = _rowMenuEntries(hub);
+        final picked = await showAdaptiveAppMenu<int>(
+          context,
+          title: hub.title,
+          entries: [for (final (i, e) in entries.indexed) AppMenuItem(value: i, icon: e.icon, label: e.label)],
+        );
+        if (picked != null && picked < entries.length) entries[picked].onSelected();
       },
     );
   }
@@ -1165,9 +1200,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   Future<void> _openPick(MediaItem item) => openAiPick(context, item);
 
-  /// The pick's peek sheet; a reason the answer didn't write is made on the
-  /// TV (or here, on a host) and saved with the answer.
-  Future<void> _peek(MediaHub hub, MediaItem item) async {
+  /// The top of a pick's long-press menu; a reason the answer didn't write
+  /// is made on the TV (or here, on a host) and saved with the answer.
+  Widget? _peekHeader(MediaHub hub, MediaItem item) {
     final entry = _entryForHub(hub);
     final key = item.globalKey;
     final reason = entry?.reasons[key];
@@ -1175,8 +1210,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     if (entry != null && (reason == null || reason.trim().isEmpty)) {
       load = _thinClient ? () => _remoteReason(entry.id, key) : () => AiPickReasons.reasonFor(entry.id, key);
     }
-    await showAiPickPeek(
-      context,
+    return AiPickPeekHeader(
       item: item,
       reason: reason,
       loadReason: load,
@@ -1255,26 +1289,30 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                       entries: _rowMenuEntries(hubs[i]),
                       child: ItemMenuEntries(
                         build: _pickMenuEntries,
-                        child: HubSection(
-                          key: _hubKey(hubs[i]),
-                          hub: hubs[i],
-                          trailingCard: _trailingCard(hubs[i]),
-                          belowTitle: _answerCard(hubs[i]),
-                          badgesFor: _badgesFor(hubs[i]),
-                          focusMemory: _hubFocusMemory,
-                          icon: Symbols.auto_awesome_rounded,
-                          // Phone: a tap plays (on the TV while casting); shows open.
-                          onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
-                          // Phone: long-press peeks (why it was picked, Play, Watchlist, Details).
-                          onItemLongPress: _thinClient ? (item) => unawaited(_peek(hubs[i], item)) : null,
-                          onVerticalNavigation: (isUp) => navigateVerticalHubRows(
-                            hubCount: hubs.length,
-                            hubIndex: i,
-                            isUp: isUp,
-                            onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
-                            requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
+                        child: ItemMenuHeader(
+                          // Phone: why it was picked, above the usual entries.
+                          build: (item) => _thinClient ? _peekHeader(hubs[i], item) : null,
+                          child: HubSection(
+                            key: _hubKey(hubs[i]),
+                            hub: hubs[i],
+                            trailingCard: _trailingCard(hubs[i]),
+                            belowTitle: _answerCard(hubs[i]),
+                            badgesFor: _badgesFor(hubs[i]),
+                            titleTrailing: _cardsInline ? _rowMenuButton(hubs[i]) : null,
+                            belowItems: _followUps(hubs[i]),
+                            focusMemory: _hubFocusMemory,
+                            icon: Symbols.auto_awesome_rounded,
+                            // Phone: a tap plays (on the TV while casting); shows open.
+                            onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                            onVerticalNavigation: (isUp) => navigateVerticalHubRows(
+                              hubCount: hubs.length,
+                              hubIndex: i,
+                              isUp: isUp,
+                              onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
+                              requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
+                            ),
+                            onNavigateToSidebar: _navigateToSidebar,
                           ),
-                          onNavigateToSidebar: _navigateToSidebar,
                         ),
                       ),
                     ),

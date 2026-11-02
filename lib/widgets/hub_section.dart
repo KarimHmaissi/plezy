@@ -112,6 +112,11 @@ class HubSection extends StatefulWidget {
   /// Fork: shown between the title and the cards (an AI answer's text).
   final Widget? belowTitle;
 
+  /// Fork: after the title (an AI answer's ⋯ menu), and under the cards
+  /// (its follow-up chips).
+  final Widget? titleTrailing;
+  final Widget? belowItems;
+
   /// Fork: labels on a card's artwork ("Top pick", "Watched").
   final List<String> Function(MediaItem item)? badgesFor;
 
@@ -129,6 +134,8 @@ class HubSection extends StatefulWidget {
     this.trailingCard,
     this.belowTitle,
     this.badgesFor,
+    this.titleTrailing,
+    this.belowItems,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -593,56 +600,58 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                 : spacing != null
                 ? EdgeInsets.fromLTRB(spacing.edgeInset - 4, 0, 8, spacing.titleGap)
                 : EdgeInsets.fromLTRB(leadingPadding - 4, isTv ? 6 : 2, 8, isTv ? 8 : 2),
-            child: ExcludeFocus(
-              child: InkWell(
-                mouseCursor: _canSeeAll ? SystemMouseCursors.click : MouseCursor.defer,
-                onTap: _canSeeAll ? () => _openSeeAll(context) : null,
-                borderRadius: BorderRadius.circular(tokens(context).radiusSm),
-                child: Padding(
-                  padding: widget.inset
-                      ? const EdgeInsets.symmetric(vertical: 2)
-                      : const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Row(
-                    mainAxisSize: .min,
-                    children: [
-                      AppIcon(widget.icon, fill: 1, size: isTv ? 28 : spacing?.titleSize),
-                      SizedBox(width: isTv ? 12 : 8),
-                      Flexible(
-                        child: Text(widget.hub.title, style: titleStyle, overflow: .ellipsis, maxLines: 1),
-                      ),
-                      if (widget.totalResults case final totalResults?) ...[
+            child: _withTitleTrailing(
+              ExcludeFocus(
+                child: InkWell(
+                  mouseCursor: _canSeeAll ? SystemMouseCursors.click : MouseCursor.defer,
+                  onTap: _canSeeAll ? () => _openSeeAll(context) : null,
+                  borderRadius: BorderRadius.circular(tokens(context).radiusSm),
+                  child: Padding(
+                    padding: widget.inset
+                        ? const EdgeInsets.symmetric(vertical: 2)
+                        : const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: .min,
+                      children: [
+                        AppIcon(widget.icon, fill: 1, size: isTv ? 28 : spacing?.titleSize),
                         SizedBox(width: isTv ? 12 : 8),
-                        Text(
-                          t.explore.totalResults(n: totalResults),
-                          maxLines: 1,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
-                            fontSize: isTv ? 17 : null,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        Flexible(
+                          child: Text(widget.hub.title, style: titleStyle, overflow: .ellipsis, maxLines: 1),
                         ),
-                      ],
-                      if (widget.showServerName && widget.hub.serverName != null) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          '•',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                        if (widget.totalResults case final totalResults?) ...[
+                          SizedBox(width: isTv ? 12 : 8),
+                          Text(
+                            t.explore.totalResults(n: totalResults),
+                            maxLines: 1,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
+                              fontSize: isTv ? 17 : null,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          widget.hub.serverName!,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                        ],
+                        if (widget.showServerName && widget.hub.serverName != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '•',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.hub.serverName!,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ],
+                        if (_canSeeAll && !isKeyboardMode) ...[
+                          const SizedBox(width: 4),
+                          AppIcon(Symbols.chevron_right_rounded, fill: 1, size: isTv ? 26 : spacing?.titleSize ?? 20),
+                        ],
                       ],
-                      if (_canSeeAll && !isKeyboardMode) ...[
-                        const SizedBox(width: 4),
-                        AppIcon(Symbols.chevron_right_rounded, fill: 1, size: isTv ? 26 : spacing?.titleSize ?? 20),
-                      ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -932,17 +941,30 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                 ),
               ),
             )
-          else
+          // An AI answer without titles is just its text.
+          else if (widget.belowTitle == null)
             Padding(
               padding: widget.inset
                   ? const EdgeInsets.symmetric(vertical: 8)
                   : const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(t.messages.noItemsAvailable, style: Theme.of(context).textTheme.bodySmall),
             ),
+          if (widget.belowItems case final below?)
+            Padding(padding: EdgeInsets.fromLTRB(spacing?.edgeInset ?? leadingPadding, 4, 0, 0), child: below),
         ],
       ),
     );
   }
+
+  Widget _withTitleTrailing(Widget title) => widget.titleTrailing == null
+      ? title
+      : Row(
+          children: [
+            Flexible(child: title),
+            const Spacer(),
+            widget.titleTrailing!,
+          ],
+        );
 
   void _onItemTapped(int index) {
     if (_totalItemCount == 0) return;

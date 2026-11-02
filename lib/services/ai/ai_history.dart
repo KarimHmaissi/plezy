@@ -27,6 +27,7 @@ class AiHistoryEntry {
     this.spotlights = const {},
     this.topPicks = const {},
     this.watchState = const {},
+    this.headline,
     this.extended = false,
   });
 
@@ -61,6 +62,9 @@ class AiHistoryEntry {
   /// What the answer card shows.
   String? get cardText => writeup ?? answer;
 
+  /// Fork: the gist in a few words, for the folded answer.
+  final String? headline;
+
   /// What the row is called on the AI tab and Home.
   String get label => title ?? request;
   final DateTime createdAt;
@@ -86,6 +90,7 @@ class AiHistoryEntry {
     spotlights: spotlights,
     topPicks: topPicks,
     watchState: watchState,
+    headline: headline,
     createdAt: createdAt,
     items: items,
     reasons: {...reasons, key: reason},
@@ -101,6 +106,7 @@ class AiHistoryEntry {
     if (writeup != null) 'writeup': writeup,
     if (notes.isNotEmpty) 'notes': notes,
     if (followUps.isNotEmpty) 'followUps': followUps,
+    'headline': ?headline,
     'createdAt': createdAt.millisecondsSinceEpoch,
     if (extended) 'extended': true,
     'items': [
@@ -143,6 +149,7 @@ class AiHistoryEntry {
         spotlights: spotlights,
         topPicks: topPicks,
         watchState: watchState,
+        headline: json['headline'] as String?,
         createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int? ?? 0),
         items: items,
         reasons: reasons,

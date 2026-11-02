@@ -8,54 +8,59 @@ import '../theme/mono_tokens.dart';
 import 'app_icon.dart';
 
 /// Fork: an AI answer's text inside its row, between the row title and the
-/// posters, on touch screens and desktop: what was asked, the write-up (why
-/// these picks, or the answer to a question), up to two "worth knowing"
-/// notes and follow-up chips. No surface of its own: it belongs to the row.
+/// posters, on touch screens and desktop. No surface of its own: it belongs
+/// to the row.
 ///
-/// While the request runs it shows the step and streams the text as it's
-/// written; a failed one says so with Retry. A settled answer can fold to
-/// its first line ("More" opens it again).
+/// Open (the newest answer): what was asked on one line, the overview (three
+/// lines), and a "Details" toggle for the top picks, spotlights and notes.
+/// Folded (older answers): just the headline; a tap opens it. While the
+/// request runs it shows the step and streams the overview as it's written;
+/// a failed one says so with Retry. The follow-up chips go under the posters
+/// ([AiFollowUpChips]).
 class AiAnswerCard extends StatelessWidget {
   const AiAnswerCard({
     super.key,
     required this.question,
     this.text,
+    this.headline,
     this.notes = const [],
-    this.followUps = const [],
+    this.topPicks = const [],
+    this.spotlights = const [],
     this.step,
     this.error,
     this.running = false,
     this.expanded = true,
+    this.detailsOpen = false,
     this.onToggle,
+    this.onDetails,
     this.onRetry,
-    this.onFollowUp,
     this.linkify,
-    this.topPicks = const [],
-    this.spotlights = const [],
   });
 
   final String question;
 
-  /// The write-up so far (streamed while [running]).
+  /// The overview so far (streamed while [running]).
   final String? text;
+
+  /// The gist in a few words, shown folded (else the overview's first
+  /// sentence).
+  final String? headline;
   final List<String> notes;
 
-  /// Refinements to ask next, as chips under the text.
-  final List<String> followUps;
+  /// The strongest matches and a few picks worth a closer look: the title
+  /// (tappable with [AiTitleNote.onTap]) and what the helper says about it.
+  final List<AiTitleNote> topPicks;
+  final List<AiTitleNote> spotlights;
 
   /// What a running request is doing ("Checking your history").
   final String? step;
   final String? error;
   final bool running;
   final bool expanded;
+  final bool detailsOpen;
   final VoidCallback? onToggle;
+  final VoidCallback? onDetails;
   final VoidCallback? onRetry;
-  final ValueChanged<String>? onFollowUp;
-
-  /// The strongest matches and a few picks worth a closer look: the title
-  /// (tappable with [AiTitleNote.onTap]) and what the helper says about it.
-  final List<AiTitleNote> topPicks;
-  final List<AiTitleNote> spotlights;
 
   /// Turns the text into spans, e.g. with the titles it names tappable.
   final List<InlineSpan> Function(String text, TextStyle? style)? linkify;
@@ -64,37 +69,49 @@ class AiAnswerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final mono = tokens(context);
     final theme = Theme.of(context).textTheme;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     final body = text?.trim();
     final hasBody = body != null && body.isNotEmpty;
     final open = expanded || running || error != null;
-    final canToggle = onToggle != null && !running && error == null && hasBody;
-    final bodyStyle = theme.bodyLarge?.copyWith(height: 1.4, color: mono.text);
     final duration = ForkMotion.reduceMotion(context) ? Duration.zero : ForkMotion.sheetIn;
+    final overviewStyle = theme.bodyMedium?.copyWith(height: 1.45, color: muted);
+    final hasDetails = topPicks.isNotEmpty || spotlights.isNotEmpty || notes.isNotEmpty;
 
-    // Folded: the overview's first sentence.
-    final shown = open || body == null ? body : _firstSentence(body);
-    Widget bodyText = Text.rich(
-      TextSpan(children: linkify != null && !running ? linkify!(shown ?? '', bodyStyle) : [TextSpan(text: shown)]),
-      maxLines: open ? null : 2,
-      overflow: open ? TextOverflow.clip : TextOverflow.ellipsis,
-      style: bodyStyle,
-    );
-    if (canToggle) {
-      bodyText = Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(child: bodyText),
-          const SizedBox(width: 8),
-          Text(open ? t.aiTab.less : t.aiTab.more, style: theme.labelLarge?.copyWith(color: mono.text)),
-          AnimatedRotation(
-            turns: open ? 0.5 : 0,
-            duration: duration,
-            curve: ForkMotion.enterCurve,
-            child: AppIcon(Symbols.expand_more_rounded, fill: 1, size: 20, color: mono.text),
-          ),
-        ],
+    void tap(VoidCallback? action) {
+      if (action == null) return;
+      ForkMotion.selection();
+      action();
+    }
+
+    if (!open) {
+      // Folded: the headline, a tap away from the rest.
+      final gist = (headline?.trim().isNotEmpty ?? false) ? headline!.trim() : _firstSentence(body ?? question);
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => tap(onToggle),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                gist,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.bodyMedium?.copyWith(color: mono.text, height: 1.4),
+              ),
+            ),
+            const SizedBox(width: 8),
+            AppIcon(Symbols.expand_more_rounded, fill: 1, size: 20, color: muted),
+          ],
+        ),
       );
     }
+
+    final overview = Text.rich(
+      TextSpan(children: linkify != null && !running ? linkify!(body ?? '', overviewStyle) : [TextSpan(text: body)]),
+      maxLines: running || detailsOpen ? null : 3,
+      overflow: running || detailsOpen ? TextOverflow.clip : TextOverflow.ellipsis,
+      style: overviewStyle,
+    );
 
     final column = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -102,19 +119,27 @@ class AiAnswerCard extends StatelessWidget {
       children: [
         Text(
           t.aiTab.youAsked(question: question),
-          maxLines: open ? 2 : 1,
+          maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: theme.bodySmall?.copyWith(color: mono.textMuted),
+          style: theme.labelSmall?.copyWith(color: muted),
         ),
-        if (hasBody) ...[const SizedBox(height: 6), bodyText],
+        if (hasBody) ...[
+          const SizedBox(height: 6),
+          // A tap on the overview folds the answer (the newest opens again
+          // with the next).
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => tap(onToggle), child: overview),
+        ],
         if (running && step != null) ...[
           SizedBox(height: hasBody ? 10 : 8),
           Row(
             children: [
-              SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: mono.textMuted)),
+              SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: muted),
+              ),
               const SizedBox(width: 10),
               Flexible(
-                child: Text(step!, style: theme.bodySmall?.copyWith(color: mono.textMuted)),
+                child: Text(step!, style: theme.bodySmall?.copyWith(color: muted)),
               ),
             ],
           ),
@@ -131,120 +156,134 @@ class AiAnswerCard extends StatelessWidget {
             ),
           ],
         ],
-        if (open && !running && topPicks.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          for (final p in topPicks)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(
-                      text: '${t.aiTab.topPick}  ',
-                      style: theme.labelLarge?.copyWith(color: mono.textMuted),
-                    ),
-                    _titleSpan(p, theme.bodyLarge?.copyWith(color: mono.text, height: 1.4)),
-                    TextSpan(text: ' — ${p.text}'),
-                  ],
-                ),
-                style: theme.bodyLarge?.copyWith(color: mono.text, height: 1.4),
-              ),
-            ),
-        ],
-        if (open && !running && spotlights.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Text(t.aiTab.spotlight, style: theme.labelLarge?.copyWith(color: mono.textMuted)),
-          const SizedBox(height: 6),
-          for (final p in spotlights)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    _titleSpan(p, theme.bodyMedium?.copyWith(color: mono.text, height: 1.4)),
-                    TextSpan(text: '\n${p.text}'),
-                  ],
-                ),
-                style: theme.bodyMedium?.copyWith(color: mono.text, height: 1.4),
-              ),
-            ),
-        ],
-        if (open && !running && notes.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          for (final note in notes)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
+        if (!running && error == null && hasDetails && onDetails != null) ...[
+          const SizedBox(height: 4),
+          // A small text toggle, left-aligned under the overview.
+          InkWell(
+            onTap: () => tap(onDetails),
+            borderRadius: BorderRadius.circular(mono.radiusSm),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: AppIcon(Symbols.info_rounded, size: 16, color: mono.textMuted),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(note, style: theme.bodyMedium?.copyWith(color: mono.textMuted, height: 1.35)),
+                  Text(t.aiTab.details, style: theme.labelMedium?.copyWith(color: mono.text)),
+                  const SizedBox(width: 2),
+                  AnimatedRotation(
+                    turns: detailsOpen ? 0.5 : 0,
+                    duration: duration,
+                    curve: ForkMotion.enterCurve,
+                    child: AppIcon(Symbols.expand_more_rounded, fill: 1, size: 18, color: mono.text),
                   ),
                 ],
               ),
             ),
-        ],
-        if (open && !running && followUps.isNotEmpty && onFollowUp != null) ...[
-          const SizedBox(height: 8),
-          // One line; scrolls sideways when the chips don't fit.
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
-            child: Row(
-              children: [
-                for (final f in followUps)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ActionChip(
-                      label: Text(f),
-                      labelStyle: theme.labelMedium,
-                      visualDensity: VisualDensity.compact,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                      onPressed: () {
-                        ForkMotion.selection();
-                        onFollowUp!(f);
-                      },
-                    ),
-                  ),
-              ],
-            ),
+          ),
+          AnimatedSize(
+            duration: duration,
+            curve: ForkMotion.enterCurve,
+            alignment: Alignment.topCenter,
+            child: detailsOpen ? _details(context) : const SizedBox(width: double.infinity),
           ),
         ],
       ],
     );
 
-    final animated = AnimatedSize(
-      duration: duration,
-      curve: ForkMotion.enterCurve,
-      alignment: Alignment.topCenter,
-      child: column,
+    return AnimatedSize(duration: duration, curve: ForkMotion.enterCurve, alignment: Alignment.topCenter, child: column);
+  }
+
+  /// Top picks, spotlights and notes: compact, titles semibold and tappable.
+  Widget _details(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final mono = tokens(context);
+    final textStyle = theme.bodyMedium?.copyWith(height: 1.4, color: mono.text);
+
+    Widget note(AiTitleNote p, {String? label}) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: p.title,
+              style: textStyle?.copyWith(fontWeight: FontWeight.w600),
+              recognizer: p.onTap,
+            ),
+            if (label != null) TextSpan(text: '  $label', style: theme.labelSmall?.copyWith(color: muted)),
+            TextSpan(text: '\n${p.text}', style: textStyle?.copyWith(color: muted)),
+          ],
+        ),
+      ),
     );
-    if (!canToggle) return animated;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        ForkMotion.selection();
-        onToggle!();
-      },
-      child: animated,
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final p in topPicks) note(p, label: t.aiTab.topPick),
+          for (final p in spotlights) note(p),
+          for (final n in notes)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: AppIcon(Symbols.info_rounded, size: 14, color: muted),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(n, style: theme.bodySmall?.copyWith(color: muted, height: 1.4)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
-  static TextSpan _titleSpan(AiTitleNote p, TextStyle? style) => TextSpan(
-    text: p.title,
-    style: style?.copyWith(fontWeight: FontWeight.w600, decoration: p.onTap == null ? null : TextDecoration.underline),
-    recognizer: p.onTap,
-  );
-
   static String _firstSentence(String text) {
-    final m = RegExp(r'^.+?[.!?](?=\s|$)', dotAll: true).firstMatch(text);
-    return m?.group(0) ?? text;
+    final m = RegExp(r'^.+?[.!?](?=\s|$)', dotAll: true).firstMatch(text.trim());
+    return m?.group(0) ?? text.trim();
+  }
+}
+
+/// Fork: an answer's follow-up refinements, one line of compact chips that
+/// scrolls sideways when they don't fit; under the answer's posters.
+class AiFollowUpChips extends StatelessWidget {
+  const AiFollowUpChips({super.key, required this.followUps, required this.onFollowUp});
+
+  final List<String> followUps;
+  final ValueChanged<String> onFollowUp;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final f in followUps)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ActionChip(
+                label: Text(f),
+                labelStyle: theme.labelMedium,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+                onPressed: () {
+                  ForkMotion.selection();
+                  onFollowUp(f);
+                },
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 

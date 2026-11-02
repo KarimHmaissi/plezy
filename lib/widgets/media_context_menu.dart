@@ -265,6 +265,22 @@ class ItemMenuEntries extends InheritedWidget {
   bool updateShouldNotify(ItemMenuEntries oldWidget) => false;
 }
 
+/// Fork: a header a screen puts above an item's menu on phones, built for
+/// that item (the AI tab's "why this pick" peek).
+class ItemMenuHeader extends InheritedWidget {
+  final Widget? Function(MediaItem item) build;
+
+  const ItemMenuHeader({super.key, required this.build, required super.child});
+
+  static Widget? of(BuildContext context, MediaItem? item) {
+    if (item == null) return null;
+    return context.getInheritedWidgetOfExactType<ItemMenuHeader>()?.build(item);
+  }
+
+  @override
+  bool updateShouldNotify(ItemMenuHeader oldWidget) => false;
+}
+
 class MediaContextMenu extends StatefulWidget {
   /// Either a [MediaItem] or a [MediaPlaylist]. Typed as [Object] because
   /// Dart has no nominal union type — guarded at runtime via the
@@ -491,9 +507,11 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     // below any screen-level OverlaySheetHost, while callers often pass a
     // screen context from ABOVE its host (which would skip the host and
     // fall back to a hostless modal sheet).
+    final header = ItemMenuHeader.of(this.context, menu.mediaItem);
     final selected = await showAdaptiveAppMenu<String>(
       this.context,
       title: _itemMenuTitle(),
+      titleWidget: header,
       entries: _menuEntries(menuActions),
       position: position,
       focusFirstItem: openedFromKeyboard,

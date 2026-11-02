@@ -38,6 +38,9 @@ class AiTools {
   List<String> notes = const [];
   List<String> followUps = const [];
 
+  /// Fork: the answer's gist in a few words, for its folded state.
+  String? headline;
+
   /// Fork: picks worth a closer look (title-specific insight), and the
   /// strongest matches, by pick id.
   List<({String id, String text})> spotlights = const [];
@@ -263,6 +266,12 @@ class AiTools {
                 'list: every/all of something',
           },
           'intro': {'type': 'string', 'description': 'One friendly sentence introducing the picks'},
+          'headline': {
+            'type': 'string',
+            'description':
+                'At most 12 words, punchy, no full stop: the gist of these picks, shown when the answer is folded '
+                '(e.g. "Binge-friendly hits with big hooks")',
+          },
           'writeup': {
             'type': 'string',
             'description':
@@ -272,14 +281,14 @@ class AiTools {
           },
           'top_picks': {
             'type': 'array',
-            'items': _idText('Why this is the strongest match for them, one sentence'),
+            'items': _idText('Why this is the strongest match for them, one sentence, not starting with the title'),
             'description': '1-2 picks you rate the strongest match, for recommendation requests; else empty',
           },
           'spotlights': {
             'type': 'array',
             'items': _idText(
               '1-2 spoiler-free sentences of insight about this title: what makes it stand out, its tone, pacing, '
-              'where to start. Not the pick reason again',
+              'where to start. Not the pick reason again, and don\'t start the sentence with the title',
             ),
             'description':
                 '2-3 picks worth a closer look (not the top picks); empty for narrow requests with 1-2 picks',
@@ -316,7 +325,7 @@ class AiTools {
             },
           },
         },
-        'required': ['title', 'scope', 'intro', 'writeup', 'top_picks', 'spotlights', 'notes', 'follow_ups', 'picks'],
+        'required': ['title', 'scope', 'intro', 'headline', 'writeup', 'top_picks', 'spotlights', 'notes', 'follow_ups', 'picks'],
         'additionalProperties': false,
       },
     },
@@ -423,6 +432,7 @@ class AiTools {
               (id: p['id'] as String, text: '${p['text']}'.trim()),
         ];
         scope = input['scope'] as String?;
+        headline = (input['headline'] as String?)?.trim();
         topPicks = idTexts('top_picks', 2);
         spotlights = idTexts('spotlights', 3);
         final listed = [
