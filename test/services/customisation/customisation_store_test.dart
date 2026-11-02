@@ -140,4 +140,18 @@ void main() {
     await again.load(createIfMissing: false);
     expect([for (final s in again.pausedShows) s.title], ['Frasier', 'Seinfeld']);
   });
+
+  test('Comfort without Trakt shows the list the Trakt device last saw, pauses included', () async {
+    final trakt = _FakeComfortTrakt();
+    await ComfortShowsController(_FakeTraktSource(trakt), store: Future.value(store)).load(createIfMissing: false);
+
+    final cached = ComfortShowsController.cached(store: Future.value(store));
+    await cached.load();
+    expect(cached.canEditList, isFalse);
+    expect(cached.shows, isNotEmpty);
+    expect([for (final s in cached.pausedShows) s.title], ['Frasier']);
+
+    await cached.setPaused(cached.activeShows.first, true);
+    expect((await store.readComfortPaused()).length, 2);
+  });
 }

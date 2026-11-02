@@ -24,6 +24,7 @@ import '../providers/discover_provider.dart';
 import '../services/continue_watching/continue_watching_classifier.dart';
 import '../services/catalog/catalog_library_matcher.dart';
 import '../services/catalog/trakt_catalog_source.dart';
+import '../services/customisation/customisation_store.dart';
 import '../services/comfort/comfort_picker.dart';
 import '../services/comfort/comfort_shows_controller.dart';
 import '../services/settings_service.dart';
@@ -91,6 +92,7 @@ class ComfortScreenState extends State<ComfortScreen>
     super.initState();
     _sources = context.read<CatalogSourcesProvider>();
     _sources.addListener(_onSourcesChanged);
+    Customisation.changed.addListener(_onCustomisationChanged);
     _discover = context.read<DiscoverProvider?>()?..addListener(_onDiscoverChanged);
     _onSourcesChanged();
   }
@@ -107,6 +109,7 @@ class ComfortScreenState extends State<ComfortScreen>
   @override
   void dispose() {
     _sources.removeListener(_onSourcesChanged);
+    Customisation.changed.removeListener(_onCustomisationChanged);
     _discover?.removeListener(_onDiscoverChanged);
     _controller?.removeListener(_onControllerChanged);
     _controller?.dispose();
@@ -117,19 +120,23 @@ class ComfortScreenState extends State<ComfortScreen>
 
   TraktCatalogSource? get _traktSource => _sources.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
 
+  /// With Trakt, the live list; without (a phone), the copy the Trakt
+  /// device keeps, which a phone mirroring the TV/Mac receives with its
+  /// snapshot.
   void _onSourcesChanged() {
     final source = _traktSource;
-    if (source == null) {
-      if (_controller == null) return;
-      _controller!.removeListener(_onControllerChanged);
-      _controller!.dispose();
-      _controller = null;
-      if (mounted) setState(() {});
-      return;
-    }
-    if (_controller != null) return;
-    _controller = ComfortShowsController(source)..addListener(_onControllerChanged);
+    final wantsLive = source != null;
+    if (_controller != null && _controller!.canEditList == wantsLive) return;
+    _controller?.removeListener(_onControllerChanged);
+    _controller?.dispose();
+    _controller = (wantsLive ? ComfortShowsController(source) : ComfortShowsController.cached())
+      ..addListener(_onControllerChanged);
     unawaited(_load());
+  }
+
+  /// A new mirror snapshot (or an edit applied here): re-read the cached list.
+  void _onCustomisationChanged() {
+    if (_controller?.canEditList == false) unawaited(_load());
   }
 
   void _onControllerChanged() {
@@ -275,10 +282,11 @@ class ComfortScreenState extends State<ComfortScreen>
 
   Future<void> _openConfigure() async {
     final controller = _controller;
-    if (controller == null) return;
+    final source = _traktSource;
+    if (controller == null || source == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ComfortConfigureScreen(controller: controller, source: _traktSource!),
+        builder: (_) => ComfortConfigureScreen(controller: controller, source: source),
       ),
     );
     _episodesByShow.clear();
@@ -325,7 +333,7 @@ class ComfortScreenState extends State<ComfortScreen>
 
   Widget? _buildStateMessage() {
     final controller = _controller;
-    if (controller == null) {
+    if (controller == null || (!controller.canEditList && controller.isLoaded && controller.shows.isEmpty)) {
       return EmptyStateWidget(
         message: t.comfort.notConnectedTitle,
         subtitle: t.comfort.notConnectedMessage,
@@ -381,7 +389,7 @@ class ComfortScreenState extends State<ComfortScreen>
       color: color,
       onRefresh: manualRefresh,
       extras: [
-        if (_controller != null) (Symbols.tune_rounded, t.comfort.configure, () => unawaited(_openConfigure())),
+        if (_traktSource != null) (Symbols.tune_rounded, t.comfort.configure, () => unawaited(_openConfigure())),
       ],
     ),
   ];
@@ -399,7 +407,7 @@ class ComfortScreenState extends State<ComfortScreen>
     ),
     FocusableAction(
       debugLabel: 'ComfortConfigure',
-      onPressed: _controller == null ? null : () => unawaited(_openConfigure()),
+      onPressed: _traktSource == null ? null : () => unawaited(_openConfigure()),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: _labelled(Symbols.tune_rounded, t.comfort.configure, color),

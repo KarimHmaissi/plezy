@@ -99,8 +99,12 @@ Details of each are in the dated entries below.
   drawer from the right (profile, Libraries, History, Downloads, Watch
   Together, Refresh, Profiles, Settings, Log out, plus the tab's extras).
 - Bottom bar: Home, Comfort, Explore, Watchlist, AI. Libraries moves into
-  the drawer; Comfort is always there on phones and offers Connect Trakt
-  when Trakt isn't linked.
+  the drawer; Comfort is always there on phones.
+- Comfort without Trakt: the Trakt-connected device keeps a copy of its
+  comfort list locally (setting `comfort.shows`), which mirroring phones
+  receive with the snapshot; a phone shows those shows, Random episode and
+  pausing work, and only Configure (adding/removing shows) needs Trakt.
+  Connect Trakt is offered only when there's no list at all.
 
 ### Calmer motion and Plex-like card text
 

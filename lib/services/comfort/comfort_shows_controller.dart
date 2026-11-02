@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+
+import '../../media/media_kind.dart';
 
 import '../../models/catalog/catalog_item.dart';
 import '../../models/trakt/trakt_ids.dart';
@@ -14,15 +18,30 @@ import 'comfort_list_description.dart';
 /// devices with Settings ▸ Backup & transfer). Earlier versions kept that in
 /// the list's description (see [parsePausedTraktIds]); it's brought over
 /// once and the description is no longer written.
+///
+/// Each Trakt load also keeps the list in the local database
+/// ([showsCacheKey]), so a phone mirroring this device sees the same shows
+/// without Trakt of its own. With no Trakt source ([ComfortShowsController.cached])
+/// the controller reads that copy: read-only, but Random episode and pausing
+/// work.
 class ComfortShowsController extends ChangeNotifier {
   static const String listName = 'Comfort Shows';
   static const String listSlug = 'comfort-shows';
 
-  ComfortShowsController(this._source, {Future<CustomisationStore>? store}) : _storeFuture = store;
+  ComfortShowsController(TraktCatalogSource this._source, {Future<CustomisationStore>? store}) : _storeFuture = store;
+
+  /// The last list a Trakt-connected device saw (this device's, or the
+  /// mirrored TV/Mac's on a phone).
+  ComfortShowsController.cached({Future<CustomisationStore>? store}) : _source = null, _storeFuture = store;
+
+  static const String showsCacheKey = 'comfort.shows';
 
   static const String _migratedKey = 'comfort.pausedMigrated';
 
-  final TraktCatalogSource _source;
+  final TraktCatalogSource? _source;
+
+  /// Whether shows can be added or removed (needs Trakt).
+  bool get canEditList => _source != null;
   final Future<CustomisationStore>? _storeFuture;
   Future<CustomisationStore> get _store => _storeFuture ?? Customisation.store;
   TraktUserList? _list;
@@ -63,7 +82,16 @@ class ComfortShowsController extends ChangeNotifier {
     _error = null;
     _notify();
     try {
-      final client = _source.client;
+      final source = _source;
+      if (source == null) {
+        final store = await _store;
+        _shows = decodeShows(await store.readSetting(showsCacheKey));
+        final onList = {for (final show in _shows) ?show.ids.trakt};
+        _paused = (await store.readComfortPaused()).keys.toSet().intersection(onList);
+        _loaded = true;
+        return;
+      }
+      final client = source.client;
       final lists = await client.getMyLists();
       // Reuse the user's existing list (matched by slug, then name); create
       // one only when neither exists.
@@ -77,7 +105,7 @@ class ComfortShowsController extends ChangeNotifier {
       }
       list ??= await client.createMyList(listName, description: '');
       if (list == null) throw StateError('Trakt did not return the created list');
-      final shows = _source.showsFromListEntries(await client.getMyListShows(list.traktId));
+      final shows = source.showsFromListEntries(await client.getMyListShows(list.traktId));
       final onList = {for (final show in shows) ?show.ids.trakt};
       _list = list;
       _shows = shows;
@@ -91,6 +119,12 @@ class ComfortShowsController extends ChangeNotifier {
         await store.writeSetting(_migratedKey, '1');
       }
       _paused = (await store.readComfortPaused()).keys.toSet().intersection(onList);
+      // Keep a copy for phones mirroring this device (never written from a
+      // phone's mirror, which would overwrite the TV's).
+      if (!Customisation.isMirror) {
+        final encoded = encodeShows(shows);
+        if (await store.readSetting(showsCacheKey) != encoded) await store.writeSetting(showsCacheKey, encoded);
+      }
       _loaded = true;
     } catch (e) {
       appLogger.w('Comfort shows: load failed', error: e);
@@ -105,8 +139,7 @@ class ComfortShowsController extends ChangeNotifier {
   /// and rolls back if the save fails.
   Future<void> setPaused(CatalogItem show, bool paused) async {
     final id = show.ids.trakt;
-    final list = _list;
-    if (id == null || list == null || isPaused(show) == paused) return;
+    if (id == null || (_list == null && _source != null) || isPaused(show) == paused) return;
     final previous = _paused;
     _paused = paused ? {..._paused, id} : ({..._paused}..remove(id));
     _notify();
@@ -129,14 +162,14 @@ class ComfortShowsController extends ChangeNotifier {
   Future<void> addShow(CatalogItem show) async {
     final list = _list;
     if (list == null) return;
-    await _source.client.addShowsToMyList(list.traktId, [_traktIds(show)]);
+    await _source!.client.addShowsToMyList(list.traktId, [_traktIds(show)]);
     await load();
   }
 
   Future<void> removeShow(CatalogItem show) async {
     final list = _list;
     if (list == null) return;
-    await _source.client.removeShowsFromMyList(list.traktId, [_traktIds(show)]);
+    await _source!.client.removeShowsFromMyList(list.traktId, [_traktIds(show)]);
     if (show.ids.trakt case final id? when _paused.contains(id)) {
       _paused = {..._paused}..remove(id);
       _shows = [
@@ -146,6 +179,50 @@ class ComfortShowsController extends ChangeNotifier {
       await _savePaused();
     }
     await load();
+  }
+
+  /// The fields Comfort needs from each show (ids to match the library,
+  /// title, year, poster), as stored under [showsCacheKey].
+  @visibleForTesting
+  static String encodeShows(List<CatalogItem> shows) => json.encode([
+    for (final s in shows)
+      {
+        'title': s.title,
+        'year': ?s.year,
+        'poster': ?s.posterUrl,
+        'trakt': ?s.ids.trakt,
+        'slug': ?s.ids.slug,
+        'imdb': ?s.ids.imdb,
+        'tmdb': ?s.ids.tmdb,
+        'tvdb': ?s.ids.tvdb,
+      },
+  ]);
+
+  @visibleForTesting
+  static List<CatalogItem> decodeShows(String? encoded) {
+    if (encoded == null) return const [];
+    try {
+      return [
+        for (final m in (json.decode(encoded) as List).whereType<Map>())
+          CatalogItem(
+            source: CatalogSourceId.trakt,
+            kind: MediaKind.show,
+            title: m['title'] as String? ?? '',
+            year: m['year'] as int?,
+            posterUrl: m['poster'] as String?,
+            ids: CatalogItemIds(
+              trakt: m['trakt'] as int?,
+              slug: m['slug'] as String?,
+              imdb: m['imdb'] as String?,
+              tmdb: m['tmdb'] as int?,
+              tvdb: m['tvdb'] as int?,
+            ),
+          ),
+      ];
+    } catch (e) {
+      appLogger.w('Comfort shows: cached list unreadable', error: e);
+      return const [];
+    }
   }
 
   static TraktIds _traktIds(CatalogItem show) => TraktIds(
