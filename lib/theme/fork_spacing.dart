@@ -14,6 +14,7 @@ class ForkSpacing {
     required this.rowGap,
     required this.titleGap,
     required this.cardGap,
+    this.headerGap = 14,
     required this.titleSize,
     required this.postersAcross,
     required this.widesAcross,
@@ -27,6 +28,10 @@ class ForkSpacing {
 
   /// Space between a row's title and its cards.
   final double titleGap;
+
+  /// Extra space under a page's top bar on phones, before its first row
+  /// (about 36 dp from the bar to the first row title in all).
+  final double headerGap;
 
   /// Space between neighbouring cards.
   final double cardGap;

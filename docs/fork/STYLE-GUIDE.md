@@ -57,6 +57,7 @@ the app.
 
 ## Spacing and shape
 
+- Under the top bar (phones): `DesktopSliverAppBar` adds `ForkSpacing.headerGap` (14 dp, about 36 dp from bar to the first row title) on every page that uses it or `CustomAppBar`; Home's hero header is separate.
 - Touch screens: `ForkSpacing.of(context)`: `edgeInset` (20 phone / 28
   tablet / 32 desktop) for left and right gutters, `titleGap` between a
   section title and its content, `rowGap` between sections, `cardGap`

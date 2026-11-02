@@ -92,6 +92,13 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### More air under the top bar on phones
+
+- Every page with the standard top bar (AI, Comfort, Explore, Watchlist,
+  Libraries, History, Search, Downloads, View all, Settings) gets
+  `ForkSpacing.headerGap` below it, so the first row isn't cramped. Home's
+  hero header is unchanged.
+
 ### Phone navigation like Plex: side drawer
 
 - Every phone tab's top bar is the same: its own primary action, then
