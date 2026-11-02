@@ -271,7 +271,11 @@ List<NavigationTab> mainScreenBottomNavigationTabs({
   required NavigationTabId currentTab,
 }) {
   if (!isMobile) return visibleTabs;
-  return visibleTabs.where((tab) {
+  final tabs = visibleTabs.where((tab) {
+    // Fork: Libraries lives in the side drawer (opened from the avatar), as
+    // Plex, and Comfort takes its slot; like History it never takes a
+    // bottom-nav slot (Home stays highlighted while it's open).
+    if (tab.id == NavigationTabId.libraries) return false;
     // Fork: five items like Plex; Search and Downloads live in Home's top
     // bar instead (shown here only while open, or Downloads offline).
     if (tab.id == NavigationTabId.search) return currentTab == tab.id;
@@ -282,6 +286,10 @@ List<NavigationTab> mainScreenBottomNavigationTabs({
     if (tab.id != NavigationTabId.settings) return true;
     return isOffline || currentTab == NavigationTabId.settings;
   }).toList();
+  // Home, Comfort, Explore, Watchlist, AI: Comfort sits next to Home.
+  final comfort = tabs.indexWhere((tab) => tab.id == NavigationTabId.comfort);
+  if (comfort > 1 && tabs.first.id == NavigationTabId.discover) tabs.insert(1, tabs.removeAt(comfort));
+  return tabs;
 }
 
 @visibleForTesting
@@ -567,11 +575,11 @@ class _MainScreenState extends State<MainScreen>
       final catalogSources = context.read<CatalogSourcesProvider>();
       _lastHasExplore = catalogSources.hasAnySource && _showExploreTabSetting;
       _lastHasWatchlist = catalogSources.watchlistCapableSources.isNotEmpty;
-      _lastHasComfort = _hasTrakt(catalogSources);
+      _lastHasComfort = _comfortAvailable(catalogSources);
     } catch (_) {
       _lastHasExplore = false;
       _lastHasWatchlist = false;
-      _lastHasComfort = false;
+      _lastHasComfort = _comfortAvailable(null);
     }
     // Re-evaluate Explore tab visibility when the appearance toggle flips
     // mid-session; the catalog-sources listener covers source changes.
@@ -1457,6 +1465,13 @@ class _MainScreenState extends State<MainScreen>
   }
 
   /// Comfort shows live in a Trakt list, so the tab needs Trakt connected.
+  /// Comfort shows with Trakt connected; on phones it's always in the bottom
+  /// bar (it explains how to connect Trakt when it isn't).
+  static bool _comfortAvailable(CatalogSourcesProvider? sources) =>
+      _isPhoneOS || (sources != null && _hasTrakt(sources));
+
+  static bool get _isPhoneOS => !PlatformDetector.isTV() && (Platform.isAndroid || Platform.isIOS);
+
   static bool _hasTrakt(CatalogSourcesProvider sources) =>
       sources.connectedSources.any((source) => source.id == CatalogSourceId.trakt);
 
@@ -1466,7 +1481,7 @@ class _MainScreenState extends State<MainScreen>
     final hasExplore = (_catalogSourcesProvider?.hasAnySource ?? false) && _showExploreTabSetting;
     final hasWatchlist = _catalogSourcesProvider?.watchlistCapableSources.isNotEmpty ?? false;
     final catalogSources = _catalogSourcesProvider;
-    final hasComfort = catalogSources != null && _hasTrakt(catalogSources);
+    final hasComfort = _comfortAvailable(catalogSources);
     if (hasExplore == _lastHasExplore && hasWatchlist == _lastHasWatchlist && hasComfort == _lastHasComfort) return;
     _lastHasExplore = hasExplore;
     _lastHasWatchlist = hasWatchlist;

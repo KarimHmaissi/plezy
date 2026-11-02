@@ -4415,6 +4415,9 @@ class Translations$comfort$en {
 
 	/// en: 'Added ${title}'
 	String added({required Object title}) => 'Added ${title}';
+
+	/// en: 'Connect Trakt'
+	String get connectTrakt => 'Connect Trakt';
 }
 
 // Path: watchlist
@@ -10733,6 +10736,7 @@ extension on Translations {
 			'comfort.searchHint' => 'Search Trakt for a show',
 			'comfort.remove' => 'Remove',
 			'comfort.added' => ({required Object title}) => 'Added ${title}',
+			'comfort.connectTrakt' => 'Connect Trakt',
 			'watchlist.films' => 'Films',
 			'watchlist.tv' => 'TV',
 			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
@@ -10743,9 +10747,9 @@ extension on Translations {
 			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
 			'watchlist.noSourceTitle' => 'No watchlist connected',
 			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
-			'explore.allCopies' => 'Details and all copies',
 			_ => null,
 		} ?? switch (path) {
+			'explore.allCopies' => 'Details and all copies',
 			'explore.traktLists.boxOffice' => 'Box Office',
 			'explore.traktLists.mostWatchedMovies' => 'Most Watched Movies This Week',
 			'explore.traktLists.mostWatchedShows' => 'Most Watched Shows This Week',
@@ -11257,9 +11261,9 @@ extension on Translations {
 			'downloads.pauseAll' => 'Pause all',
 			'downloads.resumeAll' => 'Resume all',
 			'downloads.retryAll' => 'Retry all',
-			'downloads.retryFailed' => 'Retry failed downloads',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.retryFailed' => 'Retry failed downloads',
 			'downloads.deleteAll' => 'Delete all',
 			'downloads.selectVersion' => 'Select Version',
 			'downloads.allEpisodes' => 'All episodes',
@@ -11771,9 +11775,9 @@ extension on Translations {
 			'deepLinks.movieHint' => 'Opening this link plays the movie.',
 			'deepLinks.episodeHint' => 'Opening this link plays this episode.',
 			'deepLinks.profileHint' => 'Opening this link switches to this profile.',
-			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
 			_ => null,
 		} ?? switch (path) {
+			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
 			'cast.sending' => ({required Object title, required Object name}) => 'Playing ${title} on ${name}',

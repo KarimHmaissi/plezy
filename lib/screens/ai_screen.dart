@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../widgets/phone_nav_drawer.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/hub_vertical_navigation.dart';
 import '../focus/locked_hub_controller.dart';
@@ -768,72 +769,88 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     ];
   }
 
-  List<FocusableAction> _actions(Color color) => [
-    if (_thinClient && !_canEditMirror)
-      FocusableAction(
-        debugLabel: 'AiOffline',
-        onPressed: null,
-        child: Text(
-          t.cast.notConnected(name: MirrorClient.instance.hostName ?? t.companionRemote.unknownDevice),
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color.withValues(alpha: 0.7)),
+  /// On phones the icon-only actions move into the side drawer, next to
+  /// the shared Search / remote / avatar set.
+  List<FocusableAction> _actions(Color color) {
+    final phone = PlatformDetector.isMobile(context);
+    final canRefresh = !_thinClient && !_busy && _hasKey == true;
+    return [
+      if (_thinClient && !_canEditMirror)
+        FocusableAction(
+          debugLabel: 'AiOffline',
+          onPressed: null,
+          child: Text(
+            t.cast.notConnected(name: MirrorClient.instance.hostName ?? t.companionRemote.unknownDevice),
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color.withValues(alpha: 0.7)),
+          ),
         ),
-      ),
-    if (_thinClient)
-      for (final ask in _remotePending)
+      if (_thinClient)
+        for (final ask in _remotePending)
+          FocusableAction(
+            debugLabel: 'AiPending',
+            onPressed: null,
+            child: _PendingChip(ask: ask, color: color),
+          ),
+      for (final ask in _pending)
         FocusableAction(
           debugLabel: 'AiPending',
-          onPressed: null,
+          // Running requests just show progress; a failed one retries.
+          onPressed: ask.error == null ? null : () => unawaited(_runInBackground(ask)),
           child: _PendingChip(ask: ask, color: color),
         ),
-    for (final ask in _pending)
       FocusableAction(
-        debugLabel: 'AiPending',
-        // Running requests just show progress; a failed one retries.
-        onPressed: ask.error == null ? null : () => unawaited(_runInBackground(ask)),
-        child: _PendingChip(ask: ask, color: color),
-      ),
-    FocusableAction(
-      debugLabel: 'AiAsk',
-      autofocus: _rows.isEmpty,
-      onPressed: _thinClient ? () => unawaited(_ask()) : (_hasKey != true ? null : () => unawaited(_ask())),
-      child: Padding(
-        key: _askKey,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Symbols.auto_awesome_rounded, size: 22, color: color),
-            const SizedBox(width: 8),
-            Text(
-              _conversation.isEmpty ? t.aiTab.ask : t.aiTab.followUp,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
-            ),
-          ],
+        debugLabel: 'AiAsk',
+        autofocus: _rows.isEmpty,
+        onPressed: _thinClient ? () => unawaited(_ask()) : (_hasKey != true ? null : () => unawaited(_ask())),
+        child: Padding(
+          key: _askKey,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Symbols.auto_awesome_rounded, size: 22, color: color),
+              const SizedBox(width: 8),
+              Text(
+                _conversation.isEmpty ? t.aiTab.ask : t.aiTab.followUp,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-    if (_conversation.isNotEmpty)
-      FocusableAction(
-        icon: Symbols.add_comment_rounded,
-        iconColor: color,
-        tooltip: t.aiTab.newConversation,
-        onPressed: _newConversation,
-      ),
-    if (!_thinClient)
-      FocusableAction(
-        icon: Symbols.refresh_rounded,
-        iconColor: color,
-        tooltip: t.aiTab.refreshTonight,
-        onPressed: _busy || _hasKey != true ? null : () => unawaited(_tonight(refresh: true)),
-      ),
-    if (_hasMore)
-      FocusableAction(
-        icon: Symbols.expand_more_rounded,
-        iconColor: color,
-        tooltip: t.aiTab.loadMore,
-        onPressed: () => unawaited(_loadMore()),
-      ),
-  ];
+      if (phone)
+        ...phoneTabActions(
+          context,
+          color: color,
+          onRefresh: canRefresh ? () => unawaited(_tonight(refresh: true)) : null,
+          extras: [
+            if (_conversation.isNotEmpty) (Symbols.add_comment_rounded, t.aiTab.newConversation, _newConversation),
+            if (_hasMore) (Symbols.expand_more_rounded, t.aiTab.loadMore, () => unawaited(_loadMore())),
+          ],
+        ),
+      if (!phone && _conversation.isNotEmpty)
+        FocusableAction(
+          icon: Symbols.add_comment_rounded,
+          iconColor: color,
+          tooltip: t.aiTab.newConversation,
+          onPressed: _newConversation,
+        ),
+      if (!phone && !_thinClient)
+        FocusableAction(
+          icon: Symbols.refresh_rounded,
+          iconColor: color,
+          tooltip: t.aiTab.refreshTonight,
+          onPressed: _busy || _hasKey != true ? null : () => unawaited(_tonight(refresh: true)),
+        ),
+      if (!phone && _hasMore)
+        FocusableAction(
+          icon: Symbols.expand_more_rounded,
+          iconColor: color,
+          tooltip: t.aiTab.loadMore,
+          onPressed: () => unawaited(_loadMore()),
+        ),
+    ];
+  }
 
   Widget? _message() {
     if (_hasKey == false) {

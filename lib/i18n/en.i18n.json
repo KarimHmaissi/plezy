@@ -1662,7 +1662,8 @@
     "addShow": "Add a show",
     "searchHint": "Search Trakt for a show",
     "remove": "Remove",
-    "added": "Added ${title}"
+    "added": "Added ${title}",
+    "connectTrakt": "Connect Trakt"
   },
   "watchlist": {
     "films": "Films",

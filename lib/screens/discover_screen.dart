@@ -29,11 +29,11 @@ import '../providers/discover_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/watch_state_store.dart';
 import '../widgets/hub_section.dart';
+import '../widgets/phone_nav_drawer.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/home_row_actions.dart';
-import '../navigation/navigation_tabs.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/profile_switching_overlay.dart';
 import 'profile/profile_switch_screen.dart';
@@ -1135,112 +1135,99 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 key: _actionBarKey,
                 onNavigateLeft: _navigateToSidebar,
                 onNavigateDown: _focusContentFromAppBar,
-                actions: [
-                  // Phone: Search and Downloads sit here instead of the bottom nav.
-                  if (PlatformDetector.isMobile(context)) ...[
-                    FocusableAction(
-                      icon: Symbols.search_rounded,
-                      iconColor: foregroundColor,
-                      tooltip: t.common.search,
-                      onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.search),
-                    ),
-                    FocusableAction(
-                      icon: Symbols.history_rounded,
-                      iconColor: foregroundColor,
-                      tooltip: t.navigation.history,
-                      onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.history),
-                    ),
-                    FocusableAction(
-                      icon: Symbols.download_rounded,
-                      iconColor: foregroundColor,
-                      tooltip: t.navigation.downloads,
-                      onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.downloads),
-                    ),
-                  ],
-                  FocusableAction(icon: Symbols.refresh_rounded, iconColor: foregroundColor, onPressed: manualRefresh),
-                  // Watch Together
-                  FocusableAction(
-                    onPressed: openWatchTogether,
-                    child: Stack(
-                      children: [
-                        IconButton(
-                          icon: AppIcon(
-                            Symbols.group_rounded,
-                            fill: watchTogether.isInSession ? 1 : 0,
-                            color: watchTogether.isInSession ? colorScheme.primary : foregroundColor,
-                          ),
+                // Phone: Search, the remote and the avatar (which opens the
+                // side drawer with everything else), as on every tab.
+                actions: PlatformDetector.isMobile(context)
+                    ? phoneTabActions(context, color: foregroundColor, onRefresh: manualRefresh)
+                    : [
+                        FocusableAction(
+                          icon: Symbols.refresh_rounded,
+                          iconColor: foregroundColor,
+                          onPressed: manualRefresh,
+                        ),
+                        // Watch Together
+                        FocusableAction(
                           onPressed: openWatchTogether,
-                          tooltip: t.watchTogether.title,
-                        ),
-                        // Badges sit over the button they label, so they must
-                        // not swallow its hover and clicks (#2846).
-                        if (watchTogether.isInSession && watchTogether.participantCount > 1)
-                          Positioned(
-                            top: 6,
-                            right: 6,
-                            child: IgnorePointer(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: colorScheme.primary,
-                                  borderRadius: const BorderRadius.all(Radius.circular(8)),
+                          child: Stack(
+                            children: [
+                              IconButton(
+                                icon: AppIcon(
+                                  Symbols.group_rounded,
+                                  fill: watchTogether.isInSession ? 1 : 0,
+                                  color: watchTogether.isInSession ? colorScheme.primary : foregroundColor,
                                 ),
-                                child: Text(
-                                  '${watchTogether.participantCount}',
-                                  style: TextStyle(color: colorScheme.onPrimary, fontSize: 10, fontWeight: .bold),
-                                ),
+                                onPressed: openWatchTogether,
+                                tooltip: t.watchTogether.title,
                               ),
-                            ),
+                              // Badges sit over the button they label, so they must
+                              // not swallow its hover and clicks (#2846).
+                              if (watchTogether.isInSession && watchTogether.participantCount > 1)
+                                Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: IgnorePointer(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: colorScheme.primary,
+                                        borderRadius: const BorderRadius.all(Radius.circular(8)),
+                                      ),
+                                      child: Text(
+                                        '${watchTogether.participantCount}',
+                                        style: TextStyle(color: colorScheme.onPrimary, fontSize: 10, fontWeight: .bold),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                      ],
-                    ),
-                  ),
-                  // Companion Remote
-                  FocusableAction(
-                    onPressed: openCompanionRemote,
-                    child: Stack(
-                      children: [
-                        IconButton(
-                          icon: AppIcon(
-                            Symbols.phone_android_rounded,
-                            fill: companionRemote.isConnected ? 1 : 0,
-                            color: companionRemote.isConnected ? colorScheme.primary : foregroundColor,
-                          ),
+                        ),
+                        // Companion Remote
+                        FocusableAction(
                           onPressed: openCompanionRemote,
-                          tooltip: t.companionRemote.title,
-                        ),
-                        if (companionRemote.isConnected)
-                          Positioned(
-                            top: 6,
-                            right: 6,
-                            child: IgnorePointer(
-                              child: Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                  border: Border.fromBorderSide(BorderSide(color: foregroundColor, width: 1)),
+                          child: Stack(
+                            children: [
+                              IconButton(
+                                icon: AppIcon(
+                                  Symbols.phone_android_rounded,
+                                  fill: companionRemote.isConnected ? 1 : 0,
+                                  color: companionRemote.isConnected ? colorScheme.primary : foregroundColor,
                                 ),
+                                onPressed: openCompanionRemote,
+                                tooltip: t.companionRemote.title,
                               ),
-                            ),
+                              if (companionRemote.isConnected)
+                                Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: IgnorePointer(
+                                    child: Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: Colors.green,
+                                        shape: BoxShape.circle,
+                                        border: Border.fromBorderSide(BorderSide(color: foregroundColor, width: 1)),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
+                        ),
+                        // Server Tasks — Plex-only (`/activities` API has no
+                        // Jellyfin equivalent), hide the button entirely on
+                        // Jellyfin-only profiles so the chrome doesn't show
+                        // a permanently empty popover.
+                        if (PlatformDetector.isDesktop(context) &&
+                            context.select<MultiServerProvider, bool>((p) => p.hasOnlinePlexServers))
+                          FocusableAction(
+                            onPressed: () => _serverActivitiesButtonKey.currentState?.togglePanel(),
+                            child: ServerActivitiesButton(key: _serverActivitiesButtonKey),
+                          ),
+                        // User menu — profiles + sign out
+                        _buildUserMenuAction(context),
                       ],
-                    ),
-                  ),
-                  // Server Tasks — Plex-only (`/activities` API has no
-                  // Jellyfin equivalent), hide the button entirely on
-                  // Jellyfin-only profiles so the chrome doesn't show
-                  // a permanently empty popover.
-                  if (PlatformDetector.isDesktop(context) &&
-                      context.select<MultiServerProvider, bool>((p) => p.hasOnlinePlexServers))
-                    FocusableAction(
-                      onPressed: () => _serverActivitiesButtonKey.currentState?.togglePanel(),
-                      child: ServerActivitiesButton(key: _serverActivitiesButtonKey),
-                    ),
-                  // User menu — profiles + sign out
-                  _buildUserMenuAction(context),
-                ],
               );
             },
           ),

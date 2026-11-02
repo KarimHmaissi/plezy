@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../widgets/phone_nav_drawer.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/hub_vertical_navigation.dart';
 import '../focus/locked_hub_controller.dart';
@@ -491,7 +492,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   onNavigateDown: () => _hubKeys.first.currentState?.requestFocusFromMemory(),
                   actions: [
                     ?_sourceSwitchAction(Theme.of(context).colorScheme.onSurface),
-                    FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
+                    // Phone: Search / remote / avatar; Refresh moves into the drawer.
+                    if (PlatformDetector.isMobile(context))
+                      ...phoneTabActions(context, onRefresh: manualRefresh)
+                    else
+                      FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
                   ],
                 ),
               ],

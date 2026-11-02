@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import 'settings/trakt_settings_screen.dart';
+import '../widgets/phone_nav_drawer.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/hub_vertical_navigation.dart';
 import '../focus/locked_hub_controller.dart';
@@ -328,6 +330,10 @@ class ComfortScreenState extends State<ComfortScreen>
         message: t.comfort.notConnectedTitle,
         subtitle: t.comfort.notConnectedMessage,
         icon: Symbols.weekend_rounded,
+        // Comfort is always in the phone's bottom bar, so offer the way in.
+        actionLabel: t.comfort.connectTrakt,
+        onAction: () =>
+            Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const TraktSettingsScreen())),
       );
     }
     if (!controller.isLoaded && controller.error == null) return const Center(child: CircularProgressIndicator());
@@ -359,6 +365,26 @@ class ComfortScreenState extends State<ComfortScreen>
       ),
     ],
   );
+
+  /// Phone: Random episode as an icon, Configure and Refresh in the side
+  /// drawer, beside the shared Search / remote / avatar set.
+  List<FocusableAction> _phoneActions(Color color) => [
+    FocusableAction(
+      debugLabel: 'ComfortRandomEpisode',
+      icon: _picking ? Symbols.hourglass_top_rounded : Symbols.casino_rounded,
+      iconColor: color,
+      tooltip: t.comfort.randomEpisode,
+      onPressed: _controller == null || _picking ? null : () => unawaited(_randomEpisode()),
+    ),
+    ...phoneTabActions(
+      context,
+      color: color,
+      onRefresh: manualRefresh,
+      extras: [
+        if (_controller != null) (Symbols.tune_rounded, t.comfort.configure, () => unawaited(_openConfigure())),
+      ],
+    ),
+  ];
 
   List<FocusableAction> _actions(Color color) => [
     FocusableAction(
@@ -485,7 +511,9 @@ class ComfortScreenState extends State<ComfortScreen>
                 FocusableActionBar(
                   key: _actionBarKey,
                   onNavigateDown: () => _hubKeys.first.currentState?.requestFocusFromMemory(),
-                  actions: _actions(Theme.of(context).colorScheme.onSurface),
+                  actions: PlatformDetector.isMobile(context)
+                      ? _phoneActions(Theme.of(context).colorScheme.onSurface)
+                      : _actions(Theme.of(context).colorScheme.onSurface),
                 ),
               ],
             ),

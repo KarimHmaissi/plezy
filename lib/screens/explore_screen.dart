@@ -23,6 +23,7 @@ import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/settings_service.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
+import '../widgets/phone_nav_drawer.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/catalog_source_logo.dart';
@@ -321,20 +322,36 @@ class ExploreScreenState extends State<ExploreScreen>
         FocusableActionBar(
           key: _actionBarKey,
           onNavigateDown: searchFocusNode.requestFocus,
-          actions: [
-            if (sources.activeSource case final TraktListsCatalogSource lists)
-              FocusableAction(
-                icon: Symbols.travel_explore_rounded,
-                tooltip: t.explore.traktLists.discoverLists,
-                onPressed: () => unawaited(_openDiscoverLists(lists)),
-              ),
-            FocusableAction(
-              icon: Symbols.dashboard_customize_rounded,
-              tooltip: t.homeRows.manageHome,
-              onPressed: () => openHomeRows(context),
-            ),
-            FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
-          ],
+          // Phone: the shared Search / remote / avatar set; this tab's own
+          // actions move into the drawer.
+          actions: PlatformDetector.isMobile(context)
+              ? phoneTabActions(
+                  context,
+                  onRefresh: manualRefresh,
+                  extras: [
+                    if (sources.activeSource case final TraktListsCatalogSource lists)
+                      (
+                        Symbols.travel_explore_rounded,
+                        t.explore.traktLists.discoverLists,
+                        () => unawaited(_openDiscoverLists(lists)),
+                      ),
+                    (Symbols.dashboard_customize_rounded, t.homeRows.manageHome, () => openHomeRows(context)),
+                  ],
+                )
+              : [
+                  if (sources.activeSource case final TraktListsCatalogSource lists)
+                    FocusableAction(
+                      icon: Symbols.travel_explore_rounded,
+                      tooltip: t.explore.traktLists.discoverLists,
+                      onPressed: () => unawaited(_openDiscoverLists(lists)),
+                    ),
+                  FocusableAction(
+                    icon: Symbols.dashboard_customize_rounded,
+                    tooltip: t.homeRows.manageHome,
+                    onPressed: () => openHomeRows(context),
+                  ),
+                  FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
+                ],
         ),
       ],
     );

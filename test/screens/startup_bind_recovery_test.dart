@@ -139,6 +139,25 @@ void main() {
       }
     });
 
+    test('mobile bar is Home, Comfort, Explore, Watchlist, AI; Libraries lives in the drawer', () {
+      final visible = allNavigationTabs.where((tab) => tab.id != NavigationTabId.liveTv).toList();
+      for (final current in [NavigationTabId.discover, NavigationTabId.libraries]) {
+        final tabs = mainScreenBottomNavigationTabs(
+          visibleTabs: visible,
+          isMobile: true,
+          isOffline: false,
+          currentTab: current,
+        );
+        expect(_ids(tabs), [
+          NavigationTabId.discover,
+          NavigationTabId.comfort,
+          NavigationTabId.explore,
+          NavigationTabId.watchlist,
+          NavigationTabId.ai,
+        ]);
+      }
+    });
+
     test('mobile offline includes Downloads and Settings', () {
       final offlineTabs = allNavigationTabs
           .where((tab) => tab.id == NavigationTabId.downloads || tab.id == NavigationTabId.settings)

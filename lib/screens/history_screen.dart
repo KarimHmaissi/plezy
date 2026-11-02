@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../focus/focusable_action_bar.dart';
+import '../widgets/phone_nav_drawer.dart';
 import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../media/media_kind.dart';
@@ -271,6 +273,7 @@ class _HistoryBody extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2, color: tk.textMuted),
                 ),
               ),
+            if (PlatformDetector.isMobile(context)) FocusableActionBar(actions: phoneTabActions(context)),
           ],
         ),
         if (history == null || stats == null)

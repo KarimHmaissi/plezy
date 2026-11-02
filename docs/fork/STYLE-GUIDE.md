@@ -84,6 +84,15 @@ the app.
 | Images | `OptimizedMediaImage` (Plex paths or absolute URLs) |
 | Touch feedback | wrap tappables in `Pressable`; `ForkMotion.selection()` on selection changes |
 
+## Navigation (phone)
+
+As Plex's app:
+
+- **Bottom bar**: Home, Comfort, Explore, Watchlist, AI (`mainScreenBottomNavigationTabs`). Comfort always shows on phones and explains how to connect Trakt when it isn't. Pages reached another way (Libraries, History, Search, Downloads, Settings) never take a slot; Home stays highlighted.
+- **Top bar on every tab**: the tab's own primary action, if any (AI's Ask, Comfort's Random episode, Libraries' filters, Watchlist's source), then `phoneTabActions(context)`: Search, the companion remote and the avatar. Nothing else.
+- **Side drawer** (`showPhoneNavDrawer`, from the avatar): slides in from the right over a dim scrim (`ForkMotion.sheetIn/sheetOut`, emphasized curves); swipe right, tap the scrim or Back closes it. Profile avatar and name, then the tab's own extra actions (`extras`), Libraries, History, Downloads, Watch Together, Refresh (tabs that reload), Profiles, Settings, Log out, as icon + label rows on `tokens.surface`.
+- TV and desktop keep the side rail and their own toolbars.
+
 ## Motion
 
 One set of tokens, in `ForkMotion` (`lib/theme/fork_motion.dart`):
@@ -110,5 +119,6 @@ native.
   TV (960×540 logical) beside Home and Explore.
 - **Don't** hard-code colours or fonts, add custom font assets, or use
   all-caps display headings.
-- **Don't** add bottom-nav tabs for pages reached from a top-bar icon (the
-  phone bar stays at five).
+- **Don't** add bottom-nav tabs or top-bar icons on phones: new destinations
+  and tab actions go in the side drawer (the bar stays at five; the top bar
+  at Search, remote, avatar).

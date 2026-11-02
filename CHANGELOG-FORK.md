@@ -92,6 +92,16 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### Phone navigation like Plex: side drawer
+
+- Every phone tab's top bar is the same: its own primary action, then
+  Search, the companion remote and the avatar. The avatar opens a side
+  drawer from the right (profile, Libraries, History, Downloads, Watch
+  Together, Refresh, Profiles, Settings, Log out, plus the tab's extras).
+- Bottom bar: Home, Comfort, Explore, Watchlist, AI. Libraries moves into
+  the drawer; Comfort is always there on phones and offers Connect Trakt
+  when Trakt isn't linked.
+
 ### Calmer motion and Plex-like card text
 
 - Ask opens with a short fade-and-rise (260 ms in, 200 ms out, Material 3
