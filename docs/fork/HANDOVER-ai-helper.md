@@ -60,11 +60,11 @@ below is on `feature/ai-helper` and not merged to `main`.
 ## Eval prompts
 
 The eval reads a plain-text prompt list (one request per line, `#` for
-comments) from the path in `AiEval.promptsFile`
-(`lib/services/ai/ai_eval.dart`). On the dev PC that file and the eval
-reports live outside the repo, in a local notes folder. Point
-`promptsFile` at your own copy on another machine. Reports are written next
-to it. Don't commit them: they list library titles.
+comments) from `AiEval.promptsFile` (`lib/services/ai/ai_eval.dart`): the
+`PLEZY_EVAL_PROMPTS` environment variable when set, else
+`notes/ai-eval-prompts.txt` under the working directory (ignored by git).
+Reports are written next to it. Don't commit them: they list library
+titles.
 
 ## Next backlog items (AI)
 

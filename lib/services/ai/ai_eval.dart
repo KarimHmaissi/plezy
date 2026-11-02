@@ -12,7 +12,10 @@ import 'claude_client.dart';
 /// markdown report: picks, whether each is on the servers, tool calls, time,
 /// tokens and cost. Developer tool (Settings ▸ AI, debug builds).
 abstract final class AiEval {
-  static const String promptsFile = r'C:\shieldExperience\notes\ai-eval-prompts.txt';
+  /// The prompt list: `PLEZY_EVAL_PROMPTS` when set, else
+  /// `notes/ai-eval-prompts.txt` under the working directory. The report is
+  /// written next to it. Neither is committed (they list library titles).
+  static String get promptsFile => Platform.environment['PLEZY_EVAL_PROMPTS'] ?? p.join('notes', 'ai-eval-prompts.txt');
 
   static Future<String> run({
     required LibraryIndex index,
