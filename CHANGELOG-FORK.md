@@ -92,6 +92,19 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### History: send Plex watches to Trakt (branch `feature/ai-helper`)
+- A "Send Plex watches to Trakt" button under the History hero (Trakt
+  connected) opens a preview first: how many films and episodes would be
+  added, by year, the first few, and what's skipped (already on Trakt,
+  mark-as-watched dates, no IMDb/TMDB/TVDB id). Nothing is written until
+  "Send to Trakt" is tapped.
+- Only Plex watches with real dates that Trakt lacks are sent, each with
+  its Plex date to the minute (Trakt deduplicates item + date, so a resend
+  adds nothing). Batches of 100, about one write a second, waiting out
+  rate limits.
+- The history entries a send created are recorded on the device, and
+  "Undo last send" removes exactly those (by history id), nothing else.
+
 ### History page: insights (branch `feature/ai-helper`)
 - Between the month strip and the timeline: the longest binge (episodes of
   one show in a day), top genres as bars, directors and actors as cards with

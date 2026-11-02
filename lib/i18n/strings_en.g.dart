@@ -4294,6 +4294,8 @@ class Translations$history$en {
 	/// en: '$n watches'
 	String watchCount({required Object n}) => '${n} watches';
 
+	late final Translations$history$copy$en copy = Translations$history$copy$en.internal(_root);
+
 	/// en: 'Nothing watched yet'
 	String get empty => 'Nothing watched yet';
 
@@ -7937,6 +7939,84 @@ class Translations$libraries$advancedFilters$en {
 	String get dateOlderThanYear => 'Older than a year';
 }
 
+// Path: history.copy
+class Translations$history$copy$en {
+	Translations$history$copy$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Send Plex watches to Trakt'
+	String get button => 'Send Plex watches to Trakt';
+
+	/// en: 'Undo last send to Trakt'
+	String get undoButton => 'Undo last send to Trakt';
+
+	/// en: 'Send Plex watches to Trakt'
+	String get title => 'Send Plex watches to Trakt';
+
+	/// en: 'Adds $films films and $episodes episodes to your Trakt history'
+	String adds({required Object films, required Object episodes}) => 'Adds ${films} films and ${episodes} episodes to your Trakt history';
+
+	/// en: 'Trakt already has every Plex watch it can match.'
+	String get nothing => 'Trakt already has every Plex watch it can match.';
+
+	/// en: 'By year'
+	String get byYear => 'By year';
+
+	/// en: '$films films · $episodes episodes'
+	String yearLine({required Object films, required Object episodes}) => '${films} films · ${episodes} episodes';
+
+	/// en: 'First few'
+	String get sample => 'First few';
+
+	/// en: 'Skipped'
+	String get skipped => 'Skipped';
+
+	/// en: '$n already on Trakt'
+	String alreadyOnTrakt({required Object n}) => '${n} already on Trakt';
+
+	/// en: '$n with mark-as-watched dates, not real viewings, so your Trakt timeline doesn't get made-up dates'
+	String bulk({required Object n}) => '${n} with mark-as-watched dates, not real viewings, so your Trakt timeline doesn\'t get made-up dates';
+
+	/// en: '$n that Trakt can't identify (no IMDb, TMDB or TVDB id)'
+	String noIds({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)';
+
+	/// en: 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.'
+	String get howItWorks => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.';
+
+	/// en: 'Cancel'
+	String get cancel => 'Cancel';
+
+	/// en: 'Send to Trakt'
+	String get confirm => 'Send to Trakt';
+
+	/// en: 'Sending… $done of $total'
+	String sending({required Object done, required Object total}) => 'Sending… ${done} of ${total}';
+
+	/// en: 'Added $films films and $episodes episodes to Trakt'
+	String done({required Object films, required Object episodes}) => 'Added ${films} films and ${episodes} episodes to Trakt';
+
+	/// en: '$n couldn't be found on Trakt'
+	String notFound({required Object n}) => '${n} couldn\'t be found on Trakt';
+
+	/// en: 'Sending to Trakt failed'
+	String get failed => 'Sending to Trakt failed';
+
+	/// en: 'Undo last send?'
+	String get undoTitle => 'Undo last send?';
+
+	/// en: 'Removes the $n Trakt history entries the last send added, nothing else.'
+	String undoMessage({required Object n}) => 'Removes the ${n} Trakt history entries the last send added, nothing else.';
+
+	/// en: 'Remove them'
+	String get undoConfirm => 'Remove them';
+
+	/// en: 'Removed $n entries from Trakt'
+	String undone({required Object n}) => 'Removed ${n} entries from Trakt';
+}
+
 // Path: explore.traktLists
 class Translations$explore$traktLists$en {
 	Translations$explore$traktLists$en.internal(this._root);
@@ -10593,6 +10673,29 @@ extension on Translations {
 			'history.bingeLine' => ({required Object n}) => '${n} episodes in one day',
 			'history.timesWatched' => ({required Object n}) => '×${n}',
 			'history.watchCount' => ({required Object n}) => '${n} watches',
+			'history.copy.button' => 'Send Plex watches to Trakt',
+			'history.copy.undoButton' => 'Undo last send to Trakt',
+			'history.copy.title' => 'Send Plex watches to Trakt',
+			'history.copy.adds' => ({required Object films, required Object episodes}) => 'Adds ${films} films and ${episodes} episodes to your Trakt history',
+			'history.copy.nothing' => 'Trakt already has every Plex watch it can match.',
+			'history.copy.byYear' => 'By year',
+			'history.copy.yearLine' => ({required Object films, required Object episodes}) => '${films} films · ${episodes} episodes',
+			'history.copy.sample' => 'First few',
+			'history.copy.skipped' => 'Skipped',
+			'history.copy.alreadyOnTrakt' => ({required Object n}) => '${n} already on Trakt',
+			'history.copy.bulk' => ({required Object n}) => '${n} with mark-as-watched dates, not real viewings, so your Trakt timeline doesn\'t get made-up dates',
+			'history.copy.noIds' => ({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)',
+			'history.copy.howItWorks' => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.',
+			'history.copy.cancel' => 'Cancel',
+			'history.copy.confirm' => 'Send to Trakt',
+			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
+			'history.copy.done' => ({required Object films, required Object episodes}) => 'Added ${films} films and ${episodes} episodes to Trakt',
+			'history.copy.notFound' => ({required Object n}) => '${n} couldn\'t be found on Trakt',
+			'history.copy.failed' => 'Sending to Trakt failed',
+			'history.copy.undoTitle' => 'Undo last send?',
+			'history.copy.undoMessage' => ({required Object n}) => 'Removes the ${n} Trakt history entries the last send added, nothing else.',
+			'history.copy.undoConfirm' => 'Remove them',
+			'history.copy.undone' => ({required Object n}) => 'Removed ${n} entries from Trakt',
 			'history.empty' => 'Nothing watched yet',
 			'history.loading' => 'Gathering your history…',
 			'history.failed' => 'Couldn\'t load your history',
@@ -10641,6 +10744,8 @@ extension on Translations {
 			'watchlist.noSourceTitle' => 'No watchlist connected',
 			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
 			'explore.allCopies' => 'Details and all copies',
+			_ => null,
+		} ?? switch (path) {
 			'explore.traktLists.boxOffice' => 'Box Office',
 			'explore.traktLists.mostWatchedMovies' => 'Most Watched Movies This Week',
 			'explore.traktLists.mostWatchedShows' => 'Most Watched Shows This Week',
@@ -10664,8 +10769,6 @@ extension on Translations {
 			'explore.rows.popularShows' => 'Popular Shows',
 			'explore.rows.trendingAnime' => 'Trending Anime',
 			'explore.rows.suggestedAnime' => 'Suggested Anime',
-			_ => null,
-		} ?? switch (path) {
 			'explore.rows.airingAnime' => 'Top Airing Anime',
 			'explore.rows.popularAnime' => 'Most Popular Anime',
 			'explore.rows.trending' => 'Trending',
@@ -11155,6 +11258,8 @@ extension on Translations {
 			'downloads.resumeAll' => 'Resume all',
 			'downloads.retryAll' => 'Retry all',
 			'downloads.retryFailed' => 'Retry failed downloads',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.deleteAll' => 'Delete all',
 			'downloads.selectVersion' => 'Select Version',
 			'downloads.allEpisodes' => 'All episodes',
@@ -11178,8 +11283,6 @@ extension on Translations {
 			'downloads.syncRuleRemoved' => 'Sync rule removed',
 			'downloads.syncRuleAndDownloadsRemoved' => 'Sync rule and associated downloads removed',
 			'downloads.syncRuleCleanupBusy' => 'Sync rules are currently updating. Try again in a moment.',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.syncRuleCleanupUnavailable' => 'Associated downloads could not be identified safely. Reconnect the server and try again, or remove the rule without deleting downloads.',
 			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}',
 			'downloads.activeSyncRules' => 'Sync rules',
@@ -11669,6 +11772,8 @@ extension on Translations {
 			'deepLinks.episodeHint' => 'Opening this link plays this episode.',
 			'deepLinks.profileHint' => 'Opening this link switches to this profile.',
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
+			_ => null,
+		} ?? switch (path) {
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
 			'cast.sending' => ({required Object title, required Object name}) => 'Playing ${title} on ${name}',
@@ -11692,8 +11797,6 @@ extension on Translations {
 			'cast.skipCredits' => 'Skip credits',
 			'cast.stop' => 'Stop',
 			'cast.nothingPlaying' => 'Nothing is playing',
-			_ => null,
-		} ?? switch (path) {
 			'cast.playPause' => 'Play / pause',
 			'cast.tvWorking' => ({required Object name}) => '${name} is working…',
 			'cast.notConnected' => ({required Object name}) => 'Not connected to ${name} — showing the last copy',

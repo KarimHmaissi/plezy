@@ -85,6 +85,20 @@ class TraktClient implements DisposableTrackerClient {
     return TrackerPage.fromResponse(res, [if (body is List) ...body.whereType<Map<String, dynamic>>()]);
   }
 
+  /// Fork: add watches to history and return Trakt's counts
+  /// (`added`/`not_found`). Same item + `watched_at` is deduplicated by Trakt.
+  Future<Map<String, dynamic>> addToHistoryCounted(Map<String, dynamic> body) async {
+    final res = await _request('POST', '/sync/history', body: body);
+    return res is Map<String, dynamic> ? res : const {};
+  }
+
+  /// Fork: remove specific watches by their history ids (not every play of
+  /// an item).
+  Future<Map<String, dynamic>> removeHistoryIds(List<int> ids) async {
+    final res = await _request('POST', '/sync/history/remove', body: {'ids': ids});
+    return res is Map<String, dynamic> ? res : const {};
+  }
+
   /// Fork: every show the user has watched, with images (no seasons).
   Future<List<Map<String, dynamic>>> getWatchedShows() async {
     final res = await _request('GET', '/sync/watched/shows?extended=noseasons,images');

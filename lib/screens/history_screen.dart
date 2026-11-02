@@ -17,11 +17,14 @@ import '../services/catalog/trakt_catalog_source.dart';
 import '../services/history/history_models.dart';
 import '../services/history/history_service.dart';
 import '../services/history/history_stats.dart';
+import '../services/history/trakt_copy.dart';
 import '../services/library_index/library_index.dart' show IndexSource, PlexIndexSource;
 import '../services/plex_client.dart';
 import '../theme/fork_motion.dart';
 import '../utils/app_logger.dart';
 import '../utils/catalog_navigation_helper.dart';
+import '../utils/dialogs.dart';
+import '../utils/snackbar_helper.dart';
 import '../utils/media_navigation_helper.dart';
 import '../widgets/optimized_media_image.dart';
 import '../widgets/pressable.dart';
@@ -166,6 +169,13 @@ class HistoryScreenState extends State<HistoryScreen>
                 });
               },
               onOpen: _open,
+              traktCopy: _trakt == null
+                  ? null
+                  : _TraktCopyBar(
+                      history: history,
+                      copier: TraktCopier(TraktClientHistoryWriter(_trakt!.client)),
+                      onChanged: () => _load(force: true),
+                    ),
             ),
           );
         },
@@ -201,8 +211,11 @@ class _HistoryBody extends StatelessWidget {
     required this.firstFocus,
     required this.onYear,
     required this.onOpen,
+    this.traktCopy,
   });
 
+  /// "Send Plex watches to Trakt", when Trakt is connected.
+  final Widget? traktCopy;
   final HistoryState state;
   final HistoryStats stats;
   final List<int> years;
@@ -254,6 +267,7 @@ class _HistoryBody extends StatelessWidget {
                       _YearPicker(years: years, year: year, onYear: onYear, firstFocus: firstFocus),
                       const SizedBox(height: 20),
                       _StatsHero(stats: stats, wide: width >= 600),
+                      if (traktCopy != null) ...[const SizedBox(height: 12), traktCopy!],
                       if (stats.byMonth.isNotEmpty) ...[
                         const SizedBox(height: 28),
                         _SectionTitle(t.history.byMonth),
@@ -1143,5 +1157,264 @@ class _DecadeStrip extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// "Send Plex watches to Trakt" (with its preview) and "Undo last send".
+class _TraktCopyBar extends StatefulWidget {
+  const _TraktCopyBar({required this.history, required this.copier, required this.onChanged});
+
+  final MergedHistory history;
+  final TraktCopier copier;
+  final VoidCallback onChanged;
+
+  @override
+  State<_TraktCopyBar> createState() => _TraktCopyBarState();
+}
+
+class _TraktCopyBarState extends State<_TraktCopyBar> {
+  TraktSendRecord? _last;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_readLast());
+  }
+
+  Future<void> _readLast() async {
+    final last = await widget.copier.lastSend();
+    if (mounted) setState(() => _last = last);
+  }
+
+  Future<void> _preview() async {
+    ForkMotion.selection();
+    final plan = planTraktCopy(widget.history);
+    final sent = await showModalBottomSheet<TraktSendRecord>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF111111),
+      builder: (_) => _TraktCopySheet(plan: plan, copier: widget.copier),
+    );
+    if (sent == null || !mounted) return;
+    setState(() => _last = sent);
+    showSuccessSnackBar(context, t.history.copy.done(films: sent.films, episodes: sent.episodes));
+    widget.onChanged();
+  }
+
+  Future<void> _undo() async {
+    final last = _last;
+    if (last == null) return;
+    final ok = await showConfirmDialog(
+      context,
+      title: t.history.copy.undoTitle,
+      message: t.history.copy.undoMessage(n: last.historyIds.length),
+      confirmText: t.history.copy.undoConfirm,
+      isDestructive: true,
+    );
+    if (!ok || !mounted) return;
+    try {
+      final removed = await widget.copier.undoLastSend();
+      if (!mounted) return;
+      setState(() => _last = null);
+      showSuccessSnackBar(context, t.history.copy.undone(n: removed));
+      widget.onChanged();
+    } catch (e) {
+      appLogger.w('History copy: undo failed', error: e);
+      if (mounted) showErrorSnackBar(context, t.history.copy.failed);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget button(String label, IconData icon, VoidCallback onTap, {bool primary = false}) => Pressable(
+      borderRadius: BorderRadius.circular(22),
+      longPress: false,
+      child: Material(
+        color: primary ? _amber.withValues(alpha: 0.14) : Colors.white.withValues(alpha: 0.06),
+        shape: StadiumBorder(side: BorderSide(color: primary ? _amber : Colors.white24)),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          focusColor: _amber.withValues(alpha: 0.35),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: primary ? _amber : Colors.white70),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    label.toUpperCase(),
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: _display,
+                      fontSize: 16,
+                      letterSpacing: 1,
+                      color: primary ? _amber : Colors.white70,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        button(t.history.copy.button, Symbols.cloud_upload_rounded, _preview, primary: true),
+        if (_last != null) button(t.history.copy.undoButton, Symbols.undo_rounded, _undo),
+      ],
+    );
+  }
+}
+
+/// The preview: what would be sent and what's skipped; nothing is written
+/// until Confirm.
+class _TraktCopySheet extends StatefulWidget {
+  const _TraktCopySheet({required this.plan, required this.copier});
+
+  final TraktCopyPlan plan;
+  final TraktCopier copier;
+
+  @override
+  State<_TraktCopySheet> createState() => _TraktCopySheetState();
+}
+
+class _TraktCopySheetState extends State<_TraktCopySheet> {
+  (int, int)? _progress;
+  String? _error;
+
+  Future<void> _send() async {
+    ForkMotion.selection();
+    setState(() {
+      _progress = (0, 1);
+      _error = null;
+    });
+    try {
+      final record = await widget.copier.send(
+        widget.plan,
+        onProgress: (done, total) {
+          if (mounted) setState(() => _progress = (done, total));
+        },
+      );
+      ForkMotion.success();
+      if (mounted) Navigator.pop(context, record);
+    } catch (e) {
+      appLogger.w('History copy: send failed', error: e);
+      if (mounted) {
+        setState(() {
+          _progress = null;
+          _error = t.history.copy.failed;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = widget.plan;
+    const label = TextStyle(fontFamily: _display, fontSize: 18, color: Colors.white70, letterSpacing: 1);
+    const body = TextStyle(color: Colors.white70, fontSize: 14, height: 1.35);
+    const muted = TextStyle(color: Colors.white38, fontSize: 12, height: 1.35);
+    final sending = _progress != null;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                t.history.copy.title.toUpperCase(),
+                style: const TextStyle(fontFamily: _display, fontSize: 30, color: Colors.white, height: 1),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                plan.toSend.isEmpty
+                    ? t.history.copy.nothing
+                    : t.history.copy.adds(films: plan.films, episodes: plan.episodes),
+                style: const TextStyle(color: _amber, fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              if (plan.toSend.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(t.history.copy.byYear.toUpperCase(), style: label),
+                for (final e in plan.byYear.entries)
+                  Text(
+                    '${e.key}: ${t.history.copy.yearLine(films: e.value.films, episodes: e.value.episodes)}',
+                    style: body,
+                  ),
+                const SizedBox(height: 14),
+                Text(t.history.copy.sample.toUpperCase(), style: label),
+                for (final p in plan.toSend.take(8))
+                  Text(
+                    [
+                      p.title,
+                      if (!p.isMovie && p.season != null && p.episode != null)
+                        t.history.episodeLabel(season: p.season!, episode: p.episode!),
+                      _shortDate(p.watchedAt),
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: body,
+                  ),
+              ],
+              const SizedBox(height: 14),
+              Text(t.history.copy.skipped.toUpperCase(), style: label),
+              Text(t.history.copy.alreadyOnTrakt(n: plan.alreadyOnTrakt), style: body),
+              if (plan.bulkDates > 0) Text(t.history.copy.bulk(n: plan.bulkDates), style: body),
+              if (plan.noIds > 0) Text(t.history.copy.noIds(n: plan.noIds), style: body),
+              const SizedBox(height: 14),
+              Text(t.history.copy.howItWorks, style: muted),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: const TextStyle(color: Color(0xFFE5484D))),
+              ],
+              const SizedBox(height: 18),
+              if (sending)
+                Row(
+                  children: [
+                    const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: _amber),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      t.history.copy.sending(done: _progress!.$1, total: _progress!.$2),
+                      style: body,
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(t.history.copy.cancel, style: const TextStyle(color: Colors.white70)),
+                    ),
+                    const SizedBox(width: 8),
+                    if (plan.toSend.isNotEmpty)
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+                        onPressed: _send,
+                        child: Text(t.history.copy.confirm),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _shortDate(DateTime at) {
+    final l = at.toLocal();
+    return '${l.day} ${_monthName(l.month).substring(0, 3)} ${l.year}';
   }
 }
