@@ -92,6 +92,25 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### History page, v1 (branch `feature/ai-helper`)
+- **Where:** a History item in the TV/Mac side nav, and a clock icon in the
+  phone's Home top bar.
+- **Data (read-only):** Trakt's full watch log plus Plex's last-viewed date
+  of every watched film and episode (one filtered request per library page,
+  paced), cached on the device; Trakt updates incrementally, Plex every 6 h.
+- **Merging:** one entry per watch, matched by IMDb/TMDB/TVDB ids (Plex
+  episodes without show ids borrow a same-named Trakt show's). Dates that
+  aren't viewings are detected: bulk imports and mark-all-watched (15+
+  watches within 10 minutes) and Trakt's "watched on release day". When one
+  side has such a date and the other a real one, they're the same watch on
+  the real date. Bulk-dated watches count in All time only.
+- **Page:** year chips (and All time); a hero with hours, films, episodes
+  (and shows), day streak and best; a films-vs-TV hours bar; a month-by-month
+  (or year-by-year) bar strip; then a timeline by month with posters and
+  Plex/Trakt badges. Tapping opens the title (library copy first, else its
+  catalog page). Notes say what's approximate (Plex keeps only the latest
+  watch per title; estimated runtimes; bulk and undated watches).
+
 ### Library rows to Home on the phone (branch `feature/ai-helper`)
 - Long-press any card in a library's Recommended rows (Rediscover, Recently
   added, …) for "Add to Home" / "Manage Home", as the TV already had.

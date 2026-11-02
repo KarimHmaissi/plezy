@@ -1576,7 +1576,31 @@
     "liveTv": "Live TV",
     "explore": "Explore",
     "watchlist": "Watchlist",
-    "comfort": "Comfort"
+    "comfort": "Comfort",
+    "history": "History"
+  },
+  "history": {
+    "title": "History",
+    "allTime": "All time",
+    "hours": "Hours",
+    "films": "Films",
+    "episodes": "Episodes",
+    "shows": "Shows",
+    "streak": "Day streak",
+    "bestStreak": "Best $n",
+    "byMonth": "Month by month",
+    "timeline": "Timeline",
+    "empty": "Nothing watched yet",
+    "loading": "Gathering your history…",
+    "failed": "Couldn't load your history",
+    "retry": "Try again",
+    "episodeLabel": "S$season · E$episode",
+    "plexOnlyNote": "Plex keeps only the latest watch of each title, so rewatches before it aren't counted.",
+    "undatedNote": "$n Trakt watches have no date and aren't shown.",
+    "bulkNote": "$n watches were imported or marked watched in bulk, so their dates aren't real: they count in All time but not in a year, the months or streaks.",
+    "estimatedNote": "Hours include an estimate for $n watches with no runtime.",
+    "noTraktNote": "Connect Trakt in Settings to add your full watch log.",
+    "updated": "Updated $when"
   },
   "comfort": {
     "carryOn": "Carry on watching",

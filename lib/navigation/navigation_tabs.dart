@@ -6,7 +6,7 @@ import '../i18n/strings.g.dart';
 import '../utils/platform_detector.dart';
 
 /// Navigation tab identifiers
-enum NavigationTabId { discover, explore, watchlist, comfort, ai, libraries, liveTv, search, downloads, settings }
+enum NavigationTabId { discover, explore, watchlist, comfort, ai, history, libraries, liveTv, search, downloads, settings }
 
 /// Represents a navigation tab with its configuration
 class NavigationTab {
@@ -106,6 +106,7 @@ String _getExploreLabel() => t.navigation.explore;
 String _getWatchlistLabel() => t.navigation.watchlist;
 String _getComfortLabel() => t.navigation.comfort;
 String _getAiLabel() => t.navigation.ai;
+String _getHistoryLabel() => t.navigation.history;
 String _getLibrariesLabel() => t.navigation.libraries;
 String _getLiveTvLabel() => t.navigation.liveTv;
 String _getSearchLabel() => t.common.search;
@@ -141,6 +142,12 @@ const allNavigationTabs = [
     getLabel: _getComfortLabel,
   ),
   NavigationTab(id: NavigationTabId.ai, onlineOnly: true, icon: Symbols.auto_awesome_rounded, getLabel: _getAiLabel),
+  NavigationTab(
+    id: NavigationTabId.history,
+    onlineOnly: true,
+    icon: Symbols.history_rounded,
+    getLabel: _getHistoryLabel,
+  ),
   NavigationTab(id: NavigationTabId.search, onlineOnly: true, icon: Symbols.search_rounded, getLabel: _getSearchLabel),
   NavigationTab(
     id: NavigationTabId.downloads,

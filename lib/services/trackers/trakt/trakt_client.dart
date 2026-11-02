@@ -70,6 +70,27 @@ class TraktClient implements DisposableTrackerClient {
   /// Body shape: see `trackerHistoryBody`.
   Future<void> addToHistory(Map<String, dynamic> body) => _request('POST', '/sync/history', body: body);
 
+  /// Fork: one page of the user's watch history (`movies` or `episodes`),
+  /// raw, newest first; [startAt] limits it to watches since then.
+  Future<TrackerPage<Map<String, dynamic>>> getHistory(
+    String type, {
+    int page = 1,
+    int limit = 1000,
+    DateTime? startAt,
+    String extended = 'full',
+  }) async {
+    final since = startAt == null ? '' : '&start_at=${Uri.encodeQueryComponent(startAt.toUtc().toIso8601String())}';
+    final res = await _requestResponse('GET', '/sync/history/$type?extended=$extended&page=$page&limit=$limit$since');
+    final body = json.decode(res.body);
+    return TrackerPage.fromResponse(res, [if (body is List) ...body.whereType<Map<String, dynamic>>()]);
+  }
+
+  /// Fork: every show the user has watched, with images (no seasons).
+  Future<List<Map<String, dynamic>>> getWatchedShows() async {
+    final res = await _request('GET', '/sync/watched/shows?extended=noseasons,images');
+    return [if (res is List) ...res.whereType<Map<String, dynamic>>()];
+  }
+
   Future<void> removeFromHistory(Map<String, dynamic> body) => _request('POST', '/sync/history/remove', body: body);
 
   Future<void> addRatings(Map<String, dynamic> body) =>

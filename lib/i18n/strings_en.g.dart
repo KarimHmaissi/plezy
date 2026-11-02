@@ -79,6 +79,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$startup$en startup = Translations$startup$en.internal(_root);
 	late final Translations$licenses$en licenses = Translations$licenses$en.internal(_root);
 	late final Translations$navigation$en navigation = Translations$navigation$en.internal(_root);
+	late final Translations$history$en history = Translations$history$en.internal(_root);
 	late final Translations$comfort$en comfort = Translations$comfort$en.internal(_root);
 	late final Translations$watchlist$en watchlist = Translations$watchlist$en.internal(_root);
 	late final Translations$explore$en explore = Translations$explore$en.internal(_root);
@@ -4223,6 +4224,81 @@ class Translations$navigation$en {
 
 	/// en: 'Comfort'
 	String get comfort => 'Comfort';
+
+	/// en: 'History'
+	String get history => 'History';
+}
+
+// Path: history
+class Translations$history$en {
+	Translations$history$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'History'
+	String get title => 'History';
+
+	/// en: 'All time'
+	String get allTime => 'All time';
+
+	/// en: 'Hours'
+	String get hours => 'Hours';
+
+	/// en: 'Films'
+	String get films => 'Films';
+
+	/// en: 'Episodes'
+	String get episodes => 'Episodes';
+
+	/// en: 'Shows'
+	String get shows => 'Shows';
+
+	/// en: 'Day streak'
+	String get streak => 'Day streak';
+
+	/// en: 'Best $n'
+	String bestStreak({required Object n}) => 'Best ${n}';
+
+	/// en: 'Month by month'
+	String get byMonth => 'Month by month';
+
+	/// en: 'Timeline'
+	String get timeline => 'Timeline';
+
+	/// en: 'Nothing watched yet'
+	String get empty => 'Nothing watched yet';
+
+	/// en: 'Gathering your history…'
+	String get loading => 'Gathering your history…';
+
+	/// en: 'Couldn't load your history'
+	String get failed => 'Couldn\'t load your history';
+
+	/// en: 'Try again'
+	String get retry => 'Try again';
+
+	/// en: 'S$season · E$episode'
+	String episodeLabel({required Object season, required Object episode}) => 'S${season} · E${episode}';
+
+	/// en: 'Plex keeps only the latest watch of each title, so rewatches before it aren't counted.'
+	String get plexOnlyNote => 'Plex keeps only the latest watch of each title, so rewatches before it aren\'t counted.';
+
+	/// en: '$n Trakt watches have no date and aren't shown.'
+	String undatedNote({required Object n}) => '${n} Trakt watches have no date and aren\'t shown.';
+
+	/// en: '$n watches were imported or marked watched in bulk, so their dates aren't real: they count in All time but not in a year, the months or streaks.'
+	String bulkNote({required Object n}) => '${n} watches were imported or marked watched in bulk, so their dates aren\'t real: they count in All time but not in a year, the months or streaks.';
+
+	/// en: 'Hours include an estimate for $n watches with no runtime.'
+	String estimatedNote({required Object n}) => 'Hours include an estimate for ${n} watches with no runtime.';
+
+	/// en: 'Connect Trakt in Settings to add your full watch log.'
+	String get noTraktNote => 'Connect Trakt in Settings to add your full watch log.';
+
+	/// en: 'Updated $when'
+	String updated({required Object when}) => 'Updated ${when}';
 }
 
 // Path: comfort
@@ -10470,6 +10546,28 @@ extension on Translations {
 			'navigation.explore' => 'Explore',
 			'navigation.watchlist' => 'Watchlist',
 			'navigation.comfort' => 'Comfort',
+			'navigation.history' => 'History',
+			'history.title' => 'History',
+			'history.allTime' => 'All time',
+			'history.hours' => 'Hours',
+			'history.films' => 'Films',
+			'history.episodes' => 'Episodes',
+			'history.shows' => 'Shows',
+			'history.streak' => 'Day streak',
+			'history.bestStreak' => ({required Object n}) => 'Best ${n}',
+			'history.byMonth' => 'Month by month',
+			'history.timeline' => 'Timeline',
+			'history.empty' => 'Nothing watched yet',
+			'history.loading' => 'Gathering your history…',
+			'history.failed' => 'Couldn\'t load your history',
+			'history.retry' => 'Try again',
+			'history.episodeLabel' => ({required Object season, required Object episode}) => 'S${season} · E${episode}',
+			'history.plexOnlyNote' => 'Plex keeps only the latest watch of each title, so rewatches before it aren\'t counted.',
+			'history.undatedNote' => ({required Object n}) => '${n} Trakt watches have no date and aren\'t shown.',
+			'history.bulkNote' => ({required Object n}) => '${n} watches were imported or marked watched in bulk, so their dates aren\'t real: they count in All time but not in a year, the months or streaks.',
+			'history.estimatedNote' => ({required Object n}) => 'Hours include an estimate for ${n} watches with no runtime.',
+			'history.noTraktNote' => 'Connect Trakt in Settings to add your full watch log.',
+			'history.updated' => ({required Object when}) => 'Updated ${when}',
 			'comfort.carryOn' => 'Carry on watching',
 			'comfort.randomEpisode' => 'Random episode',
 			'comfort.configure' => 'Configure',
@@ -10539,6 +10637,8 @@ extension on Translations {
 			'explore.status.ended' => 'Ended',
 			'explore.status.canceled' => 'Canceled',
 			'explore.status.upcoming' => 'Upcoming',
+			_ => null,
+		} ?? switch (path) {
 			'explore.episodeCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} episode', other: '${n} episodes', ), 
 			'explore.cast' => 'Cast',
 			'explore.characters' => 'Characters',
@@ -10561,8 +10661,6 @@ extension on Translations {
 			'explore.badge.rankPopular' => ({required Object n}) => '#${n} popular',
 			'explore.badge.rankAiring' => ({required Object n}) => '#${n} airing',
 			'explore.badge.rankRated' => ({required Object n}) => '#${n} rated',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.rankTrending' => ({required Object n}) => '#${n} trending',
 			'explore.badge.rankSeasonal' => ({required Object n, required Object season}) => '#${n} in ${season}',
 			'explore.badge.watchingNow' => ({required Object n}) => '${n} watching',
@@ -11053,6 +11151,8 @@ extension on Translations {
 			'downloads.editSyncFilter' => 'Sync filter',
 			'downloads.syncAllItems' => 'Syncing all items',
 			'downloads.syncUnwatchedItems' => 'Syncing unwatched items',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.syncRuleServerContext' => ({required Object server, required Object status}) => 'Server: ${server} • ${status}',
 			'downloads.syncRuleAvailable' => 'Available',
 			'downloads.syncRuleOffline' => 'Offline',
@@ -11075,8 +11175,6 @@ extension on Translations {
 			'downloads.backgroundWarning.reasonDataSaver' => 'Data Saver is on, which blocks background downloads on mobile data. Downloads should still run on Wi-Fi.',
 			'downloads.backgroundWarning.reasonOemUnknown' => 'Downloads repeatedly stopped while Plezy was in the background. Check Plezy\'s battery or background usage settings.',
 			'downloads.backgroundWarning.openSettings' => 'Open settings',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.backgroundWarning.stillNotWorking' => 'Device-specific help',
 			'downloads.backgroundWarning.stillNotWorkingDescription' => 'See steps for your device, or send a log from Settings › View Logs if the issue continues.',
 			'downloads.backgroundWarning.dialogTitle' => 'Downloads may not finish',
@@ -11567,6 +11665,8 @@ extension on Translations {
 			'remoteAi.connect' => 'Connect',
 			'remoteAi.hint' => 'What do you feel like watching?',
 			'remoteAi.working' => ({required Object name}) => '${name} is looking…',
+			_ => null,
+		} ?? switch (path) {
 			'remoteAi.error' => ({required Object message}) => 'The TV couldn\'t answer: ${message}',
 			'remoteAi.empty' => 'Ask for something and the picks show up here.',
 			'aiComposer.eyebrow' => 'ASK YOUR LIBRARY',
@@ -11589,8 +11689,6 @@ extension on Translations {
 			'aiComposer.random' => 'Random film',
 			'aiComposer.randomRequest' => 'Surprise me with a random great film',
 			'aiComposer.take1' => 'Take 1 · Reading your library',
-			_ => null,
-		} ?? switch (path) {
 			'aiComposer.take2' => 'Take 2 · Shortlisting',
 			'aiComposer.take3' => 'Take 3 · Final cut',
 			'aiComposer.wrap' => 'That\'s a wrap',

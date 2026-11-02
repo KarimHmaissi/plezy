@@ -1145,6 +1145,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                       onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.search),
                     ),
                     FocusableAction(
+                      icon: Symbols.history_rounded,
+                      iconColor: foregroundColor,
+                      tooltip: t.navigation.history,
+                      onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.history),
+                    ),
+                    FocusableAction(
                       icon: Symbols.download_rounded,
                       iconColor: foregroundColor,
                       tooltip: t.navigation.downloads,
