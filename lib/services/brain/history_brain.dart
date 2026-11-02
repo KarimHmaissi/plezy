@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -16,6 +17,7 @@ import '../history/history_service.dart';
 import '../library_index/index_database.dart';
 import '../library_index/library_index.dart';
 import '../trackers/trakt/trakt_client.dart';
+import 'brain_worker.dart';
 import 'history_profiles.dart';
 import 'onnx_embedder.dart';
 import 'trakt_details_cache.dart';
@@ -120,6 +122,18 @@ class HistoryBrain {
 
   Future<OnnxEmbedder> get embedder => _embedder ??= _openEmbedder();
 
+  /// Fork: the brain's own isolate for embedding and vector search (null in
+  /// tests, where that work runs here).
+  Future<BrainWorker?> get worker => _worker ??= () async {
+    await store;
+    final dir = await _folder();
+    return BrainWorker.spawn(
+      dbPath: p.join(dir.path, 'history_brain.db'),
+      modelDir: p.join(dir.path, 'models', 'bge-small-en-v1.5'),
+    );
+  }();
+  Future<BrainWorker?>? _worker;
+
   Future<OnnxEmbedder> _openEmbedder() async {
     try {
       final dir = Directory(p.join((await _folder()).path, 'models', 'bge-small-en-v1.5'));
@@ -222,12 +236,11 @@ class HistoryBrain {
       final index = await LibraryIndex.instance.database;
       final dir = await _folder();
 
-      final refs = [
-        for (final r in await index.customSelect('SELECT ${LibraryRef.columns} FROM index_titles').get())
-          LibraryRef.fromRow(r.data),
-      ];
-      final library = LibraryLookup(refs);
-      final watched = groupWatches(history.plays, library);
+      final indexPath = (await IndexDatabase.file()).path;
+      final plays = history.plays;
+      // Grouping tens of thousands of plays against the library: off the
+      // app's isolate, like every bulk step below.
+      final (:titles, :watched) = await _groupInBackground(indexPath, plays);
       final extras = await _extras(store, trakt);
 
       // Watched titles that aren't on the servers: details from Trakt.
@@ -249,16 +262,16 @@ class HistoryBrain {
         for (final w in watched)
           watchedProfile(w, row: rows[w.ref?.rowId], details: traktDetails[w.id], extras: extras),
       ];
-      var changed = store.putProfiles(watchedProfiles);
+      final dbPath = p.join(dir.path, 'history_brain.db');
+      var changed = await Isolate.run(_bound(_putProfiles, dbPath, watchedProfiles));
       keep.addAll(watchedProfiles.map((p) => p.id));
 
       // The rest of the library, a page at a time, only when the library
       // index or the extras changed since last time (most syncs are a new
       // watch: rebuilding 45k unchanged profiles would stall the app).
-      final watchedGroups = {for (final w in watched) ?w.ref?.groupKey};
       final unwatched = [
-        for (final r in library.titles)
-          if (!watchedGroups.contains(r.groupKey) && !keep.contains(r.titleId)) r.rowId,
+        for (final r in titles)
+          if (!keep.contains(r.titleId)) r.rowId,
       ];
       final stats = await index
           .customSelect('SELECT COUNT(*) AS n, MAX(updated_at) AS u, MAX(added_at) AS a FROM index_titles')
@@ -275,29 +288,45 @@ class HistoryBrain {
       if (store.meta('library.signature') != librarySignature) {
         for (var i = 0; i < unwatched.length; i += 500) {
           final page = await _rows(index, unwatched.sublist(i, (i + 500).clamp(0, unwatched.length)));
-          final profiles = [for (final row in page.values) libraryProfile(row, extras: extras)];
-          changed += store.putProfiles(profiles);
-          keep.addAll(profiles.map((p) => p.id));
+          final rows = page.values.toList();
+          final put = await _putLibraryPageInBackground(dbPath, rows, extras);
+          changed += put.changed;
+          keep.addAll(put.ids);
           // Let the UI and connections breathe between pages.
           await Future<void>.delayed(const Duration(milliseconds: 16));
         }
-        store.removeProfilesExcept(keep);
+        await Isolate.run(_bound(_removeProfilesExcept, dbPath, keep));
         store.setMeta('library.signature', librarySignature);
       }
       _publish(store, HistoryBrainPhase.embedding);
 
-      final embedder = await this.embedder;
-      final result = await BrainIndexer(
-        store: store,
-        embedder: embedder,
-        batchSize: 8,
-        // Half the time resting (more when the device is busy): background
-        // work, never a pinned CPU or loud fans.
-        duty: 0.5,
-        shouldPause: () => LocalMediaSession.active.value,
-      ).run();
-
-      final counts = store.counts(embedder.modelId);
+      store.reload();
+      final worker = await this.worker;
+      final BrainIndexSummary result;
+      if (worker != null) {
+        // Embedding runs in the brain's isolate; playback pauses it there.
+        worker.reload();
+        void onPlayback() => worker.pause(LocalMediaSession.active.value);
+        LocalMediaSession.active.addListener(onPlayback);
+        onPlayback();
+        try {
+          result = await worker.index(batchSize: 8, duty: 0.5);
+        } finally {
+          LocalMediaSession.active.removeListener(onPlayback);
+        }
+        store.reload();
+      } else {
+        result = await BrainIndexer(
+          store: store,
+          embedder: await embedder,
+          batchSize: 8,
+          // Half the time resting (more when the device is busy): background
+          // work, never a pinned CPU or loud fans.
+          duty: 0.5,
+          shouldPause: () => LocalMediaSession.active.value,
+        ).run();
+      }
+      final counts = store.counts(TransformerEmbedderIds.bgeSmall);
       final dbFile = File(p.join(dir.path, 'history_brain.db'));
       final report = (
         titles: counts.profiles,
@@ -419,6 +448,9 @@ class HistoryBrain {
     Set<String>? ids,
   }) async {
     final store = await this.store;
+    if (await worker case final w?) {
+      return _hits(store, await w.searchText(text, limit: limit, watched: watched, kind: kind, ids: ids));
+    }
     final embedder = await this.embedder;
     final query = (await embedder.embed([text], query: true)).single;
     return _hits(store, store.search(embedder.modelId, query, limit: limit, watched: watched, kind: kind, ids: ids));
@@ -432,6 +464,9 @@ class HistoryBrain {
     TitleKind? kind,
   }) async {
     final store = await this.store;
+    if (await worker case final w?) {
+      return _hits(store, await w.similar(id, limit: limit, watched: watched, kind: kind));
+    }
     return _hits(store, store.similar(TransformerEmbedderIds.bgeSmall, id, limit: limit, watched: watched, kind: kind));
   }
 
@@ -472,4 +507,60 @@ class HistoryBrain {
 /// The model ids the store files vectors under.
 abstract final class TransformerEmbedderIds {
   static const String bgeSmall = 'bge-small-en-v1.5';
+}
+
+// Fork: bulk work, run with Isolate.run (on a connection of its own).
+// Closures are made here, at the top level, so they capture only their
+// arguments (never the brain and its open database).
+
+R Function() _bound<A, B, R>(R Function(A, B) f, A a, B b) =>
+    () => f(a, b);
+
+/// The watched titles, and the library's other titles (one per group).
+Future<({List<({String rowId, String titleId})> titles, List<WatchedTitle> watched})> _groupInBackground(
+  String indexPath,
+  List<HistoryPlay> plays,
+) => Isolate.run(() {
+  final library = LibraryLookup([
+    for (final r in BrainStore.readRows(indexPath, 'SELECT ${LibraryRef.columns} FROM index_titles'))
+      LibraryRef.fromRow(r),
+  ]);
+  final watched = groupWatches(plays, library);
+  final watchedGroups = {for (final w in watched) ?w.ref?.groupKey};
+  return (
+    titles: [
+      for (final r in library.titles)
+        if (!watchedGroups.contains(r.groupKey)) (rowId: r.rowId, titleId: r.titleId),
+    ],
+    watched: watched,
+  );
+});
+
+Future<({int changed, List<String> ids})> _putLibraryPageInBackground(
+  String dbPath,
+  List<IndexedTitle> rows,
+  TitleExtras extras,
+) => Isolate.run(() => _putLibraryPage(dbPath, rows, extras));
+
+int _putProfiles(String dbPath, List<TitleProfile> profiles) {
+  final store = BrainStore.open(dbPath);
+  try {
+    return store.putProfiles(profiles);
+  } finally {
+    store.close();
+  }
+}
+
+({int changed, List<String> ids}) _putLibraryPage(String dbPath, List<IndexedTitle> rows, TitleExtras extras) {
+  final profiles = [for (final row in rows) libraryProfile(row, extras: extras)];
+  return (changed: _putProfiles(dbPath, profiles), ids: [for (final p in profiles) p.id]);
+}
+
+void _removeProfilesExcept(String dbPath, Set<String> keep) {
+  final store = BrainStore.open(dbPath);
+  try {
+    store.removeProfilesExcept(keep);
+  } finally {
+    store.close();
+  }
 }

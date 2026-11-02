@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 
@@ -55,6 +56,26 @@ abstract final class BrainDebug {
       'score': double.parse(h.score.toStringAsFixed(3)),
     };
     switch (params['op']) {
+      case 'syncLag':
+        // How long the app's isolate went without a turn during a sync.
+        if (params['rebuild'] == '1') (await brain.store).setMeta('library.signature', '');
+        var worst = Duration.zero;
+        var last = DateTime.now();
+        final probe = Timer.periodic(const Duration(milliseconds: 10), (_) {
+          final now = DateTime.now();
+          final gap = now.difference(last);
+          if (gap > worst) worst = gap;
+          if (gap.inMilliseconds > 100) debugPrint('BRAINLAG ${now.toIso8601String()} stalled ${gap.inMilliseconds} ms');
+          last = now;
+        });
+        final started = DateTime.now();
+        final r = await brain.sync(force: true);
+        probe.cancel();
+        return {
+          'seconds': DateTime.now().difference(started).inMilliseconds / 1000,
+          'worstStallMs': worst.inMilliseconds,
+          'changed': r?.changed,
+        };
       case 'sync':
         final r = await brain.sync(force: true);
         return r == null
@@ -85,7 +106,9 @@ abstract final class BrainDebug {
         // Compare against a reference implementation: the first dimensions.
         final e = await brain.embedder;
         final v = (await e.embed([params['q'] ?? ''], query: params['query'] == 'true')).single;
-        return {'head': [for (final x in v.take(6)) double.parse(x.toStringAsFixed(4))]};
+        return {
+          'head': [for (final x in v.take(6)) double.parse(x.toStringAsFixed(4))],
+        };
       case 'ask':
         // The real helper, answer not saved: for checking history questions.
         if (params['effort'] case final e?) AiAgent.effort = e;

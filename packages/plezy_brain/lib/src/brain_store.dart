@@ -19,6 +19,8 @@ typedef BrainHit = ({String id, double score});
 class BrainStore {
   BrainStore._(this._db) {
     _db.execute('PRAGMA journal_mode=WAL');
+    // Other isolates write to the same file (the app's sync, the indexer).
+    _db.execute('PRAGMA busy_timeout=5000');
     _db.execute('''
       CREATE TABLE IF NOT EXISTS profiles (
         id TEXT PRIMARY KEY,
@@ -53,6 +55,17 @@ class BrainStore {
 
   factory BrainStore.open(String path) => BrainStore._(sqlite3.open(path));
   factory BrainStore.memory() => BrainStore._(sqlite3.openInMemory());
+
+  /// Rows of [sql] from another database file, opened read-only (the app's
+  /// library index, read from a background isolate).
+  static List<Map<String, Object?>> readRows(String path, String sql) {
+    final db = sqlite3.open(path, mode: OpenMode.readOnly);
+    try {
+      return [for (final r in db.select(sql)) Map.of(r)];
+    } finally {
+      db.close();
+    }
+  }
 
   final Database _db;
 
@@ -116,6 +129,9 @@ class BrainStore {
     _cache = null;
     return gone.length;
   }
+
+  /// Forget cached vectors and flags (another connection changed the file).
+  void reload() => _cache = null;
 
   Set<String> ids() => {for (final r in _db.select('SELECT id FROM profiles')) r['id'] as String};
 
