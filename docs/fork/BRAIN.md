@@ -19,8 +19,14 @@ The AI helper's own knowledge, kept apart from Plezy's core:
 | `HistoryQuery`, `historyStats` | `history_query.dart` | Filters (dates, genres, people, collection, rewatched, show progress, rating, Comfort, watchlist) and grouped counts, for exact answers |
 | Plezy adapters | `lib/services/brain/` | `history_profiles.dart` (history + library index → profiles, without loading the whole library at once), `trakt_details_cache.dart`, `onnx_embedder.dart` (flutter_onnxruntime, pinned model download), `history_brain.dart` (the host service), `brain_debug.dart` |
 | AI tools | `lib/services/ai/ai_history_tools.dart` | `history_query`, `history_stats`, `similar_titles` for the helper |
+| `tasteSummary` | `taste_summary.dart` | The user's watching as compact text (recent, loved, didn't stick, genres) for the helper's first prompt, cached until the next sync |
+| `BrainWorker` | `lib/services/brain/brain_worker.dart` | The brain's own isolate: embedding (tokenising, hashing, ONNX) and vector search, on its own connection. Warmed 30 s after start when nothing plays |
 
 Runs on hosts only (Mac, PC, Android TV); a phone mirroring a host asks it.
+Nothing heavy runs on the app's isolate: the worker embeds and searches,
+and grouping the history and writing profiles run with `Isolate.run` on
+connections of their own (WAL, `busy_timeout`). The debug op `syncLag`
+reports the app isolate's longest stall during a sync.
 The index lives in the app's support folder (`brain/`), never in the repo.
 
 ## Dialogue (parked)
