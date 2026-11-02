@@ -112,6 +112,9 @@ class AiAgent {
 
   static const int maxSteps = 10;
 
+  /// Thinking effort for each step.
+  static String effort = 'low';
+
   static const String systemPrompt = '''
 You are the film and TV helper inside Plezy, a Plex app on the user's TV. The user asks for something to watch; you find it on their own Plex servers and hand back a row of picks.
 
@@ -119,7 +122,7 @@ How to work:
 - The user's library is large (about 30,000 films and 15,000 shows across two servers). You can't see it directly; use the tools.
 - For "only what's here" requests (genres, years, recently added, unwatched, a person, a library such as Anime or 4K), use search_library and text_search.
 - For taste-based requests ("like X", "awesome 80s action"), use your own knowledge to think of strong candidates, then check them with find_titles. Combine both approaches when useful.
-- For "based on my history" requests, call get_history first.
+- For "based on my history" or "for tonight" requests, use the summary of their watching when it's given (no need to call get_history for taste); otherwise call get_history first.
 - Ratings in the library are audience ratings (usually IMDb, 0-10). Brand-new titles often show 9-10 from a handful of votes; before calling a recent title top rated or popular, check a shortlist with get_ratings and prefer titles with many votes.
 - Only pick titles whose ids came back from the tools. Never invent ids or claim a title is available without a tool saying so.
 - Prefer one entry per title (the tools already merge 4K copies and the second server).
@@ -128,7 +131,8 @@ How to work:
 - How many picks: let the request decide, up to 50. List-style asks ("every...", "all the X on my server", "a big list", a full franchise or filmography): 40-50. Broad or open-ended requests (a genre, a mood, an era, "something like X", "based on my history"): about 30-40; the library is big, so a broad request should normally fill a long row. Narrow requests (a specific title, a yes/no question, "a random X", tight constraints): only the titles that genuinely fit, even if that's one or two. Never pad a list with weak matches to reach a number.
 - Finish by calling show_picks exactly once, best first, each pick with one short, specific reason.
 - Always finish with show_picks, even for yes/no questions ("is X on my server?", "do I have Y?"): put the answer in the intro and the title (or the closest matches) as picks so the user can play it. If nothing fits, call show_picks with an intro saying so and no picks.
-- Keep it quick: a few well-chosen tool calls, not exhaustive searching.''';
+- Keep it quick: usually two turns. In the first, call every tool you need at once, in parallel (e.g. find_titles for your candidates, plus search_library or similar_titles); then call show_picks. Only take another turn if the results leave real gaps.
+- Keep each pick's reason under 15 words.''';
 
   /// Fork: added when the history brain is available.
   static const String historyPrompt = '''
@@ -176,6 +180,12 @@ Questions about the user's own watching:
     }
     final client = _client ??= ClaudeClient(key);
     final today = DateTime.now().toIso8601String().substring(0, 10);
+    var taste = '';
+    try {
+      taste = await brain?.taste() ?? '';
+    } catch (e) {
+      appLogger.d('AI: no taste summary', error: e);
+    }
     final messages = <Map<String, Object?>>[
       {
         'role': 'user',
@@ -194,13 +204,21 @@ Questions about the user's own watching:
             'model': model.id,
             'max_tokens': 16000,
             'thinking': {'type': 'adaptive'},
-            'output_config': {'effort': 'medium'},
+            'output_config': {'effort': effort},
             'system': [
               {
                 'type': 'text',
                 'text': brain == null ? systemPrompt : '$systemPrompt$historyPrompt',
                 'cache_control': {'type': 'ephemeral'},
               },
+              // Fork: their taste up front, so a recommendation needs no
+              // history lookups first. Changes only after a sync.
+              if (taste.isNotEmpty)
+                {
+                  'type': 'text',
+                  'text': "The user's watching, from their history (for taste; use the tools for exact counts):\n$taste",
+                  'cache_control': {'type': 'ephemeral'},
+                },
             ],
             'tools': tools.definitions(),
             'messages': messages,
@@ -259,8 +277,10 @@ Questions about the user's own watching:
               final args = (use['input'] as Map?)?.cast<String, dynamic>() ?? const {};
               String result;
               var isError = false;
+              final toolStarted = DateTime.now();
               try {
                 result = await tools.run(name, args);
+                appLogger.d('AI: tool $name took ${DateTime.now().difference(toolStarted).inMilliseconds} ms');
               } catch (e) {
                 appLogger.w('AI: tool $name failed', error: e);
                 result = 'Tool failed: $e';
@@ -287,7 +307,8 @@ Questions about the user's own watching:
     }
     final timing =
         'model ${(modelTime.inMilliseconds / 1000).toStringAsFixed(1)}s ($modelCalls calls), '
-        'tools ${(toolTime.inMilliseconds / 1000).toStringAsFixed(1)}s';
+        'tools ${(toolTime.inMilliseconds / 1000).toStringAsFixed(1)}s, '
+        'tokens $input in + $cached cached, $output out, effort $effort';
     appLogger.i(
       'AI: ${DateTime.now().toIso8601String()} ask done in '
       '${(DateTime.now().difference(started).inMilliseconds / 1000).toStringAsFixed(1)}s: $timing, '

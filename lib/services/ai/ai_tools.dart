@@ -424,27 +424,39 @@ class AiTools {
 
   Future<String> _findTitles(Map<String, dynamic> input) async {
     final db = await index.database;
+    final wanted = [
+      for (final t in (input['titles'] as List? ?? const []).whereType<Map>().take(50))
+        if ((t['title'] as String? ?? '').trim() case final title when title.isNotEmpty)
+          (title: title, year: (t['year'] as num?)?.toInt()),
+    ];
+    if (wanted.isEmpty) return 'No titles given.';
+    // One pass over the table for every title (one query each was a full
+    // scan apiece: seconds for a long list).
+    final names = {for (final w in wanted) w.title.toLowerCase()}.toList();
+    final marks = List.filled(names.length, '?').join(',');
+    final rows = await db
+        .customSelect(
+          'SELECT * FROM index_titles WHERE lower(title) IN ($marks) OR lower(original_title) IN ($marks) '
+          'ORDER BY audience_rating DESC',
+          variables: [for (final n in [...names, ...names]) Variable<String>(n)],
+          readsFrom: {db.indexTitles},
+        )
+        .get();
+    final titles = [for (final r in rows) db.indexTitles.map(r.data)];
     final found = <String>[];
     final missing = <String>[];
-    for (final t in (input['titles'] as List? ?? const []).whereType<Map>().take(50)) {
-      final title = (t['title'] as String? ?? '').trim();
-      if (title.isEmpty) continue;
-      final year = (t['year'] as num?)?.toInt();
-      final rows = await db
-          .customSelect(
-            'SELECT * FROM index_titles WHERE (title = ? COLLATE NOCASE OR original_title = ? COLLATE NOCASE)'
-            '${year == null ? '' : ' AND year BETWEEN ? AND ?'} ORDER BY audience_rating DESC LIMIT 5',
-            variables: [
-              Variable<String>(title),
-              Variable<String>(title),
-              if (year != null) ...[Variable<int>(year - 1), Variable<int>(year + 1)],
-            ],
-            readsFrom: {db.indexTitles},
+    for (final w in wanted) {
+      final name = w.title.toLowerCase();
+      final year = w.year;
+      final match = titles
+          .where(
+            (t) =>
+                (t.title.toLowerCase() == name || t.originalTitle?.toLowerCase() == name) &&
+                (year == null || (t.year != null && (t.year! - year).abs() <= 1)),
           )
-          .get();
-      final match = rows.isEmpty ? null : db.indexTitles.map(rows.first.data);
+          .firstOrNull;
       if (match == null) {
-        missing.add(year == null ? title : '$title ($year)');
+        missing.add(year == null ? w.title : '${w.title} ($year)');
       } else {
         found.add(line(match));
       }

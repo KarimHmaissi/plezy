@@ -13,6 +13,7 @@ export 'src/export_job.dart';
 export 'src/history_query.dart';
 export 'src/media_source.dart';
 export 'src/subtitles.dart';
+export 'src/taste_summary.dart';
 export 'src/title_profile.dart';
 export 'src/wikipedia.dart';
 export 'src/wordpiece.dart';

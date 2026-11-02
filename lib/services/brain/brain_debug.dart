@@ -88,7 +88,9 @@ abstract final class BrainDebug {
         return {'head': [for (final x in v.take(6)) double.parse(x.toStringAsFixed(4))]};
       case 'ask':
         // The real helper, answer not saved: for checking history questions.
+        if (params['effort'] case final e?) AiAgent.effort = e;
         final agent = AiAgent(index: LibraryIndex.instance);
+        if (params['taste'] == '1') return {'taste': await HistoryBrain.instance.taste()};
         try {
           final a = await agent.ask(params['q'] ?? '');
           return {

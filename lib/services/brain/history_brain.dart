@@ -443,6 +443,21 @@ class HistoryBrain {
   /// Every watched title's profile.
   Future<List<TitleProfile>> watchedProfiles() async => (await store).profiles(watched: true);
 
+  /// The user's taste for the helper's first prompt ([tasteSummary]), kept
+  /// until the next sync (and a day at most) so the prompt stays cached.
+  Future<String> taste() async {
+    final now = DateTime.now();
+    final cached = _taste;
+    if (cached != null && cached.syncAt == _lastSyncAt && now.difference(cached.at) < const Duration(days: 1)) {
+      return cached.text;
+    }
+    final text = tasteSummary(await watchedProfiles(), now: now);
+    _taste = (text: text, at: now, syncAt: _lastSyncAt);
+    return text;
+  }
+
+  ({String text, DateTime at, DateTime? syncAt})? _taste;
+
   Future<TitleProfile?> profile(String id) async => (await store).profile(id);
 
   void stop() {

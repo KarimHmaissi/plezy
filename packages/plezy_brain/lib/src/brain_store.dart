@@ -124,6 +124,16 @@ class BrainStore {
     return rows.isEmpty ? null : _decode(rows.first['data'] as String);
   }
 
+  /// Ids of the titles called [title] (any case), watched ones first,
+  /// without decoding every profile.
+  List<String> idsByTitle(String title) => [
+    for (final r in _db.select(
+      "SELECT id FROM profiles WHERE lower(json_extract(data, '\$.t')) = ? ORDER BY watched DESC",
+      [title.trim().toLowerCase()],
+    ))
+      r['id'] as String,
+  ];
+
   List<TitleProfile> profiles({bool? watched, Iterable<String>? ids}) {
     if (ids != null) {
       return [

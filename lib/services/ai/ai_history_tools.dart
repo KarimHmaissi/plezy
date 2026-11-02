@@ -318,8 +318,7 @@ class AiHistoryTools {
       }
     }
     if (title != null && title.trim().isNotEmpty) {
-      final want = title.trim().toLowerCase();
-      return store.profiles().where((p) => p.title.toLowerCase() == want).firstOrNull?.id;
+      return store.idsByTitle(title).firstOrNull;
     }
     return null;
   }
