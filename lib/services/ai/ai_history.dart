@@ -26,6 +26,7 @@ class AiHistoryEntry {
     this.followUps = const [],
     this.spotlights = const {},
     this.topPicks = const {},
+    this.watchState = const {},
     this.extended = false,
   });
 
@@ -52,6 +53,10 @@ class AiHistoryEntry {
   /// [MediaItem.globalKey].
   final Map<String, String> spotlights;
   final Map<String, String> topPicks;
+
+  /// Fork: how far the user got with a pick when it was saved ('watched',
+  /// 'inProgress' or 'rewatch': seen more than once), by globalKey.
+  final Map<String, String> watchState;
 
   /// What the answer card shows.
   String? get cardText => writeup ?? answer;
@@ -80,6 +85,7 @@ class AiHistoryEntry {
     followUps: followUps,
     spotlights: spotlights,
     topPicks: topPicks,
+    watchState: watchState,
     createdAt: createdAt,
     items: items,
     reasons: {...reasons, key: reason},
@@ -104,6 +110,7 @@ class AiHistoryEntry {
           'reason': reasons[item.globalKey],
           'spotlight': ?spotlights[item.globalKey],
           'top': ?topPicks[item.globalKey],
+          'seen': ?watchState[item.globalKey],
         },
     ],
   };
@@ -115,12 +122,14 @@ class AiHistoryEntry {
       final reasons = <String, String>{};
       final spotlights = <String, String>{};
       final topPicks = <String, String>{};
+      final watchState = <String, String>{};
       for (final raw in (json['items'] as List? ?? const []).whereType<Map>()) {
         final item = MediaItem.fromJson((raw['item'] as Map).cast<String, dynamic>());
         items.add(item);
         if (raw['reason'] is String) reasons[item.globalKey] = raw['reason'] as String;
         if (raw['spotlight'] is String) spotlights[item.globalKey] = raw['spotlight'] as String;
         if (raw['top'] is String) topPicks[item.globalKey] = raw['top'] as String;
+        if (raw['seen'] is String) watchState[item.globalKey] = raw['seen'] as String;
       }
       return AiHistoryEntry(
         id: json['id'] as String,
@@ -133,6 +142,7 @@ class AiHistoryEntry {
         followUps: [...(json['followUps'] as List? ?? const []).whereType<String>()],
         spotlights: spotlights,
         topPicks: topPicks,
+        watchState: watchState,
         createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int? ?? 0),
         items: items,
         reasons: reasons,

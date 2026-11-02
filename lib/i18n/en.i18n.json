@@ -1229,7 +1229,10 @@
     "working": "Working on it",
     "spotlight": "Worth a closer look",
     "writingReason": "Writing why it fits…",
-    "details": "Details"
+    "details": "Details",
+    "badgeWatched": "Watched",
+    "badgeInProgress": "In progress",
+    "badgeRewatch": "Rewatch"
   },
   "ai": {
     "settingsTitle": "AI",

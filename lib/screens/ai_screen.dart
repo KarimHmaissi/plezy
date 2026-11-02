@@ -900,11 +900,22 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     );
   }
 
-  /// "Top pick" on the strongest matches' posters.
+  /// "Top pick" on the strongest matches' posters, and how far the user got
+  /// with a pick (Watched, In progress, Rewatch), from the history brain.
   List<String> Function(MediaItem item)? _badgesFor(MediaHub hub) {
-    final top = _entryForHub(hub)?.topPicks ?? const {};
-    if (top.isEmpty) return null;
-    return (item) => top.containsKey(item.globalKey) ? [t.aiTab.topPick] : const [];
+    final entry = _entryForHub(hub);
+    final top = entry?.topPicks ?? const {};
+    final seen = entry?.watchState ?? const {};
+    if (top.isEmpty && seen.isEmpty) return null;
+    return (item) => [
+      if (top.containsKey(item.globalKey)) t.aiTab.topPick,
+      ?switch (seen[item.globalKey]) {
+        'inProgress' => t.aiTab.badgeInProgress,
+        'rewatch' => t.aiTab.badgeRewatch,
+        'watched' => t.aiTab.badgeWatched,
+        _ => null,
+      },
+    ];
   }
 
   /// The answer's text inside its row: its write-up, notes and follow-ups.

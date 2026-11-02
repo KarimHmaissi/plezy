@@ -1,6 +1,11 @@
+import 'package:plezy_brain/plezy_brain.dart' show ShowProgress;
+
 import '../../media/ids.dart';
+import '../../media/media_item.dart';
 import '../../media/media_server_client.dart';
 import '../../utils/app_logger.dart';
+import '../brain/history_brain.dart';
+import '../brain/history_profiles.dart';
 import '../library_index/library_index.dart';
 import '../trackers/trakt/trakt_client.dart';
 import 'ai_agent.dart';
@@ -59,6 +64,7 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
         reasons: {for (final p in picks) p.item.globalKey: p.reason},
         spotlights: {for (final p in picks) p.item.globalKey: ?answer.spotlights[p.id]},
         topPicks: {for (final p in picks) p.item.globalKey: ?answer.topPicks[p.id]},
+        watchState: await _watchState(picks),
       ),
     );
   } finally {
@@ -97,9 +103,38 @@ AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime
     followUps: old.followUps,
     spotlights: old.spotlights,
     topPicks: old.topPicks,
+    watchState: {...old.watchState, ...found.watchState},
     createdAt: createdAt ?? old.createdAt,
     items: items,
     reasons: {...old.reasons, ...found.reasons},
     extended: true,
   );
+}
+
+/// Fork: each pick's watch state from the history brain (Plex and Trakt
+/// watches), for its badge: a show partway through, a title seen more than
+/// once, or seen.
+Future<Map<String, String>> _watchState(List<({MediaItem item, String reason, String id})> picks) async {
+  final brain = HistoryBrain.instance;
+  if (brain.status.value.profiles == 0) return const {};
+  try {
+    final store = await brain.store;
+    final db = await LibraryIndex.instance.database;
+    final out = <String, String>{};
+    for (final p in picks) {
+      final row = await (db.select(db.indexTitles)..where((r) => r.id.equals(p.id))).getSingleOrNull();
+      final profile = row == null ? null : store.profile(LibraryRef.of(row).titleId);
+      if (profile == null || !profile.watched) continue;
+      final progress = profile.progress(DateTime.now());
+      out[p.item.globalKey] = progress == ShowProgress.inProgress || progress == ShowProgress.paused
+          ? 'inProgress'
+          : profile.rewatched
+          ? 'rewatch'
+          : 'watched';
+    }
+    return out;
+  } catch (e) {
+    appLogger.d('AI: watch state for picks unavailable', error: e);
+    return const {};
+  }
 }

@@ -3409,6 +3409,15 @@ class Translations$aiTab$en {
 
 	/// en: 'Details'
 	String get details => 'Details';
+
+	/// en: 'Watched'
+	String get badgeWatched => 'Watched';
+
+	/// en: 'In progress'
+	String get badgeInProgress => 'In progress';
+
+	/// en: 'Rewatch'
+	String get badgeRewatch => 'Rewatch';
 }
 
 // Path: ai
@@ -10377,6 +10386,9 @@ extension on Translations {
 			'aiTab.spotlight' => 'Worth a closer look',
 			'aiTab.writingReason' => 'Writing why it fits…',
 			'aiTab.details' => 'Details',
+			'aiTab.badgeWatched' => 'Watched',
+			'aiTab.badgeInProgress' => 'In progress',
+			'aiTab.badgeRewatch' => 'Rewatch',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
@@ -10771,11 +10783,11 @@ extension on Translations {
 			'comfort.addShow' => 'Add a show',
 			'comfort.searchHint' => 'Search Trakt for a show',
 			'comfort.remove' => 'Remove',
+			_ => null,
+		} ?? switch (path) {
 			'comfort.added' => ({required Object title}) => 'Added ${title}',
 			'comfort.connectTrakt' => 'Connect Trakt',
 			'watchlist.films' => 'Films',
-			_ => null,
-		} ?? switch (path) {
 			'watchlist.tv' => 'TV',
 			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
 			'watchlist.genreTv' => ({required Object genre}) => '${genre} TV',
@@ -11285,11 +11297,11 @@ extension on Translations {
 			'downloads.resumeDownload' => 'Resume download',
 			'downloads.cancelledDownload' => 'Canceled download',
 			'downloads.syncingFile' => ({required Object file, required Object status}) => '${file} (syncing ${status})',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.downloadedFileClickToComplete' => ({required Object file}) => 'Downloaded ${file} - Click to complete',
 			'downloads.partialDownloadClickToComplete' => 'Partially downloaded - Click to complete',
 			'downloads.deleting' => 'Deleting...',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Deleting ${title}... (${current} of ${total})',
 			'downloads.queuedTooltip' => 'Queued',
 			'downloads.queuedFilesTooltip' => ({required Object files}) => 'Queued ${files}',
@@ -11799,11 +11811,11 @@ extension on Translations {
 			'addServer.redirectUnsupportedEnterFinal' => ({required Object product}) => 'The server redirected to an unsupported URL. Enter the final ${product} URL directly.',
 			'deepLinks.invalid' => 'This Plezy link isn\'t valid.',
 			'deepLinks.profileNotFound' => ({required Object profile}) => 'No profile matches "${profile}".',
+			_ => null,
+		} ?? switch (path) {
 			'deepLinks.serverUnavailable' => 'Couldn\'t reach the server for this link.',
 			'deepLinks.notFound' => 'Couldn\'t find this title in your libraries.',
 			'deepLinks.unsupportedItem' => 'This link can\'t be played.',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.noLiveTv' => 'No Live TV server is available for this link.',
 			'deepLinks.channelNotFound' => ({required Object channel}) => 'Couldn\'t find channel "${channel}".',
 			'deepLinks.showLink' => 'Show link',
