@@ -512,8 +512,86 @@ String withoutLeadingTitle(String text, String? title) {
   if (matched < want.length || (i < text.length && letter(text[i]))) return text;
   final rest = text.substring(i).replaceFirst(RegExp(r"^('s\b)?[\s:,;.\-–—]*"), '');
   if (rest.isEmpty) return text;
+  // "has the same spirit" isn't a sentence alone: "It has the same spirit".
+  final first = RegExp(r"^[\p{L}']+", unicode: true).firstMatch(rest)?.group(0)?.toLowerCase();
+  if (first != null && _verbs.contains(first)) {
+    return 'It $rest';
+  }
   return rest[0].toUpperCase() + rest.substring(1);
 }
+
+/// Words a stripped reason starts with that need a subject.
+const Set<String> _verbs = {
+  'is',
+  'has',
+  'was',
+  'does',
+  "isn't",
+  "wasn't",
+  "hasn't",
+  "doesn't",
+  'can',
+  'could',
+  'will',
+  'would',
+  'should',
+  'might',
+  'may',
+  'feels',
+  'offers',
+  'shares',
+  'brings',
+  'delivers',
+  'mixes',
+  'blends',
+  'keeps',
+  'gives',
+  'makes',
+  'packs',
+  'pairs',
+  'follows',
+  'tells',
+  'captures',
+  'carries',
+  'matches',
+  'echoes',
+  'swaps',
+  'trades',
+  'sits',
+  'hits',
+  'lands',
+  'puts',
+  'takes',
+  'plays',
+  'works',
+  'leans',
+  'nails',
+  'balances',
+  'combines',
+  'stars',
+  'features',
+  'explores',
+  'returns',
+  'continues',
+  'picks',
+  'adds',
+  'comes',
+  'goes',
+  'turns',
+  'sets',
+  'channels',
+  'serves',
+  'mirrors',
+  'scratches',
+  'swings',
+  'wraps',
+  'finds',
+  'gets',
+  'centres',
+  'centers',
+  'builds',
+  'leaves',
+};
 
 /// A title the answer says something about.
 typedef AiTitleNote = ({String title, String text, GestureRecognizer? onTap});
