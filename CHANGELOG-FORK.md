@@ -92,6 +92,12 @@ Details of each are in the dated entries below.
 
 ## 2026-11-02
 
+### History page: insights (branch `feature/ai-helper`)
+- Between the month strip and the timeline: the longest binge (episodes of
+  one show in a day), top genres as bars, directors and actors as cards with
+  a fanned stack of their posters, "Watched again" with ×N badges, and films
+  by release decade. All follow the year chips; tapping opens the title.
+
 ### History page, v1 (branch `feature/ai-helper`)
 - **Where:** a History item in the TV/Mac side nav, and a clock icon in the
   phone's Home top bar.

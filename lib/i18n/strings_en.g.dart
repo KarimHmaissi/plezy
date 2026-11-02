@@ -4267,6 +4267,33 @@ class Translations$history$en {
 	/// en: 'Timeline'
 	String get timeline => 'Timeline';
 
+	/// en: 'Top genres'
+	String get topGenres => 'Top genres';
+
+	/// en: 'Directors'
+	String get directors => 'Directors';
+
+	/// en: 'Actors'
+	String get actors => 'Actors';
+
+	/// en: 'Watched again'
+	String get rewatches => 'Watched again';
+
+	/// en: 'Films by decade'
+	String get decades => 'Films by decade';
+
+	/// en: 'Longest binge'
+	String get longestBinge => 'Longest binge';
+
+	/// en: '$n episodes in one day'
+	String bingeLine({required Object n}) => '${n} episodes in one day';
+
+	/// en: '×$n'
+	String timesWatched({required Object n}) => '×${n}';
+
+	/// en: '$n watches'
+	String watchCount({required Object n}) => '${n} watches';
+
 	/// en: 'Nothing watched yet'
 	String get empty => 'Nothing watched yet';
 
@@ -10557,6 +10584,15 @@ extension on Translations {
 			'history.bestStreak' => ({required Object n}) => 'Best ${n}',
 			'history.byMonth' => 'Month by month',
 			'history.timeline' => 'Timeline',
+			'history.topGenres' => 'Top genres',
+			'history.directors' => 'Directors',
+			'history.actors' => 'Actors',
+			'history.rewatches' => 'Watched again',
+			'history.decades' => 'Films by decade',
+			'history.longestBinge' => 'Longest binge',
+			'history.bingeLine' => ({required Object n}) => '${n} episodes in one day',
+			'history.timesWatched' => ({required Object n}) => '×${n}',
+			'history.watchCount' => ({required Object n}) => '${n} watches',
 			'history.empty' => 'Nothing watched yet',
 			'history.loading' => 'Gathering your history…',
 			'history.failed' => 'Couldn\'t load your history',
@@ -10628,6 +10664,8 @@ extension on Translations {
 			'explore.rows.popularShows' => 'Popular Shows',
 			'explore.rows.trendingAnime' => 'Trending Anime',
 			'explore.rows.suggestedAnime' => 'Suggested Anime',
+			_ => null,
+		} ?? switch (path) {
 			'explore.rows.airingAnime' => 'Top Airing Anime',
 			'explore.rows.popularAnime' => 'Most Popular Anime',
 			'explore.rows.trending' => 'Trending',
@@ -10637,8 +10675,6 @@ extension on Translations {
 			'explore.status.ended' => 'Ended',
 			'explore.status.canceled' => 'Canceled',
 			'explore.status.upcoming' => 'Upcoming',
-			_ => null,
-		} ?? switch (path) {
 			'explore.episodeCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} episode', other: '${n} episodes', ), 
 			'explore.cast' => 'Cast',
 			'explore.characters' => 'Characters',
@@ -11142,6 +11178,8 @@ extension on Translations {
 			'downloads.syncRuleRemoved' => 'Sync rule removed',
 			'downloads.syncRuleAndDownloadsRemoved' => 'Sync rule and associated downloads removed',
 			'downloads.syncRuleCleanupBusy' => 'Sync rules are currently updating. Try again in a moment.',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.syncRuleCleanupUnavailable' => 'Associated downloads could not be identified safely. Reconnect the server and try again, or remove the rule without deleting downloads.',
 			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}',
 			'downloads.activeSyncRules' => 'Sync rules',
@@ -11151,8 +11189,6 @@ extension on Translations {
 			'downloads.editSyncFilter' => 'Sync filter',
 			'downloads.syncAllItems' => 'Syncing all items',
 			'downloads.syncUnwatchedItems' => 'Syncing unwatched items',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.syncRuleServerContext' => ({required Object server, required Object status}) => 'Server: ${server} • ${status}',
 			'downloads.syncRuleAvailable' => 'Available',
 			'downloads.syncRuleOffline' => 'Offline',
@@ -11656,6 +11692,8 @@ extension on Translations {
 			'cast.skipCredits' => 'Skip credits',
 			'cast.stop' => 'Stop',
 			'cast.nothingPlaying' => 'Nothing is playing',
+			_ => null,
+		} ?? switch (path) {
 			'cast.playPause' => 'Play / pause',
 			'cast.tvWorking' => ({required Object name}) => '${name} is working…',
 			'cast.notConnected' => ({required Object name}) => 'Not connected to ${name} — showing the last copy',
@@ -11665,8 +11703,6 @@ extension on Translations {
 			'remoteAi.connect' => 'Connect',
 			'remoteAi.hint' => 'What do you feel like watching?',
 			'remoteAi.working' => ({required Object name}) => '${name} is looking…',
-			_ => null,
-		} ?? switch (path) {
 			'remoteAi.error' => ({required Object message}) => 'The TV couldn\'t answer: ${message}',
 			'remoteAi.empty' => 'Ask for something and the picks show up here.',
 			'aiComposer.eyebrow' => 'ASK YOUR LIBRARY',

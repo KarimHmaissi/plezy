@@ -5,6 +5,7 @@ import 'history_models.dart';
 class HistoryStats {
   HistoryStats._({
     required this.plays,
+    required this.counted,
     required this.films,
     required this.episodes,
     required this.shows,
@@ -25,6 +26,9 @@ class HistoryStats {
 
   /// The dated watches in the period, newest first (the timeline).
   final List<HistoryPlay> plays;
+
+  /// Every watch counted in the totals (with bulk-dated ones, all time).
+  final List<HistoryPlay> counted;
 
   /// Watches counted in the totals whose date isn't real (imports and
   /// mark-as-watched; all-time only), left out of months, streaks and binges.
@@ -169,6 +173,7 @@ class HistoryStats {
 
     return HistoryStats._(
       plays: plays,
+      counted: counted,
       films: films,
       episodes: episodes,
       shows: shows.length,

@@ -260,6 +260,7 @@ class _HistoryBody extends StatelessWidget {
                         const SizedBox(height: 10),
                         _MonthStrip(stats: stats, year: year),
                       ],
+                      ..._insightSections(stats, onOpen),
                       const SizedBox(height: 28),
                       _SectionTitle(t.history.timeline),
                     ],
@@ -615,9 +616,6 @@ class _PlayRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final local = play.watchedAt.toLocal();
-    final client = play.posterUrl == null && play.plexServerId != null
-        ? context.read<MultiServerProvider>().getClientForServer(ServerId(play.plexServerId!))
-        : null;
     final subtitle = play.isMovie
         ? [
             if (play.year != null) '${play.year}',
@@ -656,20 +654,7 @@ class _PlayRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: SizedBox(
-                    width: 44,
-                    height: 66,
-                    child: OptimizedMediaImage(
-                      client: client,
-                      imagePath: play.posterUrl ?? play.plexThumb,
-                      width: 44,
-                      height: 66,
-                      fallbackIcon: play.isMovie ? Symbols.movie_rounded : Symbols.tv_rounded,
-                    ),
-                  ),
-                ),
+                _Poster(play: play, width: 44),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -796,4 +781,367 @@ class _PageWidth extends StatelessWidget {
     constraints: const BoxConstraints(maxWidth: 1100),
     child: SizedBox(width: double.infinity, child: child),
   );
+}
+
+/// A title's poster: Trakt's when known, else Plex's from its server.
+class _Poster extends StatelessWidget {
+  const _Poster({required this.play, required this.width});
+
+  final HistoryPlay play;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final height = width * 1.5;
+    final client = play.posterUrl == null && play.plexServerId != null
+        ? context.read<MultiServerProvider>().getClientForServer(ServerId(play.plexServerId!))
+        : null;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(width < 50 ? 6 : 8),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: OptimizedMediaImage(
+          client: client,
+          imagePath: play.posterUrl ?? play.plexThumb,
+          width: width,
+          height: height,
+          fallbackIcon: play.isMovie ? Symbols.movie_rounded : Symbols.tv_rounded,
+        ),
+      ),
+    );
+  }
+}
+
+/// The sections between the month strip and the timeline: the longest
+/// binge, top genres, directors and actors, rewatches and decades.
+List<Widget> _insightSections(HistoryStats stats, ValueChanged<HistoryPlay> onOpen) {
+  List<HistoryPlay> titlesWith(bool Function(HistoryPlay p) test) {
+    final seen = <String>{};
+    return [
+      for (final p in stats.counted)
+        if (test(p) && seen.add(p.titleKey) && (p.posterUrl != null || p.plexThumb != null)) p,
+    ];
+  }
+
+  Widget section(String title, Widget child) => Padding(
+    padding: const EdgeInsets.only(top: 28),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [_SectionTitle(title), const SizedBox(height: 12), child],
+    ),
+  );
+
+  final binge = stats.longestBinge;
+  return [
+    if (binge != null) section(t.history.longestBinge, _BingeCard(binge: binge, onOpen: onOpen)),
+    if (stats.topGenres.isNotEmpty)
+      section(t.history.topGenres, _RankedBars(entries: stats.topGenres.take(6).toList())),
+    if (stats.topDirectors.isNotEmpty)
+      section(
+        t.history.directors,
+        _PeopleRow(
+          entries: stats.topDirectors.take(8).toList(),
+          postersFor: (name) => titlesWith((p) => p.directors.contains(name)),
+          onOpen: onOpen,
+        ),
+      ),
+    if (stats.topCast.isNotEmpty)
+      section(
+        t.history.actors,
+        _PeopleRow(
+          entries: stats.topCast.take(8).toList(),
+          postersFor: (name) => titlesWith((p) => p.cast.contains(name)),
+          onOpen: onOpen,
+        ),
+      ),
+    if (stats.rewatches.isNotEmpty)
+      section(t.history.rewatches, _RewatchRow(rewatches: stats.rewatches, onOpen: onOpen)),
+    if (stats.decades.length > 1) section(t.history.decades, _DecadeStrip(decades: stats.decades)),
+  ];
+}
+
+class _BingeCard extends StatelessWidget {
+  const _BingeCard({required this.binge, required this.onOpen});
+
+  final ({HistoryPlay play, int episodes}) binge;
+  final ValueChanged<HistoryPlay> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final local = binge.play.watchedAt.toLocal();
+    return Pressable(
+      borderRadius: BorderRadius.circular(14),
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          focusColor: _amber.withValues(alpha: 0.22),
+          onTap: () => onOpen(binge.play),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                _Poster(play: binge.play, width: 64),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${binge.episodes}',
+                        style: const TextStyle(fontFamily: _display, fontSize: 56, height: 1, color: _amber),
+                      ),
+                      Text(
+                        t.history.bingeLine(n: binge.episodes).toUpperCase(),
+                        style: const TextStyle(
+                          fontFamily: _display,
+                          fontSize: 16,
+                          color: Colors.white70,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${binge.play.title} · ${local.day} ${_monthName(local.month)} ${local.year}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white54, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Names with a bar each, longest first.
+class _RankedBars extends StatelessWidget {
+  const _RankedBars({required this.entries});
+
+  final List<MapEntry<String, int>> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    final peak = entries.first.value;
+    return Column(
+      children: [
+        for (final (i, e) in entries.indexed)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 120,
+                  child: Text(
+                    e.key,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: i == 0 ? Colors.white : Colors.white70, fontSize: 14),
+                  ),
+                ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, c) => Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        height: 10,
+                        width: math.max(4, c.maxWidth * e.value / peak),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(5),
+                          color: Color.lerp(_amber.withValues(alpha: 0.35), _amber, e.value / peak),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    '${e.value}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontFamily: _display, fontSize: 18, color: Colors.white60),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// People as cards: a fanned stack of their posters, name and count.
+class _PeopleRow extends StatelessWidget {
+  const _PeopleRow({required this.entries, required this.postersFor, required this.onOpen});
+
+  final List<MapEntry<String, int>> entries;
+  final List<HistoryPlay> Function(String name) postersFor;
+  final ValueChanged<HistoryPlay> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 168,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: entries.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 14),
+        itemBuilder: (context, i) {
+          final e = entries[i];
+          final posters = postersFor(e.key).take(3).toList();
+          return SizedBox(
+            width: 112,
+            child: Pressable(
+              borderRadius: BorderRadius.circular(10),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  focusColor: _amber.withValues(alpha: 0.22),
+                  onTap: posters.isEmpty ? null : () => onOpen(posters.first),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        height: 110,
+                        width: 112,
+                        child: Stack(
+                          children: [
+                            for (final (j, p) in posters.indexed.toList().reversed)
+                              Positioned(
+                                left: j * 22.0,
+                                top: j * 6.0,
+                                child: Transform.rotate(
+                                  angle: (j - 1) * 0.06,
+                                  child: _Poster(play: p, width: 66),
+                                ),
+                              ),
+                            if (posters.isEmpty)
+                              const Center(child: Icon(Symbols.person_rounded, color: Colors.white24, size: 40)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        e.key,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.15),
+                      ),
+                      Text(
+                        t.history.watchCount(n: e.value),
+                        style: const TextStyle(color: Colors.white38, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RewatchRow extends StatelessWidget {
+  const _RewatchRow({required this.rewatches, required this.onOpen});
+
+  final List<MapEntry<HistoryPlay, int>> rewatches;
+  final ValueChanged<HistoryPlay> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final films = rewatches.take(12).toList();
+    return SizedBox(
+      height: 132,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: films.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        itemBuilder: (context, i) {
+          final e = films[i];
+          return Pressable(
+            borderRadius: BorderRadius.circular(8),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                focusColor: _amber.withValues(alpha: 0.22),
+                onTap: () => onOpen(e.key),
+                child: Stack(
+                  children: [
+                    _Poster(play: e.key, width: 84),
+                    Positioned(
+                      right: 4,
+                      bottom: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(color: _amber, borderRadius: BorderRadius.circular(4)),
+                        child: Text(
+                          t.history.timesWatched(n: e.value),
+                          style: const TextStyle(fontFamily: _display, fontSize: 16, color: Colors.black),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DecadeStrip extends StatelessWidget {
+  const _DecadeStrip({required this.decades});
+
+  final Map<int, int> decades;
+
+  @override
+  Widget build(BuildContext context) {
+    final peak = decades.values.fold(0, math.max);
+    return SizedBox(
+      height: 90,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          for (final e in decades.entries)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text('${e.value}', style: const TextStyle(fontSize: 10, color: Colors.white54)),
+                    const SizedBox(height: 2),
+                    Container(
+                      height: math.max(2, 50 * e.value / peak),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(3),
+                        color: Color.lerp(Colors.white24, _amber, e.value / peak),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "'${'${e.key}'.substring(2)}S",
+                      style: const TextStyle(fontFamily: _display, fontSize: 13, color: Colors.white54),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
