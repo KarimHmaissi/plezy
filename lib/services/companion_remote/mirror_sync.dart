@@ -10,6 +10,7 @@ import '../../providers/companion_remote_provider.dart';
 import '../../utils/app_logger.dart';
 import '../ai/ai_activity.dart';
 import '../catalog/home_pins.dart';
+import '../comfort/comfort_shows_controller.dart';
 import '../customisation/customisation_store.dart';
 import '../customisation/mirror_store.dart';
 
@@ -83,6 +84,8 @@ class MirrorHost {
             revision: home['revision'] is int ? home['revision'] as int : 0,
           );
           await HomePinsController.instance.ensureLoaded(refresh: true);
+        case 'comfortList':
+          await ComfortShowsController.applyMirrorEdit(op);
         case 'comfort':
           await store.writeComfortPaused({
             for (final p in (op['paused'] as List? ?? const []).whereType<Map>())
@@ -117,6 +120,8 @@ class MirrorClient {
 
   Future<void> start(CompanionRemoteProvider remote) async {
     if (identical(_remote, remote)) return;
+    ComfortShowsController.sendMirrorEdit = _send;
+    ComfortShowsController.mirrorCanEdit = () => canEdit;
     _remote?.removeListener(_onRemoteChanged);
     unawaited(_sub?.cancel());
     _remote = remote;

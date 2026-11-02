@@ -23,6 +23,7 @@ import '../providers/catalog_sources_provider.dart';
 import '../providers/discover_provider.dart';
 import '../services/continue_watching/continue_watching_classifier.dart';
 import '../services/catalog/catalog_library_matcher.dart';
+import '../services/catalog/catalog_source.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../services/customisation/customisation_store.dart';
 import '../services/comfort/comfort_picker.dart';
@@ -120,13 +121,24 @@ class ComfortScreenState extends State<ComfortScreen>
 
   TraktCatalogSource? get _traktSource => _sources.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
 
+  /// Where Configure searches for shows to add: Trakt here, or (a phone
+  /// editing its TV/Mac's list) any connected catalog, Plex first. Null
+  /// when the list can't be edited (no Trakt, not connected).
+  CatalogSource? get _configureSource {
+    final controller = _controller;
+    if (controller == null || !controller.canEditList) return null;
+    return _traktSource ??
+        _sources.connectedSources.where((s) => s.id == CatalogSourceId.plex).firstOrNull ??
+        _sources.connectedSources.firstOrNull;
+  }
+
   /// With Trakt, the live list; without (a phone), the copy the Trakt
   /// device keeps, which a phone mirroring the TV/Mac receives with its
   /// snapshot.
   void _onSourcesChanged() {
     final source = _traktSource;
     final wantsLive = source != null;
-    if (_controller != null && _controller!.canEditList == wantsLive) return;
+    if (_controller != null && _controller!.isLive == wantsLive) return;
     _controller?.removeListener(_onControllerChanged);
     _controller?.dispose();
     _controller = (wantsLive ? ComfortShowsController(source) : ComfortShowsController.cached())
@@ -136,7 +148,7 @@ class ComfortScreenState extends State<ComfortScreen>
 
   /// A new mirror snapshot (or an edit applied here): re-read the cached list.
   void _onCustomisationChanged() {
-    if (_controller?.canEditList == false) unawaited(_load());
+    if (_controller?.isLive == false) unawaited(_load());
   }
 
   void _onControllerChanged() {
@@ -282,7 +294,7 @@ class ComfortScreenState extends State<ComfortScreen>
 
   Future<void> _openConfigure() async {
     final controller = _controller;
-    final source = _traktSource;
+    final source = _configureSource;
     if (controller == null || source == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -333,7 +345,7 @@ class ComfortScreenState extends State<ComfortScreen>
 
   Widget? _buildStateMessage() {
     final controller = _controller;
-    if (controller == null || (!controller.canEditList && controller.isLoaded && controller.shows.isEmpty)) {
+    if (controller == null || (!controller.isLive && controller.isLoaded && controller.shows.isEmpty)) {
       return EmptyStateWidget(
         message: t.comfort.notConnectedTitle,
         subtitle: t.comfort.notConnectedMessage,
@@ -389,7 +401,7 @@ class ComfortScreenState extends State<ComfortScreen>
       color: color,
       onRefresh: manualRefresh,
       extras: [
-        if (_traktSource != null) (Symbols.tune_rounded, t.comfort.configure, () => unawaited(_openConfigure())),
+        if (_configureSource != null) (Symbols.tune_rounded, t.comfort.configure, () => unawaited(_openConfigure())),
       ],
     ),
   ];
@@ -407,7 +419,7 @@ class ComfortScreenState extends State<ComfortScreen>
     ),
     FocusableAction(
       debugLabel: 'ComfortConfigure',
-      onPressed: _traktSource == null ? null : () => unawaited(_openConfigure()),
+      onPressed: _configureSource == null ? null : () => unawaited(_openConfigure()),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: _labelled(Symbols.tune_rounded, t.comfort.configure, color),

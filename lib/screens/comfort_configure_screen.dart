@@ -9,7 +9,7 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../mixins/debounced_media_search.dart';
 import '../models/catalog/catalog_item.dart';
-import '../services/catalog/trakt_catalog_source.dart';
+import '../services/catalog/catalog_source.dart';
 import '../services/comfort/comfort_shows_controller.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
@@ -31,7 +31,9 @@ import '../theme/fork_motion.dart';
 /// removing shows on the list.
 class ComfortConfigureScreen extends StatelessWidget {
   final ComfortShowsController controller;
-  final TraktCatalogSource source;
+  /// Where Add searches (Trakt, or a phone's own catalog when it edits its
+  /// TV/Mac's list).
+  final CatalogSource source;
 
   const ComfortConfigureScreen({super.key, required this.controller, required this.source});
 
@@ -124,10 +126,10 @@ class ComfortConfigureScreen extends StatelessWidget {
   }
 }
 
-/// Search Trakt for a show and add it to the comfort list.
+/// Search for a show and add it to the comfort list.
 class ComfortAddShowScreen extends StatefulWidget {
   final ComfortShowsController controller;
-  final TraktCatalogSource source;
+  final CatalogSource source;
 
   const ComfortAddShowScreen({super.key, required this.controller, required this.source});
 

@@ -154,4 +154,27 @@ void main() {
     await cached.setPaused(cached.activeShows.first, true);
     expect((await store.readComfortPaused()).length, 2);
   });
+
+  test('a phone adds and removes Comfort shows by sending the edit to its TV', () async {
+    final sent = <Map<String, Object?>>[];
+    ComfortShowsController.sendMirrorEdit = (op) {
+      sent.add(op);
+      return true;
+    };
+    addTearDown(() => ComfortShowsController.sendMirrorEdit = null);
+    final cached = ComfortShowsController.cached(store: Future.value(store));
+    await cached.load();
+
+    await cached.addShow(_show(7, 'Show A'));
+    expect([for (final s in cached.shows) s.title], contains('Show A'));
+    await cached.removeShow(_show(7, 'Show A'));
+    expect([for (final s in cached.shows) s.title], isNot(contains('Show A')));
+    expect([for (final op in sent) (op['op'], op['action'], (op['show'] as Map)['trakt'])], [
+      ('comfortList', 'add', 7),
+      ('comfortList', 'remove', 7),
+    ]);
+
+    ComfortShowsController.sendMirrorEdit = (_) => false;
+    expect(() => cached.addShow(_show(8, 'Show B')), throwsStateError);
+  });
 }

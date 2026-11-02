@@ -28,7 +28,18 @@ class ComfortShowsController extends ChangeNotifier {
   static const String listName = 'Comfort Shows';
   static const String listSlug = 'comfort-shows';
 
-  ComfortShowsController(TraktCatalogSource this._source, {Future<CustomisationStore>? store}) : _storeFuture = store;
+  ComfortShowsController(TraktCatalogSource this._source, {Future<CustomisationStore>? store}) : _storeFuture = store {
+    hostSource = _source;
+  }
+
+  /// The Trakt source this device last used for Comfort: a host applies a
+  /// mirroring phone's list edits through it.
+  static TraktCatalogSource? hostSource;
+
+  /// Sends a list edit to the connected TV/Mac (set by the phone's mirror);
+  /// false when not connected.
+  static bool Function(Map<String, Object?> op)? sendMirrorEdit;
+  static bool Function()? mirrorCanEdit;
 
   /// The last list a Trakt-connected device saw (this device's, or the
   /// mirrored TV/Mac's on a phone).
@@ -40,8 +51,12 @@ class ComfortShowsController extends ChangeNotifier {
 
   final TraktCatalogSource? _source;
 
-  /// Whether shows can be added or removed (needs Trakt).
-  bool get canEditList => _source != null;
+  /// Whether this controller reads Trakt itself (false: the cached copy).
+  bool get isLive => _source != null;
+
+  /// Whether shows can be added or removed: with Trakt here, or on a phone
+  /// connected to the TV/Mac that has it (the edit goes there).
+  bool get canEditList => _source != null || (Customisation.isMirror && (mirrorCanEdit?.call() ?? false));
   final Future<CustomisationStore>? _storeFuture;
   Future<CustomisationStore> get _store => _storeFuture ?? Customisation.store;
   TraktUserList? _list;
@@ -160,16 +175,18 @@ class ComfortShowsController extends ChangeNotifier {
   }
 
   Future<void> addShow(CatalogItem show) async {
+    if (_source == null) return _sendEdit('add', show);
     final list = _list;
     if (list == null) return;
-    await _source!.client.addShowsToMyList(list.traktId, [_traktIds(show)]);
+    await _source.client.addShowsToMyList(list.traktId, [_traktIds(show)]);
     await load();
   }
 
   Future<void> removeShow(CatalogItem show) async {
+    if (_source == null) return _sendEdit('remove', show);
     final list = _list;
     if (list == null) return;
-    await _source!.client.removeShowsFromMyList(list.traktId, [_traktIds(show)]);
+    await _source.client.removeShowsFromMyList(list.traktId, [_traktIds(show)]);
     if (show.ids.trakt case final id? when _paused.contains(id)) {
       _paused = {..._paused}..remove(id);
       _shows = [
@@ -181,22 +198,65 @@ class ComfortShowsController extends ChangeNotifier {
     await load();
   }
 
+  /// Phone: ask the TV/Mac to change its list; its new snapshot updates
+  /// this one. Optimistic, like the other mirrored edits.
+  Future<void> _sendEdit(String action, CatalogItem show) async {
+    final sent =
+        sendMirrorEdit?.call({'op': 'comfortList', 'action': action, 'show': _encodeShow(show)}) ?? false;
+    if (!sent) throw StateError('Not connected to the TV');
+    _shows = action == 'add'
+        ? [..._shows, show]
+        : [
+            for (final s in _shows)
+              if (s.identityKey != show.identityKey) s,
+          ];
+    _notify();
+  }
+
+  /// Host: apply a mirroring phone's list edit through Trakt. The reload
+  /// saves the new copy, which goes back to the phone in the next snapshot.
+  static Future<void> applyMirrorEdit(Map<String, dynamic> op) async {
+    final source = hostSource;
+    final show = decodeShows(json.encode([op['show']])).firstOrNull;
+    if (source == null || show == null) {
+      appLogger.w('Comfort: a phone edit arrived but Trakt is not connected here');
+      return;
+    }
+    final controller = ComfortShowsController(source);
+    try {
+      await controller.load();
+      if (op['action'] == 'add') {
+        await controller.addShow(show);
+      } else if (op['action'] == 'remove') {
+        final match = controller.shows.where((s) => _sameShow(s, show)).firstOrNull;
+        if (match != null) await controller.removeShow(match);
+      }
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  static bool _sameShow(CatalogItem a, CatalogItem b) =>
+      (a.ids.trakt != null && a.ids.trakt == b.ids.trakt) ||
+      (a.ids.tmdb != null && a.ids.tmdb == b.ids.tmdb) ||
+      (a.ids.tvdb != null && a.ids.tvdb == b.ids.tvdb) ||
+      (a.ids.imdb != null && a.ids.imdb == b.ids.imdb);
+
   /// The fields Comfort needs from each show (ids to match the library,
   /// title, year, poster), as stored under [showsCacheKey].
   @visibleForTesting
-  static String encodeShows(List<CatalogItem> shows) => json.encode([
-    for (final s in shows)
-      {
-        'title': s.title,
-        'year': ?s.year,
-        'poster': ?s.posterUrl,
-        'trakt': ?s.ids.trakt,
-        'slug': ?s.ids.slug,
-        'imdb': ?s.ids.imdb,
-        'tmdb': ?s.ids.tmdb,
-        'tvdb': ?s.ids.tvdb,
-      },
-  ]);
+  static String encodeShows(List<CatalogItem> shows) => json.encode([for (final s in shows) _encodeShow(s)]);
+
+  static Map<String, Object?> _encodeShow(CatalogItem s) => {
+    'title': s.title,
+    'year': ?s.year,
+    'poster': ?s.posterUrl,
+    'trakt': ?s.ids.trakt,
+    'slug': ?s.ids.slug,
+    'imdb': ?s.ids.imdb,
+    'tmdb': ?s.ids.tmdb,
+    'tvdb': ?s.ids.tvdb,
+  };
 
   @visibleForTesting
   static List<CatalogItem> decodeShows(String? encoded) {

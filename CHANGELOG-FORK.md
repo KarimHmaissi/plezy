@@ -103,8 +103,10 @@ Details of each are in the dated entries below.
 - Comfort without Trakt: the Trakt-connected device keeps a copy of its
   comfort list locally (setting `comfort.shows`), which mirroring phones
   receive with the snapshot; a phone shows those shows, Random episode and
-  pausing work, and only Configure (adding/removing shows) needs Trakt.
-  Connect Trakt is offered only when there's no list at all.
+  pausing work. Connect Trakt is offered only when there's no list at all.
+- Configure on a phone without Trakt: while connected, adding (searched in
+  the phone's own catalog) and removing shows goes to the TV/Mac, which
+  changes its Trakt list and sends the new list back; read-only offline.
 
 ### Calmer motion and Plex-like card text
 
