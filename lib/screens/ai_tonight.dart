@@ -8,6 +8,7 @@ import '../services/settings_service.dart';
 import '../theme/fork_spacing.dart';
 import '../theme/mono_tokens.dart';
 import '../widgets/ai_answer_card.dart' show withoutLeadingTitle;
+import '../widgets/fork_motion_widgets.dart';
 import '../widgets/media_card.dart';
 
 /// Fork: "Tonight" at the top of the AI page on touch screens: up to three
@@ -74,33 +75,38 @@ class AiTonightBlock extends StatelessWidget {
                     final item = entry.items[i];
                     final raw = entry.reasons[item.globalKey];
                     final reason = raw == null ? null : withoutLeadingTitle(raw, item.title);
-                    return SizedBox(
-                      width: width,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          MediaCard(
-                            key: Key('tonight-${item.globalKey}'),
-                            item: item,
-                            width: width,
-                            height: artHeight,
-                            viewModeOverride: ViewMode.grid,
-                            mixedHubContext: true,
-                            episodePosterModeOverride: EpisodePosterMode.episodeThumbnail,
-                            badges: [_label(entry.spotlights[item.globalKey])],
-                            onTap: onItemTap == null ? null : () => onItemTap!(item),
-                          ),
-                          if (reason != null)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 3),
-                              child: Text(
-                                reason,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.bodySmall?.copyWith(color: mono.textMuted, height: 1.35),
-                              ),
+                    // A new Tonight deals its cards in one after another.
+                    return ForkEntrance(
+                      key: ValueKey('${entry.createdAt.millisecondsSinceEpoch}-${item.globalKey}'),
+                      index: i,
+                      child: SizedBox(
+                        width: width,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            MediaCard(
+                              key: Key('tonight-${item.globalKey}'),
+                              item: item,
+                              width: width,
+                              height: artHeight,
+                              viewModeOverride: ViewMode.grid,
+                              mixedHubContext: true,
+                              episodePosterModeOverride: EpisodePosterMode.episodeThumbnail,
+                              badges: [_label(entry.spotlights[item.globalKey])],
+                              onTap: onItemTap == null ? null : () => onItemTap!(item),
                             ),
-                        ],
+                            if (reason != null)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 3),
+                                child: Text(
+                                  reason,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.bodySmall?.copyWith(color: mono.textMuted, height: 1.35),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     );
                   },

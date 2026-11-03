@@ -113,6 +113,13 @@ Details of each are in the dated entries below.
   appears when there's nothing saved; otherwise Ask leads to Settings ▸ AI.
 - **A slow server can't hold up a row.** Each pick (and each Tonight card)
   gets 8 s to load; one that doesn't answer is dropped.
+- **Motion:** answer rows rise in one after another as the page opens and
+  as a new answer lands; Tonight deals its cards in one by one, with a
+  light haptic tick when a new set arrives; a request's tile has a soft
+  light sweeping across it while it works, and each step ("Checking your
+  history") rises in over the last. Shared pieces: `ForkEntrance` and
+  `ForkShimmer` (`lib/widgets/fork_motion_widgets.dart`), all still when
+  the system asks for less motion.
 
 ### Tonight changes from day to day
 - Tonight always showed the same titles: each card took the single best

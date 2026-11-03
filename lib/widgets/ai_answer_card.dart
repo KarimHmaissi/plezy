@@ -10,6 +10,7 @@ import '../theme/mono_tokens.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/provider_extensions.dart';
 import 'app_icon.dart';
+import 'fork_motion_widgets.dart';
 import 'optimized_media_image.dart';
 import 'pressable.dart';
 
@@ -351,88 +352,99 @@ class AiAnswerTile extends StatelessWidget {
 
     final artwork = ClipRRect(
       borderRadius: radius,
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ColoredBox(color: mono.surface),
-            if (path != null)
-              OptimizedMediaImage(
-                client: context.tryGetMediaClientWithFallback(serverIdOrNull(art!.serverId)),
-                imagePath: path,
-                width: width,
-                height: height,
-                imageType: ImageType.art,
-              ),
-            // The page's own background as the scrim, heavier where the text sits.
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [mono.bg.withValues(alpha: 0.55), mono.bg.withValues(alpha: 0.92)],
+      child: ForkShimmer(
+        active: running,
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(color: mono.surface),
+              if (path != null)
+                OptimizedMediaImage(
+                  client: context.tryGetMediaClientWithFallback(serverIdOrNull(art!.serverId)),
+                  imagePath: path,
+                  width: width,
+                  height: height,
+                  imageType: ImageType.art,
+                ),
+              // The page's own background as the scrim, heavier where the text sits.
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [mono.bg.withValues(alpha: 0.55), mono.bg.withValues(alpha: 0.92)],
+                  ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (running)
-                    Row(
-                      children: [
-                        SizedBox.square(
-                          dimension: 12,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: mono.textMuted),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            step ?? t.aiTab.starting,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.labelSmall?.copyWith(color: mono.textMuted),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (running)
+                      Row(
+                        children: [
+                          SizedBox.square(
+                            dimension: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: mono.textMuted),
                           ),
-                        ),
-                      ],
-                    )
-                  else
-                    Text(
-                      question,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.labelSmall?.copyWith(color: mono.textMuted, height: 1.3),
-                    ),
-                  const Spacer(),
-                  if (error != null)
-                    Text(
-                      error!,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error),
-                    )
-                  else if (gist.isNotEmpty)
-                    AnimatedSwitcher(
-                      duration: ForkMotion.reduceMotion(context) ? Duration.zero : ForkMotion.sheetIn,
-                      child: Text(
-                        gist,
-                        key: ValueKey(gist.length > 40 ? gist.substring(0, 40) : gist),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            // Each new step rises in over the last one.
+                            child: AnimatedSwitcher(
+                              duration: ForkMotion.reduceMotion(context) ? Duration.zero : ForkMotion.sheetIn,
+                              transitionBuilder: (child, animation) => ForkMotion.riseTransition(animation, child),
+                              layoutBuilder: (current, previous) =>
+                                  Stack(alignment: Alignment.centerLeft, children: [...previous, ?current]),
+                              child: Text(
+                                step ?? t.aiTab.starting,
+                                key: ValueKey(step),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.labelSmall?.copyWith(color: mono.textMuted),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        question,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.labelSmall?.copyWith(color: mono.textMuted, height: 1.3),
+                      ),
+                    const Spacer(),
+                    if (error != null)
+                      Text(
+                        error!,
                         maxLines: 4,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.titleSmall?.copyWith(
-                          color: running ? mono.textMuted : mono.text,
-                          fontWeight: FontWeight.w600,
-                          height: 1.3,
+                        style: theme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error),
+                      )
+                    else if (gist.isNotEmpty)
+                      AnimatedSwitcher(
+                        duration: ForkMotion.reduceMotion(context) ? Duration.zero : ForkMotion.sheetIn,
+                        child: Text(
+                          gist,
+                          key: ValueKey(gist.length > 40 ? gist.substring(0, 40) : gist),
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.titleSmall?.copyWith(
+                            color: running ? mono.textMuted : mono.text,
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

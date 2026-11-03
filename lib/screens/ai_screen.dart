@@ -52,6 +52,7 @@ import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
 import '../theme/mono_tokens.dart';
+import '../widgets/fork_motion_widgets.dart';
 import '../widgets/ai_answer_card.dart';
 import '../widgets/media_card.dart';
 import 'ai_answer_page.dart';
@@ -326,7 +327,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     if (mounted && cached != null && _briefingRow == null) setState(() => _briefingRow = cached);
     if (_thinClient) return;
     final entry = await AiBriefing.today(clientFor: servers.getClientForServer, force: force);
-    if (mounted && entry != null) setState(() => _briefingRow = entry);
+    if (mounted && entry != null) {
+      if (force && entry.createdAt != _briefingRow?.createdAt) ForkMotion.success();
+      setState(() => _briefingRow = entry);
+    }
   }
 
   /// Pull to refresh and the toolbar's refresh: new Tonight picks and a new
@@ -1415,34 +1419,40 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                   if (i > 0 || pendingCards.isNotEmpty || _tonightCards != null)
                     SliverToBoxAdapter(child: _blockDivider()),
                   SliverToBoxAdapter(
-                    child: RowMenuEntries(
-                      entries: _rowMenuEntries(hubs[i]),
-                      child: ItemMenuEntries(
-                        build: _pickMenuEntries,
-                        child: ItemMenuHeader(
-                          // Phone: why it was picked, above the usual entries.
-                          build: (item) => _thinClient ? _peekHeader(hubs[i], item) : null,
-                          child: HubSection(
-                            key: _hubKey(hubs[i]),
-                            hub: hubs[i],
-                            trailingCard: _trailingCard(hubs[i]),
-                            belowTitle: _tileOnly(hubs[i]),
-                            leadingTile: _answerTile(hubs[i]),
-                            onTitleTap: _answerOpener(hubs[i]),
-                            badgesFor: _badgesFor(hubs[i]),
-                            titleTrailing: _cardsInline ? _rowMenuButton(hubs[i]) : null,
-                            focusMemory: _hubFocusMemory,
-                            icon: Symbols.auto_awesome_rounded,
-                            // Phone: a tap plays (on the TV while casting); shows open.
-                            onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
-                            onVerticalNavigation: (isUp) => navigateVerticalHubRows(
-                              hubCount: hubs.length,
-                              hubIndex: i,
-                              isUp: isUp,
-                              onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
-                              requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
+                    // Rows rise in as the page opens, and a new answer as it lands.
+                    child: ForkEntrance(
+                      key: ValueKey('enter-${hubs[i].id}'),
+                      // Rows scrolled to later rise in without waiting.
+                      index: i < ForkMotion.staggerMax ? i : 0,
+                      child: RowMenuEntries(
+                        entries: _rowMenuEntries(hubs[i]),
+                        child: ItemMenuEntries(
+                          build: _pickMenuEntries,
+                          child: ItemMenuHeader(
+                            // Phone: why it was picked, above the usual entries.
+                            build: (item) => _thinClient ? _peekHeader(hubs[i], item) : null,
+                            child: HubSection(
+                              key: _hubKey(hubs[i]),
+                              hub: hubs[i],
+                              trailingCard: _trailingCard(hubs[i]),
+                              belowTitle: _tileOnly(hubs[i]),
+                              leadingTile: _answerTile(hubs[i]),
+                              onTitleTap: _answerOpener(hubs[i]),
+                              badgesFor: _badgesFor(hubs[i]),
+                              titleTrailing: _cardsInline ? _rowMenuButton(hubs[i]) : null,
+                              focusMemory: _hubFocusMemory,
+                              icon: Symbols.auto_awesome_rounded,
+                              // Phone: a tap plays (on the TV while casting); shows open.
+                              onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                              onVerticalNavigation: (isUp) => navigateVerticalHubRows(
+                                hubCount: hubs.length,
+                                hubIndex: i,
+                                isUp: isUp,
+                                onTopBoundary: () => _actionBarKey.currentState?.requestFocusOnFirst(),
+                                requestFocus: (target) => _hubKey(hubs[target]).currentState?.requestFocusFromMemory(),
+                              ),
+                              onNavigateToSidebar: _navigateToSidebar,
                             ),
-                            onNavigateToSidebar: _navigateToSidebar,
                           ),
                         ),
                       ),

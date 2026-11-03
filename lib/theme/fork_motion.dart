@@ -29,6 +29,11 @@ abstract final class ForkMotion {
   static const enterCurve = Easing.emphasizedDecelerate;
   static const exitCurve = Easing.emphasizedAccelerate;
 
+  /// Things arriving together (Tonight's cards, a new answer's parts)
+  /// follow each other by this much, up to [staggerMax] steps.
+  static const staggerStep = Duration(milliseconds: 60);
+  static const staggerMax = 6;
+
   /// How far a rising overlay travels, in logical pixels.
   static const riseDistance = 24.0;
 
