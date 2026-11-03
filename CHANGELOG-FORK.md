@@ -103,6 +103,22 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### Smoothness: no more jumping while things load
+- Measured on the Galaxy Fold (120 Hz) with a profile build: scrolling
+  Home, the AI tab and grids holds 120 fps, with frames at 1 to 2 ms of the
+  8.3 ms budget. The stutter came from debug builds, so test builds on
+  phones are now profile builds (`flutter build apk --profile`; release
+  needs `android/key.properties`).
+- **AI tab appears in one piece:** the saved answers, Tonight, the
+  Suggested shelf, the key check (for the mood chips) and the week card
+  are read together before the page shows, instead of each popping in
+  above the last. No more empty-state flash while the answers are read.
+  The week card keeps space for its posters while they load.
+- **Home reveals rows top to bottom:** a row shows once every row above it
+  in your layout has loaded or come back empty, so a slow row never pushes
+  down what you're reading. A placeholder row sits below while more load,
+  and after 4 seconds everything shows.
+
 ### Voice requests (AI v2)
 - **Speak instead of typing:** in Ask, while the field is empty, the send
   button is a mic. A tap opens the system's speech recogniser (Google voice

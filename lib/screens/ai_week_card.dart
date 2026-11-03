@@ -23,7 +23,10 @@ class AiWeekCard extends StatelessWidget {
   const AiWeekCard({super.key, required this.week, required this.items, required this.onItemTap, required this.onHide});
 
   final WatchWeek week;
-  final List<MediaItem> items;
+
+  /// The week's posters; null while they load, when the strip keeps their
+  /// space so nothing below moves.
+  final List<MediaItem>? items;
   final ValueChanged<MediaItem> onItemTap;
   final VoidCallback onHide;
 
@@ -44,6 +47,8 @@ class AiWeekCard extends StatelessWidget {
       if (week.films > 0) t.aiTab.weekFilms(n: week.films),
       if (week.episodes > 0) t.aiTab.weekEpisodes(n: week.episodes),
     ].join(' · ');
+    // While loading, one space per title on a server.
+    final posters = items?.length ?? week.top.where((p) => p.inLibrary).length;
     final facts = <(IconData, String)>[
       if (week.finished.isNotEmpty)
         (Symbols.check_circle_rounded, t.aiTab.weekFinished(titles: _titles(week.finished))),
@@ -129,16 +134,19 @@ class AiWeekCard extends StatelessWidget {
                     ],
                   ),
                 ),
-              if (items.isNotEmpty) ...[
+              if (posters > 0) ...[
                 const SizedBox(height: 14),
                 SizedBox(
                   height: _posterWidth * 1.5,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.only(right: 12),
-                    itemCount: items.length,
+                    itemCount: posters,
                     separatorBuilder: (_, _) => const SizedBox(width: 8),
-                    itemBuilder: (context, i) => _Poster(item: items[i], onTap: () => onItemTap(items[i])),
+                    itemBuilder: (context, i) => switch (items) {
+                      final items? => _Poster(item: items[i], onTap: () => onItemTap(items[i])),
+                      null => _PosterSpace(color: mono.bg),
+                    },
                   ),
                 ),
               ],
@@ -148,6 +156,21 @@ class AiWeekCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PosterSpace extends StatelessWidget {
+  const _PosterSpace({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: AiWeekCard._posterWidth,
+    height: AiWeekCard._posterWidth * 1.5,
+    child: DecoratedBox(
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(tokens(context).radiusSm)),
+    ),
+  );
 }
 
 class _Poster extends StatelessWidget {

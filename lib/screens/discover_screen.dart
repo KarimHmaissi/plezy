@@ -297,6 +297,49 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     return hubs;
   }
 
+  /// Touch Home reveals rows top to bottom: a row shows once every row
+  /// above it has loaded (or come back empty), so a late row never pushes
+  /// down what's being read. After [_revealWait] everything shows.
+  static const Duration _revealWait = Duration(seconds: 4);
+  bool _revealAll = false;
+  Timer? _revealTimer;
+
+  /// The layout position of the first row still loading, or null when none
+  /// is (or it's time to show everything).
+  int? _firstLoadingRow() {
+    if (_revealAll || !_homePins.hasSavedLayout) return null;
+    final plexIds = {for (final row in mergePlexHubs(_hubs)) row.rowId};
+    final states = homeRowLoadStates.value;
+    for (final (i, row) in _homePins.layout.rows.indexed) {
+      final loading = switch (row.id) {
+        HomeRowIds.continueWatching || HomeRowIds.pickBackUp || HomeRowIds.comfortCarryOn => _isLoading,
+        _ when plexIds.contains(row.id) => false,
+        _ when row.id.startsWith('px:') && _areHubsLoading => true,
+        _ when HomeRowResolver.needsFetch(row.id) =>
+          states[row.id] == null || states[row.id] == HomeRowLoadState.loading,
+        _ => false,
+      };
+      if (loading) return i;
+    }
+    return null;
+  }
+
+  /// [hubs] above the first row still loading.
+  List<MediaHub> _revealed(List<MediaHub> hubs) {
+    final cut = _firstLoadingRow();
+    if (cut == null) return hubs;
+    final position = {for (final (i, row) in _homePins.layout.rows.indexed) row.id: i};
+    return [
+      for (final hub in hubs)
+        // Rows outside the layout (curation off) come after it.
+        if ((position[_rowForHubId[hub.id]?.id] ?? cut) < cut) hub,
+    ];
+  }
+
+  void _onRowLoadStates() {
+    if (mounted && !_revealAll) setState(() {});
+  }
+
   /// An AI row got new picks (Refresh or auto-refresh): load them.
   void _onAiRowReplaced() {
     final id = AiHistory.replaced.value;
@@ -577,6 +620,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _catalogSources = context.read<CatalogSourcesProvider?>()?..addListener(_onCatalogSourcesChanged);
     _homePins.addListener(_onHomePinsChanged);
     AiHistory.replaced.addListener(_onAiRowReplaced);
+    homeRowLoadStates.addListener(_onRowLoadStates);
+    _revealTimer = Timer(_revealWait, () {
+      if (mounted) setState(() => _revealAll = true);
+    });
     // Build or refresh the library index in the background once the
     // servers have connected and startup has settled.
     _indexStartTimer = Timer(const Duration(seconds: 30), () {
@@ -777,6 +824,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
     _homePins.removeListener(_onHomePinsChanged);
     AiHistory.replaced.removeListener(_onAiRowReplaced);
+    homeRowLoadStates.removeListener(_onRowLoadStates);
+    _revealTimer?.cancel();
     _rowRetryTimer?.cancel();
     _indexStartTimer?.cancel();
     PhoneMode.changed.removeListener(_startOwnAi);
@@ -1283,7 +1332,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
     final theme = Theme.of(context);
-    final homeHubs = _tvBrowseHubs;
+    final allHubs = _tvBrowseHubs;
+    final homeHubs = _revealed(allHubs);
+    final revealing = homeHubs.length < allHubs.length || _firstLoadingRow() != null;
     return Material(
       color: theme.scaffoldBackgroundColor,
       child: Stack(
@@ -1332,8 +1383,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                   ),
 
                 // Show loading skeleton for hubs while they're loading
-                if (_areHubsLoading && _hubs.isEmpty)
-                  for (int i = 0; i < 3; i++)
+                if ((_areHubsLoading && _hubs.isEmpty) || revealing)
+                  for (int i = 0; i < (homeHubs.isEmpty ? 3 : 1); i++)
                     SliverToBoxAdapter(
                       child: Container(
                         padding: const EdgeInsets.all(16),

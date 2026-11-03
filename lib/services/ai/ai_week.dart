@@ -128,23 +128,27 @@ abstract final class AiWeek {
 
   static ({DateTime start, List<MediaItem> items})? _posters;
 
-  /// This week's card with its posters, or null when there's none to show.
-  static Future<({WatchWeek week, List<MediaItem> items})?> load({
-    required MediaServerClient? Function(ServerId serverId) clientFor,
-    DateTime? now,
-  }) async {
+  /// This week's card, or null when there's none to show. Local and quick:
+  /// the posters come separately ([posters]).
+  static Future<WatchWeek?> count({DateTime? now}) async {
     final at = now ?? DateTime.now();
     final start = WatchWeek.shownOn(at);
     if (start == null) return null;
     final store = await Customisation.store;
     if (await store.readSetting(dismissedKey) == _day(start)) return null;
-    final week = WatchWeek.of(await HistoryBrain.instance.watchedProfiles(), start, now: at);
-    if (week == null) return null;
+    return WatchWeek.of(await HistoryBrain.instance.watchedProfiles(), start, now: at);
+  }
+
+  /// The week's posters from the servers (kept for the week).
+  static Future<List<MediaItem>> posters(
+    WatchWeek week, {
+    required MediaServerClient? Function(ServerId serverId) clientFor,
+  }) async {
     final cached = _posters;
-    if (cached != null && cached.start == start) return (week: week, items: cached.items);
+    if (cached != null && cached.start == week.start) return cached.items;
     final items = await _fetch(week.top, clientFor);
-    _posters = (start: start, items: items);
-    return (week: week, items: items);
+    _posters = (start: week.start, items: items);
+    return items;
   }
 
   /// Hide this week's card until next week's.

@@ -165,7 +165,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   List<AiSuggestion> _suggestions = const [];
 
   /// Your week in watching, Sunday to Tuesday.
-  ({WatchWeek week, List<MediaItem> items})? _week;
+  WatchWeek? _week;
+
+  /// The week's posters, once they've loaded from the servers.
+  List<MediaItem>? _weekItems;
   bool _makingLists = false;
 
   /// Saved answers loaded so far, newest first.
@@ -310,15 +313,29 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     if (mounted) setState(() => _suggestions = saved.lists);
   }
 
-  /// The week's card, counted on this device (no AI call).
-  Future<void> _loadWeek() async {
-    if (_thinClient) return;
+  /// The week's card, counted on this device (no AI call); null when
+  /// there's none, or counting takes too long for the first paint.
+  static Future<WatchWeek?> _countWeek({Duration? within}) async {
     try {
-      final week = await AiWeek.load(clientFor: context.read<MultiServerProvider>().getClientForServer);
-      if (mounted) setState(() => _week = week);
+      final counting = AiWeek.count();
+      return await (within == null ? counting : counting.timeout(within, onTimeout: () => null));
     } catch (e) {
       appLogger.w('AI week: counting failed', error: e);
+      return null;
     }
+  }
+
+  /// The week's card, then its posters (into the space kept for them).
+  Future<void> _loadWeek() async {
+    if (_thinClient) return;
+    final clientFor = context.read<MultiServerProvider>().getClientForServer;
+    final week = await _countWeek();
+    if (!mounted) return;
+    if (week?.start != _week?.start) _weekItems = null;
+    setState(() => _week = week);
+    if (week == null) return;
+    final items = await AiWeek.posters(week, clientFor: clientFor);
+    if (mounted && _week == week) setState(() => _weekItems = items);
   }
 
   void _hideWeek(WatchWeek week) {
@@ -406,7 +423,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       if (Customisation.isMirror) await _loadHistory();
       return;
     }
-    if (!_historyLoaded) await _loadHistory();
+    if (!_historyLoaded) await _loadHistory(withTop: _cardsInline);
     final key = await AiKeyStore.read();
     if (!mounted) return;
     setState(() => _hasKey = key != null);
@@ -477,12 +494,25 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     remote.sendCommand(RemoteCommandType.aiAction, data: {'action': 'tonight', 'rid': rid});
   }
 
-  Future<void> _loadHistory() async {
+  /// The saved answers; with [withTop] (the first load on touch screens)
+  /// also what sits above them, so the page appears whole rather than
+  /// growing and jumping as each part arrives.
+  Future<void> _loadHistory({bool withTop = false}) async {
     try {
       final total = await AiHistory.count();
       final page = await AiHistory.page(limit: _pageSize);
       final briefing = AiBriefing.enabled ? await AiBriefing.cached() : null;
       if (_thinClient) RemoteAiSession.instance.reconcile(page);
+      if (withTop && !_thinClient) {
+        final (key, shelf, week) = await (
+          AiKeyStore.read(),
+          AiSuggestions.cached(),
+          _countWeek(within: const Duration(milliseconds: 400)),
+        ).wait;
+        _hasKey = key != null;
+        _suggestions = shelf.lists;
+        _week = week;
+      }
       if (!mounted) return;
       setState(() {
         _historyLoaded = true;
@@ -1383,6 +1413,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   );
 
   Widget? _message() {
+    // Nothing until the saved answers are read (a moment), rather than the
+    // empty state flashing first.
+    if (!_historyLoaded) return const SizedBox.shrink();
     // Without a key the saved answers still show; Ask leads to the key.
     if (_hasKey == false && _rows.isEmpty) {
       return Center(
@@ -1516,12 +1549,12 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 if (_week case final week? when !_thinClient)
                   SliverToBoxAdapter(
                     child: ForkEntrance(
-                      key: ValueKey('week-${week.week.start}'),
+                      key: ValueKey('week-${week.start}'),
                       child: AiWeekCard(
-                        week: week.week,
-                        items: week.items,
+                        week: week,
+                        items: _weekItems,
                         onItemTap: (item) => unawaited(_openPick(item)),
-                        onHide: () => _hideWeek(week.week),
+                        onHide: () => _hideWeek(week),
                       ),
                     ),
                   ),
