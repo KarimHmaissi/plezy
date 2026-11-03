@@ -261,8 +261,8 @@ abstract final class AiSuggestions {
         id: id ?? 'suggested-${AiHistory.newId()}',
         request: request,
         title: title,
-        intro: why,
-        writeup: why,
+        // Said once, as the page's headline.
+        intro: null,
         headline: why,
         createdAt: DateTime.now(),
         items: items,
@@ -320,26 +320,38 @@ abstract final class AiSuggestions {
       (null, final t?) => t,
       _ => const <IndexedTitle>[],
     };
-    titles = [
-      for (final t in titles)
-        if ((t.viewCount ?? 0) == 0 && (t.watchedEpisodeCount ?? 0) == 0) t,
-    ];
-
     // Titles like one they loved lead the list, when the brain knows them.
     final like = (search['like'] as String?)?.trim();
-    if (brain != null && like != null && like.isNotEmpty && titles.isNotEmpty) {
+    String? seed;
+    final none = {for (final g in strings('genres_none')) g.toLowerCase()};
+    if (brain != null && like != null && like.isNotEmpty) {
       try {
-        final seed = (await brain.store).idsByTitle(like).firstOrNull;
-        if (seed != null) {
-          final near = await brain.similar(seed, limit: 60, watched: false);
-          final rank = <String, int>{
-            for (final (i, h) in near.indexed)
-              if (h.profile.serverId != null && h.profile.ratingKey != null)
-                '${h.profile.serverId}:${h.profile.ratingKey}': i,
-          };
-          int score(IndexedTitle t) => rank[t.id] ?? 1000;
-          titles = [...titles]..sort((a, b) => score(a).compareTo(score(b)));
-        }
+        final store = await brain.store;
+        seed = store.idsByTitle(like).firstOrNull;
+        // "Like" a live-action title keeps animation out: a list like Dune
+        // shouldn't fill with animated films that share its genres.
+        final seedGenres = seed == null ? null : store.profile(seed)?.genres;
+        if (seedGenres != null && !seedGenres.any((g) => g.toLowerCase() == 'animation')) none.add('animation');
+      } catch (e) {
+        appLogger.d('AI suggestions: brain unavailable', error: e);
+      }
+    }
+    bool excluded(IndexedTitle t) => t.genres.toLowerCase().split('|').any(none.contains);
+    titles = [
+      for (final t in titles)
+        if ((t.viewCount ?? 0) == 0 && (t.watchedEpisodeCount ?? 0) == 0 && !excluded(t)) t,
+    ];
+
+    if (brain != null && seed != null && titles.isNotEmpty) {
+      try {
+        final near = await brain.similar(seed, limit: 60, watched: false);
+        final rank = <String, int>{
+          for (final (i, h) in near.indexed)
+            if (h.profile.serverId != null && h.profile.ratingKey != null)
+              '${h.profile.serverId}:${h.profile.ratingKey}': i,
+        };
+        int score(IndexedTitle t) => rank[t.id] ?? 1000;
+        titles = [...titles]..sort((a, b) => score(a).compareTo(score(b)));
       } catch (e) {
         appLogger.d('AI suggestions: similarity unavailable', error: e);
       }

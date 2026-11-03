@@ -8,26 +8,27 @@ void main() {
   late IndexDatabase db;
   late LibraryIndex index;
 
-  Future<void> add(String key, String title, String genre, {String summary = '', int views = 0}) =>
-      db.into(db.indexTitles).insert(
-            indexRowFromPlex(
-              {
-                'ratingKey': key,
-                'type': 'movie',
-                'title': title,
-                'year': 1990,
-                'summary': summary,
-                'viewCount': views,
-                'Genre': [
-                  {'tag': genre},
-                ],
-              },
-              serverId: 's',
-              serverName: 'S',
-              libraryKey: '1',
-              libraryTitle: 'Movies',
-            ),
-          );
+  Future<void> add(String key, String title, String genre, {String summary = '', int views = 0}) => db
+      .into(db.indexTitles)
+      .insert(
+        indexRowFromPlex(
+          {
+            'ratingKey': key,
+            'type': 'movie',
+            'title': title,
+            'year': 1990,
+            'summary': summary,
+            'viewCount': views,
+            'Genre': [
+              {'tag': genre},
+            ],
+          },
+          serverId: 's',
+          serverName: 'S',
+          libraryKey: '1',
+          libraryTitle: 'Movies',
+        ),
+      );
 
   setUp(() async {
     db = IndexDatabase.memory();
@@ -39,8 +40,9 @@ void main() {
   });
   tearDown(() => db.close());
 
-  Future<List<String>> titles(Map<String, Object?> search) async =>
-      [for (final t in await AiSuggestions.fill(index, null, search)) t.title];
+  Future<List<String>> titles(Map<String, Object?> search) async => [
+    for (final t in await AiSuggestions.fill(index, null, search)) t.title,
+  ];
 
   test('genres alone: unwatched titles in them', () async {
     expect(
@@ -60,5 +62,15 @@ void main() {
       ['Vault Night'],
     );
     expect(await titles({'text': 'heist'}), unorderedEquals(['Vault Night', 'Space Rocks']));
+  });
+
+  test('genres to keep out apply to a theme search too', () async {
+    expect(
+      await titles({
+        'text': 'heist',
+        'genres_none': ['science fiction'],
+      }),
+      ['Vault Night'],
+    );
   });
 }

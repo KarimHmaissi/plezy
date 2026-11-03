@@ -133,7 +133,10 @@ Details of each are in the dated entries below.
   lists** for a fresh set now; each list's picks are topped up every 12
   hours for free (watched titles drop out, new arrivals that fit come in).
 - Lists keep kids' and animated titles out unless they're meant for them
-  (a "Sci-fi epics" list was filling with animated films).
+  (a "Sci-fi epics like Dune" list was filling with animated films): the
+  prompt asks for it, and a list "like" a live-action title never takes
+  animation. Titles to keep out now apply to theme searches too, and a
+  list's page says why it suits you once instead of twice.
 - Code: `lib/services/ai/ai_suggestions.dart`, `lib/screens/ai_suggested.dart`.
 
 ### AI answers you can act on (v2, phase 1)
