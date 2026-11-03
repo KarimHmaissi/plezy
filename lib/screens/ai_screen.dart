@@ -71,6 +71,7 @@ import '../widgets/hub_section.dart';
 import '../widgets/media_context_menu.dart' show ItemMenuEntries, ItemMenuHeader, MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/side_navigation_rail.dart';
 import '../widgets/system_bottom_inset.dart';
+import '../widgets/pressable.dart';
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/tv_browse_rail.dart';
 import '../widgets/tv_spotlight_scaffold.dart';
@@ -683,6 +684,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         await AiHistory.replace(entry);
       }
       if (!mounted) return;
+      _landed.add(_hubId(entry));
+      Timer(_landedFor, () => _landed.remove(_hubId(entry)));
       setState(() {
         _pending.remove(ask);
         if (ask.replaceId == null) {
@@ -878,6 +881,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   ];
 
   static String _hubId(AiHistoryEntry entry) => 'aitab:${entry.id}';
+
+  /// Answers that just landed (hub ids): their posters slide in one by one
+  /// for [_landedFor], then cards built later (scrolling) just appear.
+  final Set<String> _landed = {};
+  static const Duration _landedFor = Duration(seconds: 2);
 
   /// Load more card state per answer id; absent means ready.
   final Map<String, _MoreState> _more = {};
@@ -1428,7 +1436,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         ),
       );
     }
-    if (_rows.isEmpty && _tonightCards == null) {
+    // Touch screens with a key show the page itself (moods, Suggested,
+    // starter prompts) rather than an empty message.
+    final starters = _cardsInline && !_thinClient && _hasKey == true;
+    if (_rows.isEmpty && _tonightCards == null && (!starters || _busy)) {
       return Center(
         child: _busy
             ? Column(
@@ -1447,6 +1458,57 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       );
     }
     return null;
+  }
+
+  /// No answers yet: a few things to ask, one tap each.
+  Widget _starterBlock() {
+    final spacing = ForkSpacing.of(context);
+    final mono = tokens(context);
+    final theme = Theme.of(context).textTheme;
+    final prompts = [t.aiComposer.example2, t.aiComposer.historyRequest, t.aiComposer.example5, t.aiComposer.example3];
+    return Padding(
+      padding: EdgeInsets.fromLTRB(spacing.edgeInset, 0, spacing.edgeInset, spacing.rowGap),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(t.aiTab.emptyTitle, style: spacing.titleStyle(context)),
+          const SizedBox(height: 4),
+          Text(t.aiTab.starterHint, style: theme.bodyMedium?.copyWith(color: mono.textMuted)),
+          SizedBox(height: spacing.titleGap),
+          for (final (i, prompt) in prompts.indexed)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: ForkEntrance(
+                index: i,
+                child: Pressable(
+                  longPress: false,
+                  borderRadius: BorderRadius.circular(mono.radiusMd),
+                  child: Material(
+                    color: mono.surface,
+                    borderRadius: BorderRadius.circular(mono.radiusMd),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(mono.radiusMd),
+                      onTap: () => unawaited(_ask(request: prompt)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text('“$prompt”', style: theme.bodyLarge?.copyWith(color: mono.text)),
+                            ),
+                            const SizedBox(width: 12),
+                            AppIcon(Symbols.arrow_forward_rounded, size: 20, color: mono.textMuted),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   List<MediaMenuExtraEntry> _pickMenuEntries(MediaItem item) {
@@ -1520,6 +1582,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     if (!PlatformDetector.isTV()) {
       return Scaffold(
         body: RefreshIndicator(
+          // In the app's own colours rather than Material's accent disc.
+          color: tokens(context).text,
+          backgroundColor: tokens(context).surface,
+          strokeWidth: 2.5,
+          elevation: 0,
           // Pull to refresh does what the toolbar's refresh does: new Tonight
           // picks (a phone mirroring its TV reloads the TV's answers).
           onRefresh: ForkMotion.refreshing(() => _thinClient || _hasKey == true ? _pullRefresh() : _start()),
@@ -1579,6 +1646,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                       onNewLists: _hasKey == true ? () => unawaited(_loadSuggestions(force: true)) : null,
                     ),
                   ),
+                if (hubs.isEmpty && pendingCards.isEmpty && !_thinClient && _hasKey == true)
+                  SliverToBoxAdapter(child: _starterBlock()),
                 for (final (n, card) in pendingCards.indexed)
                   SliverToBoxAdapter(child: _pendingBlock(card, divider: n > 0 || _tonightCards != null)),
                 for (var i = 0; i < hubs.length; i++) ...[
@@ -1600,6 +1669,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                             child: HubSection(
                               key: _hubKey(hubs[i]),
                               hub: hubs[i],
+                              staggerIn: _landed.contains(hubs[i].id),
                               trailingCard: _trailingCard(hubs[i]),
                               belowTitle: _tileOnly(hubs[i]),
                               leadingTile: _answerTile(hubs[i]),

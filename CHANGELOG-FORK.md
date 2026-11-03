@@ -103,6 +103,16 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### AI tab polish
+- **Starter prompts:** with a key but no answers yet, the AI tab shows the
+  mood chips, Suggested and a few things to ask ("Something cosy for a
+  Sunday afternoon"), one tap each, instead of an empty message.
+- **Posters slide in:** a new answer's first cards rise in one after
+  another; cards built later while scrolling just appear
+  (`HubSection.staggerIn`, `ForkEntrance.play`).
+- **Pull to refresh** in the app's own colours, without Material's raised
+  accent disc.
+
 ### Smoothness: no more jumping while things load
 - Measured on the Galaxy Fold (120 Hz) with a profile build: scrolling
   Home, the AI tab and grids holds 120 fps, with frames at 1 to 2 ms of the

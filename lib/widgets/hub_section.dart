@@ -34,6 +34,7 @@ import 'media_grid_delegate.dart';
 import 'skeleton_media_card.dart';
 import 'sliver_child_memo.dart';
 import '../utils/scroll_utils.dart';
+import 'fork_motion_widgets.dart';
 import 'horizontal_scroll_with_arrows.dart';
 import 'tv_browse_rail.dart';
 import '../i18n/strings.g.dart';
@@ -129,6 +130,11 @@ class HubSection extends StatefulWidget {
   /// page (an AI answer's page).
   final VoidCallback? onTitleTap;
 
+  /// Fork: the first cards slide in one after another as they're built (a
+  /// new AI answer). Turn it off once they're in, so cards built while
+  /// scrolling just appear.
+  final bool staggerIn;
+
   const HubSection({
     super.key,
     required this.hub,
@@ -147,6 +153,7 @@ class HubSection extends StatefulWidget {
     this.belowItems,
     this.leadingTile,
     this.onTitleTap,
+    this.staggerIn = false,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -166,6 +173,10 @@ class HubSection extends StatefulWidget {
 }
 
 class HubSectionState extends State<HubSection> with MountedSetStateMixin, SkeletonUpgradeScheduler {
+  /// A card sliding in after [index] earlier ones while [HubSection.staggerIn].
+  Widget _staggered(int index, Widget card) =>
+      index < ForkMotion.staggerMax ? ForkEntrance(index: index, play: widget.staggerIn, child: card) : card;
+
   late FocusNode _hubFocusNode;
   final ScrollController _scrollController = ScrollController();
 
@@ -921,50 +932,53 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                                 padding: cardPadding,
                                 child: SizedBox(width: cardWidth, child: const SkeletonMediaCard()),
                               ),
-                              build: () => Padding(
-                                key: _itemKeyFor(index),
-                                padding: cardPadding,
-                                child: FocusBuilders.buildLockedFocusWrapper(
-                                  context: context,
-                                  isFocused: isItemFocused,
-                                  // Pointer/touch taps never reach these: MediaCard's own
-                                  // tap region is deeper in the tree and always wins the
-                                  // gesture arena. Passing null lets the wrapper collapse
-                                  // to the bare card outside keyboard mode instead of
-                                  // building a second dead gesture-detector stack per card.
-                                  onTap: isKeyboardMode ? () => _onItemTapped(index) : null,
-                                  onLongPress: isKeyboardMode
-                                      ? () {
-                                          _onItemTapped(index);
-                                          _mediaCardKeys[index]?.currentState?.showContextMenu();
-                                        }
-                                      : null,
-                                  delegateFocusBorder: true,
-                                  child: MediaCard(
-                                    key: _getMediaCardKey(index),
-                                    item: item,
-                                    width: cardWidth,
-                                    height: posterHeight,
-                                    onRefresh: widget.onRefresh,
-                                    onRemoveFromContinueWatching: widget.onRemoveFromContinueWatching,
-                                    onTap: widget.onItemTap == null
-                                        ? null
-                                        : () {
+                              build: () => _staggered(
+                                index,
+                                Padding(
+                                  key: _itemKeyFor(index),
+                                  padding: cardPadding,
+                                  child: FocusBuilders.buildLockedFocusWrapper(
+                                    context: context,
+                                    isFocused: isItemFocused,
+                                    // Pointer/touch taps never reach these: MediaCard's own
+                                    // tap region is deeper in the tree and always wins the
+                                    // gesture arena. Passing null lets the wrapper collapse
+                                    // to the bare card outside keyboard mode instead of
+                                    // building a second dead gesture-detector stack per card.
+                                    onTap: isKeyboardMode ? () => _onItemTapped(index) : null,
+                                    onLongPress: isKeyboardMode
+                                        ? () {
                                             _onItemTapped(index);
-                                            widget.onItemTap!(item);
-                                          },
-                                    onLongPress: widget.onItemLongPress == null
-                                        ? null
-                                        : () {
-                                            _onItemTapped(index);
-                                            widget.onItemLongPress!(item);
-                                          },
-                                    viewModeOverride: ViewMode.grid,
-                                    isInContinueWatching: widget.isInContinueWatching,
-                                    usesContinueWatchingAction: widget.usesContinueWatchingAction,
-                                    mixedHubContext: isMixedHub,
-                                    episodePosterModeOverride: episodePosterMode,
-                                    badges: widget.badgesFor?.call(item) ?? const [],
+                                            _mediaCardKeys[index]?.currentState?.showContextMenu();
+                                          }
+                                        : null,
+                                    delegateFocusBorder: true,
+                                    child: MediaCard(
+                                      key: _getMediaCardKey(index),
+                                      item: item,
+                                      width: cardWidth,
+                                      height: posterHeight,
+                                      onRefresh: widget.onRefresh,
+                                      onRemoveFromContinueWatching: widget.onRemoveFromContinueWatching,
+                                      onTap: widget.onItemTap == null
+                                          ? null
+                                          : () {
+                                              _onItemTapped(index);
+                                              widget.onItemTap!(item);
+                                            },
+                                      onLongPress: widget.onItemLongPress == null
+                                          ? null
+                                          : () {
+                                              _onItemTapped(index);
+                                              widget.onItemLongPress!(item);
+                                            },
+                                      viewModeOverride: ViewMode.grid,
+                                      isInContinueWatching: widget.isInContinueWatching,
+                                      usesContinueWatchingAction: widget.usesContinueWatchingAction,
+                                      mixedHubContext: isMixedHub,
+                                      episodePosterModeOverride: episodePosterMode,
+                                      badges: widget.badgesFor?.call(item) ?? const [],
+                                    ),
                                   ),
                                 ),
                               ),

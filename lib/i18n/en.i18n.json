@@ -1204,6 +1204,7 @@
     "noKeyMessage": "The AI helper needs your own API key. Add it in Settings ▸ AI.",
     "emptyTitle": "Ask for something to watch",
     "emptyMessage": "Press Ask and describe what you're in the mood for.",
+    "starterHint": "Tap one to try it, or press Ask and say it your way.",
     "loadMore": "Load more",
     "refreshRow": "Replace with new picks",
     "refreshing": "Refreshing: ${request}",

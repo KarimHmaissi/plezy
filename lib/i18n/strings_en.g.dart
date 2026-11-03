@@ -3333,6 +3333,9 @@ class Translations$aiTab$en {
 	/// en: 'Press Ask and describe what you're in the mood for.'
 	String get emptyMessage => 'Press Ask and describe what you\'re in the mood for.';
 
+	/// en: 'Tap one to try it, or press Ask and say it your way.'
+	String get starterHint => 'Tap one to try it, or press Ask and say it your way.';
+
 	/// en: 'Load more'
 	String get loadMore => 'Load more';
 
@@ -10547,6 +10550,7 @@ extension on Translations {
 			'aiTab.noKeyMessage' => 'The AI helper needs your own API key. Add it in Settings ▸ AI.',
 			'aiTab.emptyTitle' => 'Ask for something to watch',
 			'aiTab.emptyMessage' => 'Press Ask and describe what you\'re in the mood for.',
+			'aiTab.starterHint' => 'Tap one to try it, or press Ask and say it your way.',
 			'aiTab.loadMore' => 'Load more',
 			'aiTab.refreshRow' => 'Replace with new picks',
 			'aiTab.refreshing' => ({required Object request}) => 'Refreshing: ${request}',
@@ -10969,9 +10973,9 @@ extension on Translations {
 			'history.copy.howItWorks' => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.',
 			'history.copy.cancel' => 'Cancel',
 			'history.copy.confirm' => 'Send to Trakt',
-			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
 			_ => null,
 		} ?? switch (path) {
+			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
 			'history.copy.done' => ({required Object films, required Object episodes}) => 'Added ${films} films and ${episodes} episodes to Trakt',
 			'history.copy.notFound' => ({required Object n}) => '${n} couldn\'t be found on Trakt',
 			'history.copy.failed' => 'Sending to Trakt failed',
@@ -11483,9 +11487,9 @@ extension on Translations {
 			'watchTogether.ended.kicked' => 'You were removed from the room',
 			'watchTogether.ended.expired' => 'The room expired',
 			'watchTogether.ended.replaced' => 'You joined this room on another device',
-			'watchTogether.ended.lost' => 'Lost the connection to the room',
 			_ => null,
 		} ?? switch (path) {
+			'watchTogether.ended.lost' => 'Lost the connection to the room',
 			'watchTogether.errors.invalidCode' => 'That isn\'t a room code. Codes have 6 letters and digits, without 0, 1, I, L or O.',
 			'watchTogether.errors.roomNotFound' => 'No room has that code. It may have ended.',
 			'watchTogether.errors.roomFull' => 'That room is full.',
@@ -11997,9 +12001,9 @@ extension on Translations {
 			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
 			'addServer.findServer' => 'Find server',
 			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
-			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',
 			_ => null,
 		} ?? switch (path) {
+			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',
 			'addServer.username' => 'Username',
 			'addServer.password' => 'Password',
 			'addServer.signIn' => 'Sign in',

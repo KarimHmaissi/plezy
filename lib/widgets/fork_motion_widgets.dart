@@ -9,10 +9,14 @@ import '../theme/fork_motion.dart';
 /// answer) to play again. Nothing moves when the system asks for less
 /// motion.
 class ForkEntrance extends StatefulWidget {
-  const ForkEntrance({super.key, required this.child, this.index = 0});
+  const ForkEntrance({super.key, required this.child, this.index = 0, this.play = true});
 
   final Widget child;
   final int index;
+
+  /// When false as it's first built, [child] is simply there; the tree
+  /// stays the same either way, so turning it off later keeps state.
+  final bool play;
 
   @override
   State<ForkEntrance> createState() => _ForkEntranceState();
@@ -27,7 +31,7 @@ class _ForkEntranceState extends State<ForkEntrance> with SingleTickerProviderSt
     super.didChangeDependencies();
     if (_started) return;
     _started = true;
-    if (ForkMotion.reduceMotion(context)) {
+    if (!widget.play || ForkMotion.reduceMotion(context)) {
       _controller.value = 1;
       return;
     }
