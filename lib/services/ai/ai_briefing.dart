@@ -119,7 +119,7 @@ abstract final class AiBriefing {
         'thinking': model.noThinking,
         'system': _prompt,
         'tools': [_tool],
-        'tool_choice': {'type': 'tool', 'name': _tool['name']},
+        'tool_choice': model.answerWith(_tool['name']! as String),
         'messages': [
           {
             'role': 'user',
@@ -418,7 +418,8 @@ You choose and introduce up to three cards at the top of a TV app tonight.
 - Then one line per card, at most 14 words, plain text, no markdown, no emoji. The card already shows its title: never name it in its line.
 - newEpisode: nudge them back to the show (where they are, what's waiting). pick: why it suits their taste tonight. library: why this one they own is worth finally watching.
 - Be specific: name what it shares with titles they love, from the facts given. Never invent facts.
-- Warm and light, not salesy. Address them as "you".''';
+- Warm and light, not salesy. Address them as "you".
+- Answer only by calling show_cards, once.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'show_cards',

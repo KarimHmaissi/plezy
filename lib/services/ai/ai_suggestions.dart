@@ -198,7 +198,7 @@ abstract final class AiSuggestions {
         'thinking': model.noThinking,
         'system': _prompt,
         'tools': [_tool],
-        'tool_choice': {'type': 'tool', 'name': _tool['name']},
+        'tool_choice': model.answerWith(_tool['name']! as String),
         'messages': [
           {
             'role': 'user',
@@ -378,7 +378,8 @@ You suggest ready-made lists for a TV app's AI page, so the user finds something
 - title: 2-5 words, the shelf name. Plain, no emoji.
 - request: the same list as the user would ask for it, one sentence.
 - why: one short line on why it suits them, naming a title they love when it fits. Address them as "you".
-- search: genres use the library's names (Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western). animation: "none" for almost every list (kids' and animated titles carry grown-up genres too, so they are kept out), "only" for anime or animation lists, "allowed" when either fits. text = 1-3 plot or theme words matched in titles and summaries ("heist", "time loop"). like = the exact title of something they watched and loved, to rank by similarity.''';
+- search: genres use the library's names (Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western). animation: "none" for almost every list (kids' and animated titles carry grown-up genres too, so they are kept out), "only" for anime or animation lists, "allowed" when either fits. text = 1-3 plot or theme words matched in titles and summaries ("heist", "time loop"). like = the exact title of something they watched and loved, to rank by similarity.
+Answer only by calling suggest_lists, once.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'suggest_lists',

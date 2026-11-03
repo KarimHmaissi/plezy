@@ -117,6 +117,9 @@ Details of each are in the dated entries below.
   takes `between_tools`, `ClaudeModel.noThinking`), so new Tonights and
   lists failed. Failures now say so ("Couldn't make a new Tonight"), and
   the Tonight cards shimmer while a new set is made.
+- And it also refuses forced tool use (`tool_choice: tool`), so Sonnet
+  calls send `auto` and the prompt says which tool to answer with
+  (`ClaudeModel.answerWith`).
 
 ### AI tab polish
 - **Starter prompts:** with a key but no answers yet, the AI tab shows the

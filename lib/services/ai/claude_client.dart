@@ -29,6 +29,14 @@ enum ClaudeModel {
     haiku => const {'type': 'disabled'},
   };
 
+  /// The request's `tool_choice` for a call that must answer with [tool]:
+  /// Sonnet 5.5 refuses forced tool use, so it gets `auto` and its prompt
+  /// says to call the tool.
+  Map<String, String> answerWith(String tool) => switch (this) {
+    sonnet => const {'type': 'auto'},
+    haiku => {'type': 'tool', 'name': tool},
+  };
+
   final double input;
   final double output;
   final double cacheRead;
