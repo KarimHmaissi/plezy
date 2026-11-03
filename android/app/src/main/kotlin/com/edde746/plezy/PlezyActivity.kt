@@ -29,6 +29,7 @@ import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import com.edde746.mpv.MediaCodecQuery
 import com.edde746.plezy.car.CarRestrictionsMonitor
+import com.edde746.plezy.cast.GoogleCastChannel
 import com.edde746.plezy.deeplink.DeepLinkPlugin
 import com.edde746.plezy.exoplayer.ExoPlayerPlugin
 import com.edde746.plezy.mpv.MpvAudioPlayerPlugin
@@ -133,6 +134,7 @@ class PlezyActivity : FlutterActivity() {
   private var activityStarted = false
   private val externalPlayerChannel = ExternalPlayerChannel(this)
   private val userCertificateChannel = UserCertificateChannel()
+  private val googleCastChannel by lazy { GoogleCastChannel(applicationContext) }
   private val appIconChannel = AppIconChannel(this)
   private val exitDiagnosticsRequested = AtomicBoolean(false)
 
@@ -637,6 +639,7 @@ class PlezyActivity : FlutterActivity() {
 
   override fun onDestroy() {
     externalPlayerChannel.dispose()
+    googleCastChannel.dispose()
     systemBarsInsetsHost?.setOnApplyWindowInsetsListener(null)
     systemBarsInsetsHost = null
     cancelPendingSystemBarsHide()
@@ -990,6 +993,7 @@ class PlezyActivity : FlutterActivity() {
 
     externalPlayerChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     userCertificateChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
+    googleCastChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     appIconChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
 
     // Splash screen theme: persist user's chosen theme for next launch (API 31+)

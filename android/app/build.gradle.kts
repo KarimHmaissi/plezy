@@ -510,6 +510,13 @@ dependencies {
   // packaging rules.
   implementation(project(":libass"))
 
+  // Fork: Google Cast sender (phones cast to the Default Media Receiver).
+  // 23.x needs mediarouter 1.9, which requires compileSdk 37; stay on 22.x
+  // with the stable mediarouter (used directly for the device list) until
+  // Flutter's compileSdk moves.
+  implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
+  implementation("androidx.mediarouter:mediarouter:1.8.1")
+
   testImplementation("junit:junit:4.13.2")
   // Real android.util.* implementations for tests exercising media3 classes
   // (MatroskaExtractor uses SparseArray, which is a no-op stub on plain JVM)

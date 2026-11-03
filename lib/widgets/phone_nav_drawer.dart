@@ -12,6 +12,7 @@ import '../navigation/settings_shortcut.dart';
 import '../profiles/active_profile_provider.dart';
 import '../profiles/profile_avatar.dart';
 import '../providers/companion_remote_provider.dart';
+import '../providers/google_cast_provider.dart';
 import '../screens/companion_remote/mobile_remote_screen.dart';
 import '../screens/profile/profile_switch_screen.dart';
 import '../screens/profile/profile_teardown.dart';
@@ -22,9 +23,10 @@ import '../utils/dialogs.dart';
 import '../utils/platform_detector.dart';
 import '../watch_together/watch_together.dart';
 import 'app_icon.dart';
+import 'google_cast_sheet.dart';
 import 'pressable.dart';
 
-/// Fork: the phone's top-bar actions on every tab, as Plex: Search, the
+/// Fork: the phone's top-bar actions on every tab, as Plex: Search, Cast, the
 /// companion remote and the avatar, which opens [showPhoneNavDrawer] with
 /// everything else. Empty off phones (TV and desktop keep their side nav
 /// and own toolbars).
@@ -50,6 +52,13 @@ List<FocusableAction> phoneTabActions(
       tooltip: t.common.search,
       onPressed: () => MainTabSwitcher.select?.call(NavigationTabId.search),
     ),
+    // Fork: Google Cast (hidden where casting isn't available).
+    if (context.read<GoogleCastProvider?>()?.available ?? false)
+      FocusableAction(
+        tooltip: t.googleCast.button,
+        onPressed: () => openGoogleCast(context),
+        child: GoogleCastButton(color: fg),
+      ),
     FocusableAction(
       tooltip: t.companionRemote.title,
       onPressed: () => _openRemote(context),

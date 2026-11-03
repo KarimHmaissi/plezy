@@ -2940,5 +2940,18 @@
     "timedOut": "The TV didn't answer in time.",
     "edit": "Edit",
     "keepsRunning": "It keeps going and lands in the AI tab."
+  },
+  "googleCast": {
+    "button": "Cast",
+    "castTo": "Cast to",
+    "device": "Cast device",
+    "searching": "Looking for Cast devices on this Wi-Fi…",
+    "searchingMore": "Still looking for more devices…",
+    "connected": "Connected to ${name}",
+    "connectedHint": "Press Play on any title to watch it there.",
+    "stopCasting": "Stop casting",
+    "notPlex": "Only titles from Plex servers can be cast",
+    "noStream": "The Plex server couldn't prepare this title for Cast",
+    "loadFailed": "${name} couldn't play this title"
   }
 }

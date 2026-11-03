@@ -46,6 +46,8 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       to the TV
 - [x] Phone on its own: its own key, library index, history brain, Ask
       and Tonight, no TV or Mac needed (mirroring the TV is a switch)
+- [x] Google Cast from the phone to any Chromecast, Cast TV or the Shield,
+      no Plezy needed on the receiver
 - [x] Media notification on the phone for what the TV is playing
 - [x] Mac: surround sent to the receiver as Dolby Digital
 - [x] Watch history brain: a local index of what you've watched and own,
@@ -100,6 +102,34 @@ Details of each are in the dated entries below.
   consider registering our own Trakt app instead of upstream's.
 
 ## 2026-11-03
+
+### Google Cast from the phone
+- **A Cast button in the phone's top bar** (Android phones with Google Play
+  services), next to Search. It lists the Chromecasts, Cast-enabled TVs,
+  Google TVs and the Shield on the Wi-Fi; pick one and every Play casts
+  there until you stop casting. Nothing has to be installed on the
+  receiver: it plays in Google's own Cast player (the Default Media
+  Receiver).
+- **The stream comes from the Plex server**, made for Cast: HLS with H.264
+  video and AAC stereo. A file that already fits (H.264, up to 1080p) is
+  only repackaged; anything else (HEVC, 4K, 10-bit, surround) is
+  transcoded to 1080p. Subtitles: the one selected for the file in Plex is
+  burned in. No server settings change.
+- **Plex stays in step.** The phone reports the Cast device's progress to
+  Plex every 10 s and when it pauses or stops, so resume points, Continue
+  Watching and watched state are right, and the stream shows on the Plex
+  dashboard. Closing Plezy keeps it casting; reopening it picks the
+  session back up.
+- **Controls:** a mini bar over the bottom bar while casting (play/pause,
+  tap for more) and a full screen with seek, back 10 s, forward 30 s,
+  Stop and Stop casting. The Cast SDK adds its own notification and
+  lock-screen controls.
+- A Google Cast device wins over the companion "Play on TV" while both are
+  connected.
+- Code: `android/.../plezy/cast/` (official Cast SDK 22.3.1; 23.x needs
+  compileSdk 37), `lib/services/google_cast/`,
+  `lib/providers/google_cast_provider.dart`,
+  `lib/widgets/google_cast_sheet.dart`, `PlexClient.buildCastStreamUrl`.
 
 ### The phone works on its own
 - **Phones are hosts now, by default.** The phone has its own API key,

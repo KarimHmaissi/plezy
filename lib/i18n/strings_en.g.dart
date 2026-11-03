@@ -105,6 +105,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$cast$en cast = Translations$cast$en.internal(_root);
 	late final Translations$remoteAi$en remoteAi = Translations$remoteAi$en.internal(_root);
 	late final Translations$aiComposer$en aiComposer = Translations$aiComposer$en.internal(_root);
+	late final Translations$googleCast$en googleCast = Translations$googleCast$en.internal(_root);
 }
 
 // Path: app
@@ -7222,6 +7223,48 @@ class Translations$aiComposer$en {
 	String get keepsRunning => 'It keeps going and lands in the AI tab.';
 }
 
+// Path: googleCast
+class Translations$googleCast$en {
+	Translations$googleCast$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Cast'
+	String get button => 'Cast';
+
+	/// en: 'Cast to'
+	String get castTo => 'Cast to';
+
+	/// en: 'Cast device'
+	String get device => 'Cast device';
+
+	/// en: 'Looking for Cast devices on this Wi-Fi…'
+	String get searching => 'Looking for Cast devices on this Wi-Fi…';
+
+	/// en: 'Still looking for more devices…'
+	String get searchingMore => 'Still looking for more devices…';
+
+	/// en: 'Connected to ${name}'
+	String connected({required Object name}) => 'Connected to ${name}';
+
+	/// en: 'Press Play on any title to watch it there.'
+	String get connectedHint => 'Press Play on any title to watch it there.';
+
+	/// en: 'Stop casting'
+	String get stopCasting => 'Stop casting';
+
+	/// en: 'Only titles from Plex servers can be cast'
+	String get notPlex => 'Only titles from Plex servers can be cast';
+
+	/// en: 'The Plex server couldn't prepare this title for Cast'
+	String get noStream => 'The Plex server couldn\'t prepare this title for Cast';
+
+	/// en: '${name} couldn't play this title'
+	String loadFailed({required Object name}) => '${name} couldn\'t play this title';
+}
+
 // Path: appIcon.names
 class Translations$appIcon$names$en {
 	Translations$appIcon$names$en.internal(this._root);
@@ -11972,6 +12015,17 @@ extension on Translations {
 			'aiComposer.timedOut' => 'The TV didn\'t answer in time.',
 			'aiComposer.edit' => 'Edit',
 			'aiComposer.keepsRunning' => 'It keeps going and lands in the AI tab.',
+			'googleCast.button' => 'Cast',
+			'googleCast.castTo' => 'Cast to',
+			'googleCast.device' => 'Cast device',
+			'googleCast.searching' => 'Looking for Cast devices on this Wi-Fi…',
+			'googleCast.searchingMore' => 'Still looking for more devices…',
+			'googleCast.connected' => ({required Object name}) => 'Connected to ${name}',
+			'googleCast.connectedHint' => 'Press Play on any title to watch it there.',
+			'googleCast.stopCasting' => 'Stop casting',
+			'googleCast.notPlex' => 'Only titles from Plex servers can be cast',
+			'googleCast.noStream' => 'The Plex server couldn\'t prepare this title for Cast',
+			'googleCast.loadFailed' => ({required Object name}) => '${name} couldn\'t play this title',
 			_ => null,
 		};
 	}

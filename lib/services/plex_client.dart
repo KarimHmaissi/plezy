@@ -3046,6 +3046,97 @@ class PlexClient
 
   static const String _musicTranscodeStartEndpoint = '/music/:/transcode/universal/start.mp3';
 
+  /// Fork: what a Google Cast Default Media Receiver plays from Plex. HLS
+  /// with MPEG-TS segments, H.264 + AAC: the receiver's default HLS segment
+  /// format, which every Cast device decodes. HEVC cannot travel in TS (and
+  /// older Chromecasts lack it), so it is encoded to H.264.
+  ///
+  /// The limitations keep a copied H.264 stream inside what a 3rd-gen
+  /// Chromecast decodes (1080p, level 4.2, 8-bit) and audio in stereo; a
+  /// source within them is remuxed (`directStream=1`), anything else is
+  /// transcoded to 1080p.
+  static const String _castClientProfileExtra =
+      'add-transcode-target(type=videoProfile&context=streaming'
+      '&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac%2Cmp3)'
+      '+add-limitation(scope=videoCodec&scopeName=h264&type=upperBound&name=video.width&value=1920)'
+      '+add-limitation(scope=videoCodec&scopeName=h264&type=upperBound&name=video.height&value=1080)'
+      '+add-limitation(scope=videoCodec&scopeName=h264&type=upperBound&name=video.level&value=42)'
+      '+add-limitation(scope=videoCodec&scopeName=h264&type=upperBound&name=video.bitDepth&value=8)'
+      '+add-limitation(scope=videoAudioCodec&scopeName=*&type=upperBound&name=audio.channels&value=2)';
+
+  /// Fork: an absolute HLS URL for a Google Cast receiver to play
+  /// [ratingKey] from, or null when the server cannot produce one.
+  ///
+  /// The receiver fetches the stream itself and cannot send headers, so the
+  /// URL carries the client identity and the account token as query
+  /// parameters, as Plex's own players do. It is built on the connection
+  /// this client is using now; a `plex.direct` address resolves on the Cast
+  /// device too (public DNS answering with the server's LAN address).
+  ///
+  /// Subtitles are `auto`: the server burns in the subtitle stream selected
+  /// for the file in Plex (the receiver has no subtitle renderer for what
+  /// Plex serves), and none when nothing is selected.
+  Future<String?> buildCastStreamUrl({
+    required String ratingKey,
+    int mediaIndex = 0,
+    required String sessionIdentifier,
+    required String transcodeSessionId,
+  }) async {
+    final token = config.token;
+    if (token == null) return null;
+    final params = <String, String>{
+      'hasMDE': '1',
+      'path': '/library/metadata/$ratingKey',
+      'mediaIndex': mediaIndex.toString(),
+      'partIndex': '0',
+      'protocol': _plexVideoHlsProtocol,
+      'fastSeek': '1',
+      'directPlay': '0',
+      'directStream': '1',
+      'directStreamAudio': '1',
+      'videoResolution': '1920x1080',
+      'subtitleSize': '100',
+      'audioBoost': '100',
+      'location': 'lan',
+      'autoAdjustQuality': '0',
+      'mediaBufferSize': '102400',
+      'session': transcodeSessionId,
+      'subtitles': 'auto',
+      'Accept-Language': 'en',
+      'X-Plex-Session-Identifier': sessionIdentifier,
+      'X-Plex-Client-Profile-Extra': _castClientProfileExtra,
+      'X-Plex-Client-Profile-Name': 'Generic',
+      'X-Plex-Language': 'en',
+      ..._transcodeClientParams(),
+    };
+    try {
+      final decision = await _runTranscodeDecision(
+        startEndpoint: _plexVideoHlsStartEndpoint,
+        allParams: params,
+        isOriginal: true,
+        requiredContainer: _plexHlsVodTsContainer,
+      );
+      final startPath = decision.startPath;
+      if (startPath == null || decision.outcome == TranscodeDecisionOutcome.failed || !decision.containerHonored) {
+        return null;
+      }
+      return '${_http.buildUri(startPath)}&X-Plex-Token=${_plexEncode(token)}';
+    } catch (e, st) {
+      appLogger.e('Failed to build Cast stream URL', error: e, stackTrace: st);
+      return null;
+    }
+  }
+
+  /// Fork: end the server's transcode for a Cast stream (see
+  /// [buildCastStreamUrl]). Best-effort: PMS also reaps an idle session.
+  Future<void> stopTranscodeSession(String transcodeSessionId) async {
+    try {
+      await _http.get('/video/:/transcode/universal/stop', queryParameters: {'session': transcodeSessionId});
+    } catch (e) {
+      appLogger.d('Stopping transcode session failed', error: e);
+    }
+  }
+
   /// Shared decision plumbing for the video and music transcode flows: GET
   /// the sibling `decision` endpoint with the exact start params, parse the
   /// outcome via [_parseTranscodeDecisionOutcome], and hand back the start

@@ -13,10 +13,12 @@ import '../mpv/mpv.dart';
 import '../models/transcode_quality_preset.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/download_provider.dart';
+import '../providers/google_cast_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/watch_state_store.dart';
 import '../watch_together/providers/watch_together_provider.dart';
 import '../watch_together/models/watch_copy.dart';
+import '../widgets/google_cast_sheet.dart';
 import '../screens/video_player_screen.dart';
 import '../services/external_player_service.dart';
 import '../services/local_playback_history.dart';
@@ -330,6 +332,20 @@ Future<bool?> navigateToVideoPlayer(
       (launchObserver?.isCurrent ?? true) &&
       (watchTogetherCopy == null || watchTogether?.roomCopy?.ref == watchTogetherCopy);
   if (!launchCurrent()) return null;
+  // Fork: a phone connected to a Google Cast device plays there; the user
+  // picked that device, so it wins over the companion TV.
+  final googleCast = context.read<GoogleCastProvider?>();
+  if (allowCast &&
+      googleCast != null &&
+      googleCast.isConnected &&
+      !isOffline &&
+      watchTogetherCopy == null &&
+      metadata.serverId != null) {
+    final item = resolveWatchState ? context.readFreshWatchState(metadata) : metadata;
+    final start = initialPosition ?? Duration(milliseconds: item.viewOffsetMs ?? 0);
+    await castToGoogleCast(context, googleCast, item, start: start);
+    return null;
+  }
   // Casting (fork): a phone connected to a TV sends Play there instead.
   final cast = context.read<CompanionRemoteProvider?>();
   if (allowCast && cast != null && cast.isCasting && !isOffline && watchTogetherCopy == null && metadata.serverId != null) {
