@@ -6,6 +6,7 @@ import '../../providers/companion_remote_provider.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/platform_detector.dart';
 import '../ai/ai_history.dart';
+import '../ai/ai_spend.dart';
 import '../catalog/home_pins.dart';
 import '../customisation/customisation_store.dart';
 import '../settings_service.dart';
@@ -65,21 +66,30 @@ abstract final class PhoneMode {
   /// its own: copy the last snapshot it kept (Home, lists, AI answers) so
   /// nothing seems lost. Only into an empty database, and only once.
   static Future<void> _adoptMirrorOnce() async {
-    final settings = SettingsService.instance;
-    if (settings.read(SettingsService.phoneAdoptedMirror)) return;
+    final prefs = SettingsService.instance;
+    if (prefs.read(SettingsService.phoneAdoptedMirror)) return;
     try {
       final cached = await MirrorClient.readCachedSnapshot();
       if (cached != null) {
         final store = await Customisation.store;
         final empty = await store.readHomeLayout() == null && await AiHistory.count() == 0;
         if (empty) {
-          await store.importAll(cached.data);
+          // The TV's spend is the TV's: this phone counts its own.
+          final settings = cached.data['settings'];
+          await store.importAll({
+            ...cached.data,
+            if (settings is Map)
+              'settings': {
+                for (final MapEntry(:key, :value) in settings.entries)
+                  if (key is String && !key.startsWith(AiSpend.keyPrefix)) key: value,
+              },
+          });
           await HomePinsController.instance.ensureLoaded(refresh: true);
           Customisation.changed.value++;
           appLogger.i('Phone: copied the TV\'s mirrored data to this device');
         }
       }
-      await settings.write(SettingsService.phoneAdoptedMirror, true);
+      await prefs.write(SettingsService.phoneAdoptedMirror, true);
     } catch (e) {
       // Tried again next start.
       appLogger.w('Phone: copying the mirrored data failed', error: e);

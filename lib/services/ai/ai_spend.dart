@@ -15,7 +15,11 @@ typedef AiMonthSpend = ({
 /// What the AI helper has cost, per calendar month, from each response's
 /// token usage (no cap; shown in Settings ▸ AI).
 abstract final class AiSpend {
-  static String _key(DateTime month) => 'ai.spend.${month.year}-${month.month.toString().padLeft(2, '0')}';
+  /// Settings keys of this device's spend records; another device's copy
+  /// of the data shouldn't bring its spend along.
+  static const String keyPrefix = 'ai.spend.';
+
+  static String _key(DateTime month) => '$keyPrefix${month.year}-${month.month.toString().padLeft(2, '0')}';
 
   static Future<AiMonthSpend> month([DateTime? when]) async {
     final raw = await (await Customisation.store).readSetting(_key(when ?? DateTime.now()));
