@@ -352,7 +352,7 @@ You suggest ready-made lists for a TV app's AI page, so the user finds something
 - title: 2-5 words, the shelf name. Plain, no emoji.
 - request: the same list as the user would ask for it, one sentence.
 - why: one short line on why it suits them, naming a title they love when it fits. Address them as "you".
-- search: genres use the library's names (Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western). text = 1-3 plot or theme words matched in titles and summaries ("heist", "time loop"). like = the exact title of something they watched and loved, to rank by similarity.''';
+- search: genres use the library's names (Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western). genres_none keeps out what would spoil the list: kids' and animated titles carry most genres too, so put Animation and Family in genres_none unless the list is meant for them (anime, animated, family night). text = 1-3 plot or theme words matched in titles and summaries ("heist", "time loop"). like = the exact title of something they watched and loved, to rank by similarity.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'suggest_lists',

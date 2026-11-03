@@ -132,6 +132,8 @@ Details of each are in the dated entries below.
 - **Cadence:** a new set arrives once a day; the shelf ends in **New
   lists** for a fresh set now; each list's picks are topped up every 12
   hours for free (watched titles drop out, new arrivals that fit come in).
+- Lists keep kids' and animated titles out unless they're meant for them
+  (a "Sci-fi epics" list was filling with animated films).
 - Code: `lib/services/ai/ai_suggestions.dart`, `lib/screens/ai_suggested.dart`.
 
 ### AI answers you can act on (v2, phase 1)
