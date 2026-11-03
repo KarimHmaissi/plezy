@@ -45,7 +45,7 @@ abstract final class AiPickReasons {
         'model': ClaudeModel.haiku.id,
         'max_tokens': 200,
         // One short sentence: no thinking (it would use up the budget).
-        'thinking': {'type': 'disabled'},
+        'thinking': ClaudeModel.haiku.noThinking,
         'system':
             'You explain, in one sentence of at most 20 words, why a film or show fits what the user asked for. '
             'Specific to the title, spoiler-free, plain text, no quotes or preamble.',

@@ -3477,6 +3477,12 @@ class Translations$aiTab$en {
 	/// en: 'Hidden. You'll see fewer lists like it'
 	String get hiddenList => 'Hidden. You\'ll see fewer lists like it';
 
+	/// en: 'Couldn't make a new Tonight. Try again in a moment.'
+	String get tonightFailed => 'Couldn\'t make a new Tonight. Try again in a moment.';
+
+	/// en: 'Couldn't make new lists. Try again in a moment.'
+	String get listsFailed => 'Couldn\'t make new lists. Try again in a moment.';
+
 	/// en: 'Cosy'
 	String get moodCosy => 'Cosy';
 
@@ -10598,6 +10604,8 @@ extension on Translations {
 			'aiTab.notForMe' => 'Not for me',
 			'aiTab.keptList' => 'Saved to your lists',
 			'aiTab.hiddenList' => 'Hidden. You\'ll see fewer lists like it',
+			'aiTab.tonightFailed' => 'Couldn\'t make a new Tonight. Try again in a moment.',
+			'aiTab.listsFailed' => 'Couldn\'t make new lists. Try again in a moment.',
 			'aiTab.moodCosy' => 'Cosy',
 			'aiTab.moodCosyRequest' => 'Something cosy and comforting I haven\'t watched: warm, gentle and low-stakes',
 			'aiTab.moodEdge' => 'Edge of my seat',
@@ -10971,10 +10979,10 @@ extension on Translations {
 			'history.copy.bulk' => ({required Object n}) => '${n} with mark-as-watched dates, not real viewings, so your Trakt timeline doesn\'t get made-up dates',
 			'history.copy.noIds' => ({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)',
 			'history.copy.howItWorks' => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.',
-			'history.copy.cancel' => 'Cancel',
-			'history.copy.confirm' => 'Send to Trakt',
 			_ => null,
 		} ?? switch (path) {
+			'history.copy.cancel' => 'Cancel',
+			'history.copy.confirm' => 'Send to Trakt',
 			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
 			'history.copy.done' => ({required Object films, required Object episodes}) => 'Added ${films} films and ${episodes} episodes to Trakt',
 			'history.copy.notFound' => ({required Object n}) => '${n} couldn\'t be found on Trakt',
@@ -11485,10 +11493,10 @@ extension on Translations {
 			'watchTogether.notices.openFailed' => 'Couldn\'t open the room\'s video',
 			'watchTogether.ended.ended' => 'The host ended the room',
 			'watchTogether.ended.kicked' => 'You were removed from the room',
-			'watchTogether.ended.expired' => 'The room expired',
-			'watchTogether.ended.replaced' => 'You joined this room on another device',
 			_ => null,
 		} ?? switch (path) {
+			'watchTogether.ended.expired' => 'The room expired',
+			'watchTogether.ended.replaced' => 'You joined this room on another device',
 			'watchTogether.ended.lost' => 'Lost the connection to the room',
 			'watchTogether.errors.invalidCode' => 'That isn\'t a room code. Codes have 6 letters and digits, without 0, 1, I, L or O.',
 			'watchTogether.errors.roomNotFound' => 'No room has that code. It may have ended.',
@@ -11999,10 +12007,10 @@ extension on Translations {
 			'addServer.addMediaBrowserTitle' => ({required Object product}) => 'Add ${product} server',
 			'addServer.serverUrls' => 'Server URLs',
 			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
-			'addServer.findServer' => 'Find server',
-			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
 			_ => null,
 		} ?? switch (path) {
+			'addServer.findServer' => 'Find server',
+			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
 			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',
 			'addServer.username' => 'Username',
 			'addServer.password' => 'Password',

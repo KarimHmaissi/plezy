@@ -21,6 +21,14 @@ enum ClaudeModel {
   });
 
   final String id;
+
+  /// The request's `thinking` for a plain answer with no thinking first:
+  /// Sonnet 5.5 refuses "disabled" and only stops thinking between tools.
+  Map<String, String> get noThinking => switch (this) {
+    sonnet => const {'type': 'between_tools'},
+    haiku => const {'type': 'disabled'},
+  };
+
   final double input;
   final double output;
   final double cacheRead;

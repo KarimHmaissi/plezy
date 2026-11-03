@@ -1252,6 +1252,8 @@
     "notForMe": "Not for me",
     "keptList": "Saved to your lists",
     "hiddenList": "Hidden. You'll see fewer lists like it",
+    "tonightFailed": "Couldn't make a new Tonight. Try again in a moment.",
+    "listsFailed": "Couldn't make new lists. Try again in a moment.",
     "moodCosy": "Cosy",
     "moodCosyRequest": "Something cosy and comforting I haven't watched: warm, gentle and low-stakes",
     "moodEdge": "Edge of my seat",

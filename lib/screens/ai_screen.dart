@@ -360,7 +360,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         force: force,
       );
       if (!mounted) return;
-      if (force && today.lists.isNotEmpty) ForkMotion.success();
+      final made = today.createdAt != saved.createdAt;
+      if (force && made) ForkMotion.success();
+      if (force && !made) showAppSnackBar(context, t.aiTab.listsFailed);
       setState(() => _suggestions = today.lists);
     } finally {
       if (mounted) setState(() => _makingLists = false);
@@ -440,19 +442,29 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     }
   }
 
-  /// Today's briefing; [force] writes a new one (pull to refresh).
+  /// Today's briefing; [force] writes a new one (pull to refresh), the
+  /// cards shimmering meanwhile and a note if it couldn't be made.
   Future<void> _briefing({bool force = false}) async {
     if (!AiBriefing.enabled) return;
     final servers = context.read<MultiServerProvider>();
     final cached = await AiBriefing.cached();
     if (mounted && cached != null && _briefingRow == null) setState(() => _briefingRow = cached);
     if (_thinClient) return;
-    final entry = await AiBriefing.today(clientFor: servers.getClientForServer, force: force);
-    if (mounted && entry != null) {
-      if (force && entry.createdAt != _briefingRow?.createdAt) ForkMotion.success();
-      setState(() => _briefingRow = entry);
+    if (force && mounted) setState(() => _makingTonight = true);
+    try {
+      final entry = await AiBriefing.today(clientFor: servers.getClientForServer, force: force);
+      if (!mounted) return;
+      final made = entry != null && entry.createdAt != cached?.createdAt;
+      if (force && made) ForkMotion.success();
+      if (force && !made) showAppSnackBar(context, t.aiTab.tonightFailed);
+      if (entry != null) setState(() => _briefingRow = entry);
+    } finally {
+      if (mounted && force) setState(() => _makingTonight = false);
     }
   }
+
+  /// A new Tonight is being made.
+  bool _makingTonight = false;
 
   /// Pull to refresh and the toolbar's refresh: new Tonight picks and a new
   /// briefing.
@@ -1631,9 +1643,12 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                   SliverToBoxAdapter(
                     child: ItemMenuEntries(
                       build: _pickMenuEntries,
-                      child: AiTonightBlock(
-                        entry: tonight,
-                        onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                      child: ForkShimmer(
+                        active: _makingTonight,
+                        child: AiTonightBlock(
+                          entry: tonight,
+                          onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
+                        ),
                       ),
                     ),
                   ),

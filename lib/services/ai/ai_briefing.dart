@@ -116,7 +116,7 @@ abstract final class AiBriefing {
       final response = await client.createMessage({
         'model': model.id,
         'max_tokens': 600,
-        'thinking': {'type': 'disabled'},
+        'thinking': model.noThinking,
         'system': _prompt,
         'tools': [_tool],
         'tool_choice': {'type': 'tool', 'name': _tool['name']},

@@ -112,6 +112,10 @@ Details of each are in the dated entries below.
   turn (`AiBriefing.rotate`). About 1 to 2 cents a day.
 - Suggested for you lists are now made by **Sonnet** instead of Haiku
   (a few cents per set: once a day, or on New lists).
+- Fixed straight after: Sonnet 5.5 refuses `thinking: disabled` (it
+  takes `between_tools`, `ClaudeModel.noThinking`), so new Tonights and
+  lists failed. Failures now say so ("Couldn't make a new Tonight"), and
+  the Tonight cards shimmer while a new set is made.
 
 ### AI tab polish
 - **Starter prompts:** with a key but no answers yet, the AI tab shows the

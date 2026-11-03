@@ -195,7 +195,7 @@ abstract final class AiSuggestions {
       final response = await client.createMessage({
         'model': model.id,
         'max_tokens': 2500,
-        'thinking': {'type': 'disabled'},
+        'thinking': model.noThinking,
         'system': _prompt,
         'tools': [_tool],
         'tool_choice': {'type': 'tool', 'name': _tool['name']},
