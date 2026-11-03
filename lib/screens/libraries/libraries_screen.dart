@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:plezy/widgets/app_icon.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
+import '../../widgets/phone_nav_drawer.dart';
 import '../../focus/focusable_action_bar.dart';
 import '../../focus/dpad_navigator.dart';
 import '../../focus/input_mode_tracker.dart';
@@ -829,8 +830,11 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       return provider.getClientForServer(serverId)?.capabilities.folderGrouping ?? false;
     });
 
+    // Phone: filters stay in the bar; the rest moves into the side drawer
+    // beside the shared Search / remote / avatar set.
+    final phone = PlatformDetector.isMobile(context);
     List<FocusableAction> appBarActions() => [
-      if (allLibraries.isNotEmpty)
+      if (!phone && allLibraries.isNotEmpty)
         FocusableAction(
           icon: Symbols.edit_rounded,
           tooltip: t.libraries.manageLibraries,
@@ -868,13 +872,29 @@ class _LibrariesScreenState extends State<LibrariesScreen>
                 )
               : null,
         ),
-      if (selectedLibrary != null && MediaListPlaybackLauncher.canShuffleLibrary(selectedLibrary))
-        FocusableAction(
-          icon: Symbols.shuffle_rounded,
-          tooltip: t.libraries.shuffleLibrary,
-          onPressed: () => unawaited(MediaListPlaybackLauncher.shuffleLibrary(context, selectedLibrary)),
-        ),
-      FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
+      if (phone)
+        ...phoneTabActions(
+          context,
+          onRefresh: manualRefresh,
+          extras: [
+            if (selectedLibrary != null && MediaListPlaybackLauncher.canShuffleLibrary(selectedLibrary))
+              (
+                Symbols.shuffle_rounded,
+                t.libraries.shuffleLibrary,
+                () => unawaited(MediaListPlaybackLauncher.shuffleLibrary(context, selectedLibrary)),
+              ),
+            if (allLibraries.isNotEmpty) (Symbols.edit_rounded, t.libraries.manageLibraries, _showLibraryManagementSheet),
+          ],
+        )
+      else ...[
+        if (selectedLibrary != null && MediaListPlaybackLauncher.canShuffleLibrary(selectedLibrary))
+          FocusableAction(
+            icon: Symbols.shuffle_rounded,
+            tooltip: t.libraries.shuffleLibrary,
+            onPressed: () => unawaited(MediaListPlaybackLauncher.shuffleLibrary(context, selectedLibrary)),
+          ),
+        FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
+      ],
     ];
 
     Widget appBar({required bool floating}) => DesktopSliverAppBar(

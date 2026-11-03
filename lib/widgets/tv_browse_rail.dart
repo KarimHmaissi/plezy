@@ -117,7 +117,9 @@ class TvBrowseRailLayout {
 
   static double scaleForSize(Size size) => TvLayoutConstants.scaleForSize(size);
 
-  static double horizontalInsetForScale(double scale) => (24 * scale).clamp(18, 40).toDouble();
+  // Fork: more air than upstream (24 / 12 / 30), matching the touch rhythm
+  // in ForkSpacing at TV size.
+  static double horizontalInsetForScale(double scale) => (32 * scale).clamp(24, 48).toDouble();
 
   static double railTopPaddingForScale(double scale) => 12 * scale;
 
@@ -125,9 +127,9 @@ class TvBrowseRailLayout {
 
   static double railInteractionExpansionForScale(double scale) => (12 * scale).clamp(8, 18).toDouble();
 
-  static double fullCardItemGapForScale(double scale) => (12 * scale).clamp(8, 18).toDouble();
+  static double fullCardItemGapForScale(double scale) => (16 * scale).clamp(10, 22).toDouble();
 
-  static double hubStripHeightForScale(double scale) => 30 * scale;
+  static double hubStripHeightForScale(double scale) => 46 * scale;
 
   static double nextHubPeekHeightForScale(double scale) => 20 * scale;
 
@@ -343,7 +345,11 @@ class TvBrowseRailLayout {
 }
 
 /// What [TvBrowseRail] renders in a hub's trailing slot (after the last item).
-enum TvRailTrailing { none, loading, error, viewAll }
+///
+/// Fork: [loadMore] / [findingMore] / [noMore] are an AI row's "Load more"
+/// card ([TvBrowseRail.onLoadMoreHub]), its spinner while more are found,
+/// and its spent state.
+enum TvRailTrailing { none, loading, error, viewAll, loadMore, findingMore, noMore }
 
 class TvBrowseRail extends StatefulWidget {
   final List<MediaHub> hubs;
@@ -380,6 +386,9 @@ class TvBrowseRail extends StatefulWidget {
 
   /// Invoked when the user activates a hub's trailing retry tile.
   final void Function(MediaHub hub)? onRetryHub;
+
+  /// Fork: invoked when the user activates a hub's "Load more" tile.
+  final void Function(MediaHub hub)? onLoadMoreHub;
   final void Function(MediaHub hub, int index)? onActiveHubChanged;
   final VoidCallback? onNavigateUp;
   final VoidCallback? onNavigateToSidebar;
@@ -435,6 +444,7 @@ class TvBrowseRail extends StatefulWidget {
     this.trailingForHub,
     this.leadingItemForHub,
     this.onRetryHub,
+    this.onLoadMoreHub,
     this.onActiveHubChanged,
     this.onNavigateUp,
     this.onNavigateToSidebar,
@@ -1234,7 +1244,11 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
         case TvRailTrailing.error:
           widget.onRetryHub?.call(hub);
           break;
+        case TvRailTrailing.loadMore:
+          widget.onLoadMoreHub?.call(hub);
         case TvRailTrailing.loading:
+        case TvRailTrailing.findingMore:
+        case TvRailTrailing.noMore:
           break; // no-op while the page loads
         case TvRailTrailing.viewAll:
         case TvRailTrailing.none:
@@ -1543,7 +1557,10 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
         final item = _itemAtSlot(hub, itemIndex);
         final isLeading = _isLeadingSlot(hub, itemIndex);
         final isTrailing = _isTrailingSlot(hub, itemIndex);
-        final actionable = item != null || isLeading || (isTrailing && trailing != TvRailTrailing.loading);
+        final actionable = item != null || isLeading || (isTrailing &&
+                trailing != TvRailTrailing.loading &&
+                trailing != TvRailTrailing.findingMore &&
+                trailing != TvRailTrailing.noMore);
 
         // The enclosing Focus publishes its focused state independently. Keeping
         // that state out of this selector avoids rebuilding the label and actions
@@ -1583,6 +1600,9 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
         TvRailTrailing.loading => t.common.loading,
         TvRailTrailing.error => t.common.retry,
         TvRailTrailing.viewAll => t.common.viewAll,
+        TvRailTrailing.loadMore => t.aiTab.loadMoreCard,
+        TvRailTrailing.findingMore => t.aiTab.findingMoreCard,
+        TvRailTrailing.noMore => t.aiTab.noMoreCard,
         TvRailTrailing.none => '',
       };
     }
@@ -1609,8 +1629,11 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
     return SizedBox(
       height: TvBrowseRailLayout.hubStripHeightForScale(scale),
       child: ExcludeFocus(
-        child: Align(
-          alignment: .centerLeft,
+        // Title sits low in the strip: the space above separates it from
+        // the row before.
+        child: Container(
+          alignment: .bottomLeft,
+          padding: EdgeInsets.only(bottom: 10 * scale),
           child: Row(
             children: [
               AppIcon(widget.iconForHub(hub, hubIndex), fill: 1, size: 20 * scale, color: iconColor),
@@ -2203,6 +2226,41 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
             ),
           ),
         );
+      case TvRailTrailing.loadMore:
+        return ClickableCursor(
+          child: GestureDetector(
+            onTap: () {
+              _selectHubItem(hub, hubIndex, itemIndex);
+              widget.onLoadMoreHub?.call(hub);
+            },
+            child: _buildActionCard(
+              context,
+              metrics: metrics,
+              isFocused: isFocused,
+              scale: scale,
+              icon: Symbols.playlist_add_rounded,
+              label: t.aiTab.loadMoreCard,
+            ),
+          ),
+        );
+      case TvRailTrailing.findingMore:
+        return _buildActionCard(
+          context,
+          metrics: metrics,
+          isFocused: isFocused,
+          scale: scale,
+          spinner: true,
+          label: t.aiTab.findingMoreCard,
+        );
+      case TvRailTrailing.noMore:
+        return _buildActionCard(
+          context,
+          metrics: metrics,
+          isFocused: isFocused,
+          scale: scale,
+          icon: Symbols.done_all_rounded,
+          label: t.aiTab.noMoreCard,
+        );
       case TvRailTrailing.none:
         return const SizedBox.shrink();
     }
@@ -2248,7 +2306,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
               ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.2), blurRadius: 18, spreadRadius: 1)]
               : null,
         ),
-        child: spinner
+        child: spinner && label == null
             ? Center(
                 child: SizedBox(
                   width: 22,
@@ -2260,7 +2318,13 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
                 child: Column(
                   mainAxisSize: .min,
                   children: [
-                    AppIcon(icon!, fill: 1, size: (26 * scale).clamp(22, 32).toDouble(), color: foreground),
+                    if (spinner)
+                      SizedBox.square(
+                        dimension: (22 * scale).clamp(20, 28).toDouble(),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: foreground),
+                      )
+                    else
+                      AppIcon(icon!, fill: 1, size: (26 * scale).clamp(22, 32).toDouble(), color: foreground),
                     SizedBox(height: (6 * scale).clamp(4, 9).toDouble()),
                     Padding(
                       padding: .symmetric(horizontal: (10 * scale).clamp(8, 14).toDouble()),

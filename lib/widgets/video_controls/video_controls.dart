@@ -91,6 +91,8 @@ import '../../models/shader_preset.dart';
 import '../../providers/playback_state_provider.dart';
 import '../../providers/shader_provider.dart';
 import '../../services/shader_service.dart';
+import '../../services/companion_remote/companion_remote_receiver.dart';
+import '../../services/companion_remote/host_player_marker.dart';
 import '../../watch_together/providers/watch_together_provider.dart';
 import '../../utils/error_message_utils.dart';
 
@@ -767,6 +769,8 @@ class PlexVideoControls extends StatefulWidget {
 
 class _PlexVideoControlsState extends State<PlexVideoControls>
     with WindowListener, ListenableBindingsMixin, MountedSetStateMixin {
+  /// Fork: installed as the companion receiver's skip-marker slot.
+  void _remoteSkipMarker() => _skipMarkerFromRemote();
   bool get _showControls => widget.chromeController.controlsVisible;
   bool get _hasRenderedFirstFrame => widget.hasFirstFrame?.value ?? true;
 
@@ -981,6 +985,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
     widget.chromeController.setPlaying(widget.player.state.playing);
     _initKeyboardService();
     _listenToPosition();
+    CompanionRemoteReceiver.instance.onSkipMarker = _remoteSkipMarker;
     _listenToPlayingState();
     _listenToCompleted();
     _checkPipSupport();
@@ -1094,6 +1099,10 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
 
   @override
   void dispose() {
+    if (CompanionRemoteReceiver.instance.onSkipMarker == _remoteSkipMarker) {
+      CompanionRemoteReceiver.instance.onSkipMarker = null;
+      HostPlayerMarker.current.value = null;
+    }
     ++_subtitleVisibilityWriteGeneration;
     _feedbackTimer?.cancel();
     _feedbackHideTimer?.cancel();

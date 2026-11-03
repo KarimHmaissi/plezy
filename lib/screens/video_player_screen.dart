@@ -54,6 +54,7 @@ import '../services/trackers/tracker_coordinator.dart';
 import '../services/episode_navigation_service.dart';
 import '../services/apple_tv_remote_touch_service.dart';
 import '../services/media_controls_manager.dart';
+import '../services/companion_remote/host_media_notification.dart';
 import '../services/playback_coordinator.dart';
 import '../services/music/music_playback_service.dart';
 import '../services/playback_initialization_service.dart';
@@ -1028,6 +1029,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
     onCycleAudio: () => _cycleAudioTrack(),
     onHome: () => _handleHomeButton(),
     readProvider: () => context.read<CompanionRemoteProvider>(),
+    metadata: () => _currentMetadata,
+    hasPreviousItem: () => _hasPreviousItem,
+    onSelectAudio: (track) => unawaited(_onAudioTrackChanged(track)),
+    onSelectSubtitle: (track) => unawaited(_onSubtitleTrackChanged(track)),
   );
 
   /// Backend-neutral lookup. Returns whichever client (Plex or Jellyfin)
@@ -2080,6 +2085,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (settingsService.read(SettingsService.audioNormalization)) {
         await currentPlayer.setAudioNormalization(true);
       }
+      if (Platform.isMacOS && currentPlayer is PlayerBase) {
+        // Passthrough is no longer offered on macOS, but the player outlives
+        // a settings change: clear a bitstream request it may still hold, or
+        // the encoder would be handed a bitstream instead of PCM.
+        await currentPlayer.setAudioPassthrough(false);
+        await currentPlayer.setDolbyEncode(settingsService.read(SettingsService.macDolbyEncode));
+      }
 
       // After the passthrough apply: the stereo limit wins on both backends
       // (mpv clears audio-spdif, ExoPlayer force-decodes encoded audio). The
@@ -2492,6 +2504,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     _mediaControlsManager?.clear();
     _mediaControlsManager?.dispose();
+    LocalMediaSession.release(this);
 
     DiscordRPCService.instance.stopPlayback();
     TrackerCoordinator.instance.stopPlayback();

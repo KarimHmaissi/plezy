@@ -52,6 +52,7 @@ import '../../profiles/active_profile_provider.dart';
 import '../../profiles/profile.dart';
 import '../../watch_together/services/watch_party_relays.dart';
 import 'about_screen.dart';
+import 'ai_settings_screen.dart';
 import 'backup_transfer_screen.dart';
 import 'add_connection_screen.dart';
 import 'account_preferences_screen.dart';
@@ -237,6 +238,12 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
 
                   SettingsGroup(
                     children: [
+                      SettingNavigationTile(
+                        icon: Symbols.auto_awesome_rounded,
+                        title: t.ai.settingsTitle,
+                        subtitle: t.ai.settingsSubtitle,
+                        destinationBuilder: (context) => const AiSettingsScreen(),
+                      ),
                       SettingNavigationTile(
                         icon: Symbols.swap_horiz_rounded,
                         title: t.backupTransfer.title,

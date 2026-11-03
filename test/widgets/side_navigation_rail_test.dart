@@ -539,8 +539,8 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Search -> Downloads -> Settings -> Libraries (last section).
-    for (var i = 0; i < 4; i++) {
+    // Home -> AI -> Search -> Downloads -> Settings -> Libraries (last section).
+    for (var i = 0; i < 5; i++) {
       await _press(tester, LogicalKeyboardKey.arrowDown);
     }
     expect(sideNavKey.currentState!.lastFocusedKey, 'libraries');
@@ -606,8 +606,8 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Search -> Downloads -> Settings -> Libraries (last section).
-    for (var i = 0; i < 4; i++) {
+    // Home -> AI -> Search -> Downloads -> Settings -> Libraries (last section).
+    for (var i = 0; i < 5; i++) {
       await _press(tester, LogicalKeyboardKey.arrowDown);
     }
     expect(sideNavKey.currentState!.lastFocusedKey, 'libraries');
@@ -838,7 +838,8 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Search -> Settings. Downloads is hidden on Apple TV.
+    // Home -> AI -> Search -> Settings. Downloads is hidden on Apple TV.
+    await _press(tester, LogicalKeyboardKey.arrowDown);
     await _press(tester, LogicalKeyboardKey.arrowDown);
     await _press(tester, LogicalKeyboardKey.arrowDown);
     await _press(tester, LogicalKeyboardKey.enter);
@@ -913,9 +914,9 @@ void main() {
     sideNavKey.currentState!.focusActiveItem();
     await tester.pumpAndSettle();
 
-    // Home -> Search -> Downloads -> Settings -> Libraries -> Server A header
-    // -> visible A -> Server B header -> visible B -> Hidden Libraries.
-    for (var i = 0; i < 9; i++) {
+    // Home -> AI -> Search -> Downloads -> Settings -> Libraries -> Server A
+    // header -> visible A -> Server B header -> visible B -> Hidden Libraries.
+    for (var i = 0; i < 10; i++) {
       await _press(tester, LogicalKeyboardKey.arrowDown);
     }
     await _press(tester, LogicalKeyboardKey.enter);

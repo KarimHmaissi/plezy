@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import 'settings/trakt_settings_screen.dart';
+import '../widgets/phone_nav_drawer.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/hub_vertical_navigation.dart';
 import '../focus/locked_hub_controller.dart';
@@ -21,7 +23,9 @@ import '../providers/catalog_sources_provider.dart';
 import '../providers/discover_provider.dart';
 import '../services/continue_watching/continue_watching_classifier.dart';
 import '../services/catalog/catalog_library_matcher.dart';
+import '../services/catalog/catalog_source.dart';
 import '../services/catalog/trakt_catalog_source.dart';
+import '../services/customisation/customisation_store.dart';
 import '../services/comfort/comfort_picker.dart';
 import '../services/comfort/comfort_shows_controller.dart';
 import '../services/settings_service.dart';
@@ -44,6 +48,7 @@ import 'libraries/state_messages.dart';
 import '../services/catalog/home_pins.dart';
 import '../widgets/home_row_actions.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
+import '../theme/fork_motion.dart';
 
 enum _PickChoice { play, again }
 
@@ -88,6 +93,7 @@ class ComfortScreenState extends State<ComfortScreen>
     super.initState();
     _sources = context.read<CatalogSourcesProvider>();
     _sources.addListener(_onSourcesChanged);
+    Customisation.changed.addListener(_onCustomisationChanged);
     _discover = context.read<DiscoverProvider?>()?..addListener(_onDiscoverChanged);
     _onSourcesChanged();
   }
@@ -104,6 +110,7 @@ class ComfortScreenState extends State<ComfortScreen>
   @override
   void dispose() {
     _sources.removeListener(_onSourcesChanged);
+    Customisation.changed.removeListener(_onCustomisationChanged);
     _discover?.removeListener(_onDiscoverChanged);
     _controller?.removeListener(_onControllerChanged);
     _controller?.dispose();
@@ -114,19 +121,34 @@ class ComfortScreenState extends State<ComfortScreen>
 
   TraktCatalogSource? get _traktSource => _sources.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
 
+  /// Where Configure searches for shows to add: Trakt here, or (a phone
+  /// editing its TV/Mac's list) any connected catalog, Plex first. Null
+  /// when the list can't be edited (no Trakt, not connected).
+  CatalogSource? get _configureSource {
+    final controller = _controller;
+    if (controller == null || !controller.canEditList) return null;
+    return _traktSource ??
+        _sources.connectedSources.where((s) => s.id == CatalogSourceId.plex).firstOrNull ??
+        _sources.connectedSources.firstOrNull;
+  }
+
+  /// With Trakt, the live list; without (a phone), the copy the Trakt
+  /// device keeps, which a phone mirroring the TV/Mac receives with its
+  /// snapshot.
   void _onSourcesChanged() {
     final source = _traktSource;
-    if (source == null) {
-      if (_controller == null) return;
-      _controller!.removeListener(_onControllerChanged);
-      _controller!.dispose();
-      _controller = null;
-      if (mounted) setState(() {});
-      return;
-    }
-    if (_controller != null) return;
-    _controller = ComfortShowsController(source)..addListener(_onControllerChanged);
+    final wantsLive = source != null;
+    if (_controller != null && _controller!.isLive == wantsLive) return;
+    _controller?.removeListener(_onControllerChanged);
+    _controller?.dispose();
+    _controller = (wantsLive ? ComfortShowsController(source) : ComfortShowsController.cached())
+      ..addListener(_onControllerChanged);
     unawaited(_load());
+  }
+
+  /// A new mirror snapshot (or an edit applied here): re-read the cached list.
+  void _onCustomisationChanged() {
+    if (_controller?.isLive == false) unawaited(_load());
   }
 
   void _onControllerChanged() {
@@ -272,10 +294,11 @@ class ComfortScreenState extends State<ComfortScreen>
 
   Future<void> _openConfigure() async {
     final controller = _controller;
-    if (controller == null) return;
+    final source = _configureSource;
+    if (controller == null || source == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ComfortConfigureScreen(controller: controller, source: _traktSource!),
+        builder: (_) => ComfortConfigureScreen(controller: controller, source: source),
       ),
     );
     _episodesByShow.clear();
@@ -322,11 +345,15 @@ class ComfortScreenState extends State<ComfortScreen>
 
   Widget? _buildStateMessage() {
     final controller = _controller;
-    if (controller == null) {
+    if (controller == null || (!controller.isLive && controller.isLoaded && controller.shows.isEmpty)) {
       return EmptyStateWidget(
         message: t.comfort.notConnectedTitle,
         subtitle: t.comfort.notConnectedMessage,
         icon: Symbols.weekend_rounded,
+        // Comfort is always in the phone's bottom bar, so offer the way in.
+        actionLabel: t.comfort.connectTrakt,
+        onAction: () =>
+            Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const TraktSettingsScreen())),
       );
     }
     if (!controller.isLoaded && controller.error == null) return const Center(child: CircularProgressIndicator());
@@ -359,6 +386,26 @@ class ComfortScreenState extends State<ComfortScreen>
     ],
   );
 
+  /// Phone: Random episode as an icon, Configure and Refresh in the side
+  /// drawer, beside the shared Search / remote / avatar set.
+  List<FocusableAction> _phoneActions(Color color) => [
+    FocusableAction(
+      debugLabel: 'ComfortRandomEpisode',
+      icon: _picking ? Symbols.hourglass_top_rounded : Symbols.casino_rounded,
+      iconColor: color,
+      tooltip: t.comfort.randomEpisode,
+      onPressed: _controller == null || _picking ? null : () => unawaited(_randomEpisode()),
+    ),
+    ...phoneTabActions(
+      context,
+      color: color,
+      onRefresh: manualRefresh,
+      extras: [
+        if (_configureSource != null) (Symbols.tune_rounded, t.comfort.configure, () => unawaited(_openConfigure())),
+      ],
+    ),
+  ];
+
   List<FocusableAction> _actions(Color color) => [
     FocusableAction(
       debugLabel: 'ComfortRandomEpisode',
@@ -372,7 +419,7 @@ class ComfortScreenState extends State<ComfortScreen>
     ),
     FocusableAction(
       debugLabel: 'ComfortConfigure',
-      onPressed: _controller == null ? null : () => unawaited(_openConfigure()),
+      onPressed: _configureSource == null ? null : () => unawaited(_openConfigure()),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: _labelled(Symbols.tune_rounded, t.comfort.configure, color),
@@ -467,7 +514,7 @@ class ComfortScreenState extends State<ComfortScreen>
     final message = _buildStateMessage();
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: ForkMotion.refreshing(_load),
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
@@ -484,7 +531,9 @@ class ComfortScreenState extends State<ComfortScreen>
                 FocusableActionBar(
                   key: _actionBarKey,
                   onNavigateDown: () => _hubKeys.first.currentState?.requestFocusFromMemory(),
-                  actions: _actions(Theme.of(context).colorScheme.onSurface),
+                  actions: PlatformDetector.isMobile(context)
+                      ? _phoneActions(Theme.of(context).colorScheme.onSurface)
+                      : _actions(Theme.of(context).colorScheme.onSurface),
                 ),
               ],
             ),

@@ -1,8 +1,13 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+
+import '../theme/fork_motion.dart';
+import '../theme/fork_spacing.dart';
+import 'package:flutter/rendering.dart' show RenderProxyBox, ScrollCacheExtent;
 import 'package:plezy/widgets/app_icon.dart';
+import 'package:plezy/widgets/pressable.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import '../focus/dpad_navigator.dart';
 import '../focus/dpad_select_long_press_controller.dart';
@@ -24,6 +29,7 @@ import '../utils/media_navigation_helper.dart';
 import 'card_inflation_budget.dart';
 import 'focus_builders.dart';
 import 'media_card.dart';
+import 'media_context_menu.dart' show ItemMenuEntries, RowMenuEntries;
 import 'media_grid_delegate.dart';
 import 'skeleton_media_card.dart';
 import 'sliver_child_memo.dart';
@@ -99,6 +105,30 @@ class HubSection extends StatefulWidget {
   /// Vertical viewport alignment when this hub is focused.
   final double focusScrollAlignment;
 
+  /// Fork: an action card after the last item (an AI row's "Load more"),
+  /// in place of the View All card.
+  final HubTrailingCard? trailingCard;
+
+  /// Fork: shown between the title and the cards (an AI answer's text).
+  final Widget? belowTitle;
+
+  /// Fork: after the title (an AI answer's ⋯ menu), and under the cards
+  /// (its follow-up chips).
+  final Widget? titleTrailing;
+  final Widget? belowItems;
+
+  /// Fork: labels on a card's artwork ("Top pick", "Watched").
+  final List<String> Function(MediaItem item)? badgesFor;
+
+  /// Fork: a tile before the first card on touch screens (an AI answer),
+  /// built at the row's card height ([height] is the artwork's, [band] the
+  /// caption's under it); it scrolls with the cards and isn't a d-pad stop.
+  final Widget Function(double height, double band)? leadingTile;
+
+  /// Fork: where the title (and its chevron) goes instead of the See all
+  /// page (an AI answer's page).
+  final VoidCallback? onTitleTap;
+
   const HubSection({
     super.key,
     required this.hub,
@@ -110,6 +140,13 @@ class HubSection extends StatefulWidget {
     bool? usesContinueWatchingAction,
     this.showServerName = false,
     this.loadMoreItems,
+    this.trailingCard,
+    this.belowTitle,
+    this.badgesFor,
+    this.titleTrailing,
+    this.belowItems,
+    this.leadingTile,
+    this.onTitleTap,
     this.totalResults,
     this.onFocusedItemChanged,
     this.onItemTap,
@@ -145,6 +182,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
   final SliverChildMemo<MediaItem> _cardMemo = SliverChildMemo<MediaItem>();
 
   double _itemExtent = 0;
+
+  /// Width of [HubSection.leadingTile] in the row, for scroll offsets.
+  double _leadExtent = 0;
   double _leadingPaddingFor(bool isTv) => widget.inset
       ? 0.0
       : isTv
@@ -170,7 +210,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
   }
 
   /// Total item count including the optional "View All" card
-  int get _totalItemCount => widget.hub.items.length + (widget.hub.more ? 1 : 0);
+  int get _totalItemCount => widget.hub.items.length + (_hasEndCard ? 1 : 0);
+
+  bool get _hasEndCard => widget.hub.more || widget.trailingCard != null;
 
   @override
   void didUpdateWidget(HubSection oldWidget) {
@@ -179,7 +221,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
       _itemKeys.clear();
       _mediaCardKeys.clear();
       _displacedFocusItem = null;
-    } else if (widget.hub.items.length != oldWidget.hub.items.length || widget.hub.more != oldWidget.hub.more) {
+    } else if (widget.hub.items.length != oldWidget.hub.items.length ||
+        widget.hub.more != oldWidget.hub.more ||
+        (widget.trailingCard == null) != (oldWidget.trailingCard == null)) {
       _itemKeys.removeWhere((index, _) => index >= _totalItemCount);
       _mediaCardKeys.removeWhere((index, _) => index >= widget.hub.items.length);
     }
@@ -187,8 +231,11 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     if (widget.hub.id == oldWidget.hub.id) {
       _followFocusedItem(oldWidget.hub.items);
     }
+    _syncSeeAll();
 
-    if (widget.hub.items.length != oldWidget.hub.items.length || widget.hub.more != oldWidget.hub.more) {
+    if (widget.hub.items.length != oldWidget.hub.items.length ||
+        widget.hub.more != oldWidget.hub.more ||
+        (widget.trailingCard == null) != (oldWidget.trailingCard == null)) {
       final maxIndex = _totalItemCount == 0 ? 0 : _totalItemCount - 1;
       if (_focusedIndex > maxIndex) {
         _focusedIndex = maxIndex;
@@ -224,6 +271,8 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
 
   @override
   void dispose() {
+    _liveHub?.dispose();
+    _liveFooter?.dispose();
     _selectLongPress.dispose();
     _hubFocusNode.removeListener(_onFocusChange);
     _hubFocusNode.dispose();
@@ -292,7 +341,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
       _scrollController,
       index,
       itemExtent: _itemExtent,
-      leadingPadding: _leadingPadding,
+      leadingPadding: _leadingPadding + _leadExtent,
       animate: animate,
       duration: _navigationScrollDuration,
       curve: Curves.easeOutCubic,
@@ -418,6 +467,10 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
 
   void _activateCurrentItem() {
     _displacedFocusItem = null;
+    if (_focusedIndex == widget.hub.items.length && widget.trailingCard != null) {
+      widget.trailingCard!.onTap?.call();
+      return;
+    }
     if (_focusedIndex == widget.hub.items.length && widget.hub.more) {
       _navigateToHubDetail(context);
       return;
@@ -452,17 +505,62 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     );
   }
 
+  /// Fork: on Android phones every row with items opens its See all page
+  /// from the header, not only rows the server says have more (cast rows
+  /// excepted). Elsewhere unchanged.
+  bool get _canSeeAll =>
+      widget.onTitleTap != null ||
+      widget.hub.more ||
+      (defaultTargetPlatform == TargetPlatform.android &&
+          !PlatformDetector.isTV() &&
+          widget.hub.items.isNotEmpty &&
+          !TvBrowseRailLayout.isPersonHub(widget.hub));
+
+  /// Fork: what an open See all page follows (created on first open).
+  ValueNotifier<MediaHub>? _liveHub;
+  ValueNotifier<HubTrailingCard?>? _liveFooter;
+
+  /// Push this row's latest items and trailing card to an open See all
+  /// page, after the frame (didUpdateWidget runs mid-build).
+  void _syncSeeAll() {
+    if (_liveHub == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _liveHub?.value = widget.hub;
+      _liveFooter?.value = widget.trailingCard;
+    });
+  }
+
+  void _openSeeAll(BuildContext context) {
+    ForkMotion.selection();
+    if (widget.onTitleTap case final open?) return open();
+    _navigateToHubDetail(context);
+  }
+
   void _navigateToHubDetail(BuildContext context) {
+    // The page sits on its own route, so it takes the row's menu entries
+    // (Add to Home, Play on TV…) with it.
+    final rowEntries = RowMenuEntries.of(context);
+    final itemEntries = context.getInheritedWidgetOfExactType<ItemMenuEntries>();
+    final liveHub = _liveHub ??= ValueNotifier(widget.hub);
+    final liveFooter = _liveFooter ??= ValueNotifier(widget.trailingCard);
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => HubDetailScreen(
-          hub: widget.hub,
-          loadItems: widget.loadMoreItems,
-          isInContinueWatching: widget.isInContinueWatching,
-          usesContinueWatchingAction: widget.usesContinueWatchingAction,
-          onRemoveFromContinueWatching: widget.onRemoveFromContinueWatching,
-        ),
+        builder: (context) {
+          Widget page = HubDetailScreen(
+            hub: widget.hub,
+            loadItems: widget.loadMoreItems,
+            isInContinueWatching: widget.isInContinueWatching,
+            usesContinueWatchingAction: widget.usesContinueWatchingAction,
+            onRemoveFromContinueWatching: widget.onRemoveFromContinueWatching,
+            liveHub: liveHub,
+            footer: liveFooter,
+            onItemTap: widget.onItemTap,
+          );
+          if (itemEntries != null) page = ItemMenuEntries(build: itemEntries.build, child: page);
+          return RowMenuEntries(entries: rowEntries, child: page);
+        },
       ),
     );
   }
@@ -495,15 +593,17 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     final isKeyboardMode = InputModeTracker.isKeyboardMode(context);
     final isTv = PlatformDetector.isTV();
     final leadingPadding = _leadingPaddingFor(isTv);
-    final titleStyle = Theme.of(
-      context,
-    ).textTheme.titleLarge?.copyWith(fontSize: isTv ? 26 : null, fontWeight: isTv ? FontWeight.w700 : null);
+    // Fork: touch screens use the shared row rhythm (see ForkSpacing).
+    final spacing = !isTv && !widget.inset ? ForkSpacing.of(context) : null;
+    final titleStyle = isTv
+        ? Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 26, fontWeight: FontWeight.w700)
+        : spacing?.titleStyle(context) ?? Theme.of(context).textTheme.titleLarge;
 
     return Padding(
       padding: .only(
         bottom: isTv && !widget.inset && widget.cardSizing == HubCardSizing.shelf
             ? TvLayoutConstants.shelfVerticalGap
-            : 0,
+            : spacing?.rowGap ?? 0,
       ),
       child: Column(
         crossAxisAlignment: .start,
@@ -513,63 +613,83 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
           Padding(
             padding: widget.inset
                 ? EdgeInsets.symmetric(vertical: isTv ? 6 : 2)
+                : spacing != null
+                ? EdgeInsets.fromLTRB(spacing.edgeInset - 4, 0, 8, spacing.titleGap)
                 : EdgeInsets.fromLTRB(leadingPadding - 4, isTv ? 6 : 2, 8, isTv ? 8 : 2),
-            child: ExcludeFocus(
-              child: InkWell(
-                mouseCursor: widget.hub.more ? SystemMouseCursors.click : MouseCursor.defer,
-                onTap: widget.hub.more ? () => _navigateToHubDetail(context) : null,
-                borderRadius: BorderRadius.circular(tokens(context).radiusSm),
-                child: Padding(
-                  padding: widget.inset
-                      ? const EdgeInsets.symmetric(vertical: 2)
-                      : const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Row(
-                    mainAxisSize: .min,
-                    children: [
-                      AppIcon(widget.icon, fill: 1, size: isTv ? 28 : null),
-                      SizedBox(width: isTv ? 12 : 8),
-                      Flexible(
-                        child: Text(widget.hub.title, style: titleStyle, overflow: .ellipsis, maxLines: 1),
-                      ),
-                      if (widget.totalResults case final totalResults?) ...[
+            child: _withTitleTrailing(
+              ExcludeFocus(
+                child: InkWell(
+                  mouseCursor: _canSeeAll ? SystemMouseCursors.click : MouseCursor.defer,
+                  onTap: _canSeeAll ? () => _openSeeAll(context) : null,
+                  borderRadius: BorderRadius.circular(tokens(context).radiusSm),
+                  child: Padding(
+                    padding: widget.inset
+                        ? const EdgeInsets.symmetric(vertical: 2)
+                        : const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: .min,
+                      children: [
+                        AppIcon(widget.icon, fill: 1, size: isTv ? 28 : spacing?.titleSize),
                         SizedBox(width: isTv ? 12 : 8),
-                        Text(
-                          t.explore.totalResults(n: totalResults),
-                          maxLines: 1,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
-                            fontSize: isTv ? 17 : null,
-                            fontWeight: FontWeight.w600,
+                        Flexible(
+                          child: Text(
+                            widget.hub.title,
+                            style: titleStyle,
+                            overflow: .ellipsis,
+                            // Fork: an AI answer's title may wrap (its ⋯ stays top-right).
+                            maxLines: widget.titleTrailing == null ? 1 : 2,
                           ),
                         ),
-                      ],
-                      if (widget.showServerName && widget.hub.serverName != null) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          '•',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                        if (widget.totalResults case final totalResults?) ...[
+                          SizedBox(width: isTv ? 12 : 8),
+                          Text(
+                            t.explore.totalResults(n: totalResults),
+                            maxLines: 1,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
+                              fontSize: isTv ? 17 : null,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          widget.hub.serverName!,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                        ],
+                        if (widget.showServerName && widget.hub.serverName != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '•',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.hub.serverName!,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ],
+                        if (_canSeeAll && !isKeyboardMode) ...[
+                          const SizedBox(width: 4),
+                          AppIcon(Symbols.chevron_right_rounded, fill: 1, size: isTv ? 26 : spacing?.titleSize ?? 20),
+                        ],
                       ],
-                      if (widget.hub.more && !isKeyboardMode) ...[
-                        const SizedBox(width: 4),
-                        AppIcon(Symbols.chevron_right_rounded, fill: 1, size: isTv ? 26 : 20),
-                      ],
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
 
+          if (widget.belowTitle case final below?)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                spacing?.edgeInset ?? leadingPadding,
+                0,
+                spacing?.edgeInset ?? leadingPadding,
+                widget.hub.items.isEmpty ? 0 : spacing?.titleGap ?? 8,
+              ),
+              child: below,
+            ),
           if (widget.hub.items.isNotEmpty)
             Focus(
               focusNode: _hubFocusNode,
@@ -610,7 +730,9 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                     // same gutter the grid uses, so a row and the "see all"
                     // grid behind it render the same card at equal width.
                     final gridGap = svc.read(SettingsService.gridSpacing).gridGap;
-                    final cardWidth = isTv && widget.cardSizing == HubCardSizing.shelf
+                    final cardWidth = spacing != null
+                        ? spacing.cardWidth(constraints.maxWidth, wide: useWideLayout)
+                        : isTv && widget.cardSizing == HubCardSizing.shelf
                         ? _getTvCardWidth(
                             context,
                             constraints.maxWidth,
@@ -637,12 +759,14 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                     // always carried 4px (2px each side) on top of the card's
                     // own 3px padding, so Tight stays byte-identical and the
                     // wider settings render exactly the grid gutter (#2226).
-                    final cardGap = math.max(4.0, gridGap);
+                    final cardGap = spacing?.cardGap ?? math.max(4.0, gridGap);
                     final cardPadding = widget.inset
                         ? EdgeInsets.only(right: cardGap)
                         : EdgeInsets.symmetric(horizontal: cardGap / 2);
 
-                    final containerHeight = posterHeight + (isTv ? 48 : 33);
+                    final captionBand = isTv ? 48.0 : MediaCard.rowCaptionBandHeight(context);
+                    final containerHeight = posterHeight + captionBand;
+                    final lead = widget.leadingTile != null && !isTv ? 1 : 0;
                     final focusBorderWidth = FocusTheme.focusBorderWidth;
                     final focusExtra = focusBorderWidth * 2; // border on both sides
                     _itemExtent = cardWidth + focusExtra + cardGap;
@@ -683,10 +807,60 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                           scrollCacheExtent: isTv ? null : const ScrollCacheExtent.pixels(0),
                           padding: widget.inset
                               ? EdgeInsets.symmetric(vertical: isTv ? 6 : 2)
-                              : EdgeInsets.symmetric(horizontal: isTv ? leadingPadding : 8, vertical: isTv ? 6 : 2),
-                          itemCount: isKeyboardMode ? _totalItemCount : widget.hub.items.length,
+                              : EdgeInsets.symmetric(
+                                  horizontal: isTv
+                                      ? leadingPadding
+                                      // Touch: the first card lines up with the title.
+                                      : spacing == null
+                                      ? 8
+                                      : spacing.edgeInset - cardGap / 2,
+                                  vertical: isTv ? 6 : 2,
+                                ),
+                          itemCount:
+                              lead +
+                              (isKeyboardMode
+                                  ? _totalItemCount
+                                  : widget.hub.items.length + (widget.trailingCard != null ? 1 : 0)),
                           itemBuilder: (context, index) {
+                            if (lead == 1 && index == 0) {
+                              return Padding(
+                                padding: cardPadding,
+                                child: _MeasureWidth(
+                                  onWidth: (w) => _leadExtent = w + cardGap,
+                                  child: widget.leadingTile!(posterHeight, captionBand),
+                                ),
+                              );
+                            }
+                            index -= lead;
                             final isItemFocused = hasFocus && index == _focusedIndex;
+
+                            final card = widget.trailingCard;
+                            if (index == widget.hub.items.length && card != null) {
+                              return Padding(
+                                key: _itemKeyFor(index),
+                                padding: cardPadding,
+                                child: FocusBuilders.buildLockedFocusWrapper(
+                                  context: context,
+                                  isFocused: isItemFocused,
+                                  onTap: card.onTap == null
+                                      ? null
+                                      : () {
+                                          _onItemTapped(index);
+                                          card.onTap!();
+                                        },
+                                  child: Pressable(
+                                    enabled: card.onTap != null,
+                                    longPress: false,
+                                    child: _TrailingCardView(
+                                      card: card,
+                                      width: cardWidth,
+                                      height: posterHeight,
+                                      large: isTv,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
 
                             if (index == widget.hub.items.length) {
                               return Padding(
@@ -790,6 +964,7 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                                     usesContinueWatchingAction: widget.usesContinueWatchingAction,
                                     mixedHubContext: isMixedHub,
                                     episodePosterModeOverride: episodePosterMode,
+                                    badges: widget.badgesFor?.call(item) ?? const [],
                                   ),
                                 ),
                               ),
@@ -802,17 +977,32 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
                 ),
               ),
             )
-          else
+          // An AI answer without titles is just its text.
+          else if (widget.belowTitle == null)
             Padding(
               padding: widget.inset
                   ? const EdgeInsets.symmetric(vertical: 8)
                   : const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(t.messages.noItemsAvailable, style: Theme.of(context).textTheme.bodySmall),
             ),
+          if (widget.belowItems case final below?)
+            Padding(padding: EdgeInsets.fromLTRB(spacing?.edgeInset ?? leadingPadding, 4, 0, 0), child: below),
         ],
       ),
     );
   }
+
+  Widget _withTitleTrailing(Widget title) => widget.titleTrailing == null
+      ? title
+      : Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Align(alignment: AlignmentDirectional.centerStart, child: title),
+            ),
+            widget.titleTrailing!,
+          ],
+        );
 
   void _onItemTapped(int index) {
     if (_totalItemCount == 0) return;
@@ -825,5 +1015,101 @@ class HubSectionState extends State<HubSection> with MountedSetStateMixin, Skele
     _notifyFocusedItemChanged();
     _scrollToIndex(clamped);
     _hubFocusNode.requestFocus();
+  }
+}
+
+/// Reports its child's laid-out width (the leading tile's, for scrolling).
+class _MeasureWidth extends SingleChildRenderObjectWidget {
+  const _MeasureWidth({required this.onWidth, super.child});
+
+  final ValueChanged<double> onWidth;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderMeasureWidth(onWidth);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderMeasureWidth renderObject) => renderObject.onWidth = onWidth;
+}
+
+class _RenderMeasureWidth extends RenderProxyBox {
+  _RenderMeasureWidth(this.onWidth);
+
+  ValueChanged<double> onWidth;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    onWidth(size.width);
+  }
+}
+
+/// Fork: what [HubSection.trailingCard] shows.
+class HubTrailingCard {
+  const HubTrailingCard({required this.label, this.icon, this.spinner = false, this.onTap});
+
+  final String label;
+  final IconData? icon;
+
+  /// Shows a spinner instead of [icon] (work in progress).
+  final bool spinner;
+
+  /// Null leaves the card inert (e.g. while loading, or nothing more).
+  final VoidCallback? onTap;
+}
+
+/// A poster-sized action card matching the row's cards.
+class _TrailingCardView extends StatelessWidget {
+  const _TrailingCardView({required this.card, required this.width, required this.height, required this.large});
+
+  final HubTrailingCard card;
+  final double width;
+  final double height;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final foreground = scheme.onSurface.withValues(alpha: card.onTap == null && !card.spinner ? 0.45 : 0.85);
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: card.spinner ? 0.25 : 0.45),
+      borderRadius: BorderRadius.circular(tokens(context).radiusSm),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: card.onTap,
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: Center(
+            child: Column(
+              mainAxisSize: .min,
+              children: [
+                if (card.spinner)
+                  SizedBox.square(
+                    dimension: large ? 28 : 22,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: foreground),
+                  )
+                else if (card.icon != null)
+                  AppIcon(card.icon!, fill: 1, size: large ? 36 : 28, color: foreground),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    card.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: foreground,
+                      fontWeight: FontWeight.w700,
+                      fontSize: large ? 16 : null,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

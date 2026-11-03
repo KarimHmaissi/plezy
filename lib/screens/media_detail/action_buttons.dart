@@ -62,6 +62,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
 
     Future<void> onPlayPressed() async {
       if (!_canUseDetail) return;
+      ForkMotion.selection();
       // For TV shows, play the episode the hero describes (focused on TV,
       // otherwise on-deck); with neither, the first episode of the first season.
       if (metadata.isShow) {
@@ -106,6 +107,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
 
     Future<void> onPlayVersionPressed() async {
       if (!_canUseDetail) return;
+      ForkMotion.selection();
       final didNavigate = await promptAndPlayVersion(context, metadata);
       // Same post-playback refresh plain Play gets from
       // navigateToVideoPlayerWithRefresh; the split segment is online-only.
@@ -176,7 +178,10 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
         button: true,
         onTap: onPlayPressed,
         excludeSemantics: true,
-        child: SizedBox(
+        child: Pressable(
+          longPress: false,
+          borderRadius: BorderRadius.circular(actionSize / 2),
+          child: SizedBox(
           height: actionSize,
           child: FilledButton(
             onPressed: onPlayPressed,
@@ -195,6 +200,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
                     ],
                   )
                 : playButtonIcon,
+          ),
           ),
         ),
       );
@@ -305,6 +311,36 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
           )
         : null;
 
+    // Fork: ask the AI about this title (cinema composer over the page).
+    final askAboutAction = !widget.isOffline && AiAskAbout.supports(metadata)
+        ? FocusableAction(
+            debugLabel: 'detail_ask_about',
+            onPressed: () => unawaited(AiAskAbout.open(context, metadata)),
+            builder: (context, state) => iconActionButton(
+              state,
+              onPressed: () => unawaited(AiAskAbout.open(context, metadata)),
+              icon: const AppIcon(Symbols.question_answer_rounded, fill: 1),
+              tooltip: t.aiComposer.askAbout,
+            ),
+          )
+        : null;
+
+    // Fork: "Previously on" before the episode Play would start (a show's
+    // next episode, or this episode), when there's something to recap.
+    final recapEpisode = metadata.isShow ? _showPlayEpisode() : (metadata.isEpisode ? metadata : null);
+    final previouslyOnAction = !widget.isOffline && AiPreviouslyOn.supports(recapEpisode)
+        ? FocusableAction(
+            debugLabel: 'detail_previously_on',
+            onPressed: () => unawaited(AiPreviouslyOn.open(context, recapEpisode!)),
+            builder: (context, state) => iconActionButton(
+              state,
+              onPressed: () => unawaited(AiPreviouslyOn.open(context, recapEpisode!)),
+              icon: const AppIcon(Symbols.history_edu_rounded, fill: 1),
+              tooltip: t.aiComposer.previouslyOn,
+            ),
+          )
+        : null;
+
     final downloadAction = !widget.isOffline && !PlatformDetector.isAppleTV()
         ? FocusableAction(
             debugLabel: 'detail_download',
@@ -376,6 +412,8 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
       ?trailerAction,
       ?shuffleAction,
       ?randomEpisodeAction,
+      ?previouslyOnAction,
+      ?askAboutAction,
       ?downloadAction,
       watchedAction,
       ?watchlistAction,
@@ -512,6 +550,7 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
       // Optimistic inside the source; the row/screens listening to
       // watchlistChanges (including this one) rebuild immediately.
       await mutateWatchlistMembership(metadata.kind, candidate, add: !current);
+      ForkMotion.success();
     } catch (_) {
       if (mounted) showErrorSnackBar(context, t.explore.watchlistUpdateFailed);
     } finally {

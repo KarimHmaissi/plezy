@@ -64,6 +64,8 @@ import 'watchlist_source_chooser.dart';
 import '../widgets/rating_bottom_sheet.dart';
 import '../i18n/strings.g.dart';
 import '../utils/error_message_utils.dart';
+import '../services/ai/ai_more_like_this.dart';
+import '../screens/ai_ask_about.dart';
 
 class _MenuAction {
   final String value;
@@ -245,6 +247,38 @@ class RowMenuEntries extends InheritedWidget {
 
   @override
   bool updateShouldNotify(RowMenuEntries oldWidget) => false;
+}
+
+/// Fork: entries a screen adds to the menu of each media item under it,
+/// built for that item (e.g. the phone AI tab's "Play on TV").
+class ItemMenuEntries extends InheritedWidget {
+  final List<MediaMenuExtraEntry> Function(MediaItem item) build;
+
+  const ItemMenuEntries({super.key, required this.build, required super.child});
+
+  static List<MediaMenuExtraEntry> of(BuildContext context, MediaItem? item) {
+    if (item == null) return const [];
+    return context.getInheritedWidgetOfExactType<ItemMenuEntries>()?.build(item) ?? const [];
+  }
+
+  @override
+  bool updateShouldNotify(ItemMenuEntries oldWidget) => false;
+}
+
+/// Fork: a header a screen puts above an item's menu on phones, built for
+/// that item (the AI tab's "why this pick" peek).
+class ItemMenuHeader extends InheritedWidget {
+  final Widget? Function(MediaItem item) build;
+
+  const ItemMenuHeader({super.key, required this.build, required super.child});
+
+  static Widget? of(BuildContext context, MediaItem? item) {
+    if (item == null) return null;
+    return context.getInheritedWidgetOfExactType<ItemMenuHeader>()?.build(item);
+  }
+
+  @override
+  bool updateShouldNotify(ItemMenuHeader oldWidget) => false;
 }
 
 class MediaContextMenu extends StatefulWidget {
@@ -438,8 +472,13 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         : _buildItemMenuActions(context, menu);
     // Row-wide entries (Add to Home…) lead the menu; caller extras close it.
     final collection = menu.isCollection ? menu.mediaItem : null;
+    final moreLikeThis = menu.mediaItem == null ? null : AiMoreLikeThis.entryForItem(menu.mediaItem!);
     final leading = [
+      ...ItemMenuEntries.of(this.context, menu.mediaItem),
       ...RowMenuEntries.of(this.context),
+      ?moreLikeThis,
+      if (menu.mediaItem case final item?) ?AiAskAbout.entryForItem(this.context, item),
+      if (menu.mediaItem case final item?) ?AiPreviouslyOn.entryForItem(this.context, item),
       if (collection != null && collection.backend == MediaBackend.plex && collection.serverId != null)
         ...homeRowMenuEntries(this.context, (
           id: HomeRowIds.plex(collection.title ?? collection.id),
@@ -468,9 +507,11 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     // below any screen-level OverlaySheetHost, while callers often pass a
     // screen context from ABOVE its host (which would skip the host and
     // fall back to a hostless modal sheet).
+    final header = ItemMenuHeader.of(this.context, menu.mediaItem);
     final selected = await showAdaptiveAppMenu<String>(
       this.context,
       title: _itemMenuTitle(),
+      titleWidget: header,
       entries: _menuEntries(menuActions),
       position: position,
       focusFirstItem: openedFromKeyboard,

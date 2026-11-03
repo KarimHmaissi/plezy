@@ -75,3 +75,6 @@ maestro/**/*.png
 
 server/deploy.sh
 server/Caddyfile
+
+# Fork: local AI eval prompts and reports (they list library titles)
+notes/

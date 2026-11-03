@@ -29,11 +29,12 @@ import '../providers/discover_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/watch_state_store.dart';
 import '../widgets/hub_section.dart';
+import '../widgets/phone_nav_drawer.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/home_row_actions.dart';
-import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
+import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/profile_switching_overlay.dart';
 import 'profile/profile_switch_screen.dart';
 import 'profile/profile_teardown.dart';
@@ -42,7 +43,13 @@ import '../profiles/profile.dart';
 import '../profiles/profile_activation.dart';
 import '../profiles/profile_avatar.dart';
 import '../providers/catalog_sources_provider.dart';
+import '../services/ai/ai_history.dart';
+import '../services/ai/ai_home_refresher.dart';
+import '../services/brain/brain_debug.dart';
+import '../services/brain/history_brain.dart';
 import '../services/catalog/home_pins.dart';
+import '../services/library_index/library_index.dart';
+import '../services/plex_client.dart';
 import '../services/catalog/home_rows.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../services/catalog/trakt_lists_catalog_source.dart';
@@ -150,6 +157,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   TraktListsCatalogSource? _listsSource;
   HomePinsController get _homePins => HomePinsController.instance;
   Map<String, MediaHub> _fetchedRows = const {};
+
+  /// Phone/tablet Home rows' keys, by hub id.
+  final Map<String, GlobalKey<HubSectionState>> _homeHubKeys = {};
   final Set<String> _rowsLoading = {};
 
   late FocusNode _heroFocusNode;
@@ -193,6 +203,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   List<GlobalKey<HubSectionState>> get _allHubKeys {
+    if (!PlatformDetector.isTV()) {
+      return [for (final hub in _tvBrowseHubs) _homeHubKeys.putIfAbsent(hub.id, GlobalKey<HubSectionState>.new)];
+    }
     final keys = <GlobalKey<HubSectionState>>[];
     if (_continueWatchingHubKey != null && _onDeck.isNotEmpty) {
       keys.add(_continueWatchingHubKey!);
@@ -283,6 +296,15 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     return hubs;
   }
 
+  /// An AI row got new picks (Refresh or auto-refresh): load them.
+  void _onAiRowReplaced() {
+    final id = AiHistory.replaced.value;
+    if (!mounted || id == null) return;
+    final rowId = HomeRowIds.ai(id);
+    if (!_fetchedRows.containsKey(rowId)) return;
+    unawaited(_loadRows(refreshIds: {rowId}));
+  }
+
   void _onHomePinsChanged() {
     if (!mounted) return;
     setState(() {});
@@ -299,7 +321,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   /// Fetch the added rows Home doesn't have loaded, or all of them on
   /// [refresh] (charts move), each on its own so one failing row never hides
   /// the rest. Plex rows come from Home's own hubs when they include them.
-  Future<void> _loadRows({bool refresh = false}) async {
+  Future<void> _loadRows({bool refresh = false, Set<String> refreshIds = const {}}) async {
     final pins = _homePins;
     final resolver = _resolver();
     if (resolver == null) return;
@@ -308,7 +330,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       for (final row in pins.rows)
         if (HomeRowResolver.needsFetch(row.id) &&
             !(row.id.startsWith('px:') && (plexIds.contains(row.id) || _areHubsLoading)) &&
-            (refresh || !_fetchedRows.containsKey(row.id)) &&
+            (refresh || refreshIds.contains(row.id) || !_fetchedRows.containsKey(row.id)) &&
             !_rowsLoading.contains(row.id))
           row,
     ];
@@ -355,6 +377,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   Timer? _rowRetryTimer;
+  Timer? _indexStartTimer;
   int _rowRetries = 0;
   static const int _maxRowRetries = 4;
 
@@ -398,18 +421,6 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     identifier: '_pick_back_up_continue_',
     size: items.length,
     items: items,
-  );
-
-  /// The synthesized Continue Watching row, rendered ahead of the backend hubs
-  /// on both the mobile list and the TV rail.
-  MediaHub get _continueWatchingHub => MediaHub(
-    id: 'continue_watching',
-    title: t.discover.continueWatching,
-    type: 'mixed',
-    identifier: '_continue_watching_',
-    size: _onDeck.length + (_hasMoreContinueWatching ? 1 : 0),
-    more: _hasMoreContinueWatching,
-    items: _onDeck,
   );
 
   void _setSpotlightItem(MediaItem item) => _spotlight.select(item);
@@ -564,6 +575,36 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // titles when its source appears or changes.
     _catalogSources = context.read<CatalogSourcesProvider?>()?..addListener(_onCatalogSourcesChanged);
     _homePins.addListener(_onHomePinsChanged);
+    AiHistory.replaced.addListener(_onAiRowReplaced);
+    // Build or refresh the library index in the background once the
+    // servers have connected and startup has settled.
+    _indexStartTimer = Timer(const Duration(seconds: 30), () {
+      if (!mounted) return;
+      final servers = context.read<MultiServerProvider>();
+      // AI rows on Home refresh themselves (Haiku, every 12 hours).
+      AiHomeRefresher.start(
+        clientFor: servers.getClientForServer,
+        trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
+      );
+      // A phone is a remote for the TV's AI: no index of its own.
+      if (PlatformDetector.isMobile(context)) return;
+      List<IndexSource> plexSources() => [
+        for (final id in servers.onlineServerIds)
+          if (servers.getClientForServer(ServerId(id)) case final PlexClient client) PlexIndexSource(client),
+      ];
+      // The history brain follows the index: it reads titles from it.
+      unawaited(
+        LibraryIndex.instance
+            .start(plexSources)
+            .whenComplete(
+              () => HistoryBrain.instance.start(
+                plex: plexSources,
+                trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
+              ),
+            ),
+      );
+      BrainDebug.register();
+    });
     unawaited(_homePins.ensureLoaded());
     _onCatalogSourcesChanged();
     _startAutoScroll();
@@ -726,7 +767,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _discover.removeListener(_onDiscoverChanged);
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
     _homePins.removeListener(_onHomePinsChanged);
+    AiHistory.replaced.removeListener(_onAiRowReplaced);
     _rowRetryTimer?.cancel();
+    _indexStartTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();
@@ -1068,6 +1111,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     final colorScheme = Theme.of(context).colorScheme;
     final foregroundColor = colorScheme.onSurface;
     return ToolbarScrim(
+      scrollController: _scrollController,
       child: Row(
         children: [
           if (!PlatformDetector.isTV())
@@ -1101,91 +1145,99 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 key: _actionBarKey,
                 onNavigateLeft: _navigateToSidebar,
                 onNavigateDown: _focusContentFromAppBar,
-                actions: [
-                  FocusableAction(icon: Symbols.refresh_rounded, iconColor: foregroundColor, onPressed: manualRefresh),
-                  // Watch Together
-                  FocusableAction(
-                    onPressed: openWatchTogether,
-                    child: Stack(
-                      children: [
-                        IconButton(
-                          icon: AppIcon(
-                            Symbols.group_rounded,
-                            fill: watchTogether.isInSession ? 1 : 0,
-                            color: watchTogether.isInSession ? colorScheme.primary : foregroundColor,
-                          ),
+                // Phone: Search, the remote and the avatar (which opens the
+                // side drawer with everything else), as on every tab.
+                actions: PlatformDetector.isMobile(context)
+                    ? phoneTabActions(context, color: foregroundColor, onRefresh: manualRefresh)
+                    : [
+                        FocusableAction(
+                          icon: Symbols.refresh_rounded,
+                          iconColor: foregroundColor,
+                          onPressed: manualRefresh,
+                        ),
+                        // Watch Together
+                        FocusableAction(
                           onPressed: openWatchTogether,
-                          tooltip: t.watchTogether.title,
-                        ),
-                        // Badges sit over the button they label, so they must
-                        // not swallow its hover and clicks (#2846).
-                        if (watchTogether.isInSession && watchTogether.participantCount > 1)
-                          Positioned(
-                            top: 6,
-                            right: 6,
-                            child: IgnorePointer(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: colorScheme.primary,
-                                  borderRadius: const BorderRadius.all(Radius.circular(8)),
+                          child: Stack(
+                            children: [
+                              IconButton(
+                                icon: AppIcon(
+                                  Symbols.group_rounded,
+                                  fill: watchTogether.isInSession ? 1 : 0,
+                                  color: watchTogether.isInSession ? colorScheme.primary : foregroundColor,
                                 ),
-                                child: Text(
-                                  '${watchTogether.participantCount}',
-                                  style: TextStyle(color: colorScheme.onPrimary, fontSize: 10, fontWeight: .bold),
-                                ),
+                                onPressed: openWatchTogether,
+                                tooltip: t.watchTogether.title,
                               ),
-                            ),
+                              // Badges sit over the button they label, so they must
+                              // not swallow its hover and clicks (#2846).
+                              if (watchTogether.isInSession && watchTogether.participantCount > 1)
+                                Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: IgnorePointer(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: colorScheme.primary,
+                                        borderRadius: const BorderRadius.all(Radius.circular(8)),
+                                      ),
+                                      child: Text(
+                                        '${watchTogether.participantCount}',
+                                        style: TextStyle(color: colorScheme.onPrimary, fontSize: 10, fontWeight: .bold),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                      ],
-                    ),
-                  ),
-                  // Companion Remote
-                  FocusableAction(
-                    onPressed: openCompanionRemote,
-                    child: Stack(
-                      children: [
-                        IconButton(
-                          icon: AppIcon(
-                            Symbols.phone_android_rounded,
-                            fill: companionRemote.isConnected ? 1 : 0,
-                            color: companionRemote.isConnected ? colorScheme.primary : foregroundColor,
-                          ),
+                        ),
+                        // Companion Remote
+                        FocusableAction(
                           onPressed: openCompanionRemote,
-                          tooltip: t.companionRemote.title,
-                        ),
-                        if (companionRemote.isConnected)
-                          Positioned(
-                            top: 6,
-                            right: 6,
-                            child: IgnorePointer(
-                              child: Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                  border: Border.fromBorderSide(BorderSide(color: foregroundColor, width: 1)),
+                          child: Stack(
+                            children: [
+                              IconButton(
+                                icon: AppIcon(
+                                  Symbols.phone_android_rounded,
+                                  fill: companionRemote.isConnected ? 1 : 0,
+                                  color: companionRemote.isConnected ? colorScheme.primary : foregroundColor,
                                 ),
+                                onPressed: openCompanionRemote,
+                                tooltip: t.companionRemote.title,
                               ),
-                            ),
+                              if (companionRemote.isConnected)
+                                Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: IgnorePointer(
+                                    child: Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: Colors.green,
+                                        shape: BoxShape.circle,
+                                        border: Border.fromBorderSide(BorderSide(color: foregroundColor, width: 1)),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
+                        ),
+                        // Server Tasks — Plex-only (`/activities` API has no
+                        // Jellyfin equivalent), hide the button entirely on
+                        // Jellyfin-only profiles so the chrome doesn't show
+                        // a permanently empty popover.
+                        if (PlatformDetector.isDesktop(context) &&
+                            context.select<MultiServerProvider, bool>((p) => p.hasOnlinePlexServers))
+                          FocusableAction(
+                            onPressed: () => _serverActivitiesButtonKey.currentState?.togglePanel(),
+                            child: ServerActivitiesButton(key: _serverActivitiesButtonKey),
+                          ),
+                        // User menu — profiles + sign out
+                        _buildUserMenuAction(context),
                       ],
-                    ),
-                  ),
-                  // Server Tasks — Plex-only (`/activities` API has no
-                  // Jellyfin equivalent), hide the button entirely on
-                  // Jellyfin-only profiles so the chrome doesn't show
-                  // a permanently empty popover.
-                  if (PlatformDetector.isDesktop(context) &&
-                      context.select<MultiServerProvider, bool>((p) => p.hasOnlinePlexServers))
-                    FocusableAction(
-                      onPressed: () => _serverActivitiesButtonKey.currentState?.togglePanel(),
-                      child: ServerActivitiesButton(key: _serverActivitiesButtonKey),
-                    ),
-                  // User menu — profiles + sign out
-                  _buildUserMenuAction(context),
-                ],
               );
             },
           ),
@@ -1221,7 +1273,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
     final theme = Theme.of(context);
-    final continueWatchingHub = _onDeck.isEmpty ? null : _continueWatchingHub;
+    final homeHubs = _tvBrowseHubs;
     return Material(
       color: theme.scaffoldBackgroundColor,
       child: Stack(
@@ -1244,37 +1296,28 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               if (_isLoading) LoadingIndicatorBox.sliver,
               if (_errorMessage != null) SliverErrorState(message: _errorMessage!, onRetry: _discover.load),
               if (!_isLoading && _errorMessage == null) ...[
-                if (continueWatchingHub != null)
+                // The same rows as the TV, from the Home layout (the TV's,
+                // while this phone mirrors it), in its order.
+                for (final (i, hub) in homeHubs.indexed)
                   SliverToBoxAdapter(
-                    child: HubSection(
-                      key: _continueWatchingHubKey,
-                      hub: continueWatchingHub,
-                      focusMemory: _hubFocusMemory,
-                      icon: hubIconFor(continueWatchingHub),
-                      onRefresh: _discover.updateItem,
-                      onRemoveFromContinueWatching: _discover.refreshContinueWatching,
-                      isInContinueWatching: true,
-                      loadMoreItems: _discover.loadAllContinueWatching,
-                      onVerticalNavigation: (isUp) => _handleVerticalNavigation(0, isUp),
-                      onNavigateUp: _focusTopBoundary,
-                      onNavigateToSidebar: _navigateToSidebar,
-                    ),
-                  ),
-
-                // Recommendation Hubs (Trending, Top in Genre, etc.)
-                for (int i = 0; i < _hubs.length; i++)
-                  SliverToBoxAdapter(
-                    child: HubSection(
-                      key: i < _orderedHubKeys.length ? _orderedHubKeys[i] : null,
-                      hub: _hubs[i],
-                      focusMemory: _hubFocusMemory,
-                      icon: hubIconFor(_hubs[i]),
-                      showServerName: showServerNameOnHubs || hubsSpanMultipleServers,
-                      onRefresh: _discover.updateItem,
-                      // Hub index is i + 1 if continue watching exists, otherwise i
-                      onVerticalNavigation: (isUp) => _handleVerticalNavigation(_onDeck.isNotEmpty ? i + 1 : i, isUp),
-                      onNavigateUp: (i == 0 && _onDeck.isEmpty) ? _focusTopBoundary : null,
-                      onNavigateToSidebar: _navigateToSidebar,
+                    child: RowMenuEntries(
+                      entries: _rowMenuEntriesFor(hub),
+                      child: HubSection(
+                        key: _homeHubKeys.putIfAbsent(hub.id, GlobalKey<HubSectionState>.new),
+                        hub: hub,
+                        focusMemory: _hubFocusMemory,
+                        icon: hubIconFor(hub),
+                        showServerName: showServerNameOnHubs || hubsSpanMultipleServers,
+                        onRefresh: _discover.updateItem,
+                        isInContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching',
+                        onRemoveFromContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching'
+                            ? _discover.refreshContinueWatching
+                            : null,
+                        loadMoreItems: hub.id == 'continue_watching' ? _discover.loadAllContinueWatching : null,
+                        onVerticalNavigation: (isUp) => _handleVerticalNavigation(i, isUp),
+                        onNavigateUp: i == 0 ? _focusTopBoundary : null,
+                        onNavigateToSidebar: _navigateToSidebar,
+                      ),
                     ),
                   ),
 

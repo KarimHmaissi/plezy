@@ -70,6 +70,41 @@ class TraktClient implements DisposableTrackerClient {
   /// Body shape: see `trackerHistoryBody`.
   Future<void> addToHistory(Map<String, dynamic> body) => _request('POST', '/sync/history', body: body);
 
+  /// Fork: one page of the user's watch history (`movies` or `episodes`),
+  /// raw, newest first; [startAt] limits it to watches since then.
+  Future<TrackerPage<Map<String, dynamic>>> getHistory(
+    String type, {
+    int page = 1,
+    int limit = 1000,
+    DateTime? startAt,
+    String extended = 'full',
+  }) async {
+    final since = startAt == null ? '' : '&start_at=${Uri.encodeQueryComponent(startAt.toUtc().toIso8601String())}';
+    final res = await _requestResponse('GET', '/sync/history/$type?extended=$extended&page=$page&limit=$limit$since');
+    final body = json.decode(res.body);
+    return TrackerPage.fromResponse(res, [if (body is List) ...body.whereType<Map<String, dynamic>>()]);
+  }
+
+  /// Fork: add watches to history and return Trakt's counts
+  /// (`added`/`not_found`). Same item + `watched_at` is deduplicated by Trakt.
+  Future<Map<String, dynamic>> addToHistoryCounted(Map<String, dynamic> body) async {
+    final res = await _request('POST', '/sync/history', body: body);
+    return res is Map<String, dynamic> ? res : const {};
+  }
+
+  /// Fork: remove specific watches by their history ids (not every play of
+  /// an item).
+  Future<Map<String, dynamic>> removeHistoryIds(List<int> ids) async {
+    final res = await _request('POST', '/sync/history/remove', body: {'ids': ids});
+    return res is Map<String, dynamic> ? res : const {};
+  }
+
+  /// Fork: every show the user has watched, with images (no seasons).
+  Future<List<Map<String, dynamic>>> getWatchedShows() async {
+    final res = await _request('GET', '/sync/watched/shows?extended=noseasons,images');
+    return [if (res is List) ...res.whereType<Map<String, dynamic>>()];
+  }
+
   Future<void> removeFromHistory(Map<String, dynamic> body) => _request('POST', '/sync/history/remove', body: body);
 
   Future<void> addRatings(Map<String, dynamic> body) =>
@@ -161,6 +196,15 @@ class TraktClient implements DisposableTrackerClient {
       guestStars: _decodePeopleEntries(decoded['guest_stars']),
       crew: _decodeCrewEntries(decoded['crew']),
     );
+  }
+
+  /// Fork: a title's full details (`GET /{movies|shows}/{id}?extended=full`): overview, genres, runtime,
+  /// rating, and for shows `aired_episodes`. Null when Trakt does not know the title. [id] is a Trakt id, slug or
+  /// IMDb id.
+  Future<Map<String, dynamic>?> getSummary(TraktCatalogType type, String id) async {
+    final res = await _getOrNull('/${type.name}/$id?extended=full');
+    final decoded = res == null ? null : TrackerHttpClient.decodeJson(res.body);
+    return decoded is Map<String, dynamic> ? decoded : null;
   }
 
   /// The Trakt id a TMDB or TVDB id ([idType]) names (`GET /search/{tmdb|tvdb}/{id}?type=movie|show`,

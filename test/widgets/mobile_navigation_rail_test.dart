@@ -48,6 +48,10 @@ void main() {
   });
 
   testWidgets('labels follow the nav bar label setting', (tester) async {
+    // Tall enough for every labelled destination (the fork adds AI).
+    tester.view.physicalSize = const Size(900, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       wrap(
         MobileNavigationRail(

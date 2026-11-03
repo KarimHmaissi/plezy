@@ -11,6 +11,35 @@ class UdpBroadcastSocketSet {
 
   bool get isEmpty => _sockets.isEmpty;
 
+  /// Sends that threw since binding (a dead socket after sleep/wake).
+  int sendFailures = 0;
+
+  /// Sockets the OS closed under us (their interface went away).
+  int closedSockets = 0;
+
+  /// The local addresses these sockets are bound to.
+  List<String> get boundAddresses => [for (final s in _sockets) s.address.address];
+
+  /// Send-only use: count sockets the OS closes (sleep/wake, Wi-Fi drop).
+  /// Don't combine with [listen]; a datagram socket takes one listener.
+  void watchForClose() {
+    for (final socket in _sockets) {
+      _subscriptions.add(
+        socket.listen(
+          (event) {
+            if (event == RawSocketEvent.read) {
+              while (socket.receive() != null) {}
+              return;
+            }
+            if (event == RawSocketEvent.closed || event == RawSocketEvent.readClosed) closedSockets++;
+          },
+          onError: (Object _) => closedSockets++,
+          onDone: () => closedSockets++,
+        ),
+      );
+    }
+  }
+
   Iterable<RawDatagramSocket> get sockets => _sockets;
 
   void listen(void Function(Datagram datagram) onDatagram, {required String debugLabel}) {
@@ -24,6 +53,7 @@ class UdpBroadcastSocketSet {
       try {
         socket.send(data, address, port);
       } catch (e, st) {
+        sendFailures++;
         appLogger.w('UDP broadcast send failed from ${socket.address.address}', error: e, stackTrace: st);
       }
     }
@@ -84,6 +114,9 @@ class UdpBroadcastSockets {
 
     return UdpBroadcastSocketSet._(List.unmodifiable(sockets));
   }
+
+  /// The machine's IPv4 LAN addresses as strings.
+  static Future<List<String>> localIPv4Strings() async => [for (final a in await _localIPv4Addresses()) a.address];
 
   static Future<List<InternetAddress>> _localIPv4Addresses() async {
     try {

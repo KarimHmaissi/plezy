@@ -29,7 +29,7 @@ import '../../main_screen.dart';
 import 'base_library_tab.dart';
 import '../../../services/catalog/home_pins.dart';
 import '../../../widgets/home_row_actions.dart';
-import '../../../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
+import '../../../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
 
 /// Recommended tab for library screen
 /// Shows library-specific hubs and recommendations, including dedicated Continue Watching
@@ -307,19 +307,23 @@ class _LibraryRecommendedTabState extends BaseLibraryTabState<MediaHub, LibraryR
                 final isContinueWatching = _isContinueWatchingHub(hub);
                 final usesContinueWatchingAction = _usesContinueWatchingAction(hub);
 
-                return HubSection(
-                  key: hubKeys[index],
-                  hub: hub,
-                  focusMemory: _hubFocusMemory,
-                  icon: hubIconFor(hub),
-                  isInContinueWatching: isContinueWatching,
-                  usesContinueWatchingAction: usesContinueWatchingAction,
-                  onRefresh: updateItem,
-                  onRemoveFromContinueWatching: isContinueWatching ? _refreshContinueWatching : null,
-                  onVerticalNavigation: (isUp) => _handleVerticalNavigation(hubKeys, index, isUp),
-                  onBack: widget.onBack,
-                  onNavigateUp: index == 0 ? widget.onBack : null,
-                  onNavigateToSidebar: _navigateToSidebar,
+                // Long-press any card: "Add to Home" for this row (phone).
+                return RowMenuEntries(
+                  entries: _homeRowMenuEntriesFor(hub),
+                  child: HubSection(
+                    key: hubKeys[index],
+                    hub: hub,
+                    focusMemory: _hubFocusMemory,
+                    icon: hubIconFor(hub),
+                    isInContinueWatching: isContinueWatching,
+                    usesContinueWatchingAction: usesContinueWatchingAction,
+                    onRefresh: updateItem,
+                    onRemoveFromContinueWatching: isContinueWatching ? _refreshContinueWatching : null,
+                    onVerticalNavigation: (isUp) => _handleVerticalNavigation(hubKeys, index, isUp),
+                    onBack: widget.onBack,
+                    onNavigateUp: index == 0 ? widget.onBack : null,
+                    onNavigateToSidebar: _navigateToSidebar,
+                  ),
                 );
               },
             ),

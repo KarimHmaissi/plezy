@@ -2,6 +2,7 @@ import 'dart:async';
 import '../media/catalog_item_ref.dart';
 import '../media/ids.dart';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import '../media/library_query.dart';
@@ -20,11 +21,13 @@ import '../utils/media_server_http_client.dart';
 import '../utils/plex_library_section_utils.dart';
 import '../utils/provider_extensions.dart';
 import '../widgets/focusable_media_card.dart';
+import '../widgets/hub_section.dart' show HubTrailingCard;
 import '../widgets/media_card_sliver_layout.dart';
 import '../widgets/desktop_app_bar.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/overlay_sheet.dart';
 import '../focus/focusable_action_bar.dart';
+import '../focus/focusable_button.dart';
 import '../focus/key_event_utils.dart';
 import '../mixins/grid_focus_node_mixin.dart';
 import '../mixins/paginated_item_loader.dart';
@@ -42,6 +45,19 @@ class HubDetailScreen extends StatefulWidget {
   final bool usesContinueWatchingAction;
   final VoidCallback? onRemoveFromContinueWatching;
 
+  /// Fork: the row this page was opened from, as it changes (an AI row
+  /// growing through Load more, a mirrored row updating). Followed only
+  /// while the page shows the row's own items (no [loadItems], not
+  /// [MediaHub.more]).
+  final ValueListenable<MediaHub>? liveHub;
+
+  /// Fork: the row's trailing action (an AI row's Load more), shown as a
+  /// button under the grid.
+  final ValueListenable<HubTrailingCard?>? footer;
+
+  /// Fork: overrides opening an item (the phone's AI picks).
+  final ValueChanged<MediaItem>? onItemTap;
+
   const HubDetailScreen({
     super.key,
     required this.hub,
@@ -49,6 +65,9 @@ class HubDetailScreen extends StatefulWidget {
     this.isInContinueWatching = false,
     bool? usesContinueWatchingAction,
     this.onRemoveFromContinueWatching,
+    this.liveHub,
+    this.footer,
+    this.onItemTap,
   }) : usesContinueWatchingAction = usesContinueWatchingAction ?? isInContinueWatching;
 
   @override
@@ -81,6 +100,7 @@ class _HubDetailScreenState extends State<HubDetailScreen>
   /// Key for getting a context below OverlaySheetHost
   final GlobalKey _overlayChildKey = GlobalKey();
   final FocusNode _continuationRetryFocusNode = FocusNode(debugLabel: 'hub_continuation_retry');
+  final FocusNode _footerFocusNode = FocusNode(debugLabel: 'hub_detail_footer');
 
   @override
   bool get hasItems => _filteredItems.isNotEmpty;
@@ -110,10 +130,21 @@ class _HubDetailScreenState extends State<HubDetailScreen>
     }
     _loadSorts();
     autoFocusFirstItemAfterLoad();
+    widget.liveHub?.addListener(_onLiveHubChanged);
+  }
+
+  bool get _followsLiveHub => widget.loadItems == null && !widget.hub.more;
+
+  void _onLiveHubChanged() {
+    final live = widget.liveHub?.value;
+    if (!mounted || live == null || !_followsLiveHub || identical(live.items, _items)) return;
+    _replaceItems(List.of(live.items));
   }
 
   @override
   void dispose() {
+    widget.liveHub?.removeListener(_onLiveHubChanged);
+    _footerFocusNode.dispose();
     scrollController.removeListener(_scheduleNextHubPageCheck);
     disposePagination();
     _continuation.dispose();
@@ -496,6 +527,12 @@ class _HubDetailScreenState extends State<HubDetailScreen>
         canPop: PlatformDetector.isHandheldIOS(context),
         onSystemBack: () {
           if (BackKeyCoordinator.consumeIfHandled()) return;
+          // Touch phones/tablets leave at once; focusing the app bar first
+          // (a D-pad step) scrolled the grid to the top and needed a 2nd back.
+          if (PlatformDetector.isMobile(context)) {
+            if (mounted) Navigator.pop(context);
+            return;
+          }
           if (handleBackNavigation() && mounted) Navigator.pop(context);
         },
         child: Scaffold(
@@ -584,10 +621,14 @@ class _HubDetailScreenState extends State<HubDetailScreen>
                             isInContinueWatching: widget.isInContinueWatching,
                             usesContinueWatchingAction: widget.usesContinueWatchingAction,
                             onNavigateUp: position.isFirstRow ? navigateToAppBar : null,
-                            onNavigateDown:
-                                _pageLoadError != null && position.index >= position.itemCount - position.columnCount
+                            onNavigateDown: position.index < position.itemCount - position.columnCount
+                                ? null
+                                : _pageLoadError != null
                                 ? _continuationRetryFocusNode.requestFocus
+                                : widget.footer?.value?.onTap != null
+                                ? _footerFocusNode.requestFocus
                                 : null,
+                            onTap: widget.onItemTap == null ? null : () => widget.onItemTap!(item),
                             onNavigateLeft: position.isGrid && position.isFirstColumn ? () {} : null,
                             onBack: handleBackFromContent,
                             onFocusChange: (hasFocus) => _handleGridItemFocusChange(
@@ -611,9 +652,53 @@ class _HubDetailScreenState extends State<HubDetailScreen>
                     onNavigateUp: () => _focusNodeForIndex(_filteredItems.length - 1).requestFocus(),
                     onBack: handleBackFromContent,
                   ),
+                if (widget.footer case final footer? when _filteredItems.isNotEmpty)
+                  ValueListenableBuilder<HubTrailingCard?>(
+                    valueListenable: footer,
+                    builder: (context, card, _) => card == null
+                        ? const SliverToBoxAdapter(child: SizedBox.shrink())
+                        : _SeeAllFooter(
+                            card: card,
+                            focusNode: _footerFocusNode,
+                            onNavigateUp: () => _focusNodeForIndex(_filteredItems.length - 1).requestFocus(),
+                            onBack: handleBackFromContent,
+                          ),
+                  ),
                 const SliverSystemBottomInset(),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Fork: an AI row's Load more under its See all grid.
+class _SeeAllFooter extends StatelessWidget {
+  const _SeeAllFooter({required this.card, required this.focusNode, required this.onNavigateUp, required this.onBack});
+
+  final HubTrailingCard card;
+  final FocusNode focusNode;
+  final VoidCallback onNavigateUp;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final onTap = card.onTap;
+    final Widget icon = card.spinner
+        ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+        : Icon(card.icon ?? Symbols.expand_more_rounded);
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        child: Center(
+          child: FocusableButton(
+            focusNode: focusNode,
+            onPressed: onTap,
+            onNavigateUp: onNavigateUp,
+            onBack: onBack,
+            child: FilledButton.tonalIcon(onPressed: onTap, icon: icon, label: Text(card.label)),
           ),
         ),
       ),

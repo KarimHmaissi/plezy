@@ -16,11 +16,21 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import '../i18n/strings.g.dart';
+import '../services/lab/lab_export.dart';
+import '../services/ai/ai_more_like_this.dart';
+import '../services/ai/ai_remote_asks.dart';
+import '../services/companion_remote/host_media_notification.dart';
+import '../services/companion_remote/mirror_sync.dart';
+import '../services/trackers/trakt/trakt_client.dart';
+import '../services/catalog/trakt_catalog_source.dart';
+import '../utils/media_navigation_helper.dart';
+import '../utils/provider_extensions.dart';
 import '../services/app_exit_service.dart';
 import '../services/tvos_system_navigation_service.dart';
 import '../services/update_service.dart';
 import '../utils/app_logger.dart';
 import '../widgets/auth_error_banner.dart';
+import '../widgets/cast_bar.dart';
 import '../widgets/app_icon.dart';
 import '../utils/platform_detector.dart';
 import '../utils/snackbar_helper.dart';
@@ -74,6 +84,8 @@ import 'libraries/library_quick_picker_sheet.dart';
 import 'libraries/libraries_screen.dart';
 import 'livetv/live_tv_screen.dart';
 import 'search_screen.dart';
+import 'ai_screen.dart';
+import 'history_screen.dart';
 import 'comfort_screen.dart';
 import 'watchlist_screen.dart';
 import 'downloads/downloads_screen.dart';
@@ -82,6 +94,7 @@ import 'profile/profile_switch_screen.dart';
 import 'video_player_screen.dart';
 import 'profile/profile_teardown.dart';
 import '../watch_together/watch_together.dart';
+import '../theme/fork_motion.dart';
 
 /// Provides access to the main screen's focus control.
 // MainScreenFocusScope and SideNavigationBleedBuilder live in
@@ -259,10 +272,25 @@ List<NavigationTab> mainScreenBottomNavigationTabs({
   required NavigationTabId currentTab,
 }) {
   if (!isMobile) return visibleTabs;
-  return visibleTabs.where((tab) {
+  final tabs = visibleTabs.where((tab) {
+    // Fork: Libraries lives in the side drawer (opened from the avatar), as
+    // Plex, and Comfort takes its slot; like History it never takes a
+    // bottom-nav slot (Home stays highlighted while it's open).
+    if (tab.id == NavigationTabId.libraries) return false;
+    // Fork: five items like Plex; Search and Downloads live in Home's top
+    // bar instead (shown here only while open, or Downloads offline).
+    if (tab.id == NavigationTabId.search) return currentTab == tab.id;
+    // History opens from Home's top bar and never takes a bottom-nav slot
+    // (Home stays highlighted while it's open).
+    if (tab.id == NavigationTabId.history) return false;
+    if (tab.id == NavigationTabId.downloads) return isOffline || currentTab == tab.id;
     if (tab.id != NavigationTabId.settings) return true;
     return isOffline || currentTab == NavigationTabId.settings;
   }).toList();
+  // Home, Comfort, Explore, Watchlist, AI: Comfort sits next to Home.
+  final comfort = tabs.indexWhere((tab) => tab.id == NavigationTabId.comfort);
+  if (comfort > 1 && tabs.first.id == NavigationTabId.discover) tabs.insert(1, tabs.removeAt(comfort));
+  return tabs;
 }
 
 @visibleForTesting
@@ -529,6 +557,8 @@ class _MainScreenState extends State<MainScreen>
 
     WidgetsBinding.instance.addObserver(this);
     _contentFocusScope.addListener(_syncSidebarFocusWithContent);
+    AiMoreLikeThis.requests.addListener(_openAiForMoreLikeThis);
+    MainTabSwitcher.select = _switchTabFromToolbar;
 
     if (PlatformDetector.isDesktopOS()) {
       windowManager.addListener(this);
@@ -539,6 +569,8 @@ class _MainScreenState extends State<MainScreen>
     // so _buildScreens and _hasLiveTv getter agree from the start.
     try {
       _lastHasLiveTv = context.read<MultiServerProvider>().hasLiveTv;
+      // Fork, debug Mac builds only: subtitle export for indexing experiments.
+      LabExport.attach(context.read<MultiServerProvider>());
     } catch (_) {
       _lastHasLiveTv = false;
     }
@@ -546,11 +578,11 @@ class _MainScreenState extends State<MainScreen>
       final catalogSources = context.read<CatalogSourcesProvider>();
       _lastHasExplore = catalogSources.hasAnySource && _showExploreTabSetting;
       _lastHasWatchlist = catalogSources.watchlistCapableSources.isNotEmpty;
-      _lastHasComfort = _hasTrakt(catalogSources);
+      _lastHasComfort = _comfortAvailable(catalogSources);
     } catch (_) {
       _lastHasExplore = false;
       _lastHasWatchlist = false;
-      _lastHasComfort = false;
+      _lastHasComfort = _comfortAvailable(null);
     }
     // Re-evaluate Explore tab visibility when the appearance toggle flips
     // mid-session; the catalog-sources listener covers source changes.
@@ -972,6 +1004,15 @@ class _MainScreenState extends State<MainScreen>
       _companionRemoteSetup = true;
       _setupCompanionRemote();
     }
+    if (!_autoConnectChecked && PlatformDetector.isMobile(context)) {
+      _autoConnectChecked = true;
+      unawaited(MirrorClient.instance.start(context.read<CompanionRemoteProvider>()));
+      HostMediaNotification.instance.start(
+        context.read<CompanionRemoteProvider>(),
+        clientFor: (id) => context.tryGetMediaClientWithFallback(serverIdOrNull(id)),
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_autoConnectToTv()));
+    }
 
     _miniPlayerInsets = context.read<MiniPlayerInsetController?>();
 
@@ -1031,6 +1072,91 @@ class _MainScreenState extends State<MainScreen>
         });
       }
     };
+    receiver.onPlayMedia = (data) => unawaited(_playFromPhone(data, play: true));
+    receiver.onOpenItem = (data) => unawaited(_playFromPhone(data, play: false));
+    receiver.onAiAsk = (data) => unawaited(
+      AiRemoteAsks.run(
+        data,
+        remote: companionRemote,
+        clientFor: context.read<MultiServerProvider>().getClientForServer,
+        trakt: _traktClient,
+      ),
+    );
+    // Mirroring: phones see and edit this device's Home, lists and AI answers.
+    final mirror = _mirrorHost = MirrorHost(companionRemote)..start();
+    receiver.onMirrorRequest = () {
+      unawaited(mirror.sendSnapshot());
+      mirror.sendActivity();
+    };
+    receiver.onMirrorWrite = (op) => unawaited(mirror.applyWrite(op));
+    receiver.onAiAction = (data) => unawaited(
+      AiRemoteAsks.runAction(
+        data,
+        clientFor: context.read<MultiServerProvider>().getClientForServer,
+        trakt: _traktClient,
+        remote: companionRemote,
+      ),
+    );
+  }
+
+  MirrorHost? _mirrorHost;
+
+  TraktClient? get _traktClient =>
+      context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client;
+
+  /// A phone cast a title here: fetch it from this app's servers and play it
+  /// (or open its page), on top of whatever the TV was showing.
+  Future<void> _playFromPhone(Map<String, dynamic> data, {required bool play}) async {
+    final remote = context.read<CompanionRemoteProvider>();
+    final serverId = data['server'] as String?;
+    final id = data['id'] as String?;
+    final title = data['title'] as String? ?? '';
+    final offsetMs = data['offsetMs'] as int?;
+    try {
+      final client = serverId == null || id == null
+          ? null
+          : context.read<MultiServerProvider>().serverManager.getClient(ServerId(serverId));
+      final item = await client?.fetchItem(id!);
+      if (!mounted) return;
+      if (item == null) {
+        remote.sendCastResult(ok: false, message: t.cast.itemNotFound);
+        return;
+      }
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      remote.sendCastResult(ok: true, message: item.title ?? title);
+      if (play) {
+        await navigateToVideoPlayer(
+          context,
+          metadata: item,
+          initialPosition: offsetMs == null ? null : Duration(milliseconds: offsetMs),
+        );
+      } else {
+        await navigateToMediaItem(context, item);
+      }
+    } catch (e) {
+      appLogger.w('CompanionRemote: cast of $title failed', error: e);
+      if (mounted) remote.sendCastResult(ok: false, message: '$e');
+    }
+  }
+
+  void _switchTabFromToolbar(NavigationTabId tab) => _selectTab(tab);
+
+  bool _autoConnectChecked = false;
+
+  /// Phone: reconnect to the TV app last connected to, if it's on the LAN,
+  /// so casting and the now-playing bar work without opening the remote.
+  Future<void> _autoConnectToTv() async {
+    try {
+      final remote = context.read<CompanionRemoteProvider>();
+      if (remote.isInSession) return;
+      final settings = await SettingsService.getInstance();
+      final host = settings.read(SettingsService.companionRemoteAutoHost);
+      if (host == null || !mounted) return;
+      if (!await ensureCompanionRemoteCryptoFromContext(context)) return;
+      await remote.autoConnect(host);
+    } catch (e) {
+      appLogger.d('CompanionRemote: auto-connect skipped', error: e);
+    }
   }
 
   Future<void> _autoStartCompanionRemoteServer() async {
@@ -1044,8 +1170,18 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
+  /// "More like this" from a long-press menu: back to the main screen and
+  /// on to the AI tab, which runs the request.
+  void _openAiForMoreLikeThis() {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _selectTab(NavigationTabId.ai);
+  }
+
   @override
   void dispose() {
+    AiMoreLikeThis.requests.removeListener(_openAiForMoreLikeThis);
+    if (MainTabSwitcher.select == _switchTabFromToolbar) MainTabSwitcher.select = null;
     if (_watchTogether?.navigatorOpener == _navigateToWatchTogetherMedia) _watchTogether?.navigatorOpener = null;
     WidgetsBinding.instance.removeObserver(this);
     _profileRouteObserver?.unsubscribe(this);
@@ -1083,6 +1219,13 @@ class _MainScreenState extends State<MainScreen>
         receiver.onTabSettings = null;
         receiver.onHome = null;
         receiver.onSearchAction = null;
+        receiver.onPlayMedia = null;
+        receiver.onOpenItem = null;
+        receiver.onAiAsk = null;
+        receiver.onMirrorRequest = null;
+        receiver.onMirrorWrite = null;
+        receiver.onAiAction = null;
+        _mirrorHost?.stop();
         receiver.navigationOwner = null;
       }
     }
@@ -1124,6 +1267,7 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _autoConnectChecked) unawaited(_autoConnectToTv());
     // Always consume: the gates latch backgrounding on every lifecycle event.
     final resumedFromBackground = _profileSelectionResumeGate.consumePromptOn(state);
     final refreshStaleContent = _contentRefreshResumeGate.consumeRefreshOn(state);
@@ -1214,6 +1358,8 @@ class _MainScreenState extends State<MainScreen>
       NavigationTabId.explore => ExploreScreen(key: _screenKeys[tab]),
       NavigationTabId.watchlist => WatchlistScreen(key: _screenKeys[tab]),
       NavigationTabId.comfort => ComfortScreen(key: _screenKeys[tab]),
+      NavigationTabId.ai => AiScreen(key: _screenKeys[tab]),
+      NavigationTabId.history => HistoryScreen(key: _screenKeys[tab]),
       NavigationTabId.libraries => LibrariesScreen(
         key: _screenKeys[tab],
         onLibraryOrderChanged: _onLibraryOrderChanged,
@@ -1322,6 +1468,13 @@ class _MainScreenState extends State<MainScreen>
   }
 
   /// Comfort shows live in a Trakt list, so the tab needs Trakt connected.
+  /// Comfort shows with Trakt connected; on phones it's always in the bottom
+  /// bar (it explains how to connect Trakt when it isn't).
+  static bool _comfortAvailable(CatalogSourcesProvider? sources) =>
+      _isPhoneOS || (sources != null && _hasTrakt(sources));
+
+  static bool get _isPhoneOS => !PlatformDetector.isTV() && (Platform.isAndroid || Platform.isIOS);
+
   static bool _hasTrakt(CatalogSourcesProvider sources) =>
       sources.connectedSources.any((source) => source.id == CatalogSourceId.trakt);
 
@@ -1331,7 +1484,7 @@ class _MainScreenState extends State<MainScreen>
     final hasExplore = (_catalogSourcesProvider?.hasAnySource ?? false) && _showExploreTabSetting;
     final hasWatchlist = _catalogSourcesProvider?.watchlistCapableSources.isNotEmpty ?? false;
     final catalogSources = _catalogSourcesProvider;
-    final hasComfort = catalogSources != null && _hasTrakt(catalogSources);
+    final hasComfort = _comfortAvailable(catalogSources);
     if (hasExplore == _lastHasExplore && hasWatchlist == _lastHasWatchlist && hasComfort == _lastHasComfort) return;
     _lastHasExplore = hasExplore;
     _lastHasWatchlist = hasWatchlist;
@@ -1774,6 +1927,7 @@ class _MainScreenState extends State<MainScreen>
   void _selectTab(NavigationTabId tab, {bool focusSearchInput = true}) {
     // Guard: ignore if tab isn't available in current mode
     if (!_getVisibleTabs(_isOffline).any((t) => t.id == tab)) return;
+    ForkMotion.selection();
 
     final previousTab = _currentTab;
     final wasMounted = _mountedTabs.contains(tab);
@@ -2219,6 +2373,10 @@ class _MainScreenState extends State<MainScreen>
   /// the content must not indent for it a second time.
   Widget _buildLandscapeShell(BuildContext context) {
     return Scaffold(
+      // Fork: the shell never moves for the keyboard (screens with fields
+      // have their own Scaffolds that do). A stale IME inset after an app
+      // switch on Samsung pushed the bottom bar halfway up the screen.
+      resizeToAvoidBottomInset: false,
       body: Builder(
         builder: (context) {
           final isRtl = Directionality.of(context) == TextDirection.rtl;
@@ -2258,11 +2416,16 @@ class _MainScreenState extends State<MainScreen>
 
   Widget _buildPortraitShell(BuildContext context) {
     return Scaffold(
+      // Fork: the shell never moves for the keyboard (screens with fields
+      // have their own Scaffolds that do). A stale IME inset after an app
+      // switch on Samsung pushed the bottom bar halfway up the screen.
+      resizeToAvoidBottomInset: false,
       body: _buildTickerAwareStack(),
       bottomNavigationBar: Column(
         key: _navBarKey,
         mainAxisSize: .min,
         children: [
+          const CastBar(),
           // Reconnect bar when offline
           if (_isOffline)
             Material(
@@ -2303,8 +2466,28 @@ class _MainScreenState extends State<MainScreen>
               // this builder reruns on label toggles AND on every
               // MainScreen rebuild (offline bar appearing/disappearing).
               _scheduleNavBarMeasure(rail: false);
+              // Fork: a compact Plex-like bar: 24dp icons over 12sp labels,
+              // the current tab in the accent and the rest muted, no pill.
+              final scheme = Theme.of(context).colorScheme;
+              final muted = scheme.onSurface.withValues(alpha: 0.6);
               return NavigationBarTheme(
-                data: NavigationBarTheme.of(context).copyWith(height: hideLabels ? 56 : null),
+                data: NavigationBarTheme.of(context).copyWith(
+                  height: hideLabels ? 48 : 58,
+                  indicatorColor: Colors.transparent,
+                  labelPadding: const EdgeInsets.only(top: 2),
+                  iconTheme: WidgetStateProperty.resolveWith(
+                    (states) =>
+                        IconThemeData(size: 24, color: states.contains(WidgetState.selected) ? scheme.primary : muted),
+                  ),
+                  labelTextStyle: WidgetStateProperty.resolveWith(
+                    (states) => TextStyle(
+                      fontSize: 12,
+                      height: 1.1,
+                      fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+                      color: states.contains(WidgetState.selected) ? scheme.primary : muted,
+                    ),
+                  ),
+                ),
                 child: _buildBottomNavigationBar(context, hideLabels: hideLabels),
               );
             },

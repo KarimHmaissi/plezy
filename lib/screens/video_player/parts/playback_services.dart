@@ -588,6 +588,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     // helper wires its metadata update).
     final mediaControlsManager = MediaControlsManager();
     _mediaControlsManager = mediaControlsManager;
+    LocalMediaSession.claim(this);
 
     final mediaControlRouter = _buildMediaControlRouter();
 

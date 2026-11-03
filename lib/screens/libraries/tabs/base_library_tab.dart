@@ -14,6 +14,7 @@ import '../../../providers/libraries_provider.dart';
 import '../../../mixins/refreshable.dart';
 import '../../video_player_screen.dart';
 import '../content_state_builder.dart';
+import '../../../theme/fork_motion.dart';
 
 /// Base class for library tab screens that provides common state management
 /// and lifecycle handling for tabs that display library content.
@@ -570,7 +571,7 @@ abstract class BaseLibraryTabState<T, W extends BaseLibraryTab<T>> extends State
         emptyIcon: emptyIcon,
         emptyMessage: emptyMessage,
         onRetry: loadItems,
-        builder: (items) => RefreshIndicator(onRefresh: loadItems, child: buildContent(items)),
+        builder: (items) => RefreshIndicator(onRefresh: ForkMotion.refreshing(loadItems), child: buildContent(items)),
       ),
     );
   }

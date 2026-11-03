@@ -511,8 +511,12 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
             if (name is! String) continue;
             devices.add(AudioDevice(name: name, description: description is String ? description : ''));
           }
+          final changed =
+              _state.audioDevices.isNotEmpty &&
+              !listEquals([for (final d in _state.audioDevices) d.name], [for (final d in devices) d.name]);
           _state = _state.copyWith(audioDevices: devices);
           audioDevicesController.add(devices);
+          if (changed) _reopenDolbyOutput();
         }
         break;
 
@@ -1399,10 +1403,51 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
       'acompressor=threshold=-34dB:ratio=4:knee=6dB:attack=30:release=300:makeup=15dB:link=maximum,'
       'alimiter=limit=-3dB:attack=1:release=60:level=false';
 
+  /// The two parts of `af`: normalization first, then (fork, macOS) the
+  /// Dolby Digital encoder, which must be last since it outputs a bitstream.
+  String _normalizationAf = '';
+  String _dolbyEncodeAf = '';
+
+  Future<void> _applyAf() => setProperty('af', [_normalizationAf, _dolbyEncodeAf].where((f) => f.isNotEmpty).join(','));
+
   @override
   Future<void> setAudioNormalization(bool enabled) async {
     final filter = Platform.isAndroid ? _androidNormalizationFilter : _loudnormFilter;
-    await setProperty('af', enabled ? filter : '');
+    _normalizationAf = enabled ? filter : '';
+    await _applyAf();
+  }
+
+  /// Fork: re-encode decoded audio to Dolby Digital (640 kb/s, up to 5.1) and
+  /// send it as an S/PDIF bitstream. On a Mac's HDMI port, multichannel PCM
+  /// can arrive at the receiver with its channels rotated (the offset changes
+  /// when the link re-syncs), so speakers swap; a Dolby bitstream carries its
+  /// own channel layout and the receiver places each channel itself.
+  Future<void> setDolbyEncode(bool enabled) async {
+    _dolbyEncodeAf = enabled ? '@dolby:lavcac3enc=tospdif=yes:bitrate=640:minch=2' : '';
+    // The encoder needs decoded PCM. The native core outlives the Dart
+    // player (hot restart, settings changes), so clear a bitstream request
+    // directly rather than through the passthrough state, which may not
+    // know it is set.
+    if (enabled) await setProperty('audio-spdif', '');
+    await _applyAf();
+  }
+
+  Timer? _dolbyReopen;
+
+  /// Fork: the outputs changed (the receiver woke, or its HDMI link
+  /// re-synced) while Dolby encoding is on. If audio opened while the
+  /// receiver wasn't there, coreaudio_exclusive declined and the AVFoundation
+  /// fallback took the bitstream, which macOS decodes and sends on as
+  /// multichannel PCM: the scrambled path Dolby encoding avoids. Reopen the
+  /// output once the burst of hotplug events settles, so the bitstream goes
+  /// to the receiver again.
+  void _reopenDolbyOutput() {
+    if (!Platform.isMacOS || _dolbyEncodeAf.isEmpty) return;
+    _dolbyReopen?.cancel();
+    _dolbyReopen = Timer(const Duration(milliseconds: 1500), () {
+      appLogger.i('MPV: audio outputs changed, reopening the Dolby output');
+      unawaited(command(['ao-reload']).catchError((Object e) => appLogger.w('MPV: ao-reload failed', error: e)));
+    });
   }
 
   /// mpv's `audio-channels` for each limit. The 5.1 limit is a list so stereo
@@ -1665,6 +1710,7 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
 
   @override
   Future<void> dispose({bool preserveDisplayMode = false}) async {
+    _dolbyReopen?.cancel();
     if (_disposed) return;
     _disposed = true;
 

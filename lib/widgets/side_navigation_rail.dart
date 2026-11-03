@@ -33,6 +33,7 @@ import '../providers/multi_server_provider.dart';
 import '../services/fullscreen_state_manager.dart';
 import '../theme/mono_tokens.dart';
 import '../widgets/backend_badge.dart';
+import 'ai_nav_icon.dart';
 import '../i18n/strings.g.dart';
 
 enum _LibraryNavSection { visible, hidden }
@@ -471,6 +472,8 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
   static const _kExplore = 'explore';
   static const _kWatchlist = 'watchlist';
   static const _kComfort = 'comfort';
+  static const _kAi = 'ai';
+  static const _kHistory = 'history';
   static const _kNowPlaying = 'nowPlaying';
   static const _kLibraries = 'libraries';
   static const _kSearch = 'search';
@@ -633,6 +636,10 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
         return _kWatchlist;
       case NavigationTabId.comfort:
         return _kComfort;
+      case NavigationTabId.ai:
+        return _kAi;
+      case NavigationTabId.history:
+        return _kHistory;
       case NavigationTabId.libraries:
         final libKey = widget.selectedLibraryKey;
         if (libKey != null && _librariesExpanded) {
@@ -694,6 +701,8 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
       if (hasExplore) _kExplore,
       if (hasWatchlist) _kWatchlist,
       if (hasComfort) _kComfort,
+      _kAi,
+      _kHistory,
       _kSearch,
       if (_showDownloads) _kDownloads,
       _kSettings,
@@ -782,6 +791,8 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
         if (hasExplore) _kExplore,
         if (hasWatchlist) _kWatchlist,
         if (hasComfort) _kComfort,
+        _kAi,
+        _kHistory,
         _kSearch,
       ],
       if (_showDownloads) _kDownloads,
@@ -1106,6 +1117,31 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
                                         const SizedBox(height: _itemGap),
                                       ],
                                       _buildNavItem(
+                                        icon: Symbols.auto_awesome_rounded,
+                                        selectedIcon: Symbols.auto_awesome_rounded,
+                                        iconWidget: AiNavIcon(
+                                          color: widget.selectedTab == NavigationTabId.ai
+                                              ? tokens(context).accent
+                                              : tokens(context).textMuted,
+                                        ),
+                                        label: Translations.of(context).navigation.ai,
+                                        isSelected: widget.selectedTab == NavigationTabId.ai,
+                                        onTap: () => widget.onDestinationSelected(NavigationTabId.ai),
+                                        focusNode: _focusTracker.get(_kAi),
+                                        isCollapsed: isCollapsed,
+                                      ),
+                                      const SizedBox(height: _itemGap),
+                                      _buildNavItem(
+                                        icon: Symbols.history_rounded,
+                                        selectedIcon: Symbols.history_rounded,
+                                        label: Translations.of(context).navigation.history,
+                                        isSelected: widget.selectedTab == NavigationTabId.history,
+                                        onTap: () => widget.onDestinationSelected(NavigationTabId.history),
+                                        focusNode: _focusTracker.get(_kHistory),
+                                        isCollapsed: isCollapsed,
+                                      ),
+                                      const SizedBox(height: _itemGap),
+                                      _buildNavItem(
                                         icon: Symbols.search_rounded,
                                         selectedIcon: Symbols.search_rounded,
                                         label: Translations.of(context).common.search,
@@ -1185,12 +1221,14 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     required FocusNode focusNode,
     required bool isCollapsed,
     bool autofocus = false,
+    Widget? iconWidget,
   }) {
     final t = tokens(context);
 
     return NavigationRailItem(
       icon: icon,
       selectedIcon: selectedIcon,
+      iconWidget: iconWidget,
       label: Text(
         label,
         style: TextStyle(fontSize: 14, fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400),

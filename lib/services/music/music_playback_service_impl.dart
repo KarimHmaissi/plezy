@@ -25,6 +25,7 @@ import '../discord_rpc_service.dart';
 import '../driver_distraction.dart';
 import '../media_control_router.dart';
 import '../media_controls_manager.dart';
+import '../companion_remote/host_media_notification.dart';
 import '../multi_server_manager.dart';
 import '../offline_watch_sync_service.dart';
 import '../playback_coordinator.dart';
@@ -504,6 +505,7 @@ class MusicPlaybackServiceImpl extends MusicPlaybackService with WidgetsBindingO
       final player = await _ensurePlayer();
       if (!launchCurrent() || _player != player) return;
       _ensureMediaControls();
+      LocalMediaSession.claim(this);
       // Re-asserted per open (cheap, idempotent): the native side drops the
       // background-mode opt-in when the user swipes the task away, so a
       // session that survives task removal heals itself here.
@@ -1766,6 +1768,7 @@ class MusicPlaybackServiceImpl extends MusicPlaybackService with WidgetsBindingO
     _cancelTimersAndFinalizeTrack();
     _queue.clear();
     _currentTrack = null;
+    LocalMediaSession.release(this);
     _currentSource = null;
     _armed = null;
     _staleArm = null;
@@ -1848,6 +1851,7 @@ class MusicPlaybackServiceImpl extends MusicPlaybackService with WidgetsBindingO
 
     unawaited(_controlEventsSub?.cancel());
     _controlEventsSub = null;
+    LocalMediaSession.release(this);
     final controls = _mediaControls;
     _mediaControls = null;
     if (controls != null) {

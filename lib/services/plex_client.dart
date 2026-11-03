@@ -649,6 +649,41 @@ class PlexClient
     return response;
   }
 
+  /// Library sections as raw `Directory` maps (key, title, type…), for the
+  /// library index.
+  Future<List<Map<String, dynamic>>> fetchIndexSections() async {
+    final response = await _getWithFailover('/library/sections', headers: const {'Accept': 'application/json'});
+    final container = (response.data as Map)['MediaContainer'] as Map?;
+    return [...((container?['Directory'] as List?) ?? const []).whereType<Map<String, dynamic>>()];
+  }
+
+  /// One page of a library section's titles as raw `Metadata` maps with
+  /// external ids, plus the section's total, for the library index.
+  /// [filters] adds Plex filters such as `addedAt>>`.
+  Future<({List<Map<String, dynamic>> items, int total})> fetchIndexPage(
+    String sectionKey, {
+    required int plexType,
+    required int start,
+    required int size,
+    Map<String, String> filters = const {},
+  }) async {
+    final response = await _getWithFailover(
+      '/library/sections/$sectionKey/all',
+      queryParameters: {
+        'type': '$plexType',
+        'includeGuids': '1',
+        'X-Plex-Container-Start': '$start',
+        'X-Plex-Container-Size': '$size',
+        ...filters,
+      },
+      headers: const {'Accept': 'application/json'},
+      timeout: const Duration(seconds: 60),
+    );
+    final container = (response.data as Map)['MediaContainer'] as Map? ?? const {};
+    final items = [...((container['Metadata'] as List?) ?? const []).whereType<Map<String, dynamic>>()];
+    return (items: items, total: (container['totalSize'] ?? container['size'] ?? items.length) as int);
+  }
+
   /// POST twin of [_getWithFailover] for the rare replay-safe mutation (see
   /// [FailoverHttpClient]'s class doc): the same endpoint failover and non-2xx
   /// throw policy, opted into per call site because replaying most POSTs

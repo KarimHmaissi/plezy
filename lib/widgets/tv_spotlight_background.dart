@@ -101,13 +101,20 @@ class TvSpotlightBackground extends StatelessWidget {
             RepaintBoundary(
               child: cornerBackdrop ? _buildCornerBackdrop(backdropSize, backdrop) : blurArtwork(backdrop),
             ),
+            // A light overall dim so busy artwork never competes with text.
+            const ColoredBox(color: Color(0x38000000)),
             _buildHorizontalScrim(bgColor),
             RasterizedGradient(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Colors.black.withValues(alpha: 0.45), Colors.transparent, bgColor.withValues(alpha: 0.96)],
-                stops: const [0.0, 0.38, 1.0],
+                colors: [
+                  Colors.black.withValues(alpha: 0.6),
+                  Colors.transparent,
+                  bgColor.withValues(alpha: 0.72),
+                  bgColor.withValues(alpha: 0.97),
+                ],
+                stops: const [0.0, 0.3, 0.6, 1.0],
               ),
             ),
             AnimatedSwitcher(
@@ -207,8 +214,14 @@ class TvSpotlightBackground extends StatelessWidget {
       gradient: LinearGradient(
         begin: Alignment.centerLeft,
         end: Alignment.centerRight,
-        colors: [bgColor.withValues(alpha: 0.86), bgColor.withValues(alpha: 0.32), Colors.transparent],
-        stops: const [0.0, 0.56, 1.0],
+        // Dark behind the title and summary column, clear by ~85% across.
+        colors: [
+          bgColor.withValues(alpha: 0.94),
+          bgColor.withValues(alpha: 0.78),
+          bgColor.withValues(alpha: 0.3),
+          Colors.transparent,
+        ],
+        stops: const [0.0, 0.36, 0.62, 0.85],
       ),
     );
   }

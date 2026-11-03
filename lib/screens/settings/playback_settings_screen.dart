@@ -104,6 +104,13 @@ class PlaybackSettingsScreen extends StatelessWidget {
               title: t.settings.audio,
               children: [
                 if (PlatformDetector.supportsAudioPassthrough()) _audioPassthroughTile(),
+                if (Platform.isMacOS)
+                  SettingSwitchTile(
+                    pref: SettingsService.macDolbyEncode,
+                    icon: Symbols.surround_sound_rounded,
+                    title: t.settings.macDolbyEncode,
+                    subtitle: t.settings.macDolbyEncodeDescription,
+                  ),
                 _audioChannelLimitTile(exoActive: exoActive),
                 // Only a stereo fold mixes the center away; any fold can clip.
                 if (channelLimit == AudioChannelLimit.stereo) _downmixCenterBoostTile(),

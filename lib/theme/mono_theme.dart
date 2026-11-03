@@ -325,6 +325,12 @@ ThemeData _buildMonoTheme(MonoPalette c, {required TargetPlatform platform}) {
           bodyMedium: TextStyle(color: c.text),
           bodySmall: TextStyle(color: c.textMuted),
         ),
+    // Fork: one page transition on Android, the platform's own (fade
+    // forwards, as Android 14+), set explicitly so every MaterialPageRoute
+    // matches. Overlays use ForkMotion.riseTransition.
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {TargetPlatform.android: FadeForwardsPageTransitionsBuilder()},
+    ),
     cardTheme: CardThemeData(
       color: c.surface,
       elevation: 0,

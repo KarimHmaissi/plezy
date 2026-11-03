@@ -1,0 +1,16 @@
+name: plezy_brain
+description: Plezy fork's content brain. Indexes what the user watches (title profiles, embeddings, structured history queries) and, parked, dialogue from subtitles. Talks to the host only through small interfaces (MediaSource, Embedder).
+version: 0.2.0
+publish_to: none
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+
+dependencies:
+  crypto: ^3.0.6
+  http: ^1.2.0
+  sqlite3: ^3.5.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^5.0.0

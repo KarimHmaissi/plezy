@@ -65,6 +65,8 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$profiles$en profiles = Translations$profiles$en.internal(_root);
 	late final Translations$connections$en connections = Translations$connections$en.internal(_root);
 	late final Translations$accountPreferences$en accountPreferences = Translations$accountPreferences$en.internal(_root);
+	late final Translations$aiTab$en aiTab = Translations$aiTab$en.internal(_root);
+	late final Translations$ai$en ai = Translations$ai$en.internal(_root);
 	late final Translations$backupTransfer$en backupTransfer = Translations$backupTransfer$en.internal(_root);
 	late final Translations$homeRows$en homeRows = Translations$homeRows$en.internal(_root);
 	late final Translations$discover$en discover = Translations$discover$en.internal(_root);
@@ -77,6 +79,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$startup$en startup = Translations$startup$en.internal(_root);
 	late final Translations$licenses$en licenses = Translations$licenses$en.internal(_root);
 	late final Translations$navigation$en navigation = Translations$navigation$en.internal(_root);
+	late final Translations$history$en history = Translations$history$en.internal(_root);
 	late final Translations$comfort$en comfort = Translations$comfort$en.internal(_root);
 	late final Translations$watchlist$en watchlist = Translations$watchlist$en.internal(_root);
 	late final Translations$explore$en explore = Translations$explore$en.internal(_root);
@@ -99,6 +102,9 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$services$en services = Translations$services$en.internal(_root);
 	late final Translations$addServer$en addServer = Translations$addServer$en.internal(_root);
 	late final Translations$deepLinks$en deepLinks = Translations$deepLinks$en.internal(_root);
+	late final Translations$cast$en cast = Translations$cast$en.internal(_root);
+	late final Translations$remoteAi$en remoteAi = Translations$remoteAi$en.internal(_root);
+	late final Translations$aiComposer$en aiComposer = Translations$aiComposer$en.internal(_root);
 }
 
 // Path: app
@@ -1193,6 +1199,12 @@ class Translations$settings$en {
 
 	/// en: 'Audio Passthrough'
 	String get audioPassthrough => 'Audio Passthrough';
+
+	/// en: 'Send surround as Dolby Digital'
+	String get macDolbyEncode => 'Send surround as Dolby Digital';
+
+	/// en: 'Encodes the audio to Dolby Digital 5.1 so the receiver places each speaker itself. Fixes channels coming out of the wrong speakers over HDMI. Plezy uses the HDMI output on its own while playing.'
+	String get macDolbyEncodeDescription => 'Encodes the audio to Dolby Digital 5.1 so the receiver places each speaker itself. Fixes channels coming out of the wrong speakers over HDMI. Plezy uses the HDMI output on its own while playing.';
 
 	/// en: 'Send Dolby/DTS audio to your receiver or TV without re-encoding, preserving surround sound. Turn off if you have no sound.'
 	String get audioPassthroughDescription => 'Send Dolby/DTS audio to your receiver or TV without re-encoding, preserving surround sound. Turn off if you have no sound.';
@@ -3255,6 +3267,309 @@ class Translations$accountPreferences$en {
 	late final Translations$accountPreferences$mediaReviewsOptions$en mediaReviewsOptions = Translations$accountPreferences$mediaReviewsOptions$en.internal(_root);
 }
 
+// Path: aiTab
+class Translations$aiTab$en {
+	Translations$aiTab$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Play on TV'
+	String get playOnTv => 'Play on TV';
+
+	/// en: 'This title isn't on a server this phone can reach.'
+	String get pickUnavailable => 'This title isn\'t on a server this phone can reach.';
+
+	/// en: 'Load more'
+	String get loadMoreCard => 'Load more';
+
+	/// en: 'Finding more…'
+	String get findingMoreCard => 'Finding more…';
+
+	/// en: 'No more matches'
+	String get noMoreCard => 'No more matches';
+
+	/// en: 'Tonight'
+	String get tonight => 'Tonight';
+
+	/// en: 'Ask'
+	String get ask => 'Ask';
+
+	/// en: 'Follow up'
+	String get followUp => 'Follow up';
+
+	/// en: 'What do you feel like watching?'
+	String get askTitle => 'What do you feel like watching?';
+
+	/// en: 'Follow up'
+	String get followUpTitle => 'Follow up';
+
+	/// en: 'e.g. a short funny film, or something like Severance'
+	String get askHint => 'e.g. a short funny film, or something like Severance';
+
+	/// en: 'Looking for: ${request}'
+	String thinking({required Object request}) => 'Looking for: ${request}';
+
+	/// en: 'Picking a few things for tonight…'
+	String get preparingTonight => 'Picking a few things for tonight…';
+
+	/// en: 'New conversation'
+	String get newConversation => 'New conversation';
+
+	/// en: 'New Tonight picks'
+	String get refreshTonight => 'New Tonight picks';
+
+	/// en: 'Add your Anthropic API key'
+	String get noKeyTitle => 'Add your Anthropic API key';
+
+	/// en: 'The AI helper needs your own API key. Add it in Settings ▸ AI.'
+	String get noKeyMessage => 'The AI helper needs your own API key. Add it in Settings ▸ AI.';
+
+	/// en: 'Ask for something to watch'
+	String get emptyTitle => 'Ask for something to watch';
+
+	/// en: 'Press Ask and describe what you're in the mood for.'
+	String get emptyMessage => 'Press Ask and describe what you\'re in the mood for.';
+
+	/// en: 'Load more'
+	String get loadMore => 'Load more';
+
+	/// en: 'Replace with new picks'
+	String get refreshRow => 'Replace with new picks';
+
+	/// en: 'Refreshing: ${request}'
+	String refreshing({required Object request}) => 'Refreshing: ${request}';
+
+	/// en: 'Delete this row'
+	String get deleteRow => 'Delete this row';
+
+	/// en: 'Delete "${request}"?'
+	String deleteRowTitle({required Object request}) => 'Delete "${request}"?';
+
+	/// en: 'This saved answer will be removed from the AI tab (and from Home if it's there).'
+	String get deleteRowMessage => 'This saved answer will be removed from the AI tab (and from Home if it\'s there).';
+
+	/// en: 'Deleted'
+	String get deleted => 'Deleted';
+
+	/// en: 'Retry: ${request}'
+	String retryChip({required Object request}) => 'Retry: ${request}';
+
+	/// en: 'New picks ready: ${request}'
+	String ready({required Object request}) => 'New picks ready: ${request}';
+
+	/// en: 'No picks came back'
+	String get noPicks => 'No picks came back';
+
+	/// en: 'Home already has 10 AI rows. Remove one first.'
+	String get homeFull => 'Home already has 10 AI rows. Remove one first.';
+
+	/// en: 'More like this'
+	String get moreLikeThis => 'More like this';
+
+	/// en: 'more like ${title}'
+	String moreLike({required Object title}) => 'more like ${title}';
+
+	/// en: 'Find more (add titles)'
+	String get findMore => 'Find more (add titles)';
+
+	/// en: 'more: ${request}'
+	String findingMore({required Object request}) => 'more: ${request}';
+
+	/// en: 'No more matches for ${request}'
+	String noMoreMatches({required Object request}) => 'No more matches for ${request}';
+
+	/// en: '${count} more picks added: ${request}'
+	String addedMore({required Object count, required Object request}) => '${count} more picks added: ${request}';
+
+	/// en: 'More'
+	String get more => 'More';
+
+	/// en: 'Less'
+	String get less => 'Less';
+
+	/// en: 'Starting'
+	String get starting => 'Starting';
+
+	/// en: 'You asked: ${question}'
+	String youAsked({required Object question}) => 'You asked: ${question}';
+
+	/// en: 'Top pick'
+	String get topPick => 'Top pick';
+
+	/// en: 'Working on it'
+	String get working => 'Working on it';
+
+	/// en: 'Worth a closer look'
+	String get spotlight => 'Worth a closer look';
+
+	/// en: 'Writing why it fits…'
+	String get writingReason => 'Writing why it fits…';
+
+	/// en: 'Details'
+	String get details => 'Details';
+
+	/// en: 'Watched'
+	String get badgeWatched => 'Watched';
+
+	/// en: 'In progress'
+	String get badgeInProgress => 'In progress';
+
+	/// en: 'Rewatch'
+	String get badgeRewatch => 'Rewatch';
+
+	/// en: 'Read'
+	String get read => 'Read';
+
+	/// en: '${count} picks'
+	String picksCount({required Object count}) => '${count} picks';
+
+	/// en: 'Top picks'
+	String get topPicks => 'Top picks';
+
+	/// en: 'All picks'
+	String get allPicks => 'All picks';
+
+	/// en: 'You asked'
+	String get askedLabel => 'You asked';
+
+	/// en: 'New episode'
+	String get tonightNewEpisode => 'New episode';
+
+	/// en: 'Tonight's pick'
+	String get tonightPick => 'Tonight\'s pick';
+
+	/// en: 'From your library'
+	String get tonightLibrary => 'From your library';
+
+	/// en: 'Made ${time}'
+	String tonightUpdated({required Object time}) => 'Made ${time}';
+
+	/// en: 'Make a new Tonight?'
+	String get tonightConfirm => 'Make a new Tonight?';
+
+	/// en: 'Three fresh cards, using one small AI call.'
+	String get tonightConfirmBody => 'Three fresh cards, using one small AI call.';
+}
+
+// Path: ai
+class Translations$ai$en {
+	Translations$ai$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'AI'
+	String get settingsTitle => 'AI';
+
+	/// en: 'Anthropic API key for the AI helper'
+	String get settingsSubtitle => 'Anthropic API key for the AI helper';
+
+	/// en: 'The AI helper uses your own Anthropic API key. It's stored encrypted on this device only, never shown in full, and never included in exports or backups.'
+	String get keyExplainer => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.';
+
+	/// en: 'Paste API key'
+	String get pasteKey => 'Paste API key';
+
+	/// en: 'Replace API key'
+	String get replaceKey => 'Replace API key';
+
+	/// en: 'Anthropic API key'
+	String get keyLabel => 'Anthropic API key';
+
+	/// en: 'Anthropic keys start with sk-ant-'
+	String get keyFormat => 'Anthropic keys start with sk-ant-';
+
+	/// en: 'No key on this device yet'
+	String get noKey => 'No key on this device yet';
+
+	/// en: 'Key ${hint} saved on this device'
+	String keySet({required Object hint}) => 'Key ${hint} saved on this device';
+
+	/// en: 'Test key'
+	String get testKey => 'Test key';
+
+	/// en: 'The key works'
+	String get keyWorks => 'The key works';
+
+	/// en: 'Anthropic rejected that key; check it and try again'
+	String get keyRejected => 'Anthropic rejected that key; check it and try again';
+
+	/// en: 'Couldn't reach Anthropic to check the key; it's saved and will be checked on first use'
+	String get keyUnreachable => 'Couldn\'t reach Anthropic to check the key; it\'s saved and will be checked on first use';
+
+	/// en: 'Remove key'
+	String get removeKey => 'Remove key';
+
+	/// en: 'Remove the API key?'
+	String get removeKeyTitle => 'Remove the API key?';
+
+	/// en: 'The AI helper stops working on this device until a key is added again.'
+	String get removeKeyMessage => 'The AI helper stops working on this device until a key is added again.';
+
+	/// en: 'Receive key from another device'
+	String get receiveKey => 'Receive key from another device';
+
+	/// en: 'Open a one-time page on your home network and paste the key there from a phone or laptop'
+	String get receiveKeyDescription => 'Open a one-time page on your home network and paste the key there from a phone or laptop';
+
+	/// en: 'Send the key from another device'
+	String get receiveTitle => 'Send the key from another device';
+
+	/// en: 'On a phone or laptop on the same Wi-Fi, open:'
+	String get receiveStep1 => 'On a phone or laptop on the same Wi-Fi, open:';
+
+	/// en: 'Then enter this code with the key:'
+	String get receiveStep2 => 'Then enter this code with the key:';
+
+	/// en: 'This page works once and closes after 5 minutes or 3 wrong codes.'
+	String get receiveExpiry => 'This page works once and closes after 5 minutes or 3 wrong codes.';
+
+	/// en: 'This device isn't on a home network, so the key can't be sent from another device'
+	String get receiveNoNetwork => 'This device isn\'t on a home network, so the key can\'t be sent from another device';
+
+	/// en: 'Too many wrong codes; the page is closed'
+	String get receiveTooManyAttempts => 'Too many wrong codes; the page is closed';
+
+	/// en: 'The page closed after 5 minutes without a key'
+	String get receiveTimedOut => 'The page closed after 5 minutes without a key';
+
+	/// en: 'Try a request'
+	String get tryRequest => 'Try a request';
+
+	/// en: 'Ask for something to watch and see what the helper picks from your library'
+	String get tryRequestDescription => 'Ask for something to watch and see what the helper picks from your library';
+
+	/// en: 'What do you feel like watching?'
+	String get tryRequestLabel => 'What do you feel like watching?';
+
+	/// en: 'Ask'
+	String get ask => 'Ask';
+
+	/// en: 'Spend'
+	String get spendTitle => 'Spend';
+
+	/// en: '${dollars} USD this month across ${requests} requests (no cap)'
+	String spendThisMonth({required Object dollars, required Object requests}) => '${dollars} USD this month across ${requests} requests (no cap)';
+
+	/// en: '${dollars} of it on Home auto-refresh'
+	String spendAutoRefresh({required Object dollars}) => '${dollars} of it on Home auto-refresh';
+
+	/// en: 'Auto-refresh AI rows on Home'
+	String get autoRefreshTitle => 'Auto-refresh AI rows on Home';
+
+	/// en: 'Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.'
+	String get autoRefreshSubtitle => 'Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.';
+
+	/// en: 'Models'
+	String get modelsTitle => 'Models';
+
+	/// en: 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.'
+	String get modelsDescription => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.';
+}
+
 // Path: backupTransfer
 class Translations$backupTransfer$en {
 	Translations$backupTransfer$en.internal(this._root);
@@ -3958,6 +4273,9 @@ class Translations$navigation$en {
 
 	// Translations
 
+	/// en: 'AI'
+	String get ai => 'AI';
+
 	/// en: 'Libraries'
 	String get libraries => 'Libraries';
 
@@ -3975,6 +4293,110 @@ class Translations$navigation$en {
 
 	/// en: 'Comfort'
 	String get comfort => 'Comfort';
+
+	/// en: 'History'
+	String get history => 'History';
+}
+
+// Path: history
+class Translations$history$en {
+	Translations$history$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'History'
+	String get title => 'History';
+
+	/// en: 'All time'
+	String get allTime => 'All time';
+
+	/// en: 'Hours'
+	String get hours => 'Hours';
+
+	/// en: 'Films'
+	String get films => 'Films';
+
+	/// en: 'Episodes'
+	String get episodes => 'Episodes';
+
+	/// en: 'Shows'
+	String get shows => 'Shows';
+
+	/// en: 'Day streak'
+	String get streak => 'Day streak';
+
+	/// en: 'Best $n'
+	String bestStreak({required Object n}) => 'Best ${n}';
+
+	/// en: 'Month by month'
+	String get byMonth => 'Month by month';
+
+	/// en: 'Timeline'
+	String get timeline => 'Timeline';
+
+	/// en: 'Top genres'
+	String get topGenres => 'Top genres';
+
+	/// en: 'Directors'
+	String get directors => 'Directors';
+
+	/// en: 'Actors'
+	String get actors => 'Actors';
+
+	/// en: 'Watched again'
+	String get rewatches => 'Watched again';
+
+	/// en: 'Films by decade'
+	String get decades => 'Films by decade';
+
+	/// en: 'Longest binge'
+	String get longestBinge => 'Longest binge';
+
+	/// en: '$n episodes in one day'
+	String bingeLine({required Object n}) => '${n} episodes in one day';
+
+	/// en: '×$n'
+	String timesWatched({required Object n}) => '×${n}';
+
+	/// en: '$n watches'
+	String watchCount({required Object n}) => '${n} watches';
+
+	late final Translations$history$copy$en copy = Translations$history$copy$en.internal(_root);
+
+	/// en: 'Nothing watched yet'
+	String get empty => 'Nothing watched yet';
+
+	/// en: 'Gathering your history…'
+	String get loading => 'Gathering your history…';
+
+	/// en: 'Couldn't load your history'
+	String get failed => 'Couldn\'t load your history';
+
+	/// en: 'Try again'
+	String get retry => 'Try again';
+
+	/// en: 'S$season · E$episode'
+	String episodeLabel({required Object season, required Object episode}) => 'S${season} · E${episode}';
+
+	/// en: 'Plex keeps only the latest watch of each title, so rewatches before it aren't counted.'
+	String get plexOnlyNote => 'Plex keeps only the latest watch of each title, so rewatches before it aren\'t counted.';
+
+	/// en: '$n Trakt watches have no date and aren't shown.'
+	String undatedNote({required Object n}) => '${n} Trakt watches have no date and aren\'t shown.';
+
+	/// en: '$n watches were imported or marked watched in bulk, so their dates aren't real: they count in All time but not in a year, the months or streaks.'
+	String bulkNote({required Object n}) => '${n} watches were imported or marked watched in bulk, so their dates aren\'t real: they count in All time but not in a year, the months or streaks.';
+
+	/// en: 'Hours include an estimate for $n watches with no runtime.'
+	String estimatedNote({required Object n}) => 'Hours include an estimate for ${n} watches with no runtime.';
+
+	/// en: 'Connect Trakt in Settings to add your full watch log.'
+	String get noTraktNote => 'Connect Trakt in Settings to add your full watch log.';
+
+	/// en: 'Updated $when'
+	String updated({required Object when}) => 'Updated ${when}';
 }
 
 // Path: comfort
@@ -4062,6 +4484,9 @@ class Translations$comfort$en {
 
 	/// en: 'Added ${title}'
 	String added({required Object title}) => 'Added ${title}';
+
+	/// en: 'Connect Trakt'
+	String get connectTrakt => 'Connect Trakt';
 }
 
 // Path: watchlist
@@ -4110,6 +4535,10 @@ class Translations$explore$en {
 	final Translations _root; // ignore: unused_field
 
 	// Translations
+
+	/// en: 'Details and all copies'
+	String get allCopies => 'Details and all copies';
+
 	late final Translations$explore$traktLists$en traktLists = Translations$explore$traktLists$en.internal(_root);
 
 	/// en: 'Explore'
@@ -6493,6 +6922,297 @@ class Translations$deepLinks$en {
 	String get copied => 'Link copied';
 }
 
+// Path: cast
+class Translations$cast$en {
+	Translations$cast$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Playing ${title} on ${name}'
+	String sending({required Object title, required Object name}) => 'Playing ${title} on ${name}';
+
+	/// en: 'Playing on ${name}'
+	String playingOn({required Object name}) => 'Playing on ${name}';
+
+	/// en: 'This phone'
+	String get thisPhone => 'This phone';
+
+	/// en: 'Play on this phone'
+	String get switchToThisPhone => 'Play on this phone';
+
+	/// en: 'Play on ${name}'
+	String switchToHost({required Object name}) => 'Play on ${name}';
+
+	/// en: 'Now playing on ${name}'
+	String nowPlaying({required Object name}) => 'Now playing on ${name}';
+
+	/// en: 'Couldn't play on the TV: ${message}'
+	String failed({required Object message}) => 'Couldn\'t play on the TV: ${message}';
+
+	/// en: 'That title isn't on the TV's servers'
+	String get itemNotFound => 'That title isn\'t on the TV\'s servers';
+
+	/// en: 'Show on TV'
+	String get showOnTv => 'Show on TV';
+
+	/// en: 'Play on this phone'
+	String get playOnPhone => 'Play on this phone';
+
+	/// en: 'Audio'
+	String get audio => 'Audio';
+
+	/// en: 'Subtitles'
+	String get subtitles => 'Subtitles';
+
+	/// en: 'Off'
+	String get off => 'Off';
+
+	/// en: 'Previous'
+	String get previous => 'Previous';
+
+	/// en: 'Next'
+	String get next => 'Next';
+
+	/// en: 'Back'
+	String get back10 => 'Back';
+
+	/// en: 'Forward'
+	String get forward10 => 'Forward';
+
+	/// en: 'Skip intro'
+	String get skipIntro => 'Skip intro';
+
+	/// en: 'Skip credits'
+	String get skipCredits => 'Skip credits';
+
+	/// en: 'Stop'
+	String get stop => 'Stop';
+
+	/// en: 'Nothing is playing'
+	String get nothingPlaying => 'Nothing is playing';
+
+	/// en: 'Play / pause'
+	String get playPause => 'Play / pause';
+
+	/// en: '${name} is working…'
+	String tvWorking({required Object name}) => '${name} is working…';
+
+	/// en: 'Not connected to ${name} — showing the last copy'
+	String notConnected({required Object name}) => 'Not connected to ${name} — showing the last copy';
+}
+
+// Path: remoteAi
+class Translations$remoteAi$en {
+	Translations$remoteAi$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'AI on ${name}'
+	String title({required Object name}) => 'AI on ${name}';
+
+	/// en: 'Connect to your TV to use AI'
+	String get connectTitle => 'Connect to your TV to use AI';
+
+	/// en: 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.'
+	String get connectMessage => 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.';
+
+	/// en: 'Connect'
+	String get connect => 'Connect';
+
+	/// en: 'What do you feel like watching?'
+	String get hint => 'What do you feel like watching?';
+
+	/// en: '${name} is looking…'
+	String working({required Object name}) => '${name} is looking…';
+
+	/// en: 'The TV couldn't answer: ${message}'
+	String error({required Object message}) => 'The TV couldn\'t answer: ${message}';
+
+	/// en: 'Ask for something and the picks show up here.'
+	String get empty => 'Ask for something and the picks show up here.';
+}
+
+// Path: aiComposer
+class Translations$aiComposer$en {
+	Translations$aiComposer$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'ASK YOUR LIBRARY'
+	String get eyebrow => 'ASK YOUR LIBRARY';
+
+	/// en: 'What are we watching?'
+	String get headline => 'What are we watching?';
+
+	/// en: 'Where next?'
+	String get followUpHeadline => 'Where next?';
+
+	/// en: 'Action anime like Attack on Titan'
+	String get example1 => 'Action anime like Attack on Titan';
+
+	/// en: 'Something cosy for a Sunday afternoon'
+	String get example2 => 'Something cosy for a Sunday afternoon';
+
+	/// en: '80s action, easy to watch'
+	String get example3 => '80s action, easy to watch';
+
+	/// en: 'Surprise me with a Marvel film'
+	String get example4 => 'Surprise me with a Marvel film';
+
+	/// en: 'A twisty thriller I haven't seen'
+	String get example5 => 'A twisty thriller I haven\'t seen';
+
+	/// en: 'QUICK START'
+	String get quickStart => 'QUICK START';
+
+	/// en: 'Tonight's pick'
+	String get tonight => 'Tonight\'s pick';
+
+	/// en: 'Pick the one film I should watch tonight'
+	String get tonightRequest => 'Pick the one film I should watch tonight';
+
+	/// en: 'Based on my history'
+	String get history => 'Based on my history';
+
+	/// en: 'Something like what I've watched recently'
+	String get historyRequest => 'Something like what I\'ve watched recently';
+
+	/// en: 'Hidden gems'
+	String get gems => 'Hidden gems';
+
+	/// en: 'Hidden gems in my library that I haven't watched'
+	String get gemsRequest => 'Hidden gems in my library that I haven\'t watched';
+
+	/// en: 'Feel-good'
+	String get feelGood => 'Feel-good';
+
+	/// en: 'Feel-good films to lift the mood'
+	String get feelGoodRequest => 'Feel-good films to lift the mood';
+
+	/// en: 'Random film'
+	String get random => 'Random film';
+
+	/// en: 'Surprise me with a random great film'
+	String get randomRequest => 'Surprise me with a random great film';
+
+	/// en: 'Take 1 · Reading your library'
+	String get take1 => 'Take 1 · Reading your library';
+
+	/// en: 'Take 2 · Shortlisting'
+	String get take2 => 'Take 2 · Shortlisting';
+
+	/// en: 'Take 3 · Final cut'
+	String get take3 => 'Take 3 · Final cut';
+
+	/// en: 'That's a wrap'
+	String get wrap => 'That\'s a wrap';
+
+	/// en: 'Continue browsing'
+	String get continueBrowsing => 'Continue browsing';
+
+	/// en: 'Ask about this'
+	String get askAbout => 'Ask about this';
+
+	/// en: 'Previously on'
+	String get previouslyOn => 'Previously on';
+
+	/// en: 'S${season} E${episode}'
+	String episodeCode({required Object season, required Object episode}) => 'S${season} E${episode}';
+
+	/// en: 'Catch me up before ${episode}'
+	String recapRequest({required Object episode}) => 'Catch me up before ${episode}';
+
+	/// en: 'Shorter'
+	String get recapShorter => 'Shorter';
+
+	/// en: 'Give me the recap again in three sentences.'
+	String get recapShorterRequest => 'Give me the recap again in three sentences.';
+
+	/// en: 'Just the last episode'
+	String get recapLast => 'Just the last episode';
+
+	/// en: 'Recap only the episode just before this one.'
+	String get recapLastRequest => 'Recap only the episode just before this one.';
+
+	/// en: 'Who's who?'
+	String get recapWho => 'Who\'s who?';
+
+	/// en: 'Remind me who the main characters are and where each one stands.'
+	String get recapWhoRequest => 'Remind me who the main characters are and where each one stands.';
+
+	/// en: 'ASK ABOUT IT'
+	String get aboutEyebrow => 'ASK ABOUT IT';
+
+	/// en: 'About: ${title}'
+	String aboutChip({required Object title}) => 'About: ${title}';
+
+	/// en: 'What do you want to know?'
+	String get aboutHeadline => 'What do you want to know?';
+
+	/// en: 'Ask anything about it'
+	String get aboutHint => 'Ask anything about it';
+
+	/// en: 'Is it worth watching?'
+	String get aboutWorth => 'Is it worth watching?';
+
+	/// en: 'Is it worth watching? Give me an honest, spoiler-free take.'
+	String get aboutWorthRequest => 'Is it worth watching? Give me an honest, spoiler-free take.';
+
+	/// en: 'Anything like this?'
+	String get aboutLike => 'Anything like this?';
+
+	/// en: 'Anything like this in my library?'
+	String get aboutLikeRequest => 'Anything like this in my library?';
+
+	/// en: 'Who's in it?'
+	String get aboutCast => 'Who\'s in it?';
+
+	/// en: 'Who's in it, and who do they play?'
+	String get aboutCastRequest => 'Who\'s in it, and who do they play?';
+
+	/// en: 'Is it scary or kid-friendly?'
+	String get aboutScary => 'Is it scary or kid-friendly?';
+
+	/// en: 'How scary or intense is it, and is it OK for kids?'
+	String get aboutScaryRequest => 'How scary or intense is it, and is it OK for kids?';
+
+	/// en: 'Where should I start?'
+	String get aboutStart => 'Where should I start?';
+
+	/// en: 'Where should I start with this show, and is it worth sticking with?'
+	String get aboutStartRequest => 'Where should I start with this show, and is it worth sticking with?';
+
+	/// en: 'Programme notes'
+	String get programNotes => 'Programme notes';
+
+	/// en: 'Picks for it are in the AI tab.'
+	String get picksInTab => 'Picks for it are in the AI tab.';
+
+	/// en: 'Done'
+	String get done => 'Done';
+
+	/// en: 'Ask another'
+	String get askAnother => 'Ask another';
+
+	/// en: 'Film jammed'
+	String get jammed => 'Film jammed';
+
+	/// en: 'The TV didn't answer in time.'
+	String get timedOut => 'The TV didn\'t answer in time.';
+
+	/// en: 'Edit'
+	String get edit => 'Edit';
+
+	/// en: 'It keeps going and lands in the AI tab.'
+	String get keepsRunning => 'It keeps going and lands in the AI tab.';
+}
+
 // Path: appIcon.names
 class Translations$appIcon$names$en {
 	Translations$appIcon$names$en.internal(this._root);
@@ -7289,6 +8009,84 @@ class Translations$libraries$advancedFilters$en {
 
 	/// en: 'Older than a year'
 	String get dateOlderThanYear => 'Older than a year';
+}
+
+// Path: history.copy
+class Translations$history$copy$en {
+	Translations$history$copy$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Send Plex watches to Trakt'
+	String get button => 'Send Plex watches to Trakt';
+
+	/// en: 'Undo last send to Trakt'
+	String get undoButton => 'Undo last send to Trakt';
+
+	/// en: 'Send Plex watches to Trakt'
+	String get title => 'Send Plex watches to Trakt';
+
+	/// en: 'Adds $films films and $episodes episodes to your Trakt history'
+	String adds({required Object films, required Object episodes}) => 'Adds ${films} films and ${episodes} episodes to your Trakt history';
+
+	/// en: 'Trakt already has every Plex watch it can match.'
+	String get nothing => 'Trakt already has every Plex watch it can match.';
+
+	/// en: 'By year'
+	String get byYear => 'By year';
+
+	/// en: '$films films · $episodes episodes'
+	String yearLine({required Object films, required Object episodes}) => '${films} films · ${episodes} episodes';
+
+	/// en: 'First few'
+	String get sample => 'First few';
+
+	/// en: 'Skipped'
+	String get skipped => 'Skipped';
+
+	/// en: '$n already on Trakt'
+	String alreadyOnTrakt({required Object n}) => '${n} already on Trakt';
+
+	/// en: '$n with mark-as-watched dates, not real viewings, so your Trakt timeline doesn't get made-up dates'
+	String bulk({required Object n}) => '${n} with mark-as-watched dates, not real viewings, so your Trakt timeline doesn\'t get made-up dates';
+
+	/// en: '$n that Trakt can't identify (no IMDb, TMDB or TVDB id)'
+	String noIds({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)';
+
+	/// en: 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.'
+	String get howItWorks => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.';
+
+	/// en: 'Cancel'
+	String get cancel => 'Cancel';
+
+	/// en: 'Send to Trakt'
+	String get confirm => 'Send to Trakt';
+
+	/// en: 'Sending… $done of $total'
+	String sending({required Object done, required Object total}) => 'Sending… ${done} of ${total}';
+
+	/// en: 'Added $films films and $episodes episodes to Trakt'
+	String done({required Object films, required Object episodes}) => 'Added ${films} films and ${episodes} episodes to Trakt';
+
+	/// en: '$n couldn't be found on Trakt'
+	String notFound({required Object n}) => '${n} couldn\'t be found on Trakt';
+
+	/// en: 'Sending to Trakt failed'
+	String get failed => 'Sending to Trakt failed';
+
+	/// en: 'Undo last send?'
+	String get undoTitle => 'Undo last send?';
+
+	/// en: 'Removes the $n Trakt history entries the last send added, nothing else.'
+	String undoMessage({required Object n}) => 'Removes the ${n} Trakt history entries the last send added, nothing else.';
+
+	/// en: 'Remove them'
+	String get undoConfirm => 'Remove them';
+
+	/// en: 'Removed $n entries from Trakt'
+	String undone({required Object n}) => 'Removed ${n} entries from Trakt';
 }
 
 // Path: explore.traktLists
@@ -8870,6 +9668,8 @@ extension on Translations {
 			'settings.tunneledPlayback' => 'Tunneled Playback',
 			'settings.tunneledPlaybackDescription' => 'Use video tunneling. Disable if HDR playback shows black video or motion stutters.',
 			'settings.audioPassthrough' => 'Audio Passthrough',
+			'settings.macDolbyEncode' => 'Send surround as Dolby Digital',
+			'settings.macDolbyEncodeDescription' => 'Encodes the audio to Dolby Digital 5.1 so the receiver places each speaker itself. Fixes channels coming out of the wrong speakers over HDMI. Plezy uses the HDMI output on its own while playing.',
 			'settings.audioPassthroughDescription' => 'Send Dolby/DTS audio to your receiver or TV without re-encoding, preserving surround sound. Turn off if you have no sound.',
 			'settings.audioPassthroughDescriptionApple' => 'Use Apple\'s native Dolby decoder for Dolby Digital Plus, including Atmos. DTS and TrueHD still play as multichannel PCM. Turn off if you have no sound.',
 			'settings.audioPassthroughDescriptionAppleSpatial' => 'Use Apple\'s native Dolby decoder for Dolby Digital Plus, including Atmos. On iOS, iPadOS and tvOS 26 or later, TrueHD Atmos and DTS:X play as spatial audio. Other DTS and TrueHD tracks play as multichannel PCM. Turn off if you have no sound.',
@@ -8988,10 +9788,10 @@ extension on Translations {
 			'themeEditor.slots.surface' => 'Surface',
 			'themeEditor.slots.outline' => 'Outline',
 			'themeEditor.slots.text' => 'Text',
-			'themeEditor.slots.textMuted' => 'Secondary text',
-			'themeEditor.slots.accent' => 'Accent',
 			_ => null,
 		} ?? switch (path) {
+			'themeEditor.slots.textMuted' => 'Secondary text',
+			'themeEditor.slots.accent' => 'Accent',
 			'themeEditor.opacity' => 'Opacity',
 			'themeEditor.hexHint' => '#RRGGBB or #AARRGGBB',
 			'themeEditor.fromOtherThemes' => 'From other themes',
@@ -9502,10 +10302,10 @@ extension on Translations {
 			'profiles.pinProtectionOptional' => 'PIN protection (optional)',
 			'profiles.pinExplain' => '4-digit PIN required to switch profiles.',
 			'profiles.continueButton' => 'Continue',
-			'profiles.pinsDontMatch' => 'PINs don\'t match',
-			'profiles.tokenIdentityMismatch' => 'The Plex profile token resolved to an unexpected server',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.pinsDontMatch' => 'PINs don\'t match',
+			'profiles.tokenIdentityMismatch' => 'The Plex profile token resolved to an unexpected server',
 			'connections.sectionTitle' => 'Connections',
 			'connections.addConnection' => 'Add connection',
 			'connections.addConnectionSubtitleNoProfile' => 'Sign in with Plex or connect a Jellyfin or Emby server',
@@ -9574,6 +10374,101 @@ extension on Translations {
 			'accountPreferences.mediaReviewsOptions.usersOnly' => 'Users only',
 			'accountPreferences.mediaReviewsOptions.criticsOnly' => 'Critics only',
 			'accountPreferences.mediaReviewsOptions.nobody' => 'Hidden',
+			'aiTab.playOnTv' => 'Play on TV',
+			'aiTab.pickUnavailable' => 'This title isn\'t on a server this phone can reach.',
+			'aiTab.loadMoreCard' => 'Load more',
+			'aiTab.findingMoreCard' => 'Finding more…',
+			'aiTab.noMoreCard' => 'No more matches',
+			'aiTab.tonight' => 'Tonight',
+			'aiTab.ask' => 'Ask',
+			'aiTab.followUp' => 'Follow up',
+			'aiTab.askTitle' => 'What do you feel like watching?',
+			'aiTab.followUpTitle' => 'Follow up',
+			'aiTab.askHint' => 'e.g. a short funny film, or something like Severance',
+			'aiTab.thinking' => ({required Object request}) => 'Looking for: ${request}',
+			'aiTab.preparingTonight' => 'Picking a few things for tonight…',
+			'aiTab.newConversation' => 'New conversation',
+			'aiTab.refreshTonight' => 'New Tonight picks',
+			'aiTab.noKeyTitle' => 'Add your Anthropic API key',
+			'aiTab.noKeyMessage' => 'The AI helper needs your own API key. Add it in Settings ▸ AI.',
+			'aiTab.emptyTitle' => 'Ask for something to watch',
+			'aiTab.emptyMessage' => 'Press Ask and describe what you\'re in the mood for.',
+			'aiTab.loadMore' => 'Load more',
+			'aiTab.refreshRow' => 'Replace with new picks',
+			'aiTab.refreshing' => ({required Object request}) => 'Refreshing: ${request}',
+			'aiTab.deleteRow' => 'Delete this row',
+			'aiTab.deleteRowTitle' => ({required Object request}) => 'Delete "${request}"?',
+			'aiTab.deleteRowMessage' => 'This saved answer will be removed from the AI tab (and from Home if it\'s there).',
+			'aiTab.deleted' => 'Deleted',
+			'aiTab.retryChip' => ({required Object request}) => 'Retry: ${request}',
+			'aiTab.ready' => ({required Object request}) => 'New picks ready: ${request}',
+			'aiTab.noPicks' => 'No picks came back',
+			'aiTab.homeFull' => 'Home already has 10 AI rows. Remove one first.',
+			'aiTab.moreLikeThis' => 'More like this',
+			'aiTab.moreLike' => ({required Object title}) => 'more like ${title}',
+			'aiTab.findMore' => 'Find more (add titles)',
+			'aiTab.findingMore' => ({required Object request}) => 'more: ${request}',
+			'aiTab.noMoreMatches' => ({required Object request}) => 'No more matches for ${request}',
+			'aiTab.addedMore' => ({required Object count, required Object request}) => '${count} more picks added: ${request}',
+			'aiTab.more' => 'More',
+			'aiTab.less' => 'Less',
+			'aiTab.starting' => 'Starting',
+			'aiTab.youAsked' => ({required Object question}) => 'You asked: ${question}',
+			'aiTab.topPick' => 'Top pick',
+			'aiTab.working' => 'Working on it',
+			'aiTab.spotlight' => 'Worth a closer look',
+			'aiTab.writingReason' => 'Writing why it fits…',
+			'aiTab.details' => 'Details',
+			'aiTab.badgeWatched' => 'Watched',
+			'aiTab.badgeInProgress' => 'In progress',
+			'aiTab.badgeRewatch' => 'Rewatch',
+			'aiTab.read' => 'Read',
+			'aiTab.picksCount' => ({required Object count}) => '${count} picks',
+			'aiTab.topPicks' => 'Top picks',
+			'aiTab.allPicks' => 'All picks',
+			'aiTab.askedLabel' => 'You asked',
+			'aiTab.tonightNewEpisode' => 'New episode',
+			'aiTab.tonightPick' => 'Tonight\'s pick',
+			'aiTab.tonightLibrary' => 'From your library',
+			'aiTab.tonightUpdated' => ({required Object time}) => 'Made ${time}',
+			'aiTab.tonightConfirm' => 'Make a new Tonight?',
+			'aiTab.tonightConfirmBody' => 'Three fresh cards, using one small AI call.',
+			'ai.settingsTitle' => 'AI',
+			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
+			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
+			'ai.pasteKey' => 'Paste API key',
+			'ai.replaceKey' => 'Replace API key',
+			'ai.keyLabel' => 'Anthropic API key',
+			'ai.keyFormat' => 'Anthropic keys start with sk-ant-',
+			'ai.noKey' => 'No key on this device yet',
+			'ai.keySet' => ({required Object hint}) => 'Key ${hint} saved on this device',
+			'ai.testKey' => 'Test key',
+			'ai.keyWorks' => 'The key works',
+			'ai.keyRejected' => 'Anthropic rejected that key; check it and try again',
+			'ai.keyUnreachable' => 'Couldn\'t reach Anthropic to check the key; it\'s saved and will be checked on first use',
+			'ai.removeKey' => 'Remove key',
+			'ai.removeKeyTitle' => 'Remove the API key?',
+			'ai.removeKeyMessage' => 'The AI helper stops working on this device until a key is added again.',
+			'ai.receiveKey' => 'Receive key from another device',
+			'ai.receiveKeyDescription' => 'Open a one-time page on your home network and paste the key there from a phone or laptop',
+			'ai.receiveTitle' => 'Send the key from another device',
+			'ai.receiveStep1' => 'On a phone or laptop on the same Wi-Fi, open:',
+			'ai.receiveStep2' => 'Then enter this code with the key:',
+			'ai.receiveExpiry' => 'This page works once and closes after 5 minutes or 3 wrong codes.',
+			'ai.receiveNoNetwork' => 'This device isn\'t on a home network, so the key can\'t be sent from another device',
+			'ai.receiveTooManyAttempts' => 'Too many wrong codes; the page is closed',
+			'ai.receiveTimedOut' => 'The page closed after 5 minutes without a key',
+			'ai.tryRequest' => 'Try a request',
+			'ai.tryRequestDescription' => 'Ask for something to watch and see what the helper picks from your library',
+			'ai.tryRequestLabel' => 'What do you feel like watching?',
+			'ai.ask' => 'Ask',
+			'ai.spendTitle' => 'Spend',
+			'ai.spendThisMonth' => ({required Object dollars, required Object requests}) => '${dollars} USD this month across ${requests} requests (no cap)',
+			'ai.spendAutoRefresh' => ({required Object dollars}) => '${dollars} of it on Home auto-refresh',
+			'ai.autoRefreshTitle' => 'Auto-refresh AI rows on Home',
+			'ai.autoRefreshSubtitle' => 'Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.',
+			'ai.modelsTitle' => 'Models',
+			'ai.modelsDescription' => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.',
 			'backupTransfer.title' => 'Backup & transfer',
 			'backupTransfer.settingsSubtitle' => 'Move your Home rows and Comfort settings to another device',
 			'backupTransfer.description' => 'Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).',
@@ -9846,12 +10741,67 @@ extension on Translations {
 			'licenses.license' => 'License',
 			'licenses.licenseNumber' => ({required Object number}) => 'License ${number}',
 			'licenses.licensesCount' => ({required Object count}) => '${count} licenses',
+			'navigation.ai' => 'AI',
 			'navigation.libraries' => 'Libraries',
 			'navigation.downloads' => 'Downloads',
 			'navigation.liveTv' => 'Live TV',
 			'navigation.explore' => 'Explore',
 			'navigation.watchlist' => 'Watchlist',
 			'navigation.comfort' => 'Comfort',
+			'navigation.history' => 'History',
+			'history.title' => 'History',
+			'history.allTime' => 'All time',
+			'history.hours' => 'Hours',
+			'history.films' => 'Films',
+			'history.episodes' => 'Episodes',
+			'history.shows' => 'Shows',
+			'history.streak' => 'Day streak',
+			'history.bestStreak' => ({required Object n}) => 'Best ${n}',
+			'history.byMonth' => 'Month by month',
+			'history.timeline' => 'Timeline',
+			'history.topGenres' => 'Top genres',
+			'history.directors' => 'Directors',
+			'history.actors' => 'Actors',
+			'history.rewatches' => 'Watched again',
+			'history.decades' => 'Films by decade',
+			'history.longestBinge' => 'Longest binge',
+			'history.bingeLine' => ({required Object n}) => '${n} episodes in one day',
+			'history.timesWatched' => ({required Object n}) => '×${n}',
+			'history.watchCount' => ({required Object n}) => '${n} watches',
+			'history.copy.button' => 'Send Plex watches to Trakt',
+			'history.copy.undoButton' => 'Undo last send to Trakt',
+			'history.copy.title' => 'Send Plex watches to Trakt',
+			'history.copy.adds' => ({required Object films, required Object episodes}) => 'Adds ${films} films and ${episodes} episodes to your Trakt history',
+			'history.copy.nothing' => 'Trakt already has every Plex watch it can match.',
+			'history.copy.byYear' => 'By year',
+			'history.copy.yearLine' => ({required Object films, required Object episodes}) => '${films} films · ${episodes} episodes',
+			'history.copy.sample' => 'First few',
+			'history.copy.skipped' => 'Skipped',
+			'history.copy.alreadyOnTrakt' => ({required Object n}) => '${n} already on Trakt',
+			'history.copy.bulk' => ({required Object n}) => '${n} with mark-as-watched dates, not real viewings, so your Trakt timeline doesn\'t get made-up dates',
+			'history.copy.noIds' => ({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)',
+			'history.copy.howItWorks' => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.',
+			'history.copy.cancel' => 'Cancel',
+			'history.copy.confirm' => 'Send to Trakt',
+			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
+			'history.copy.done' => ({required Object films, required Object episodes}) => 'Added ${films} films and ${episodes} episodes to Trakt',
+			'history.copy.notFound' => ({required Object n}) => '${n} couldn\'t be found on Trakt',
+			'history.copy.failed' => 'Sending to Trakt failed',
+			'history.copy.undoTitle' => 'Undo last send?',
+			'history.copy.undoMessage' => ({required Object n}) => 'Removes the ${n} Trakt history entries the last send added, nothing else.',
+			'history.copy.undoConfirm' => 'Remove them',
+			'history.copy.undone' => ({required Object n}) => 'Removed ${n} entries from Trakt',
+			'history.empty' => 'Nothing watched yet',
+			'history.loading' => 'Gathering your history…',
+			'history.failed' => 'Couldn\'t load your history',
+			'history.retry' => 'Try again',
+			'history.episodeLabel' => ({required Object season, required Object episode}) => 'S${season} · E${episode}',
+			'history.plexOnlyNote' => 'Plex keeps only the latest watch of each title, so rewatches before it aren\'t counted.',
+			'history.undatedNote' => ({required Object n}) => '${n} Trakt watches have no date and aren\'t shown.',
+			'history.bulkNote' => ({required Object n}) => '${n} watches were imported or marked watched in bulk, so their dates aren\'t real: they count in All time but not in a year, the months or streaks.',
+			'history.estimatedNote' => ({required Object n}) => 'Hours include an estimate for ${n} watches with no runtime.',
+			'history.noTraktNote' => 'Connect Trakt in Settings to add your full watch log.',
+			'history.updated' => ({required Object when}) => 'Updated ${when}',
 			'comfort.carryOn' => 'Carry on watching',
 			'comfort.randomEpisode' => 'Random episode',
 			'comfort.configure' => 'Configure',
@@ -9866,6 +10816,8 @@ extension on Translations {
 			'comfort.picking' => 'Picking an episode…',
 			'comfort.nothingToPlay' => 'None of the shows in the mix are on your servers',
 			'comfort.noEpisodes' => 'No episodes of this show are on your server',
+			_ => null,
+		} ?? switch (path) {
 			'comfort.allPaused' => 'Every show is paused. Turn some on in Configure',
 			'comfort.play' => 'Play',
 			'comfort.pickAgain' => 'Pick again',
@@ -9878,6 +10830,7 @@ extension on Translations {
 			'comfort.searchHint' => 'Search Trakt for a show',
 			'comfort.remove' => 'Remove',
 			'comfort.added' => ({required Object title}) => 'Added ${title}',
+			'comfort.connectTrakt' => 'Connect Trakt',
 			'watchlist.films' => 'Films',
 			'watchlist.tv' => 'TV',
 			'watchlist.genreFilms' => ({required Object genre}) => '${genre} Films',
@@ -9888,6 +10841,7 @@ extension on Translations {
 			'watchlist.emptyMessage' => ({required Object source}) => 'Titles you add to your ${source} watchlist appear here',
 			'watchlist.noSourceTitle' => 'No watchlist connected',
 			'watchlist.noSourceMessage' => 'Connect Plex, Trakt or another watchlist service in Settings',
+			'explore.allCopies' => 'Details and all copies',
 			'explore.traktLists.boxOffice' => 'Box Office',
 			'explore.traktLists.mostWatchedMovies' => 'Most Watched Movies This Week',
 			'explore.traktLists.mostWatchedShows' => 'Most Watched Shows This Week',
@@ -10018,8 +10972,6 @@ extension on Translations {
 			'explore.detail.alsoKnownAs' => 'Also known as',
 			'explore.detail.studios' => 'Studios',
 			'explore.detail.country' => 'Country',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.language' => 'Language',
 			'explore.detail.released' => 'Released',
 			'explore.detail.physicalRelease' => 'On disc',
@@ -10378,6 +11330,8 @@ extension on Translations {
 			'downloads.storageFull' => 'Downloads stopped to protect available storage. Free some space or choose another download location, then retry.',
 			'downloads.storageUnavailable' => 'Downloads stopped because available storage could not be checked. Check the download location, then retry.',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.downloadDeleted' => 'Download deleted',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
 			'downloads.deleteCollectionDownloads' => 'Delete downloads',
@@ -10532,8 +11486,6 @@ extension on Translations {
 			'companionRemote.pairing.connectionTimedOut' => 'Connection timed out. Use the same network on both devices.',
 			'companionRemote.pairing.sessionNotFound' => 'Device not found. Make sure Plezy is running on the host.',
 			'companionRemote.pairing.authFailed' => 'Authentication failed. Both devices need the same Plex account.',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.pairing.failedToConnect' => ({required Object error}) => 'Failed to connect: ${error}',
 			'companionRemote.remote.disconnectConfirm' => 'Do you want to disconnect from the remote session?',
 			'companionRemote.remote.reconnecting' => 'Reconnecting...',
@@ -10892,6 +11844,8 @@ extension on Translations {
 			'addServer.serverTimedOut' => 'The server did not respond in time',
 			'addServer.responseNotJson' => 'The server response was not valid JSON',
 			'addServer.responseMissingIdentity' => ({required Object product}) => 'The response is missing an ID or server name — is this a ${product} server?',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.probeFailed' => ({required Object error}) => 'Could not reach the server: ${error}',
 			'addServer.enterAtLeastOneUrl' => ({required Object product}) => 'Enter at least one ${product} server URL',
 			'addServer.noReachableServer' => ({required Object product}) => 'No reachable ${product} server was found',
@@ -10918,6 +11872,94 @@ extension on Translations {
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
+			'cast.sending' => ({required Object title, required Object name}) => 'Playing ${title} on ${name}',
+			'cast.playingOn' => ({required Object name}) => 'Playing on ${name}',
+			'cast.thisPhone' => 'This phone',
+			'cast.switchToThisPhone' => 'Play on this phone',
+			'cast.switchToHost' => ({required Object name}) => 'Play on ${name}',
+			'cast.nowPlaying' => ({required Object name}) => 'Now playing on ${name}',
+			'cast.failed' => ({required Object message}) => 'Couldn\'t play on the TV: ${message}',
+			'cast.itemNotFound' => 'That title isn\'t on the TV\'s servers',
+			'cast.showOnTv' => 'Show on TV',
+			'cast.playOnPhone' => 'Play on this phone',
+			'cast.audio' => 'Audio',
+			'cast.subtitles' => 'Subtitles',
+			'cast.off' => 'Off',
+			'cast.previous' => 'Previous',
+			'cast.next' => 'Next',
+			'cast.back10' => 'Back',
+			'cast.forward10' => 'Forward',
+			'cast.skipIntro' => 'Skip intro',
+			'cast.skipCredits' => 'Skip credits',
+			'cast.stop' => 'Stop',
+			'cast.nothingPlaying' => 'Nothing is playing',
+			'cast.playPause' => 'Play / pause',
+			'cast.tvWorking' => ({required Object name}) => '${name} is working…',
+			'cast.notConnected' => ({required Object name}) => 'Not connected to ${name} — showing the last copy',
+			'remoteAi.title' => ({required Object name}) => 'AI on ${name}',
+			'remoteAi.connectTitle' => 'Connect to your TV to use AI',
+			'remoteAi.connectMessage' => 'The AI runs on the TV app with its own key and library index. Connect to it from Home ▸ remote.',
+			'remoteAi.connect' => 'Connect',
+			'remoteAi.hint' => 'What do you feel like watching?',
+			'remoteAi.working' => ({required Object name}) => '${name} is looking…',
+			'remoteAi.error' => ({required Object message}) => 'The TV couldn\'t answer: ${message}',
+			'remoteAi.empty' => 'Ask for something and the picks show up here.',
+			'aiComposer.eyebrow' => 'ASK YOUR LIBRARY',
+			'aiComposer.headline' => 'What are we watching?',
+			'aiComposer.followUpHeadline' => 'Where next?',
+			'aiComposer.example1' => 'Action anime like Attack on Titan',
+			'aiComposer.example2' => 'Something cosy for a Sunday afternoon',
+			'aiComposer.example3' => '80s action, easy to watch',
+			'aiComposer.example4' => 'Surprise me with a Marvel film',
+			'aiComposer.example5' => 'A twisty thriller I haven\'t seen',
+			'aiComposer.quickStart' => 'QUICK START',
+			'aiComposer.tonight' => 'Tonight\'s pick',
+			'aiComposer.tonightRequest' => 'Pick the one film I should watch tonight',
+			'aiComposer.history' => 'Based on my history',
+			'aiComposer.historyRequest' => 'Something like what I\'ve watched recently',
+			'aiComposer.gems' => 'Hidden gems',
+			'aiComposer.gemsRequest' => 'Hidden gems in my library that I haven\'t watched',
+			'aiComposer.feelGood' => 'Feel-good',
+			'aiComposer.feelGoodRequest' => 'Feel-good films to lift the mood',
+			'aiComposer.random' => 'Random film',
+			'aiComposer.randomRequest' => 'Surprise me with a random great film',
+			'aiComposer.take1' => 'Take 1 · Reading your library',
+			'aiComposer.take2' => 'Take 2 · Shortlisting',
+			'aiComposer.take3' => 'Take 3 · Final cut',
+			'aiComposer.wrap' => 'That\'s a wrap',
+			'aiComposer.continueBrowsing' => 'Continue browsing',
+			'aiComposer.askAbout' => 'Ask about this',
+			'aiComposer.previouslyOn' => 'Previously on',
+			'aiComposer.episodeCode' => ({required Object season, required Object episode}) => 'S${season} E${episode}',
+			'aiComposer.recapRequest' => ({required Object episode}) => 'Catch me up before ${episode}',
+			'aiComposer.recapShorter' => 'Shorter',
+			'aiComposer.recapShorterRequest' => 'Give me the recap again in three sentences.',
+			'aiComposer.recapLast' => 'Just the last episode',
+			'aiComposer.recapLastRequest' => 'Recap only the episode just before this one.',
+			'aiComposer.recapWho' => 'Who\'s who?',
+			'aiComposer.recapWhoRequest' => 'Remind me who the main characters are and where each one stands.',
+			'aiComposer.aboutEyebrow' => 'ASK ABOUT IT',
+			'aiComposer.aboutChip' => ({required Object title}) => 'About: ${title}',
+			'aiComposer.aboutHeadline' => 'What do you want to know?',
+			'aiComposer.aboutHint' => 'Ask anything about it',
+			'aiComposer.aboutWorth' => 'Is it worth watching?',
+			'aiComposer.aboutWorthRequest' => 'Is it worth watching? Give me an honest, spoiler-free take.',
+			'aiComposer.aboutLike' => 'Anything like this?',
+			'aiComposer.aboutLikeRequest' => 'Anything like this in my library?',
+			'aiComposer.aboutCast' => 'Who\'s in it?',
+			'aiComposer.aboutCastRequest' => 'Who\'s in it, and who do they play?',
+			'aiComposer.aboutScary' => 'Is it scary or kid-friendly?',
+			'aiComposer.aboutScaryRequest' => 'How scary or intense is it, and is it OK for kids?',
+			'aiComposer.aboutStart' => 'Where should I start?',
+			'aiComposer.aboutStartRequest' => 'Where should I start with this show, and is it worth sticking with?',
+			'aiComposer.programNotes' => 'Programme notes',
+			'aiComposer.picksInTab' => 'Picks for it are in the AI tab.',
+			'aiComposer.done' => 'Done',
+			'aiComposer.askAnother' => 'Ask another',
+			'aiComposer.jammed' => 'Film jammed',
+			'aiComposer.timedOut' => 'The TV didn\'t answer in time.',
+			'aiComposer.edit' => 'Edit',
+			'aiComposer.keepsRunning' => 'It keeps going and lands in the AI tab.',
 			_ => null,
 		};
 	}

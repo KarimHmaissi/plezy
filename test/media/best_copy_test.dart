@@ -1,0 +1,31 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:plezy/media/media_item_merge.dart';
+import 'package:plezy/media/media_version.dart';
+
+import '../test_helpers/media_items.dart';
+
+void main() {
+  MediaVersion version(int? bitrate, int? height) => MediaVersion(id: '$bitrate-$height', bitrate: bitrate, height: height);
+
+  test('best copy is the highest bitrate, skipping unavailable servers', () {
+    final low = testMediaItem(id: 'a', serverId: 's1', mediaVersions: [version(8000, 1080)]);
+    final high = testMediaItem(id: 'b', serverId: 's2', mediaVersions: [version(60000, 2160)]);
+    final offline = testMediaItem(id: 'c', serverId: 's3', mediaVersions: [version(90000, 2160)]);
+    expect(bestLibraryCopy([low, high, offline], isAvailable: (c) => c.serverId != 's3'), same(high));
+    expect(bestLibraryCopy([low, offline], isAvailable: (c) => c.serverId != 's3'), same(low));
+    expect(bestLibraryCopy([offline], isAvailable: (c) => c.serverId != 's3'), isNull);
+  });
+
+  test('equal bitrates fall back to resolution', () {
+    final hd = testMediaItem(id: 'a', serverId: 's1', mediaVersions: [version(null, 1080)]);
+    final uhd = testMediaItem(id: 'b', serverId: 's2', mediaVersions: [version(null, 2160)]);
+    expect(bestLibraryCopy([hd, uhd]), same(uhd));
+  });
+
+  test('play defaults to the highest-bitrate version', () {
+    expect(bestVersionIndex(null), 0);
+    expect(bestVersionIndex([version(5000, 1080)]), 0);
+    expect(bestVersionIndex([version(5000, 1080), version(40000, 2160), version(12000, 1080)]), 1);
+    expect(bestVersionIndex([version(null, 720), version(null, 1080)]), 1);
+  });
+}

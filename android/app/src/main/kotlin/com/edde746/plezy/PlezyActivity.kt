@@ -496,6 +496,18 @@ class PlezyActivity : FlutterActivity() {
     return if (!bt.isNullOrBlank()) bt else null
   }
 
+  /// Fork: phones and tablets scroll at the display's top rate (120 Hz on
+  /// a Fold) instead of the 60 Hz some vendors give apps that don't ask.
+  /// Only the refresh rate is asked for, not a display mode, so the video
+  /// frame-rate matching (which sets preferredDisplayModeId) is unaffected.
+  /// TVs are left alone.
+  private fun requestHighRefreshRate() {
+    if (isAndroidTvDevice() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+    val modes = display?.supportedModes ?: return
+    val top = modes.maxOfOrNull { it.refreshRate } ?: return
+    window.attributes = window.attributes.apply { preferredRefreshRate = top }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Snapshot the previous process phase before this launch can overwrite it.
     initializeStartupPhaseStore()
@@ -508,6 +520,7 @@ class PlezyActivity : FlutterActivity() {
 
     super.onCreate(savedInstanceState)
     lastConfig = Configuration(resources.configuration)
+    requestHighRefreshRate()
 
     // Disable the Android splash screen fade-out animation to avoid
     // a flicker before Flutter draws its first frame.

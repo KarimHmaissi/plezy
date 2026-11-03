@@ -9,7 +9,7 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../mixins/debounced_media_search.dart';
 import '../models/catalog/catalog_item.dart';
-import '../services/catalog/trakt_catalog_source.dart';
+import '../services/catalog/catalog_source.dart';
 import '../services/comfort/comfort_shows_controller.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
@@ -24,13 +24,16 @@ import '../widgets/loading_indicator_box.dart';
 import '../widgets/search_input_field.dart';
 import '../widgets/setting_tile.dart';
 import 'libraries/state_messages.dart';
+import '../theme/fork_motion.dart';
 
 /// Configure the comfort shows: whether Random episode plays straight away,
 /// which shows are in the mix (synced through the Trakt list), and adding or
 /// removing shows on the list.
 class ComfortConfigureScreen extends StatelessWidget {
   final ComfortShowsController controller;
-  final TraktCatalogSource source;
+  /// Where Add searches (Trakt, or a phone's own catalog when it edits its
+  /// TV/Mac's list).
+  final CatalogSource source;
 
   const ComfortConfigureScreen({super.key, required this.controller, required this.source});
 
@@ -123,10 +126,10 @@ class ComfortConfigureScreen extends StatelessWidget {
   }
 }
 
-/// Search Trakt for a show and add it to the comfort list.
+/// Search for a show and add it to the comfort list.
 class ComfortAddShowScreen extends StatefulWidget {
   final ComfortShowsController controller;
-  final TraktCatalogSource source;
+  final CatalogSource source;
 
   const ComfortAddShowScreen({super.key, required this.controller, required this.source});
 
@@ -162,6 +165,7 @@ class _ComfortAddShowScreenState extends State<ComfortAddShowScreen>
     setState(() => _adding = true);
     try {
       await widget.controller.addShow(show);
+      ForkMotion.success();
       if (!mounted) return;
       showAppSnackBar(context, t.comfort.added(title: show.title));
       Navigator.of(context).pop();

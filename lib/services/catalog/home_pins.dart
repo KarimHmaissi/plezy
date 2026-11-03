@@ -49,6 +49,9 @@ abstract final class HomeRowIds {
   /// A Watchlist page shelf (`films`, `tv`, `films.Horror`, `tv.other`…) of
   /// [source]'s watchlist; without a source, whichever watchlist the
   /// Watchlist page would show.
+  /// A saved answer from the AI tab (its snapshot of picks).
+  static String ai(String historyId) => 'ai:$historyId';
+
   static String watchlist(String shelfId, {CatalogSourceId? source}) =>
       source == null ? 'wl:$shelfId' : 'wl:${source.name}:$shelfId';
 }
@@ -237,7 +240,7 @@ class HomePinsController extends ChangeNotifier {
   void attachTrakt(TraktClient client) {
     if (identical(_trakt, client)) return;
     _trakt = client;
-    if (_loaded && !_persisted) unawaited(_migrateFromTrakt());
+    if (_loaded && !_persisted && !Customisation.isMirror) unawaited(_migrateFromTrakt());
   }
 
   /// Read the layout once (coalesced); [refresh] re-reads the database (after
@@ -257,12 +260,18 @@ class HomePinsController extends ChangeNotifier {
         );
         _revision = stored.revision;
         _persisted = true;
+      } else if (Customisation.isMirror) {
+        // A TV with no Home of its own: show the default, and leave the
+        // TV's data alone (migrations below would write to it).
+        _layout = defaultHomeLayout;
+        _revision = 0;
+        _persisted = false;
       } else if (!_persisted) {
         await _migrateFromLocalCache();
       }
       _loaded = true;
       notifyListeners();
-      if (!_persisted) await _migrateFromTrakt();
+      if (!_persisted && !Customisation.isMirror) await _migrateFromTrakt();
     } catch (e) {
       appLogger.w('Home layout: load failed', error: e);
       _loaded = true;

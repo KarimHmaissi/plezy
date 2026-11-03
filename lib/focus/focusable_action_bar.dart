@@ -345,9 +345,18 @@ class FocusableActionBarState extends State<FocusableActionBar> {
               customChild ??
               Container(
                 decoration: FocusTheme.focusBackgroundDecoration(isFocused: showFocus, borderRadius: 20),
-                child:
-                    action.child ??
-                    IconButton(
+                child: action.child != null
+                    // A custom child has no button of its own: give it the
+                    // tap a touch screen needs (D-pad select is handled above).
+                    ? Material(
+                        type: MaterialType.transparency,
+                        child: InkWell(
+                          onTap: action.onPressed,
+                          borderRadius: BorderRadius.circular(20),
+                          child: action.child,
+                        ),
+                      )
+                    : IconButton(
                       icon: AppIcon(action.icon, size: action.iconSize, fill: action.iconFill, color: action.iconColor),
                       tooltip: action.tooltip,
                       onPressed: action.onPressed,

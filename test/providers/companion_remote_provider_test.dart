@@ -15,6 +15,7 @@ import 'package:plezy/services/companion_remote/companion_remote_peer_service.da
 import 'package:plezy/services/companion_remote/lan_discovery_service.dart';
 import 'package:plezy/services/companion_remote/remote_auth_context.dart';
 import 'package:plezy/services/companion_remote/remote_auth_service.dart';
+import 'package:plezy/services/settings_service.dart';
 
 import '../test_helpers/backend_client_fixtures.dart';
 import '../test_helpers/prefs.dart';
@@ -63,6 +64,56 @@ void main() {
 
       await harness.provider.stopHostServer();
       expect(harness.provider.hostServerAddresses, isEmpty);
+    });
+  });
+
+  group('CompanionRemoteProvider — reconnect after sleep (fork)', () {
+    test('the shown host addresses follow a re-advertised IP', () async {
+      final discovery = _FakeLanDiscoveryService();
+      final harness = await _RemoteHarness.create(
+        _FakePeerFactory([_FakeCompanionRemotePeerService()]).call,
+        discoveryServiceFactory: () => discovery,
+      );
+      addTearDown(harness.close);
+      await harness.provider.startHostServer();
+
+      discovery.onAdvertisedIpsChanged!(['192.0.2.20']);
+      expect(harness.provider.hostServerAddresses, ['192.0.2.20:48634']);
+    });
+
+    test('auto-connect falls back to the last address when no beacon is heard', () async {
+      final peer = _FakeCompanionRemotePeerService();
+      final harness = await _RemoteHarness.create(
+        _FakePeerFactory([peer]).call,
+        discoveryServiceFactory: _FakeLanDiscoveryService.new,
+      );
+      addTearDown(harness.close);
+      final settings = await SettingsService.getInstance();
+      await settings.write(SettingsService.companionRemoteAutoHost, 'host-client');
+      await settings.write(SettingsService.companionRemoteAutoHostAddress, '192.0.2.10:48632');
+      harness.provider.autoConnectDiscoveryTimeout = const Duration(milliseconds: 20);
+
+      await harness.provider.autoConnect('host-client');
+
+      expect(peer.joins, [(address: '192.0.2.10:48632', expectedHostClientId: 'host-client')]);
+      expect(harness.provider.isConnected, isTrue);
+      expect(harness.provider.debugAutoConnectRetryPending, isFalse);
+    });
+
+    test('auto-connect keeps retrying when the host is neither heard nor reachable', () async {
+      final harness = await _RemoteHarness.create(
+        _FakePeerFactory([]).call,
+        discoveryServiceFactory: _FakeLanDiscoveryService.new,
+      );
+      addTearDown(harness.close);
+      final settings = await SettingsService.getInstance();
+      await settings.write(SettingsService.companionRemoteAutoHost, 'host-client');
+      harness.provider.autoConnectDiscoveryTimeout = const Duration(milliseconds: 20);
+
+      await harness.provider.autoConnect('host-client');
+
+      expect(harness.provider.isConnected, isFalse);
+      expect(harness.provider.debugAutoConnectRetryPending, isTrue);
     });
   });
 
@@ -955,6 +1006,7 @@ class _FakeCompanionRemotePeerService extends CompanionRemotePeerService {
   final Completer<void> joinStarted = Completer<void>();
   final Completer<void> disconnectStarted = Completer<void>();
   final List<RemoteCommand> sentCommands = [];
+  final List<({String address, String expectedHostClientId})> joins = [];
 
   final StreamController<RemoteCommand> _commands = StreamController<RemoteCommand>.broadcast(sync: true);
   final StreamController<RemoteDevice> _connected = StreamController<RemoteDevice>.broadcast(sync: true);
@@ -1017,6 +1069,7 @@ class _FakeCompanionRemotePeerService extends CompanionRemotePeerService {
     String? authContextId,
     String expectedHostClientId = '',
   }) async {
+    joins.add((address: hostAddress, expectedHostClientId: expectedHostClientId));
     if (!joinStarted.isCompleted) joinStarted.complete();
     final gate = joinGate;
     if (gate != null) await gate.future;
@@ -1111,6 +1164,14 @@ class _FakeCompanionRemotePeerService extends CompanionRemotePeerService {
 
 class _FakeLanDiscoveryService extends LanDiscoveryService {
   bool _broadcasting = false;
+  final StreamController<List<DiscoveredHost>> hosts = StreamController.broadcast();
+
+  @override
+  Stream<List<DiscoveredHost>> startListeningForContexts(List<RemoteAuthContext> contexts) {
+    _listening = true;
+    return hosts.stream;
+  }
+
   bool _listening = false;
   int stopBroadcastingCalls = 0;
   int stopListeningCalls = 0;

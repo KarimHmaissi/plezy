@@ -254,6 +254,8 @@ Future<T?> showAdaptiveAppMenu<T>(
   AppMenuAnchorAlignment anchorAlignment = AppMenuAnchorAlignment.start,
   bool focusFirstItem = false,
   bool isScrollControlled = false,
+  // Fork: a header above the entries in place of [title] (phone sheets only).
+  Widget? titleWidget,
 }) {
   // ThemeData.platform follows the real target platform by default, including
   // Android TV and tvOS, while remaining overrideable in widget tests.
@@ -263,7 +265,12 @@ Future<T?> showAdaptiveAppMenu<T>(
       context,
       showDragHandle: true,
       isScrollControlled: isScrollControlled,
-      builder: (context) => AppMenuSheet<T>(title: title, entries: entries, focusFirstItem: focusFirstItem),
+      builder: (context) => AppMenuSheet<T>(
+        title: titleWidget == null ? title : null,
+        titleWidget: titleWidget,
+        entries: entries,
+        focusFirstItem: focusFirstItem,
+      ),
     );
   }
 

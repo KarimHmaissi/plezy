@@ -23,6 +23,7 @@ import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/settings_service.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
+import '../widgets/phone_nav_drawer.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/catalog_source_logo.dart';
@@ -42,6 +43,7 @@ import '../widgets/tv_spotlight_scaffold.dart';
 import 'catalog_search_screen.dart';
 import 'trakt_discover_lists_screen.dart';
 import 'libraries/state_messages.dart';
+import '../theme/fork_motion.dart';
 
 /// The Explore tab: watchlist + discover rows from the active external
 /// catalog source (Trakt). Only mounted when a source is connected (the tab
@@ -320,20 +322,36 @@ class ExploreScreenState extends State<ExploreScreen>
         FocusableActionBar(
           key: _actionBarKey,
           onNavigateDown: searchFocusNode.requestFocus,
-          actions: [
-            if (sources.activeSource case final TraktListsCatalogSource lists)
-              FocusableAction(
-                icon: Symbols.travel_explore_rounded,
-                tooltip: t.explore.traktLists.discoverLists,
-                onPressed: () => unawaited(_openDiscoverLists(lists)),
-              ),
-            FocusableAction(
-              icon: Symbols.dashboard_customize_rounded,
-              tooltip: t.homeRows.manageHome,
-              onPressed: () => openHomeRows(context),
-            ),
-            FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
-          ],
+          // Phone: the shared Search / remote / avatar set; this tab's own
+          // actions move into the drawer.
+          actions: PlatformDetector.isMobile(context)
+              ? phoneTabActions(
+                  context,
+                  onRefresh: manualRefresh,
+                  extras: [
+                    if (sources.activeSource case final TraktListsCatalogSource lists)
+                      (
+                        Symbols.travel_explore_rounded,
+                        t.explore.traktLists.discoverLists,
+                        () => unawaited(_openDiscoverLists(lists)),
+                      ),
+                    (Symbols.dashboard_customize_rounded, t.homeRows.manageHome, () => openHomeRows(context)),
+                  ],
+                )
+              : [
+                  if (sources.activeSource case final TraktListsCatalogSource lists)
+                    FocusableAction(
+                      icon: Symbols.travel_explore_rounded,
+                      tooltip: t.explore.traktLists.discoverLists,
+                      onPressed: () => unawaited(_openDiscoverLists(lists)),
+                    ),
+                  FocusableAction(
+                    icon: Symbols.dashboard_customize_rounded,
+                    tooltip: t.homeRows.manageHome,
+                    onPressed: () => openHomeRows(context),
+                  ),
+                  FocusableAction(icon: Symbols.refresh_rounded, tooltip: t.common.refresh, onPressed: manualRefresh),
+                ],
         ),
       ],
     );
@@ -408,7 +426,7 @@ class ExploreScreenState extends State<ExploreScreen>
       // Horizontal-only SafeArea, as on Search: the field, shelves, and
       // results clear a landscape notch or iPhone Duo's portrait sensor column.
       body: RefreshIndicator(
-        onRefresh: _handleRefresh,
+        onRefresh: ForkMotion.refreshing(_handleRefresh),
         child: SafeArea(top: false, bottom: false, child: content),
       ),
     );

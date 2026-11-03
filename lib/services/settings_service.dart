@@ -897,6 +897,10 @@ class SettingsService extends BaseSharedPreferencesService {
   static const audioPassthrough = _AudioPassthroughPref();
   static const audioNormalization = BoolPref('audio_normalization');
 
+  /// Fork, macOS: send audio to the receiver as Dolby Digital (see
+  /// `PlayerBase.setDolbyEncode`).
+  static const macDolbyEncode = BoolPref('mac_dolby_encode', defaultValue: true);
+
   /// Replaced the `audio_downmix` stereo toggle: on → [AudioChannelLimit.stereo].
   static const audioChannelLimit = LegacyBoolEnumPref<AudioChannelLimit>(
     'audio_channel_limit',
@@ -940,6 +944,17 @@ class SettingsService extends BaseSharedPreferencesService {
 
   static final companionRemoteLastHostAddress = NullableStringPref(
     'companion_remote_last_host_address',
+    transform: _trimEmptyAsNull,
+  );
+
+  /// Fork: the host this phone reconnects to on its own (its client id);
+  /// cleared by a manual disconnect.
+  static final companionRemoteAutoHost = NullableStringPref('companion_remote_auto_host', transform: _trimEmptyAsNull);
+
+  /// Fork: the auto host's last working ip:port, tried directly when its
+  /// beacon isn't heard.
+  static final companionRemoteAutoHostAddress = NullableStringPref(
+    'companion_remote_auto_host_address',
     transform: _trimEmptyAsNull,
   );
 
@@ -1638,6 +1653,8 @@ class SettingsService extends BaseSharedPreferencesService {
     customExternalPlayers,
     watchPartyRelayUrl,
     companionRemoteLastHostAddress,
+    companionRemoteAutoHost,
+    companionRemoteAutoHostAddress,
     rememberedBrightnessLevel,
     refusedVideoCodecs,
     audioOutputDevice,

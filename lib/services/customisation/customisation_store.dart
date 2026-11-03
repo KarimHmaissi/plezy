@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../database/fork_database.dart';
 
@@ -50,6 +51,7 @@ class LocalCustomisationStore implements CustomisationStore {
   @override
   Future<void> writeHomeLayout(List<StoredHomeRow> rows, {required bool curated, required int revision}) =>
       _db.transaction(() async {
+        Customisation.localWrites.value++;
         await _db.delete(_db.homeRows).go();
         await _db.batch((b) {
           b.insertAll(_db.homeRows, [
@@ -74,6 +76,7 @@ class LocalCustomisationStore implements CustomisationStore {
 
   @override
   Future<void> writeComfortPaused(Map<int, String> paused) => _db.transaction(() async {
+    Customisation.localWrites.value++;
     await _db.delete(_db.comfortPausedShows).go();
     await _db.batch((b) {
       b.insertAll(_db.comfortPausedShows, [
@@ -89,6 +92,7 @@ class LocalCustomisationStore implements CustomisationStore {
 
   @override
   Future<void> writeSetting(String key, String? value) async {
+    Customisation.localWrites.value++;
     if (value == null) {
       await (_db.delete(_db.forkSettings)..where((s) => s.key.equals(key))).go();
     } else {
@@ -127,6 +131,7 @@ class LocalCustomisationStore implements CustomisationStore {
 
   @override
   Future<void> importAll(Map<String, Object?> data) => _db.transaction(() async {
+    Customisation.localWrites.value++;
     await _db.delete(_db.homeRows).go();
     await _db.delete(_db.comfortPausedShows).go();
     await _db.delete(_db.shortlistItems).go();
@@ -234,4 +239,24 @@ abstract final class Customisation {
 
   /// Tests: use [store] instead of the on-disk database.
   static void debugSetStore(CustomisationStore? store) => _store = store == null ? null : Future.value(store);
+
+  /// Bumped on every write to this device's own database; a host sends
+  /// connected phones a fresh snapshot after it (see `MirrorHost`).
+  static final ValueNotifier<int> localWrites = ValueNotifier(0);
+
+  /// Bumped when the data was replaced or changed from elsewhere (a phone
+  /// mirroring its TV got a new snapshot; a TV applied a phone's edit), so
+  /// screens holding a copy reload it.
+  static final ValueNotifier<int> changed = ValueNotifier(0);
+
+  /// Whether this is a phone showing a connected TV's data ([useMirror]).
+  static bool isMirror = false;
+
+  /// Phone: read the TV's data from [store] (and send edits to it) instead
+  /// of this device's own database, which stays untouched.
+  static void useMirror(CustomisationStore store) {
+    _store = Future.value(store);
+    isMirror = true;
+    changed.value++;
+  }
 }

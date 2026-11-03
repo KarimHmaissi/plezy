@@ -1,3 +1,5 @@
+import '../utils/platform_detector.dart';
+import '../theme/fork_spacing.dart';
 import 'package:flutter/material.dart';
 import '../utils/desktop_window_padding.dart';
 import '../services/fullscreen_state_manager.dart';
@@ -72,8 +74,16 @@ class DesktopSliverAppBar extends StatelessWidget {
       snap: snap,
       expandedHeight: expandedHeight,
       flexibleSpace: DesktopAppBarHelper.buildAdjustedFlexibleSpace(flexibleSpace),
-      bottom: bottom,
+      // Fork: on phones, air between the top bar and the page's first row
+      // (Plex's rhythm); pages with their own bottom keep it as is.
+      bottom: bottom ?? _phoneHeaderGap(context),
     );
+  }
+
+  static PreferredSizeWidget? _phoneHeaderGap(BuildContext context) {
+    if (!PlatformDetector.isMobile(context)) return null;
+    final gap = ForkSpacing.of(context).headerGap;
+    return PreferredSize(preferredSize: Size.fromHeight(gap), child: SizedBox(height: gap));
   }
 
   /// [SliverAppBar]'s own implied back button bypasses the traffic-light padding,

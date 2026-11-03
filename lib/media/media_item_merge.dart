@@ -132,3 +132,40 @@ List<MediaItem> mergeLibraryCopies(Iterable<MediaItem> current, Iterable<MediaIt
   }
   return byKey.values.toList()..sort(compareLibraryCopies);
 }
+
+/// Fork: the highest bitrate any of [copy]'s versions reports (0 if none).
+int bestCopyBitrate(MediaItem copy) {
+  var best = 0;
+  for (final version in copy.mediaVersions ?? const <MediaVersion>[]) {
+    final bitrate = version.bitrate ?? 0;
+    if (bitrate > best) best = bitrate;
+  }
+  return best;
+}
+
+/// Fork: the copy to open without asking: the highest bitrate, then the
+/// usual order ([compareLibraryCopies]: resolution first). Copies that
+/// [isAvailable] rejects (an offline server) are skipped.
+MediaItem? bestLibraryCopy(Iterable<MediaItem> copies, {bool Function(MediaItem copy)? isAvailable}) {
+  final candidates = [for (final c in copies) if (isAvailable == null || isAvailable(c)) c];
+  if (candidates.isEmpty) return null;
+  candidates.sort((a, b) {
+    final byBitrate = bestCopyBitrate(b).compareTo(bestCopyBitrate(a));
+    return byBitrate != 0 ? byBitrate : compareLibraryCopies(a, b);
+  });
+  return candidates.first;
+}
+
+/// Fork: index of the version Play uses by default: the highest bitrate,
+/// then the highest resolution; 0 when there's nothing to compare.
+int bestVersionIndex(List<MediaVersion>? versions) {
+  if (versions == null || versions.length < 2) return 0;
+  var best = 0;
+  for (var i = 1; i < versions.length; i++) {
+    final a = versions[i];
+    final b = versions[best];
+    final byBitrate = (a.bitrate ?? 0).compareTo(b.bitrate ?? 0);
+    if (byBitrate > 0 || (byBitrate == 0 && (a.height ?? 0) > (b.height ?? 0))) best = i;
+  }
+  return best;
+}

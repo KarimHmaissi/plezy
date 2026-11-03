@@ -69,7 +69,10 @@ void main() {
       expect(ids, contains(NavigationTabId.explore));
       // Explore sits after Live TV, directly before Search.
       expect(ids.indexOf(NavigationTabId.explore), ids.indexOf(NavigationTabId.liveTv) + 1);
-      expect(ids.indexOf(NavigationTabId.explore), ids.indexOf(NavigationTabId.search) - 1);
+      // The AI tab, then History, sit right before Search.
+      expect(ids.indexOf(NavigationTabId.explore), ids.indexOf(NavigationTabId.ai) - 1);
+      expect(ids.indexOf(NavigationTabId.ai), ids.indexOf(NavigationTabId.history) - 1);
+      expect(ids.indexOf(NavigationTabId.history), ids.indexOf(NavigationTabId.search) - 1);
     });
 
     test('Explore is online-only', () {
@@ -87,7 +90,10 @@ void main() {
         hasWatchlist: true,
       ).map((tab) => tab.id).toList();
       expect(ids.indexOf(NavigationTabId.watchlist), ids.indexOf(NavigationTabId.explore) + 1);
-      expect(ids.indexOf(NavigationTabId.watchlist), ids.indexOf(NavigationTabId.search) - 1);
+      // The AI tab, then History, sit right before Search.
+      expect(ids.indexOf(NavigationTabId.watchlist), ids.indexOf(NavigationTabId.ai) - 1);
+      expect(ids.indexOf(NavigationTabId.ai), ids.indexOf(NavigationTabId.history) - 1);
+      expect(ids.indexOf(NavigationTabId.history), ids.indexOf(NavigationTabId.search) - 1);
 
       final offline = NavigationTab.getVisibleTabs(isOffline: true, hasWatchlist: true);
       expect(offline.map((tab) => tab.id), isNot(contains(NavigationTabId.watchlist)));
@@ -103,7 +109,10 @@ void main() {
         hasComfort: true,
       ).map((tab) => tab.id).toList();
       expect(ids.indexOf(NavigationTabId.comfort), ids.indexOf(NavigationTabId.watchlist) + 1);
-      expect(ids.indexOf(NavigationTabId.comfort), ids.indexOf(NavigationTabId.search) - 1);
+      // The AI tab, then History, sit right before Search.
+      expect(ids.indexOf(NavigationTabId.comfort), ids.indexOf(NavigationTabId.ai) - 1);
+      expect(ids.indexOf(NavigationTabId.ai), ids.indexOf(NavigationTabId.history) - 1);
+      expect(ids.indexOf(NavigationTabId.history), ids.indexOf(NavigationTabId.search) - 1);
     });
   });
 }

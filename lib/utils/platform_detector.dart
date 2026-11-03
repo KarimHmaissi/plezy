@@ -334,8 +334,12 @@ class PlatformDetector {
     // and the AVFoundation fallback in the ao list
     // (shared/apple/MpvPlayer/MpvPlayerCoreBase.swift) takes it. 2.14.0 pinned
     // CoreAudio alone, where a declined bitstream silenced playback instead.
+    //
+    // Fork: not on macOS. It never bitstreams there, and each attempt switches
+    // the HDMI output to an AC3 format and back, which re-syncs the link and
+    // can rotate the receiver's channels. Dolby Digital encoding
+    // (SettingsService.macDolbyEncode) takes its place.
     return Platform.isIOS ||
-        Platform.isMacOS ||
         Platform.isWindows ||
         Platform.isLinux ||
         (Platform.isAndroid && isTV());

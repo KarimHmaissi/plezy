@@ -6,9 +6,95 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/companion_remote/lan_discovery_service.dart';
 import 'package:plezy/services/companion_remote/remote_auth_context.dart';
 import 'package:plezy/services/companion_remote/remote_auth_service.dart';
+import 'package:plezy/utils/udp_broadcast_sockets.dart';
 
 void main() {
   group('LanDiscoveryService', () {
+    group('host beacon recovery (fork)', () {
+      Future<int> freePort() async {
+        final reservation = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+        final port = reservation.port;
+        reservation.close();
+        return port;
+      }
+
+      test('does nothing while sockets and addresses still match', () async {
+        final real = await UdpBroadcastSockets.localIPv4Strings();
+        final host = LanDiscoveryService(discoveryPort: await freePort(), listLocalIps: () async => real);
+        final context = _authContext(id: 'context-a', discoveryKey: List<int>.generate(32, (index) => index + 7));
+        await host.startBroadcastingForContexts(
+          contexts: [context],
+          deviceName: 'Mac',
+          platform: 'macOS',
+          wsPort: 52100,
+          ips: real,
+        );
+        try {
+          expect(await host.checkBroadcastHealth(), isFalse);
+        } finally {
+          await host.stopBroadcasting();
+        }
+      });
+
+      test('a forced wake re-binds even when nothing else changed', () async {
+        final real = await UdpBroadcastSockets.localIPv4Strings();
+        final host = LanDiscoveryService(discoveryPort: await freePort(), listLocalIps: () async => real);
+        final context = _authContext(id: 'context-a', discoveryKey: List<int>.generate(32, (index) => index + 9));
+        await host.startBroadcastingForContexts(
+          contexts: [context],
+          deviceName: 'Mac',
+          platform: 'macOS',
+          wsPort: 52100,
+          ips: real,
+        );
+        try {
+          expect(await host.checkBroadcastHealth(reason: 'wake'), isTrue);
+          expect(host.isBroadcasting, isTrue);
+          expect(await host.checkBroadcastHealth(), isFalse);
+        } finally {
+          await host.stopBroadcasting();
+        }
+      });
+
+      test('a stopped host never re-binds', () async {
+        final host = LanDiscoveryService(discoveryPort: await freePort(), listLocalIps: () async => ['192.0.2.99']);
+        expect(await host.checkBroadcastHealth(reason: 'wake'), isFalse);
+      });
+
+      test('re-advertises a new LAN address; a listener sees the move', () async {
+        final context = _authContext(id: 'context-a', discoveryKey: List<int>.generate(32, (index) => index + 11));
+        final listener = await _DiscoveryListener.start([context]);
+        var lan = ['192.0.2.10'];
+        final changes = <List<String>>[];
+        final host = LanDiscoveryService(discoveryPort: listener.service.discoveryPort, listLocalIps: () async => lan)
+          ..onAdvertisedIpsChanged = changes.add;
+        await host.startBroadcastingForContexts(
+          contexts: [context],
+          deviceName: 'Mac',
+          platform: 'macOS',
+          wsPort: 52100,
+          ips: lan,
+        );
+        try {
+          // Real UDP: the beacon reaches a listener on this machine. Some
+          // sandboxes drop broadcasts, so fall back to the advertised state.
+          final heard = await _eventually(() => listener.emissions.isNotEmpty);
+          lan = ['192.0.2.20'];
+          expect(await host.checkBroadcastHealth(), isTrue);
+          expect(host.advertisedIps, ['192.0.2.20']);
+          expect(changes, [
+            ['192.0.2.20'],
+          ]);
+          if (heard) {
+            expect(await _eventually(() => listener.emissions.last.single.ips.contains('192.0.2.20')), isTrue);
+          }
+        } finally {
+          await host.stopBroadcasting();
+          await listener.close();
+        }
+      });
+    });
+
     test('publishes a changed normalized IP set for an existing host', () async {
       final context = _authContext(id: 'context-a', discoveryKey: List<int>.generate(32, (index) => index));
       final listener = await _DiscoveryListener.start([context]);
@@ -271,4 +357,13 @@ Future<void> _waitFor(bool Function() condition) async {
     await Future<void>.delayed(_pollInterval);
   }
   fail('Timed out waiting for LAN discovery behavior');
+}
+
+Future<bool> _eventually(bool Function() condition, {Duration within = const Duration(seconds: 8)}) async {
+  final deadline = DateTime.now().add(within);
+  while (DateTime.now().isBefore(deadline)) {
+    if (condition()) return true;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+  return false;
 }

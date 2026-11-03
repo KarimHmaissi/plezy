@@ -127,6 +127,37 @@ void main() {
       expect(_ids(tabs), isNot(contains(NavigationTabId.settings)));
     });
 
+    test('mobile never gives History a bottom-nav slot, even while it is open', () {
+      for (final current in [NavigationTabId.discover, NavigationTabId.history]) {
+        final tabs = mainScreenBottomNavigationTabs(
+          visibleTabs: allNavigationTabs,
+          isMobile: true,
+          isOffline: false,
+          currentTab: current,
+        );
+        expect(_ids(tabs), isNot(contains(NavigationTabId.history)));
+      }
+    });
+
+    test('mobile bar is Home, Comfort, Explore, Watchlist, AI; Libraries lives in the drawer', () {
+      final visible = allNavigationTabs.where((tab) => tab.id != NavigationTabId.liveTv).toList();
+      for (final current in [NavigationTabId.discover, NavigationTabId.libraries]) {
+        final tabs = mainScreenBottomNavigationTabs(
+          visibleTabs: visible,
+          isMobile: true,
+          isOffline: false,
+          currentTab: current,
+        );
+        expect(_ids(tabs), [
+          NavigationTabId.discover,
+          NavigationTabId.comfort,
+          NavigationTabId.explore,
+          NavigationTabId.watchlist,
+          NavigationTabId.ai,
+        ]);
+      }
+    });
+
     test('mobile offline includes Downloads and Settings', () {
       final offlineTabs = allNavigationTabs
           .where((tab) => tab.id == NavigationTabId.downloads || tab.id == NavigationTabId.settings)
@@ -150,6 +181,25 @@ void main() {
       );
 
       expect(_ids(tabs), contains(NavigationTabId.settings));
+    });
+
+    test('mobile online moves Search and Downloads out of the bar unless open', () {
+      final home = mainScreenBottomNavigationTabs(
+        visibleTabs: allNavigationTabs,
+        isMobile: true,
+        isOffline: false,
+        currentTab: NavigationTabId.discover,
+      );
+      expect(_ids(home), isNot(contains(NavigationTabId.search)));
+      expect(_ids(home), isNot(contains(NavigationTabId.downloads)));
+
+      final search = mainScreenBottomNavigationTabs(
+        visibleTabs: allNavigationTabs,
+        isMobile: true,
+        isOffline: false,
+        currentTab: NavigationTabId.search,
+      );
+      expect(_ids(search), contains(NavigationTabId.search));
     });
 
     test('non-mobile returns all visible tabs unchanged', () {
