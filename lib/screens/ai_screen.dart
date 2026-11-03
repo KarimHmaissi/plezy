@@ -135,6 +135,9 @@ class _PendingAsk {
   /// What the helper is doing, and its answer as it's written.
   String? step;
   String? partial;
+
+  /// The composer this was asked from flies into its tile on closing.
+  Object? heroTag;
 }
 
 /// The AI helper tab: a hello with "Tonight" picks on opening, then any
@@ -583,6 +586,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       return;
     }
     final remote = _thinClient ? context.read<CompanionRemoteProvider>() : null;
+    // The composer's film strip shrinks into the request's tile as it closes.
+    final heroTag = remote == null ? Object() : null;
     // A mood starts afresh rather than following up the conversation.
     final previous = request == null ? List.of(_conversation) : <({String request, AiAnswer answer})>[];
     _PendingAsk? lastFailed;
@@ -596,6 +601,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       posters: [for (final r in _rows.take(6)) ...r.items.take(8)],
       origin: _rectOf(_askKey),
       autoRequest: request,
+      heroTag: heroTag,
       run: (text) async {
         // The composer's send moment, then the answer card takes over: as
         // soon as text streams in, or after [_handoff] at most.
@@ -612,7 +618,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
         // A retry from the composer replaces its failed attempt.
         final failed = lastFailed;
         if (failed != null && mounted) setState(() => _pending.remove(failed));
-        final ask = _PendingAsk(text, previous: previous);
+        final ask = _PendingAsk(text, previous: previous)..heroTag = heroTag;
         final running = _runInBackground(ask);
         final progress = ValueNotifier(0);
         void tick() => progress.value++;
@@ -1059,18 +1065,22 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       String? step,
       bool running,
       String? error,
-      VoidCallback retry,
-    ) => _rowSizedTile(
-      (height, band) => AiAnswerTile(
-        key: key,
-        question: question,
-        headline: partial == null || partial.trim().isEmpty ? null : _firstSentence(partial),
-        step: step ?? t.aiTab.starting,
-        running: running,
-        error: error,
-        height: height,
-        band: band,
-        onTap: error == null ? null : retry,
+      VoidCallback retry, {
+      Object? heroTag,
+    }) => _rowSizedTile(
+      (height, band) => _heroed(
+        heroTag,
+        AiAnswerTile(
+          key: key,
+          question: question,
+          headline: partial == null || partial.trim().isEmpty ? null : _firstSentence(partial),
+          step: step ?? t.aiTab.starting,
+          running: running,
+          error: error,
+          height: height,
+          band: band,
+          onTap: error == null ? null : retry,
+        ),
       ),
     );
     if (_thinClient) {
@@ -1100,9 +1110,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
           ask.error == null,
           ask.error == null ? null : (ask.error!.isEmpty ? t.aiTab.noPicks : ask.error),
           () => unawaited(_runInBackground(ask)),
+          heroTag: ask.heroTag,
         ),
     ];
   }
+
+  static Widget _heroed(Object? tag, Widget tile) =>
+      tag == null ? tile : Hero(tag: tag, flightShuttleBuilder: AiComposer.flight, child: tile);
 
   /// The hairline between answer blocks; with the row's own bottom gap it
   /// leaves about 48 dp between one block's posters and the next title.

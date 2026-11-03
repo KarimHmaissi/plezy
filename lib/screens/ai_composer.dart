@@ -55,7 +55,41 @@ class AiComposer extends StatefulWidget {
     this.chips,
     this.autoRequest,
     this.notesTitle,
+    this.heroTag,
   });
+
+  /// Shared with the request's tile on the AI page: the film strip shrinks
+  /// into it as the composer closes.
+  final Object? heroTag;
+
+  /// The flight between the film strip and the tile: one fades into the
+  /// other as it moves and resizes.
+  static Widget flight(
+    BuildContext context,
+    Animation<double> animation,
+    HeroFlightDirection direction,
+    BuildContext fromContext,
+    BuildContext toContext,
+  ) {
+    final from = fromContext.widget as Hero, to = toContext.widget as Hero;
+    final strip = direction == HeroFlightDirection.pop ? from : to;
+    final tile = direction == HeroFlightDirection.pop ? to : from;
+    // Toward the tile as the composer closes.
+    final toward = CurvedAnimation(
+      parent: direction == HeroFlightDirection.pop ? ReverseAnimation(animation) : animation,
+      curve: Curves.easeInOutCubic,
+    );
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        FadeTransition(
+          opacity: ReverseAnimation(toward),
+          child: FittedBox(fit: BoxFit.contain, child: strip.child),
+        ),
+        FadeTransition(opacity: toward, child: tile.child),
+      ],
+    );
+  }
 
   /// Sent as soon as the composer opens (Previously on), skipping the input.
   final String? autoRequest;
@@ -91,6 +125,7 @@ class AiComposer extends StatefulWidget {
     List<AiComposerChip>? chips,
     String? autoRequest,
     String? notesTitle,
+    Object? heroTag,
 
     /// Where the Ask button is, in global coordinates (unused since the
     /// iris was replaced by a plain rise; kept for callers).
@@ -111,6 +146,7 @@ class AiComposer extends StatefulWidget {
           chips: chips,
           autoRequest: autoRequest,
           notesTitle: notesTitle,
+          heroTag: heroTag,
         ),
         transitionsBuilder: (context, animation, _, child) {
           if (ForkMotion.reduceMotion(context)) return FadeTransition(opacity: animation, child: child);
@@ -1026,6 +1062,10 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     );
   }
 
+  /// The film strip, as the hero that flies into the request's tile.
+  static Widget _strip(Object? tag, Widget strip) =>
+      tag == null ? strip : Hero(tag: tag, flightShuttleBuilder: AiComposer.flight, child: strip);
+
   Widget _thinkingView(Size size, bool isTv, bool wide) {
     final theme = Theme.of(context);
     final media = MediaQuery.of(context);
@@ -1082,24 +1122,27 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
             ),
           ),
           SizedBox(height: isTv ? 28 : 20),
-          AnimatedBuilder(
-            animation: _judder,
-            builder: (context, child) {
-              final v = _judder.value;
-              // A decaying shudder, as if the film caught in the gate.
-              final dx = _judder.isAnimating ? math.sin(v * math.pi * 9) * 14 * (1 - v) : 0.0;
-              return Transform.translate(offset: Offset(dx, 0), child: child);
-            },
-            child: _FilmStrip(
-              items: widget.posters,
-              position: _stripPos,
-              frameW: frameW,
-              frameH: frameH,
-              pitch: _pitch,
-              pickSlot: _pickSlot,
-              pick: pick,
-              flash: _flash,
-              gate: jam != null ? error : (_landed ? tk.accent : tk.text.withValues(alpha: 0.7)),
+          _strip(
+            jam == null ? widget.heroTag : null,
+            AnimatedBuilder(
+              animation: _judder,
+              builder: (context, child) {
+                final v = _judder.value;
+                // A decaying shudder, as if the film caught in the gate.
+                final dx = _judder.isAnimating ? math.sin(v * math.pi * 9) * 14 * (1 - v) : 0.0;
+                return Transform.translate(offset: Offset(dx, 0), child: child);
+              },
+              child: _FilmStrip(
+                items: widget.posters,
+                position: _stripPos,
+                frameW: frameW,
+                frameH: frameH,
+                pitch: _pitch,
+                pickSlot: _pickSlot,
+                pick: pick,
+                flash: _flash,
+                gate: jam != null ? error : (_landed ? tk.accent : tk.text.withValues(alpha: 0.7)),
+              ),
             ),
           ),
           SizedBox(height: isTv ? 28 : 20),

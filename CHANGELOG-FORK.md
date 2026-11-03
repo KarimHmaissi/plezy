@@ -142,6 +142,10 @@ Details of each are in the dated entries below.
   (`HubSection.staggerIn`, `ForkEntrance.play`).
 - **Pull to refresh** in the app's own colours, without Material's raised
   accent disc.
+- **Ask shrinks into its tile:** as the composer closes, its film strip
+  flies down and resizes into the request's working tile on the AI page,
+  fading into it (a `Hero` per ask, `AiComposer.flight`). Touch screens
+  running their own AI.
 
 ### Smoothness: no more jumping while things load
 - Measured on the Galaxy Fold (120 Hz) with a profile build: scrolling
