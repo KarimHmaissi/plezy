@@ -22,7 +22,9 @@ The AI helper's own knowledge, kept apart from Plezy's core:
 | `tasteSummary` | `taste_summary.dart` | The user's watching as compact text (recent, loved, didn't stick, genres) for the helper's first prompt, cached until the next sync |
 | `BrainWorker` | `lib/services/brain/brain_worker.dart` | The brain's own isolate: embedding (tokenising, hashing, ONNX) and vector search, on its own connection. Warmed 30 s after start when nothing plays |
 
-Runs on hosts only (Mac, PC, Android TV); a phone mirroring a host asks it.
+Runs on every device that runs its own AI (Mac, PC, Android TV, and phones
+by default); a phone set to mirror a TV asks the TV. Phones download the
+model on Wi-Fi only.
 Nothing heavy runs on the app's isolate: the worker embeds and searches,
 and grouping the history and writing profiles run with `Isolate.run` on
 connections of their own (WAL, `busy_timeout`). The debug op `syncLag`

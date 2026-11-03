@@ -62,4 +62,18 @@ void main() {
     expect(AiKeyReceiver.isPrivate(InternetAddress('172.32.1.1')), isFalse);
     expect(AiKeyReceiver.isPrivate(InternetAddress('8.8.8.8')), isFalse);
   });
+
+  test('picks the Wi-Fi address over a private mobile data address', () {
+    InternetAddress a(String ip) => InternetAddress(ip);
+    expect(
+      AiKeyReceiver.pickLanAddress([
+        (name: 'rmnet_data1', address: a('10.84.2.7')),
+        (name: 'wlan0', address: a('192.168.1.23')),
+      ])?.address,
+      '192.168.1.23',
+    );
+    expect(AiKeyReceiver.pickLanAddress([(name: 'rmnet_data1', address: a('10.84.2.7'))]), isNull);
+    expect(AiKeyReceiver.pickLanAddress([(name: 'bridge0', address: a('172.20.0.1'))])?.address, '172.20.0.1');
+    expect(AiKeyReceiver.pickLanAddress([(name: 'wlan0', address: a('100.70.1.2'))]), isNull);
+  });
 }

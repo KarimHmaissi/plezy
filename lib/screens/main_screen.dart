@@ -21,6 +21,7 @@ import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_remote_asks.dart';
 import '../services/companion_remote/host_media_notification.dart';
 import '../services/companion_remote/mirror_sync.dart';
+import '../services/companion_remote/phone_mode.dart';
 import '../services/trackers/trakt/trakt_client.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../utils/media_navigation_helper.dart';
@@ -1006,7 +1007,8 @@ class _MainScreenState extends State<MainScreen>
     }
     if (!_autoConnectChecked && PlatformDetector.isMobile(context)) {
       _autoConnectChecked = true;
-      unawaited(MirrorClient.instance.start(context.read<CompanionRemoteProvider>()));
+      // On its own (the default) or mirroring a connected TV.
+      unawaited(PhoneMode.start(context.read<CompanionRemoteProvider>()));
       HostMediaNotification.instance.start(
         context.read<CompanionRemoteProvider>(),
         clientFor: (id) => context.tryGetMediaClientWithFallback(serverIdOrNull(id)),

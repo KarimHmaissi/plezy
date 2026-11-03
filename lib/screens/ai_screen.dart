@@ -20,6 +20,7 @@ import '../navigation/main_screen_scope.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../services/companion_remote/phone_mode.dart';
 import '../services/ai/ai_remote_asks.dart';
 import '../media/media_kind.dart';
 import '../utils/media_navigation_helper.dart';
@@ -192,6 +193,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     AiRemoteAsks.landed.addListener(_onLanded);
     Customisation.changed.addListener(_onDataChanged);
     RemoteAiSession.instance.addListener(_onRemoteAsks);
+    PhoneMode.changed.addListener(_onPhoneModeChanged);
     unawaited(_start());
     WidgetsBinding.instance.addPostFrameCallback((_) => _takeMoreLikeThis());
   }
@@ -253,6 +255,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     AiRemoteAsks.landed.removeListener(_onLanded);
     Customisation.changed.removeListener(_onDataChanged);
     RemoteAiSession.instance.removeListener(_onRemoteAsks);
+    PhoneMode.changed.removeListener(_onPhoneModeChanged);
     for (final r in _taps.values) {
       r.dispose();
     }
@@ -271,6 +274,20 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       // Mirroring (or its connection) changed; the build picks the layout.
     }
     unawaited(_loadHistory());
+  }
+
+  /// The phone switched between mirroring its TV and running its own AI:
+  /// start again from the new data and key.
+  void _onPhoneModeChanged() {
+    if (!mounted) return;
+    setState(() {
+      _hasKey = null;
+      _briefingRow = null;
+      _tonightRow = null;
+      _tonightCache = null;
+      _historyLoaded = false;
+    });
+    unawaited(_start());
   }
 
   void _onRemoteAsks() {
@@ -1332,11 +1349,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     }
   }
 
-  /// Phones don't run the AI themselves: requests go to the TV app they're
-  /// connected to (its key, index and history).
-  static bool get _thinClient =>
-      !PlatformDetector.isTV() &&
-      (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+  /// A phone set to mirror its TV doesn't run the AI itself: requests go to
+  /// the TV app it's connected to (its key, index and history).
+  static bool get _thinClient => PhoneMode.mirrorsTv;
 
   @override
   Widget build(BuildContext context) {

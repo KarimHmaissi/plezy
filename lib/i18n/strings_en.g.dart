@@ -3467,6 +3467,15 @@ class Translations$ai$en {
 	/// en: 'Anthropic API key for the AI helper'
 	String get settingsSubtitle => 'Anthropic API key for the AI helper';
 
+	/// en: 'Use the TV's AI'
+	String get mirrorTv => 'Use the TV\'s AI';
+
+	/// en: 'Requests, answers, Home and lists come from the TV this phone is connected to'
+	String get mirrorTvOn => 'Requests, answers, Home and lists come from the TV this phone is connected to';
+
+	/// en: 'This phone runs the AI on its own, with its own key, library index and watch history'
+	String get mirrorTvOff => 'This phone runs the AI on its own, with its own key, library index and watch history';
+
 	/// en: 'The AI helper uses your own Anthropic API key. It's stored encrypted on this device only, never shown in full, and never included in exports or backups.'
 	String get keyExplainer => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.';
 
@@ -3512,14 +3521,14 @@ class Translations$ai$en {
 	/// en: 'Receive key from another device'
 	String get receiveKey => 'Receive key from another device';
 
-	/// en: 'Open a one-time page on your home network and paste the key there from a phone or laptop'
-	String get receiveKeyDescription => 'Open a one-time page on your home network and paste the key there from a phone or laptop';
+	/// en: 'Open a one-time page on your home network and paste the key there from a computer or another device'
+	String get receiveKeyDescription => 'Open a one-time page on your home network and paste the key there from a computer or another device';
 
 	/// en: 'Send the key from another device'
 	String get receiveTitle => 'Send the key from another device';
 
-	/// en: 'On a phone or laptop on the same Wi-Fi, open:'
-	String get receiveStep1 => 'On a phone or laptop on the same Wi-Fi, open:';
+	/// en: 'On a computer or another device on the same Wi-Fi, open:'
+	String get receiveStep1 => 'On a computer or another device on the same Wi-Fi, open:';
 
 	/// en: 'Then enter this code with the key:'
 	String get receiveStep2 => 'Then enter this code with the key:';
@@ -10435,6 +10444,9 @@ extension on Translations {
 			'aiTab.tonightConfirmBody' => 'Three fresh cards, using one small AI call.',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
+			'ai.mirrorTv' => 'Use the TV\'s AI',
+			'ai.mirrorTvOn' => 'Requests, answers, Home and lists come from the TV this phone is connected to',
+			'ai.mirrorTvOff' => 'This phone runs the AI on its own, with its own key, library index and watch history',
 			'ai.keyExplainer' => 'The AI helper uses your own Anthropic API key. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
 			'ai.pasteKey' => 'Paste API key',
 			'ai.replaceKey' => 'Replace API key',
@@ -10450,9 +10462,9 @@ extension on Translations {
 			'ai.removeKeyTitle' => 'Remove the API key?',
 			'ai.removeKeyMessage' => 'The AI helper stops working on this device until a key is added again.',
 			'ai.receiveKey' => 'Receive key from another device',
-			'ai.receiveKeyDescription' => 'Open a one-time page on your home network and paste the key there from a phone or laptop',
+			'ai.receiveKeyDescription' => 'Open a one-time page on your home network and paste the key there from a computer or another device',
 			'ai.receiveTitle' => 'Send the key from another device',
-			'ai.receiveStep1' => 'On a phone or laptop on the same Wi-Fi, open:',
+			'ai.receiveStep1' => 'On a computer or another device on the same Wi-Fi, open:',
 			'ai.receiveStep2' => 'Then enter this code with the key:',
 			'ai.receiveExpiry' => 'This page works once and closes after 5 minutes or 3 wrong codes.',
 			'ai.receiveNoNetwork' => 'This device isn\'t on a home network, so the key can\'t be sent from another device',
@@ -10813,11 +10825,11 @@ extension on Translations {
 			'comfort.notConnectedMessage' => 'Comfort shows live in a Trakt list. Connect Trakt in Settings to use them',
 			'comfort.loadFailed' => 'Couldn\'t load your Comfort Shows list from Trakt',
 			'comfort.updateFailed' => 'Couldn\'t update your Comfort Shows list',
+			_ => null,
+		} ?? switch (path) {
 			'comfort.picking' => 'Picking an episode…',
 			'comfort.nothingToPlay' => 'None of the shows in the mix are on your servers',
 			'comfort.noEpisodes' => 'No episodes of this show are on your server',
-			_ => null,
-		} ?? switch (path) {
 			'comfort.allPaused' => 'Every show is paused. Turn some on in Configure',
 			'comfort.play' => 'Play',
 			'comfort.pickAgain' => 'Pick again',
@@ -11327,11 +11339,11 @@ extension on Translations {
 			'downloads.downloadQueued' => 'Download queued',
 			'downloads.downloadResumed' => 'Download resumed',
 			'downloads.serverErrorBitrate' => 'Server error: file may exceed the remote bitrate limit',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.storageFull' => 'Downloads stopped to protect available storage. Free some space or choose another download location, then retry.',
 			'downloads.storageUnavailable' => 'Downloads stopped because available storage could not be checked. Check the download location, then retry.',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.downloadDeleted' => 'Download deleted',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
 			'downloads.deleteCollectionDownloads' => 'Delete downloads',
@@ -11841,11 +11853,11 @@ extension on Translations {
 			'addServer.quickConnectNotJson' => 'The Quick Connect response was not valid JSON',
 			'addServer.quickConnectMissingFields' => 'The Quick Connect response is missing a code or secret',
 			'addServer.quickConnectPollRejected' => 'Quick Connect polling was rejected by the server',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.serverTimedOut' => 'The server did not respond in time',
 			'addServer.responseNotJson' => 'The server response was not valid JSON',
 			'addServer.responseMissingIdentity' => ({required Object product}) => 'The response is missing an ID or server name — is this a ${product} server?',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.probeFailed' => ({required Object error}) => 'Could not reach the server: ${error}',
 			'addServer.enterAtLeastOneUrl' => ({required Object product}) => 'Enter at least one ${product} server URL',
 			'addServer.noReachableServer' => ({required Object product}) => 'No reachable ${product} server was found',

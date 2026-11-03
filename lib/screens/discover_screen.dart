@@ -26,6 +26,7 @@ import '../widgets/optimized_media_image.dart' show ClearLogoImage, blurArtwork;
 import '../widgets/toolbar_scrim.dart';
 import '../widgets/system_clock.dart';
 import '../providers/discover_provider.dart';
+import '../services/companion_remote/phone_mode.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/watch_state_store.dart';
 import '../widgets/hub_section.dart';
@@ -586,25 +587,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         clientFor: servers.getClientForServer,
         trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
       );
-      // A phone is a remote for the TV's AI: no index of its own.
-      if (PlatformDetector.isMobile(context)) return;
-      List<IndexSource> plexSources() => [
-        for (final id in servers.onlineServerIds)
-          if (servers.getClientForServer(ServerId(id)) case final PlexClient client) PlexIndexSource(client),
-      ];
-      // The history brain follows the index: it reads titles from it.
-      unawaited(
-        LibraryIndex.instance
-            .start(plexSources)
-            .whenComplete(
-              () => HistoryBrain.instance.start(
-                plex: plexSources,
-                trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
-              ),
-            ),
-      );
-      BrainDebug.register();
+      _startOwnAi();
     });
+    // A phone switched to running its own AI: start its index now.
+    PhoneMode.changed.addListener(_startOwnAi);
     unawaited(_homePins.ensureLoaded());
     _onCatalogSourcesChanged();
     _startAutoScroll();
@@ -762,6 +748,29 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     )(node, event);
   }
 
+  /// The library index and the history brain, on every device that runs
+  /// its own AI (a phone mirroring its TV asks the TV instead).
+  void _startOwnAi() {
+    if (!mounted || !PhoneMode.runsOwnAi || _indexStartTimer?.isActive == true) return;
+    final servers = context.read<MultiServerProvider>();
+    List<IndexSource> plexSources() => [
+      for (final id in servers.onlineServerIds)
+        if (servers.getClientForServer(ServerId(id)) case final PlexClient client) PlexIndexSource(client),
+    ];
+    // The history brain follows the index: it reads titles from it.
+    unawaited(
+      LibraryIndex.instance
+          .start(plexSources)
+          .whenComplete(
+            () => HistoryBrain.instance.start(
+              plex: plexSources,
+              trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
+            ),
+          ),
+    );
+    BrainDebug.register();
+  }
+
   @override
   void dispose() {
     _discover.removeListener(_onDiscoverChanged);
@@ -770,6 +779,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     AiHistory.replaced.removeListener(_onAiRowReplaced);
     _rowRetryTimer?.cancel();
     _indexStartTimer?.cancel();
+    PhoneMode.changed.removeListener(_startOwnAi);
     WidgetsBinding.instance.removeObserver(this);
     _autoScrollTimer?.cancel();
     _indicatorTimer?.cancel();

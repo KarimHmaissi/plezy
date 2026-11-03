@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/catalog_sources_provider.dart';
+import '../../services/companion_remote/phone_mode.dart';
 import '../../services/ai/ai_eval.dart';
 import '../../services/ai/ai_key_receiver.dart';
 import '../../services/ai/ai_spend.dart';
@@ -216,110 +217,131 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final hint = _keyHint;
+    final mirrorsTv = PhoneMode.mirrorsTv;
     return FocusedScrollScaffold(
       title: Text(t.ai.settingsTitle),
       slivers: [
         SliverList.list(
           children: [
-            ListTile(subtitle: Text(t.ai.keyExplainer)),
-            FocusableListTile(
-              autofocus: true,
-              leading: const AppIcon(Symbols.key_rounded, fill: 1),
-              title: Text(hint == null ? t.ai.pasteKey : t.ai.replaceKey),
-              subtitle: Text(
-                !_loaded
-                    ? '…'
-                    : hint == null
-                    ? t.ai.noKey
-                    : t.ai.keySet(hint: hint),
-              ),
-              onTap: _busy ? null : () => unawaited(_paste()),
-            ),
-            FocusableListTile(
-              leading: const AppIcon(Symbols.devices_rounded, fill: 1),
-              title: Text(t.ai.receiveKey),
-              subtitle: Text(t.ai.receiveKeyDescription),
-              onTap: _busy ? null : () => unawaited(_receive()),
-            ),
-            if (hint != null) ...[
-              FocusableListTile(
-                leading: const AppIcon(Symbols.check_circle_rounded, fill: 1),
-                title: Text(t.ai.testKey),
-                onTap: _busy ? null : () => unawaited(_test()),
-              ),
-              FocusableListTile(
-                leading: const AppIcon(Symbols.delete_rounded, fill: 1),
-                title: Text(t.ai.removeKey),
-                onTap: _busy ? null : () => unawaited(_remove()),
-              ),
-            ],
-            if (hint != null)
-              FocusableListTile(
-                leading: const AppIcon(Symbols.auto_awesome_rounded, fill: 1),
-                title: Text(t.ai.tryRequest),
-                subtitle: Text(t.ai.tryRequestDescription),
-                onTap: () => unawaited(_try()),
-              ),
-            if (hint != null && kDebugMode)
-              FocusableListTile(
-                leading: const AppIcon(Symbols.science_rounded, fill: 1),
-                title: const Text('Run eval (prompt list × Sonnet)'),
-                subtitle: Text(_evalStatus ?? AiEval.promptsFile),
-                onTap: _evalStatus != null && !_evalStatus!.startsWith('Done') ? null : () => unawaited(_eval()),
-              ),
-            if (hint != null)
+            if (PhoneMode.isHandheld)
               FocusableSwitchListTile(
-                secondary: const AppIcon(Symbols.autorenew_rounded, fill: 1),
-                title: Text(t.ai.autoRefreshTitle),
-                subtitle: Text(t.ai.autoRefreshSubtitle),
-                value: _autoRefresh,
-                onChanged: (v) async {
-                  setState(() => _autoRefresh = v);
-                  await AiHomeRefresher.setEnabled(v);
-                },
-              ),
-            if (hint != null && kDebugMode)
-              FocusableListTile(
-                leading: const AppIcon(Symbols.science_rounded, fill: 1),
-                title: const Text('Auto-refresh Home AI rows now (Haiku)'),
-                subtitle: Text(_autoRefreshStatus ?? 'Ignores the 12-hour wait'),
-                onTap: _autoRefreshStatus == 'Refreshing…'
+                secondary: const AppIcon(Symbols.tv_rounded, fill: 1),
+                title: Text(t.ai.mirrorTv),
+                subtitle: Text(mirrorsTv ? t.ai.mirrorTvOn : t.ai.mirrorTvOff),
+                value: mirrorsTv,
+                onChanged: _busy
                     ? null
-                    : () async {
-                        setState(() => _autoRefreshStatus = 'Refreshing…');
-                        final before = (await AiSpend.month()).autoRefreshDollars;
-                        final n = await AiHomeRefresher.check(force: true);
-                        final cost = (await AiSpend.month()).autoRefreshDollars - before;
-                        if (mounted) {
-                          setState(() => _autoRefreshStatus = 'Done: $n rows, \$${cost.toStringAsFixed(4)}');
-                        }
+                    : (v) async {
+                        setState(() => _busy = true);
+                        await PhoneMode.setMirrorsTv(v);
+                        if (!mounted) return;
+                        setState(() => _busy = false);
+                        await _load();
                       },
               ),
-            FutureBuilder(
-              future: AiSpend.month(),
-              builder: (context, snap) => ListTile(
-                title: Text(t.ai.spendTitle, style: Theme.of(context).textTheme.titleMedium),
-                subtitle: Text(
-                  snap.data == null
-                      ? '…'
-                      : [
-                          t.ai.spendThisMonth(
-                            dollars: snap.data!.dollars.toStringAsFixed(2),
-                            requests: snap.data!.requests,
-                          ),
-                          if (snap.data!.autoRefreshDollars > 0)
-                            t.ai.spendAutoRefresh(dollars: snap.data!.autoRefreshDollars.toStringAsFixed(2)),
-                        ].join(' · '),
-                ),
-              ),
-            ),
-            ListTile(
-              title: Text(t.ai.modelsTitle, style: Theme.of(context).textTheme.titleMedium),
-              subtitle: Text(t.ai.modelsDescription),
-            ),
+            if (!mirrorsTv) ..._ownAiTiles(hint),
           ],
         ),
       ],
     );
+  }
+
+  /// Key, spend and the rest: for a device that runs its own AI.
+  List<Widget> _ownAiTiles(String? hint) {
+    return [
+      ListTile(subtitle: Text(t.ai.keyExplainer)),
+      FocusableListTile(
+        autofocus: !PhoneMode.isHandheld,
+        leading: const AppIcon(Symbols.key_rounded, fill: 1),
+        title: Text(hint == null ? t.ai.pasteKey : t.ai.replaceKey),
+        subtitle: Text(
+          !_loaded
+              ? '…'
+              : hint == null
+              ? t.ai.noKey
+              : t.ai.keySet(hint: hint),
+        ),
+        onTap: _busy ? null : () => unawaited(_paste()),
+      ),
+      FocusableListTile(
+        leading: const AppIcon(Symbols.devices_rounded, fill: 1),
+        title: Text(t.ai.receiveKey),
+        subtitle: Text(t.ai.receiveKeyDescription),
+        onTap: _busy ? null : () => unawaited(_receive()),
+      ),
+      if (hint != null) ...[
+        FocusableListTile(
+          leading: const AppIcon(Symbols.check_circle_rounded, fill: 1),
+          title: Text(t.ai.testKey),
+          onTap: _busy ? null : () => unawaited(_test()),
+        ),
+        FocusableListTile(
+          leading: const AppIcon(Symbols.delete_rounded, fill: 1),
+          title: Text(t.ai.removeKey),
+          onTap: _busy ? null : () => unawaited(_remove()),
+        ),
+      ],
+      if (hint != null)
+        FocusableListTile(
+          leading: const AppIcon(Symbols.auto_awesome_rounded, fill: 1),
+          title: Text(t.ai.tryRequest),
+          subtitle: Text(t.ai.tryRequestDescription),
+          onTap: () => unawaited(_try()),
+        ),
+      if (hint != null && kDebugMode)
+        FocusableListTile(
+          leading: const AppIcon(Symbols.science_rounded, fill: 1),
+          title: const Text('Run eval (prompt list × Sonnet)'),
+          subtitle: Text(_evalStatus ?? AiEval.promptsFile),
+          onTap: _evalStatus != null && !_evalStatus!.startsWith('Done') ? null : () => unawaited(_eval()),
+        ),
+      if (hint != null)
+        FocusableSwitchListTile(
+          secondary: const AppIcon(Symbols.autorenew_rounded, fill: 1),
+          title: Text(t.ai.autoRefreshTitle),
+          subtitle: Text(t.ai.autoRefreshSubtitle),
+          value: _autoRefresh,
+          onChanged: (v) async {
+            setState(() => _autoRefresh = v);
+            await AiHomeRefresher.setEnabled(v);
+          },
+        ),
+      if (hint != null && kDebugMode)
+        FocusableListTile(
+          leading: const AppIcon(Symbols.science_rounded, fill: 1),
+          title: const Text('Auto-refresh Home AI rows now (Haiku)'),
+          subtitle: Text(_autoRefreshStatus ?? 'Ignores the 12-hour wait'),
+          onTap: _autoRefreshStatus == 'Refreshing…'
+              ? null
+              : () async {
+                  setState(() => _autoRefreshStatus = 'Refreshing…');
+                  final before = (await AiSpend.month()).autoRefreshDollars;
+                  final n = await AiHomeRefresher.check(force: true);
+                  final cost = (await AiSpend.month()).autoRefreshDollars - before;
+                  if (mounted) {
+                    setState(() => _autoRefreshStatus = 'Done: $n rows, \$${cost.toStringAsFixed(4)}');
+                  }
+                },
+        ),
+      FutureBuilder(
+        future: AiSpend.month(),
+        builder: (context, snap) => ListTile(
+          title: Text(t.ai.spendTitle, style: Theme.of(context).textTheme.titleMedium),
+          subtitle: Text(
+            snap.data == null
+                ? '…'
+                : [
+                    t.ai.spendThisMonth(dollars: snap.data!.dollars.toStringAsFixed(2), requests: snap.data!.requests),
+                    if (snap.data!.autoRefreshDollars > 0)
+                      t.ai.spendAutoRefresh(dollars: snap.data!.autoRefreshDollars.toStringAsFixed(2)),
+                  ].join(' · '),
+          ),
+        ),
+      ),
+      ListTile(
+        title: Text(t.ai.modelsTitle, style: Theme.of(context).textTheme.titleMedium),
+        subtitle: Text(t.ai.modelsDescription),
+      ),
+    ];
   }
 }

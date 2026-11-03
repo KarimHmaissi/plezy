@@ -22,7 +22,8 @@ class ModelFile {
 }
 
 /// Fork: bge-small-en-v1.5 (384 dimensions) as ONNX, downloaded once to the
-/// app's support folder on a host (Mac, PC, TV); phones never need it.
+/// app's support folder on a device that runs its own AI (Mac, PC, TV, or a
+/// phone on its own; phones wait for Wi-Fi to fetch it).
 abstract final class BgeSmallModel {
   static const String _base =
       'https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55';
@@ -39,6 +40,16 @@ abstract final class BgeSmallModel {
     'd241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66',
     711396,
   );
+
+  /// Whether both files are already in [folder] (by size; [ensure] checks
+  /// their checksums before use).
+  static Future<bool> isDownloaded(Directory folder) async {
+    for (final f in [model, tokenizer]) {
+      final file = File(p.join(folder.path, f.name));
+      if (!await file.exists() || await file.length() != f.bytes) return false;
+    }
+    return true;
+  }
 
   /// The model files in [folder], downloading any that are missing or
   /// don't match their checksum.

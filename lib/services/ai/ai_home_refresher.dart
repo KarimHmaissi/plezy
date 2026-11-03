@@ -61,7 +61,8 @@ abstract final class AiHomeRefresher {
     _running = true;
     var refreshed = 0;
     try {
-      if (!await enabled() || await AiKeyStore.read() == null) return 0;
+      // A phone mirroring its TV leaves refreshing to the TV.
+      if (Customisation.isMirror || !await enabled() || await AiKeyStore.read() == null) return 0;
       await HomePinsController.instance.ensureLoaded();
       final prefix = HomeRowIds.ai('');
       final ids = [

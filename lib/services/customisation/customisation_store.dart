@@ -259,4 +259,12 @@ abstract final class Customisation {
     isMirror = true;
     changed.value++;
   }
+
+  /// Phone: back to this device's own database after mirroring.
+  static void useLocal() {
+    if (!isMirror) return;
+    _store = null;
+    isMirror = false;
+    changed.value++;
+  }
 }

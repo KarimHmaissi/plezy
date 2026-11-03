@@ -60,16 +60,32 @@ class AiKeyReceiver {
     return receiver;
   }
 
-  /// This device's first private IPv4 address (10/8, 172.16/12, 192.168/16).
+  /// This device's private IPv4 address (10/8, 172.16/12, 192.168/16) on
+  /// the home network: Wi-Fi or Ethernet first. A phone's mobile data link
+  /// can have a private address too, which nothing at home could reach.
   static Future<InternetAddress?> privateLanAddress() async {
     final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
-    for (final interface in interfaces) {
-      for (final address in interface.addresses) {
-        if (isPrivate(address)) return address;
-      }
-    }
-    return null;
+    return pickLanAddress([
+      for (final interface in interfaces)
+        for (final address in interface.addresses) (name: interface.name, address: address),
+    ]);
   }
+
+  @visibleForTesting
+  static InternetAddress? pickLanAddress(List<({String name, InternetAddress address})> candidates) {
+    final usable = [
+      for (final c in candidates)
+        if (isPrivate(c.address) && !_mobileOrTunnel.hasMatch(c.name)) c,
+    ];
+    final lan = usable.where((c) => _lan.hasMatch(c.name)).firstOrNull;
+    return (lan ?? usable.firstOrNull)?.address;
+  }
+
+  /// Wi-Fi and Ethernet interface names (Android, Linux, macOS, Windows).
+  static final RegExp _lan = RegExp(r'^(wlan|wlp|wl|en|eth|Wi-?Fi|Ethernet)', caseSensitive: false);
+
+  /// Mobile data and VPN interfaces: never the home network.
+  static final RegExp _mobileOrTunnel = RegExp(r'^(rmnet|ccmni|pdp|v4-|clat|tun|ppp|ipsec|utun|dummy)');
 
   static bool isPrivate(InternetAddress address) {
     if (address.type != InternetAddressType.IPv4) return false;

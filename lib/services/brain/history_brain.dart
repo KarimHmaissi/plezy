@@ -3,14 +3,17 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:plezy_brain/plezy_brain.dart';
 
 import '../../utils/app_logger.dart';
+import '../../utils/connectivity_link_type.dart';
 import '../comfort/comfort_shows_controller.dart';
 import '../companion_remote/host_media_notification.dart' show LocalMediaSession;
+import '../companion_remote/phone_mode.dart';
 import '../customisation/customisation_store.dart';
 import '../history/history_models.dart';
 import '../history/history_service.dart';
@@ -73,11 +76,11 @@ typedef HistoryBrainReport = ({
   Duration took,
 });
 
-/// Fork: the "watch history brain" on a host (Mac, PC, TV). Turns the
+/// Fork: the "watch history brain" on a host (Mac, PC, TV, phone). Turns the
 /// merged Plex + Trakt history and the library index into a [BrainStore]
 /// of title profiles with embeddings, kept up to date as watches arrive, and
-/// answers the AI helper's history questions from it. Phones mirror a host
-/// and never run this.
+/// answers the AI helper's history questions from it. A phone runs it too,
+/// unless it mirrors a TV (see `PhoneMode`).
 ///
 /// Read-only everywhere: Plex is read through the library index and the
 /// History page's cache; Trakt only for details of titles not on the
@@ -166,7 +169,7 @@ class HistoryBrain {
   Timer? _warmTimer;
 
   Future<void> _warm() async {
-    if (LocalMediaSession.active.value) {
+    if (LocalMediaSession.active.value || !await _modelAllowed()) {
       _warmTimer = Timer(const Duration(minutes: 5), _warm);
       return;
     }
@@ -176,6 +179,21 @@ class HistoryBrain {
       appLogger.d('Brain: warmed in ${DateTime.now().difference(started).inMilliseconds} ms');
     } catch (e) {
       appLogger.d('Brain: warm-up failed', error: e);
+    }
+  }
+
+  /// Whether the embedding model may be used now: it's already downloaded,
+  /// or this device isn't a phone on mobile data only (it's 66 MB).
+  Future<bool> _modelAllowed() async {
+    if (!PhoneMode.isHandheld) return true;
+    final dir = Directory(p.join((await _folder()).path, 'models', 'bge-small-en-v1.5'));
+    if (await BgeSmallModel.isDownloaded(dir)) return true;
+    try {
+      final allowed = !(await Connectivity().checkConnectivity()).isCellularOnly;
+      if (!allowed) appLogger.d('Brain: waiting for Wi-Fi to download the model');
+      return allowed;
+    } catch (_) {
+      return true;
     }
   }
 
@@ -324,7 +342,12 @@ class HistoryBrain {
       store.reload();
       final worker = await this.worker;
       final BrainIndexSummary result;
-      if (worker != null) {
+      if (!await _modelAllowed()) {
+        // Profiles and history queries work meanwhile; embedding waits for
+        // Wi-Fi (the next sync tries again).
+        final c = store.counts(TransformerEmbedderIds.bgeSmall);
+        result = (embedded: 0, remaining: c.profiles - c.vectors, took: Duration.zero, stopped: true);
+      } else if (worker != null) {
         // Embedding runs in the brain's isolate; playback pauses it there.
         worker.reload();
         void onPlayback() => worker.pause(LocalMediaSession.active.value);
@@ -469,6 +492,7 @@ class HistoryBrain {
     Set<String>? ids,
   }) async {
     final store = await this.store;
+    if (!await _modelAllowed()) throw StateError('The similarity model downloads on Wi-Fi; not available yet');
     if (await worker case final w?) {
       return _hits(store, await w.searchText(text, limit: limit, watched: watched, kind: kind, ids: ids));
     }

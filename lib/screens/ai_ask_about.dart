@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -14,6 +13,7 @@ import '../models/companion_remote/remote_command.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../services/companion_remote/phone_mode.dart';
 import '../services/ai/ai_history.dart';
 import '../services/ai/ai_remote_asks.dart';
 import '../services/ai/ai_rows.dart';
@@ -21,7 +21,6 @@ import '../services/ai/claude_client.dart';
 import '../services/catalog/trakt_catalog_source.dart';
 import '../services/trackers/trakt/trakt_client.dart';
 import '../utils/app_logger.dart';
-import '../utils/platform_detector.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry;
 import 'ai_composer.dart';
@@ -32,9 +31,7 @@ import 'ai_composer.dart';
 /// recommendations also save a row of picks to the AI tab. Phones send the
 /// question to the TV app they're connected to, like the AI tab does.
 abstract final class AiAskAbout {
-  static bool get _thinClient =>
-      !PlatformDetector.isTV() &&
-      (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+  static bool get _thinClient => PhoneMode.mirrorsTv;
 
   /// The title asked about for [item]: episodes and seasons ask about their
   /// show.

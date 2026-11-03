@@ -31,6 +31,9 @@ below is on `feature/ai-helper` and not merged to `main`.
   **auto-refresh** twice a day on Haiku while Plezy is open. There's a cap
   of 10 AI rows on Home, and a toggle in Settings ▸ AI.
 - **UI**: a darker, calmer overlay on the TV spotlight backdrop.
+- **Phones run it all themselves** by default (key, index, brain, Ask,
+  Tonight). Settings ▸ AI ▸ Use the TV's AI makes a phone mirror a TV
+  instead. Code: `lib/services/companion_remote/phone_mode.dart`.
 
 ## Unfinished
 

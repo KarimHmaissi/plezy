@@ -44,6 +44,8 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       player screen controlling the TV
 - [x] Phone mirrors the TV: AI answers as rows, Home and lists, edits go
       to the TV
+- [x] Phone on its own: its own key, library index, history brain, Ask
+      and Tonight, no TV or Mac needed (mirroring the TV is a switch)
 - [x] Media notification on the phone for what the TV is playing
 - [x] Mac: surround sent to the receiver as Dolby Digital
 - [x] Watch history brain: a local index of what you've watched and own,
@@ -96,6 +98,31 @@ Details of each are in the dated entries below.
   original goal).
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
+
+## 2026-11-03
+
+### The phone works on its own
+- **Phones are hosts now, by default.** The phone has its own API key,
+  library index, watch history brain (embeddings included), Home, lists
+  and saved AI answers. Ask, Follow up, Tonight, More like this, Ask about
+  this title and Home auto-refresh all run on the phone, with no Mac or TV
+  needed. Casting, Now playing and the remote still work when it's
+  connected to a TV.
+- **First start copies what it mirrored.** A phone that used to mirror a
+  TV copies the last snapshot it kept (Home, lists, AI answers) into its
+  own database once, only if that database is empty.
+- **Settings ▸ AI ▸ Use the TV's AI** (phones only, off by default) brings
+  back the old thin client: the TV's AI, Home and lists, edits sent to the
+  TV. It switches straight away, without a restart.
+- **The embedding model waits for Wi-Fi** on phones (it's 66 MB). History
+  questions work meanwhile; similarity search starts once it's in.
+- **Receive key from another device on a phone:** the one-time page picks
+  the Wi-Fi address, never a private mobile data address, so it opens from
+  the Mac's browser. Its wording no longer assumes the other device is a
+  phone.
+- New `PhoneMode` (`lib/services/companion_remote/phone_mode.dart`) is the
+  one place that decides; the AI tab, Ask about, the index start on Home
+  and mirroring all ask it.
 
 ## 2026-11-02
 

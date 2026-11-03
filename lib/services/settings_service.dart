@@ -951,6 +951,15 @@ class SettingsService extends BaseSharedPreferencesService {
   /// cleared by a manual disconnect.
   static final companionRemoteAutoHost = NullableStringPref('companion_remote_auto_host', transform: _trimEmptyAsNull);
 
+  /// Fork: a phone shows and edits a connected TV's AI, Home and lists
+  /// instead of running its own (see `PhoneMode`). Off by default: phones
+  /// work on their own.
+  static const phoneMirrorsTv = BoolPref('phone_mirrors_tv');
+
+  /// Fork: set once this phone has copied the TV's last mirrored data into
+  /// its own database (the first start on its own).
+  static const phoneAdoptedMirror = BoolPref('phone_adopted_mirror');
+
   /// Fork: the auto host's last working ip:port, tried directly when its
   /// beacon isn't heard.
   static final companionRemoteAutoHostAddress = NullableStringPref(
@@ -1655,6 +1664,8 @@ class SettingsService extends BaseSharedPreferencesService {
     companionRemoteLastHostAddress,
     companionRemoteAutoHost,
     companionRemoteAutoHostAddress,
+    phoneMirrorsTv,
+    phoneAdoptedMirror,
     rememberedBrightnessLevel,
     refusedVideoCodecs,
     audioOutputDevice,

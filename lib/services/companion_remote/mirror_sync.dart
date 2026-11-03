@@ -128,8 +128,8 @@ class MirrorClient {
     remote.addListener(_onRemoteChanged);
     _sub = remote.mirrorSnapshots.listen((d) => unawaited(_onSnapshot(d)));
     if (_store == null) {
-      final cached = await _readCache();
-      if (cached != null && _store == null) {
+      final cached = await readCachedSnapshot();
+      if (cached != null && _store == null && identical(_remote, remote)) {
         hostName = cached.host;
         _use(cached.data);
       }
@@ -137,11 +137,26 @@ class MirrorClient {
     _onRemoteChanged();
   }
 
+  /// The phone went back to its own data (see `PhoneMode`): stop listening
+  /// and forget the TV's data. The cache file stays for a later switch.
+  void stop() {
+    _remote?.removeListener(_onRemoteChanged);
+    unawaited(_sub?.cancel());
+    _sub = null;
+    _remote = null;
+    _store = null;
+    _wasConnected = false;
+    ComfortShowsController.sendMirrorEdit = null;
+    ComfortShowsController.mirrorCanEdit = null;
+  }
+
   void _onRemoteChanged() {
+    final remote = _remote;
+    if (remote == null) return;
     final connected = canEdit;
     if (connected && !_wasConnected) {
-      hostName = _remote!.connectedDevice?.name ?? hostName;
-      _remote!.sendCommand(RemoteCommandType.mirrorRequest);
+      hostName = remote.connectedDevice?.name ?? hostName;
+      remote.sendCommand(RemoteCommandType.mirrorRequest);
     }
     if (connected != _wasConnected) {
       _wasConnected = connected;
@@ -170,7 +185,7 @@ class MirrorClient {
 
   Future<void> _onSnapshot(Map<String, dynamic> snapshot) async {
     final data = snapshot['data'];
-    if (data is! Map) return;
+    if (data is! Map || _remote == null) return;
     hostName = _remote?.connectedDevice?.name ?? hostName;
     _use(data.cast<String, Object?>());
     await _writeCache(data);
@@ -187,7 +202,8 @@ class MirrorClient {
     }
   }
 
-  Future<({String? host, Map<String, Object?> data})?> _readCache() async {
+  /// The last TV snapshot this phone kept, if any.
+  static Future<({String? host, Map<String, Object?> data})?> readCachedSnapshot() async {
     try {
       final file = await _cacheFile();
       if (!await file.exists()) return null;
