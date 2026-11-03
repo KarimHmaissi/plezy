@@ -43,7 +43,7 @@ class AiSuggestion {
 
 /// Fork: "Suggested for you" on the AI page: up to [maxLists] ready-made
 /// lists the AI thinks of from the user's watching, so they don't have to
-/// ask. Haiku names the lists and says how to fill each one (genres, years,
+/// ask. The [model] names the lists and says how to fill each one (genres, years,
 /// a theme, "like a title they loved"); the app fills them from the library
 /// index and the history brain, unwatched titles only, so a tap opens a
 /// list at once and topping it up costs nothing.
@@ -55,6 +55,10 @@ class AiSuggestion {
 abstract final class AiSuggestions {
   static const String settingKey = 'ai.suggestions';
   static const String dismissedKey = 'ai.suggestions.dismissed';
+
+  /// Good lists need taste (what fits whom, what to keep out): Sonnet, once
+  /// a day and on New lists, a few cents.
+  static const ClaudeModel model = ClaudeModel.sonnet;
   static const int maxLists = 6;
   static const int minPicks = 6;
   static const int maxPicks = 20;
@@ -174,7 +178,7 @@ abstract final class AiSuggestions {
     return (createdAt: saved.createdAt, lists: lists);
   }
 
-  /// A new set: Haiku's ideas, each filled from the library; ideas that
+  /// A new set: the model's ideas, each filled from the library; ideas that
   /// find fewer than [minPicks] titles are dropped.
   static Future<List<AiSuggestion>> _make(
     MediaServerClient? Function(ServerId serverId) clientFor, {
@@ -189,7 +193,7 @@ abstract final class AiSuggestions {
       final dismissed = await _dismissed();
       final asked = [for (final e in await AiHistory.page(limit: 15)) e.label];
       final response = await client.createMessage({
-        'model': ClaudeModel.haiku.id,
+        'model': model.id,
         'max_tokens': 2500,
         'thinking': {'type': 'disabled'},
         'system': _prompt,
@@ -209,7 +213,7 @@ abstract final class AiSuggestions {
         ],
       });
       final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const {};
-      final cost = await AiSpend.record(ClaudeModel.haiku, usage);
+      final cost = await AiSpend.record(model, usage);
       final input = [
         for (final b in (response['content'] as List? ?? const []).whereType<Map>())
           if (b['type'] == 'tool_use') (b['input'] as Map).cast<String, dynamic>(),

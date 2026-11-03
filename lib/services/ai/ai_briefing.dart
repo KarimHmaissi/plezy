@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:drift/drift.dart' show QueryRow, Variable;
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -29,13 +28,11 @@ import 'claude_client.dart';
 /// - From your library: rated 8+ by audiences (7.5+ by critics, when
 ///   known) and on the server a year or more, also matching their taste.
 ///
-/// Each card is drawn from the best few candidates, not always the very
-/// best, and a title shown recently ([cooldown]) waits its turn while there
-/// are others, so a new Tonight (pull to refresh, or the next day) brings
-/// different titles.
-///
-/// The titles come from the history brain and the local library index (no
-/// server crawl); Haiku only writes the lines. Made on the host at most
+/// The brain and the local library index (no server crawl) find
+/// candidates near what they love; [model] chooses each card from them and
+/// writes its line. A title shown recently ([cooldown]) waits its turn while
+/// there are others, so a new Tonight (pull to refresh, or the next day)
+/// brings different titles. Made on the host at most
 /// once a day (pull to refresh makes a new one) and kept as one setting, so
 /// a phone mirroring the host gets it with the rest of the data. The slot
 /// of each card is in [AiHistoryEntry.spotlights] ([slotNewEpisode]...),
@@ -57,12 +54,12 @@ abstract final class AiBriefing {
   static const String shownKey = 'ai.briefing.shown';
   static const Duration cooldown = Duration(days: 5);
 
-  /// How many of the best candidates a card is drawn from.
-  static const int drawFrom = 8;
+  /// How many candidates the model chooses each card from.
+  static const int maxCandidates = 15;
 
-  static Random _random = Random();
-  @visibleForTesting
-  static set random(Random r) => _random = r;
+  /// Choosing well needs judgement (tone, audience), not just a line of
+  /// copy: Sonnet, once a day, a cent or two.
+  static const ClaudeModel model = ClaudeModel.sonnet;
 
   /// What the last run knew about each card (for checking by hand).
   static List<String> lastFacts = const [];
@@ -104,21 +101,21 @@ abstract final class AiBriefing {
     final shown = _readShown(await store.readSetting(shownKey), now);
     final episode = await _newEpisode(watched, now, shown);
     final pool = await _tastePool(brain, watched, now);
-    final picked = await _pickAndGem(pool, now, shown);
-    final slots = <(String, TitleProfile, String)>[
-      if (episode != null) (slotNewEpisode, episode.profile, episode.facts),
-      if (picked.pick case final p?) (slotPick, p.profile, p.facts),
-      if (picked.gem case final g?) (slotLibrary, g.profile, g.facts),
-    ];
-    if (slots.isEmpty) return cached();
-    lastFacts = [for (final (slot, p, facts) in slots) '$slot: ${p.title}: $facts'];
+    final candidates = await _candidates(pool, now, shown);
+    if (episode == null && candidates.pick.isEmpty && candidates.gem.isEmpty) return cached();
+    String line(String slot, _Candidate c) =>
+        '- $slot: ${c.profile.title}${c.profile.year == null ? '' : ' (${c.profile.year})'}. ${c.facts}';
+    String options(String prefix, List<_Candidate> list) => [
+      for (final (i, c) in list.indexed)
+        '$prefix${i + 1}: ${c.profile.title}${c.profile.year == null ? '' : ' (${c.profile.year})'}. ${c.facts}',
+    ].join('\n');
 
     final client = ClaudeClient(key);
     try {
       final taste = await brain.taste();
       final response = await client.createMessage({
-        'model': ClaudeModel.haiku.id,
-        'max_tokens': 400,
+        'model': model.id,
+        'max_tokens': 600,
         'thinking': {'type': 'disabled'},
         'system': _prompt,
         'tools': [_tool],
@@ -126,18 +123,40 @@ abstract final class AiBriefing {
         'messages': [
           {
             'role': 'user',
-            'content':
-                'Their taste:\n$taste\nThe cards:\n'
-                '${[for (final (slot, p, facts) in slots) '- $slot: ${p.title}${p.year == null ? '' : ' (${p.year})'}. $facts'].join('\n')}',
+            'content': [
+              'Their taste:\n$taste',
+              if (episode != null)
+                'The newEpisode card:\n${line(slotNewEpisode, (profile: episode.profile, facts: episode.facts))}',
+              if (candidates.pick.isNotEmpty) 'Choose the pick from:\n${options('p', candidates.pick)}',
+              if (candidates.gem.isNotEmpty) 'Choose the library card from:\n${options('g', candidates.gem)}',
+            ].join('\n\n'),
           },
         ],
       });
       final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const {};
-      final cost = await AiSpend.record(ClaudeModel.haiku, usage);
+      final cost = await AiSpend.record(model, usage);
       final input = [
         for (final b in (response['content'] as List? ?? const []).whereType<Map>())
           if (b['type'] == 'tool_use') (b['input'] as Map).cast<String, dynamic>(),
       ].firstOrNull;
+      // The model's choice, or the best candidate when it named none.
+      _Candidate? chosen(String key, String prefix, List<_Candidate> list) {
+        final n = int.tryParse('${input?[key] ?? ''}'.replaceFirst(prefix, ''));
+        return n != null && n >= 1 && n <= list.length ? list[n - 1] : list.firstOrNull;
+      }
+
+      final pick = chosen('pick_id', 'p', candidates.pick);
+      // Never the pick twice.
+      final gem = switch (chosen('library_id', 'g', candidates.gem)) {
+        final g? when g.profile.id != pick?.profile.id => g,
+        _ => candidates.gem.where((c) => c.profile.id != pick?.profile.id).firstOrNull,
+      };
+      final slots = <(String, TitleProfile, String)>[
+        if (episode != null) (slotNewEpisode, episode.profile, episode.facts),
+        if (pick != null) (slotPick, pick.profile, pick.facts),
+        if (gem != null) (slotLibrary, gem.profile, gem.facts),
+      ];
+      lastFacts = [for (final (slot, p, facts) in slots) '$slot: ${p.title}: $facts'];
       final lines = {
         for (final (slot, _, _) in slots)
           if ('${input?[slot] ?? ''}'.trim() case final line when line.isNotEmpty) slot: line,
@@ -202,29 +221,24 @@ abstract final class AiBriefing {
     }
   }
 
-  /// One of the first [drawFrom] of [ranked] (best first), favouring the
-  /// better ones, skipping titles in [shown] unless every candidate is.
+  /// [ranked] (best first) for the model to choose from: titles not shown
+  /// lately; while fewer than [minFresh] are, the ones shown longest ago
+  /// make up the list.
   @visibleForTesting
-  static T? draw<T>(List<T> ranked, {required String? Function(T) id, required Map<String, DateTime> shown}) {
-    if (ranked.isEmpty) return null;
+  static List<T> rotate<T>(List<T> ranked, {required String? Function(T) id, required Map<String, DateTime> shown}) {
     final fresh = [
       for (final c in ranked)
         if (!shown.containsKey(id(c))) c,
     ];
-    // Everything was shown lately: the one shown longest ago.
-    if (fresh.isEmpty) {
-      return ([...ranked]..sort((a, b) => shown[id(a)]!.compareTo(shown[id(b)]!))).first;
-    }
-    final top = fresh.take(drawFrom).toList();
-    // Weights n, n-1, ... 1: the best is likeliest, any can come up.
-    final total = top.length * (top.length + 1) ~/ 2;
-    var roll = _random.nextInt(total);
-    for (var i = 0; i < top.length; i++) {
-      roll -= top.length - i;
-      if (roll < 0) return top[i];
-    }
-    return top.first;
+    if (fresh.length >= minFresh) return fresh.take(maxCandidates).toList();
+    final stale = [
+      for (final c in ranked)
+        if (shown.containsKey(id(c))) c,
+    ]..sort((a, b) => shown[id(a)]!.compareTo(shown[id(b)]!));
+    return [...fresh, ...stale].take(maxCandidates).toList();
   }
+
+  static const int minFresh = 3;
 
   static String? _cardId(TitleProfile p) =>
       p.inLibrary && p.serverId != null && p.ratingKey != null ? '${p.serverId}:${p.ratingKey}' : null;
@@ -282,7 +296,7 @@ abstract final class AiBriefing {
     }
     // New since they last watched first, then the most recently updated.
     candidates.sort((a, b) => a.fresh != b.fresh ? (a.fresh ? -1 : 1) : b.updated.compareTo(a.updated));
-    final best = draw(candidates, id: (c) => _cardId(c.profile), shown: shown);
+    final best = rotate(candidates, id: (c) => _cardId(c.profile), shown: shown).firstOrNull;
     if (best == null) return null;
     return (
       profile: best.profile,
@@ -324,17 +338,19 @@ abstract final class AiBriefing {
     return pool.values.toList()..sort((a, b) => b.score.compareTo(a.score));
   }
 
-  /// Tonight's pick (rated 7+, a film of 80-150 minutes or a show) and a
-  /// library gem (rated 8+, critics 7.5+ when known, on the server a year
-  /// or more), not the same.
-  static Future<({({TitleProfile profile, String facts})? pick, ({TitleProfile profile, String facts})? gem})>
-  _pickAndGem(
+  /// Candidates for Tonight's pick (rated 7+, a film of 80-150 minutes or a
+  /// show) and the library gem (rated 8+, critics 7.5+ when known, on the
+  /// server a year or more), best first, titles shown lately left out
+  /// ([rotate]). The
+  /// model chooses among them: similarity alone matches on surface words
+  /// ("Girlfriends" for someone who loved "Friends").
+  static Future<({List<_Candidate> pick, List<_Candidate> gem})> _candidates(
     List<({TitleProfile profile, double score, List<String> like})> pool,
     DateTime now,
     Map<String, DateTime> shown,
   ) async {
-    if (pool.isEmpty) return (pick: null, gem: null);
-    final top = pool.take(80).toList();
+    if (pool.isEmpty) return (pick: const <_Candidate>[], gem: const <_Candidate>[]);
+    final top = pool.take(120).toList();
     final rows = await _indexRows([for (final c in top) _cardId(c.profile)!]);
     double? rating(TitleProfile p) => rows[_cardId(p)]?.readNullable<double>('audience_rating') ?? p.audienceRating;
     String facts(({TitleProfile profile, double score, List<String> like}) c) {
@@ -346,39 +362,43 @@ abstract final class AiBriefing {
         if (rating(p) case final r?) 'rated ${r.toStringAsFixed(1)}/10',
         if (rows[_cardId(p)]?.readNullable<double>('critic_rating') case final r?) 'critics ${r.toStringAsFixed(1)}/10',
         _genres(p),
-        'Like their ${c.like.take(3).join(', ')}',
+        'Near their ${c.like.take(3).join(', ')}',
         if (p.summary case final s? when s.isNotEmpty) s.length > 280 ? '${s.substring(0, 280)}…' : s,
       ].where((s) => s.isNotEmpty).join('. ');
     }
 
-    String? id(({TitleProfile profile, double score, List<String> like}) c) => _cardId(c.profile);
-    final pick = draw(
-      top.where((c) {
-        final r = rating(c.profile);
-        if (r == null || r < 7) return false;
-        if (!c.profile.isMovie) return true;
-        final minutes = rows[_cardId(c.profile)]?.readNullable<int>('duration_minutes') ?? c.profile.runtimeMinutes;
-        return minutes != null && minutes >= 80 && minutes <= 150;
-      }).toList(),
+    bool length(TitleProfile p) {
+      if (!p.isMovie) return true;
+      final minutes = rows[_cardId(p)]?.readNullable<int>('duration_minutes') ?? p.runtimeMinutes;
+      return minutes != null && minutes >= 80 && minutes <= 150;
+    }
+
+    String? id(_Candidate c) => _cardId(c.profile);
+    final pick = rotate(
+      [
+        for (final c in top)
+          if ((rating(c.profile) ?? 0) >= 7 && length(c.profile)) (profile: c.profile, facts: facts(c)),
+      ],
       id: id,
       shown: shown,
     );
     final yearAgo = now.subtract(const Duration(days: 365)).millisecondsSinceEpoch ~/ 1000;
-    final gem = draw(
-      top.where((c) {
-        if (identical(c, pick)) return false;
-        final r = rating(c.profile);
-        final critics = rows[_cardId(c.profile)]?.readNullable<double>('critic_rating');
-        final added = rows[_cardId(c.profile)]?.readNullable<int>('added_at');
-        return r != null && r >= 8 && (critics == null || critics >= 7.5) && added != null && added < yearAgo;
-      }).toList(),
+    bool gemWorthy(TitleProfile p) {
+      final row = rows[_cardId(p)];
+      final critics = row?.readNullable<double>('critic_rating');
+      final added = row?.readNullable<int>('added_at');
+      return (rating(p) ?? 0) >= 8 && (critics == null || critics >= 7.5) && added != null && added < yearAgo;
+    }
+
+    final gem = rotate(
+      [
+        for (final c in top)
+          if (gemWorthy(c.profile)) (profile: c.profile, facts: '${facts(c)}. On their server over a year'),
+      ],
       id: id,
       shown: shown,
     );
-    return (
-      pick: pick == null ? null : (profile: pick.profile, facts: facts(pick)),
-      gem: gem == null ? null : (profile: gem.profile, facts: '${facts(gem)}. On their server over a year'),
-    );
+    return (pick: pick, gem: gem);
   }
 
   static String _genres(TitleProfile p) => p.genres.isEmpty ? '' : 'Genres: ${p.genres.take(3).join(', ')}';
@@ -393,8 +413,9 @@ abstract final class AiBriefing {
   }
 
   static const String _prompt = '''
-You write the one-line reasons on three cards at the top of a TV app tonight, each under a title chosen for the user. Rules:
-- One line per card, at most 14 words, plain text, no markdown, no emoji. The card already shows its title: never name it in its line.
+You choose and introduce up to three cards at the top of a TV app tonight.
+- pick: choose the one candidate (p1, p2, ...) they would most enjoy tonight. library: choose the one candidate (g1, g2, ...) from their own library most worth finally watching. Judge by genre, tone, story and audience against their taste. The candidates are only similar by a rough measure that can match on surface words ("Girlfriends" is nothing like "Friends", a kids' cartoon is nothing like a grown-up drama), so ignore any candidate that doesn't genuinely fit.
+- Then one line per card, at most 14 words, plain text, no markdown, no emoji. The card already shows its title: never name it in its line.
 - newEpisode: nudge them back to the show (where they are, what's waiting). pick: why it suits their taste tonight. library: why this one they own is worth finally watching.
 - Be specific: name what it shares with titles they love, from the facts given. Never invent facts.
 - Warm and light, not salesy. Address them as "you".''';
@@ -405,6 +426,8 @@ You write the one-line reasons on three cards at the top of a TV app tonight, ea
     'input_schema': {
       'type': 'object',
       'properties': {
+        'pick_id': {'type': 'string', 'description': 'The chosen pick candidate, e.g. "p3"'},
+        'library_id': {'type': 'string', 'description': 'The chosen library candidate, e.g. "g2"'},
         slotNewEpisode: {'type': 'string', 'description': 'The newEpisode card line, if that card is given'},
         slotPick: {'type': 'string', 'description': 'The pick card line, if given'},
         slotLibrary: {'type': 'string', 'description': 'The library card line, if given'},
@@ -412,3 +435,6 @@ You write the one-line reasons on three cards at the top of a TV app tonight, ea
     },
   };
 }
+
+/// A title Tonight could show, with what's known about it for the model.
+typedef _Candidate = ({TitleProfile profile, String facts});

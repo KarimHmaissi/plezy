@@ -103,6 +103,16 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### Better Tonight and Suggested picks (Sonnet chooses)
+- Tonight's pick and library card were chosen by similarity alone, which
+  can match on surface words (Girlfriends for someone who loved Friends).
+  Now the brain finds up to 15 candidates for each card and **Sonnet
+  chooses** the one that truly fits by genre, tone, story and audience,
+  then writes the lines. Titles shown in the last 5 days still wait their
+  turn (`AiBriefing.rotate`). About 1 to 2 cents a day.
+- Suggested for you lists are now made by **Sonnet** instead of Haiku
+  (a few cents per set: once a day, or on New lists).
+
 ### AI tab polish
 - **Starter prompts:** with a key but no answers yet, the AI tab shows the
   mood chips, Suggested and a few things to ask ("Something cosy for a
