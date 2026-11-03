@@ -48,6 +48,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       and Tonight, no TV or Mac needed (mirroring the TV is a switch)
 - [x] Google Cast from the phone to any Chromecast, Cast TV or the Shield,
       no Plezy needed on the receiver
+- [x] DLNA casting from the phone to smart TVs without Cast (the LG C1)
 - [x] Media notification on the phone for what the TV is playing
 - [x] Mac: surround sent to the receiver as Dolby Digital
 - [x] Watch history brain: a local index of what you've watched and own,
@@ -216,6 +217,25 @@ Details of each are in the dated entries below.
   the last 5 days waits its turn while there are others. Pull to refresh
   brings different titles.
 
+### DLNA casting from the phone
+- **TVs without Google Cast show up in the same Cast list**, marked DLNA:
+  most smart TVs (LG webOS like the living-room C1, Samsung, Sony,
+  Philips) are DLNA media renderers. Found with SSDP; speakers and HEOS
+  are left out (no video in their sink list).
+- **The TV gets the original file** when it takes the container (from its
+  own sink list) and the codecs (H.264/HEVC, AAC/AC-3/E-AC-3/FLAC): full
+  4K, HDR and Dolby audio, seekable. Otherwise Plex streams a Matroska
+  transcode (video copied when it fits; DTS/TrueHD audio converted); a seek
+  then restarts the stream at the new point.
+- Same controls, mini bar and Plex progress reports as Google Cast; the
+  phone asks the TV where it is every second.
+- YouTube reaches the LG with DIAL, which can only launch apps already on
+  the TV, so it's no use for Plex streams. AirPlay is left out: LG's
+  AirPlay 2 needs Apple's private pairing.
+- Code: `lib/services/casting/dlna_renderer.dart`, `CastProvider`
+  (`lib/providers/cast_provider.dart`, was `GoogleCastProvider`),
+  `PlexClient.buildDlnaStream`.
+
 ### Google Cast from the phone
 - **A Cast button in the phone's top bar** (Android phones with Google Play
   services), next to Search. It lists the Chromecasts, Cast-enabled TVs,
@@ -240,9 +260,9 @@ Details of each are in the dated entries below.
 - A Google Cast device wins over the companion "Play on TV" while both are
   connected.
 - Code: `android/.../plezy/cast/` (official Cast SDK 22.3.1; 23.x needs
-  compileSdk 37), `lib/services/google_cast/`,
-  `lib/providers/google_cast_provider.dart`,
-  `lib/widgets/google_cast_sheet.dart`, `PlexClient.buildCastStreamUrl`.
+  compileSdk 37), `lib/services/casting/google_cast_channel.dart`,
+  `lib/providers/cast_provider.dart`, `lib/widgets/cast_sheet.dart`,
+  `PlexClient.buildCastStreamUrl`.
 
 ### The phone works on its own
 - **Phones are hosts now, by default.** The phone has its own API key,

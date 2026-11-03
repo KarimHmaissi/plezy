@@ -3127,6 +3127,100 @@ class PlexClient
     }
   }
 
+  /// Fork: what DLNA renderers (smart TVs) are taken to decode. Their sink
+  /// list names containers only, so codecs are the ones every current TV
+  /// ships with; DTS and TrueHD audio are left out (many TVs dropped DTS).
+  static const _dlnaVideoCodecs = {'h264', 'hevc', 'mpeg2video', 'mpeg4', 'vc1'};
+  static const _dlnaAudioCodecs = {'aac', 'ac3', 'eac3', 'mp3', 'mp2', 'flac', 'pcm'};
+  static const _dlnaContainerMimes = {
+    'mkv': 'video/x-matroska',
+    'mp4': 'video/mp4',
+    'm4v': 'video/mp4',
+    'mov': 'video/mp4',
+    'mpegts': 'video/mp2t',
+    'ts': 'video/mp2t',
+    'avi': 'video/avi',
+  };
+
+  /// Fork: a stream for a DLNA renderer that accepts [acceptsMime], for
+  /// [ratingKey] starting at [offset].
+  ///
+  /// The file itself when the renderer takes its container and codecs (full
+  /// quality, and seekable, since PMS serves byte ranges). Otherwise a
+  /// progressive Matroska transcode (copying the video when it fits) that
+  /// cannot seek: [offset] starts it part-way, and a seek is a new stream.
+  /// Subtitles are `auto`, as for [buildCastStreamUrl].
+  Future<({String url, String mime, bool seekable})?> buildDlnaStream({
+    required String ratingKey,
+    required bool Function(String mime) acceptsMime,
+    required String sessionIdentifier,
+    required String transcodeSessionId,
+    Duration offset = Duration.zero,
+    bool allowDirect = true,
+  }) async {
+    final token = config.token;
+    if (token == null) return null;
+    if (allowDirect) {
+      final version = (await _fetchFileInfo(ratingKey))?.versions.firstOrNull;
+      final mime = _dlnaContainerMimes[version?.container?.toLowerCase()];
+      if (version != null &&
+          mime != null &&
+          acceptsMime(mime) &&
+          _dlnaVideoCodecs.contains(version.videoCodec?.toLowerCase()) &&
+          _dlnaAudioCodecs.contains(version.audioCodec?.toLowerCase())) {
+        final direct = (await getVideoPlaybackData(ratingKey)).videoUrl;
+        if (direct != null && direct.isNotEmpty) return (url: direct, mime: mime, seekable: true);
+      }
+    }
+    if (!acceptsMime('video/x-matroska')) return null;
+    const profile =
+        'add-transcode-target(type=videoProfile&context=streaming'
+        '&protocol=http&container=mkv&videoCodec=h264%2Chevc&audioCodec=aac%2Cac3%2Ceac3%2Cmp3)';
+    final params = <String, String>{
+      'hasMDE': '1',
+      'path': '/library/metadata/$ratingKey',
+      'mediaIndex': '0',
+      'partIndex': '0',
+      'protocol': 'http',
+      'directPlay': '0',
+      'directStream': '1',
+      'directStreamAudio': '1',
+      'offset': (offset.inMilliseconds / 1000).toStringAsFixed(1),
+      'subtitleSize': '100',
+      'audioBoost': '100',
+      'location': 'lan',
+      'autoAdjustQuality': '0',
+      'session': transcodeSessionId,
+      'subtitles': 'auto',
+      'Accept-Language': 'en',
+      'X-Plex-Session-Identifier': sessionIdentifier,
+      'X-Plex-Client-Profile-Extra': profile,
+      'X-Plex-Client-Profile-Name': 'Generic',
+      'X-Plex-Language': 'en',
+      ..._transcodeClientParams(),
+    };
+    try {
+      final decision = await _runTranscodeDecision(
+        startEndpoint: '$_plexVideoTranscodeBaseEndpoint/start.mkv',
+        allParams: params,
+        isOriginal: true,
+        requiredContainer: 'mkv',
+      );
+      final startPath = decision.startPath;
+      if (startPath == null || decision.outcome == TranscodeDecisionOutcome.failed || !decision.containerHonored) {
+        return null;
+      }
+      return (
+        url: '${_http.buildUri(startPath)}&X-Plex-Token=${_plexEncode(token)}',
+        mime: 'video/x-matroska',
+        seekable: false,
+      );
+    } catch (e, st) {
+      appLogger.e('Failed to build DLNA stream', error: e, stackTrace: st);
+      return null;
+    }
+  }
+
   /// Fork: end the server's transcode for a Cast stream (see
   /// [buildCastStreamUrl]). Best-effort: PMS also reaps an idle session.
   Future<void> stopTranscodeSession(String transcodeSessionId) async {

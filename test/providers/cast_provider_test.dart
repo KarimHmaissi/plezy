@@ -1,8 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:plezy/providers/google_cast_provider.dart';
-import 'package:plezy/services/google_cast/google_cast_channel.dart';
+import 'package:plezy/providers/cast_provider.dart';
+import 'package:plezy/services/casting/dlna_renderer.dart';
+import 'package:plezy/services/casting/google_cast_channel.dart';
 
 void main() {
   group('CastingTitle custom data', () {
@@ -59,6 +60,19 @@ void main() {
       expect(status.idle, isTrue);
       expect(status.idleReason, 'finished');
       expect(status.customData, isNull);
+    });
+  });
+
+  group('DLNA time', () {
+    test('formats and parses H:MM:SS', () {
+      expect(DlnaPlayer.formatTime(const Duration(hours: 1, minutes: 2, seconds: 3)), '1:02:03');
+      expect(DlnaPlayer.parseTime('1:02:03'), const Duration(hours: 1, minutes: 2, seconds: 3));
+      expect(DlnaPlayer.parseTime('0:00:05.5'), const Duration(seconds: 5, milliseconds: 500));
+    });
+
+    test('treats NOT_IMPLEMENTED and junk as zero', () {
+      expect(DlnaPlayer.parseTime('NOT_IMPLEMENTED'), Duration.zero);
+      expect(DlnaPlayer.parseTime(null), Duration.zero);
     });
   });
 }

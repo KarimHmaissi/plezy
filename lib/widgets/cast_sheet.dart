@@ -7,8 +7,8 @@ import 'package:provider/provider.dart';
 import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../media/media_item.dart';
-import '../providers/google_cast_provider.dart';
-import '../services/google_cast/google_cast_channel.dart';
+import '../providers/cast_provider.dart';
+import '../services/casting/google_cast_channel.dart';
 import '../theme/fork_motion.dart';
 import '../utils/formatters.dart';
 import '../utils/provider_extensions.dart';
@@ -18,9 +18,9 @@ import 'optimized_media_image.dart';
 
 /// Fork: cast [item] to the connected Google Cast device, telling the user
 /// how it went.
-Future<void> castToGoogleCast(
+Future<void> castToDevice(
   BuildContext context,
-  GoogleCastProvider cast,
+  CastProvider cast,
   MediaItem item, {
   Duration start = Duration.zero,
 }) async {
@@ -28,32 +28,32 @@ Future<void> castToGoogleCast(
   showAppSnackBar(context, t.cast.sending(title: item.displayTitle, name: device));
   try {
     await cast.play(item, start: start);
-  } on GoogleCastException catch (e) {
+  } on CastException catch (e) {
     if (!context.mounted) return;
     showErrorSnackBar(context, switch (e.reason) {
-      GoogleCastFailure.notPlex => t.googleCast.notPlex,
-      GoogleCastFailure.noStream => t.googleCast.noStream,
-      GoogleCastFailure.loadFailed => t.googleCast.loadFailed(name: device),
+      CastFailure.notPlex => t.googleCast.notPlex,
+      CastFailure.noStream => t.googleCast.noStream,
+      CastFailure.loadFailed => t.googleCast.loadFailed(name: device),
     });
   }
 }
 
 /// The Cast icon in the phone's top bar: outlined when idle, filled while
 /// connected. Hidden where casting isn't available.
-class GoogleCastButton extends StatelessWidget {
-  const GoogleCastButton({super.key, required this.color});
+class CastButton extends StatelessWidget {
+  const CastButton({super.key, required this.color});
 
   final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final cast = context.watch<GoogleCastProvider?>();
+    final cast = context.watch<CastProvider?>();
     if (cast == null || !cast.available) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
     final connected = cast.isConnected;
     return IconButton(
       tooltip: t.googleCast.button,
-      onPressed: () => openGoogleCast(context),
+      onPressed: () => openCastPicker(context),
       icon: cast.sessionState == CastSessionState.connecting
           ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: color))
           : AppIcon(
@@ -67,28 +67,28 @@ class GoogleCastButton extends StatelessWidget {
 
 /// From the Cast button or mini bar: the device picker when not connected,
 /// the controls for what is casting, or the connected device's sheet.
-Future<void> openGoogleCast(BuildContext context) {
+Future<void> openCastPicker(BuildContext context) {
   ForkMotion.selection();
-  final cast = context.read<GoogleCastProvider>();
-  if (cast.isConnected && cast.title != null) return GoogleCastNowPlayingScreen.open(context);
+  final cast = context.read<CastProvider>();
+  if (cast.isConnected && cast.title != null) return CastNowPlayingScreen.open(context);
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     useSafeArea: true,
-    builder: (_) => ChangeNotifierProvider.value(value: cast, child: const _GoogleCastDevicesSheet()),
+    builder: (_) => ChangeNotifierProvider.value(value: cast, child: const _CastDevicesSheet()),
   );
 }
 
-class _GoogleCastDevicesSheet extends StatefulWidget {
-  const _GoogleCastDevicesSheet();
+class _CastDevicesSheet extends StatefulWidget {
+  const _CastDevicesSheet();
 
   @override
-  State<_GoogleCastDevicesSheet> createState() => _GoogleCastDevicesSheetState();
+  State<_CastDevicesSheet> createState() => _CastDevicesSheetState();
 }
 
-class _GoogleCastDevicesSheetState extends State<_GoogleCastDevicesSheet> {
-  late final GoogleCastProvider _cast = context.read<GoogleCastProvider>();
+class _CastDevicesSheetState extends State<_CastDevicesSheet> {
+  late final CastProvider _cast = context.read<CastProvider>();
   bool _wasConnected = false;
 
   @override
@@ -116,7 +116,7 @@ class _GoogleCastDevicesSheetState extends State<_GoogleCastDevicesSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final cast = context.watch<GoogleCastProvider>();
+    final cast = context.watch<CastProvider>();
     final theme = Theme.of(context);
     final connected = cast.isConnected;
     return SafeArea(
@@ -191,14 +191,14 @@ class _GoogleCastDevicesSheetState extends State<_GoogleCastDevicesSheet> {
 
 /// A slim bar over the bottom navigation while something is casting: the
 /// title, its progress and play/pause; tap for the full controls.
-class GoogleCastMiniBar extends StatefulWidget {
-  const GoogleCastMiniBar({super.key});
+class CastMiniBar extends StatefulWidget {
+  const CastMiniBar({super.key});
 
   @override
-  State<GoogleCastMiniBar> createState() => _GoogleCastMiniBarState();
+  State<CastMiniBar> createState() => _CastMiniBarState();
 }
 
-class _GoogleCastMiniBarState extends State<GoogleCastMiniBar> {
+class _CastMiniBarState extends State<CastMiniBar> {
   Timer? _tick;
 
   @override
@@ -221,7 +221,7 @@ class _GoogleCastMiniBarState extends State<GoogleCastMiniBar> {
 
   @override
   Widget build(BuildContext context) {
-    final cast = context.watch<GoogleCastProvider?>();
+    final cast = context.watch<CastProvider?>();
     final title = cast?.title;
     final status = cast?.status;
     _syncTick(status?.playing ?? false);
@@ -231,7 +231,7 @@ class _GoogleCastMiniBarState extends State<GoogleCastMiniBar> {
     return Material(
       color: theme.colorScheme.surfaceContainerHigh,
       child: InkWell(
-        onTap: () => unawaited(GoogleCastNowPlayingScreen.open(context)),
+        onTap: () => unawaited(CastNowPlayingScreen.open(context)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -298,11 +298,11 @@ class _GoogleCastMiniBarState extends State<GoogleCastMiniBar> {
 
 /// Phone: full controls for what is casting, laid out like the companion
 /// TV's now-playing screen.
-class GoogleCastNowPlayingScreen extends StatefulWidget {
-  const GoogleCastNowPlayingScreen({super.key});
+class CastNowPlayingScreen extends StatefulWidget {
+  const CastNowPlayingScreen({super.key});
 
   static Future<void> open(BuildContext context) {
-    final cast = context.read<GoogleCastProvider>();
+    final cast = context.read<CastProvider>();
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -311,17 +311,17 @@ class GoogleCastNowPlayingScreen extends StatefulWidget {
       enableDrag: true,
       builder: (_) => ChangeNotifierProvider.value(
         value: cast,
-        child: const FractionallySizedBox(heightFactor: 1, child: GoogleCastNowPlayingScreen()),
+        child: const FractionallySizedBox(heightFactor: 1, child: CastNowPlayingScreen()),
       ),
     );
   }
 
   @override
-  State<GoogleCastNowPlayingScreen> createState() => _GoogleCastNowPlayingScreenState();
+  State<CastNowPlayingScreen> createState() => _CastNowPlayingScreenState();
 }
 
-class _GoogleCastNowPlayingScreenState extends State<GoogleCastNowPlayingScreen> {
-  late final GoogleCastProvider _cast = context.read<GoogleCastProvider>();
+class _CastNowPlayingScreenState extends State<CastNowPlayingScreen> {
+  late final CastProvider _cast = context.read<CastProvider>();
   Timer? _tick;
   double? _dragValue;
 
@@ -476,7 +476,7 @@ class _GoogleCastNowPlayingScreenState extends State<GoogleCastNowPlayingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final cast = context.watch<GoogleCastProvider>();
+    final cast = context.watch<CastProvider>();
     final title = cast.title;
     final status = cast.status;
     final name = cast.deviceName ?? t.googleCast.device;

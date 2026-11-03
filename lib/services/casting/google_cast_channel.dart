@@ -6,14 +6,24 @@ import 'package:flutter/services.dart';
 
 import '../../utils/app_logger.dart';
 
-/// A Cast device found on the network.
+/// How a device is reached.
+enum CastKind { googleCast, dlna }
+
+/// A device found on the network to play on.
 class CastRoute {
-  const CastRoute({required this.id, required this.name, this.description = '', this.selected = false});
+  const CastRoute({
+    required this.id,
+    required this.name,
+    this.description = '',
+    this.selected = false,
+    this.kind = CastKind.googleCast,
+  });
 
   final String id;
   final String name;
   final String description;
   final bool selected;
+  final CastKind kind;
 
   static CastRoute fromMap(Map<dynamic, dynamic> map) => CastRoute(
     id: map['id'] as String,
@@ -44,7 +54,7 @@ class CastMediaStatus {
   /// finished, cancelled, interrupted or error, when [state] is idle.
   final String? idleReason;
 
-  /// What the load carried (see `GoogleCastProvider`), so a session the app
+  /// What the load carried (see `CastProvider`), so a session the app
   /// rejoined after a restart still knows its title.
   final Map<String, dynamic>? customData;
   final DateTime receivedAt;

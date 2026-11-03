@@ -14,7 +14,7 @@ import '../profiles/plex_home_service.dart';
 import '../profiles/profile_connection_registry.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
-import '../providers/google_cast_provider.dart';
+import '../providers/cast_provider.dart';
 import '../providers/discover_provider.dart';
 import '../providers/explore_provider.dart';
 import '../providers/hidden_libraries_provider.dart';
@@ -282,11 +282,11 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
                   );
                 },
               ),
-              // Fork: Google Cast from phones (no-op elsewhere).
+              // Fork: casting from phones to Google Cast and DLNA devices.
               ChangeNotifierProvider(
                 create: (context) {
                   final multiServer = context.read<MultiServerProvider>();
-                  return GoogleCastProvider(clientFor: (id) => multiServer.getClientForServer(ServerId(id)));
+                  return CastProvider(clientFor: (id) => multiServer.getClientForServer(ServerId(id)));
                 },
               ),
               ChangeNotifierProvider(

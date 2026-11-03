@@ -8,18 +8,18 @@ import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../models/companion_remote/remote_command.dart';
 import '../providers/companion_remote_provider.dart';
-import '../providers/google_cast_provider.dart';
+import '../providers/cast_provider.dart';
 import '../screens/companion_remote/now_playing_screen.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
-import 'google_cast_sheet.dart';
+import 'cast_sheet.dart';
 import 'optimized_media_image.dart';
 import '../theme/fork_motion.dart';
 
 /// Phone side of casting: while connected to a TV app, shows where Play goes
 /// (the TV, or this phone) and, while the TV is playing, a mini player that
-/// opens the full now-playing screen. While a Google Cast device plays one
-/// of our titles, its mini player ([GoogleCastMiniBar]) shows instead.
+/// opens the full now-playing screen. While a Cast or DLNA device plays one
+/// of our titles, its mini player ([CastMiniBar]) shows instead.
 class CastBar extends StatefulWidget {
   const CastBar({super.key});
 
@@ -74,11 +74,11 @@ class _CastBarState extends State<CastBar> {
 
   @override
   Widget build(BuildContext context) {
-    // Fork: a Google Cast title takes the bar (Play goes there too).
-    final googleCasting = context.select<GoogleCastProvider?, bool>(
+    // Fork: a title on a Cast or DLNA device takes the bar (Play goes there too).
+    final castingToDevice = context.select<CastProvider?, bool>(
       (c) => c != null && c.isConnected && c.title != null,
     );
-    if (googleCasting) return const GoogleCastMiniBar();
+    if (castingToDevice) return const CastMiniBar();
     final remote = context.watch<CompanionRemoteProvider?>();
     if (remote == null || !remote.isRemote || !remote.isConnected) return const SizedBox.shrink();
     final theme = Theme.of(context);
