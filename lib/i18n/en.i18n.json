@@ -1243,7 +1243,14 @@
     "tonightLibrary": "From your library",
     "tonightUpdated": "Made ${time}",
     "tonightConfirm": "Make a new Tonight?",
-    "tonightConfirmBody": "Three fresh cards, using one small AI call."
+    "tonightConfirmBody": "Three fresh cards, using one small AI call.",
+    "suggestedTitle": "Suggested for you",
+    "newLists": "New lists",
+    "makingLists": "Making lists…",
+    "keepList": "Keep",
+    "notForMe": "Not for me",
+    "keptList": "Saved to your lists",
+    "hiddenList": "Hidden. You'll see fewer lists like it"
   },
   "ai": {
     "settingsTitle": "AI",

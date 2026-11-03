@@ -103,6 +103,23 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### Suggested for you (AI v2, phase 2)
+- **A shelf of ready-made lists** between Tonight and your answers: up to
+  6 lists the AI thinks of from your watching ("90s heist films",
+  "Short anime to finish this week"), each three posters and a name, so
+  you don't have to ask. No tabs: the AI's ideas stay on one row and your
+  own lists stay as they are.
+- Haiku names the lists and says how to fill each (genres, years, a theme
+  word, "like" a title you loved); the app fills them from the library
+  index and the history brain, unwatched titles only, so one small call
+  makes the whole shelf and a tap opens a list at once.
+- **Keep** saves a list into your answers (then Add to Home as usual);
+  **Not for me** hides it, and later sets steer away from hidden themes.
+- **Cadence:** a new set arrives once a day; the shelf ends in **New
+  lists** for a fresh set now; each list's picks are topped up every 12
+  hours for free (watched titles drop out, new arrivals that fit come in).
+- Code: `lib/services/ai/ai_suggestions.dart`, `lib/screens/ai_suggested.dart`.
+
 ### AI answers you can act on (v2, phase 1)
 - **History answers always bring their cards.** "My most watched shows"
   came back as text only. The answer tool now asks for every listed title

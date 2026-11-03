@@ -3452,6 +3452,27 @@ class Translations$aiTab$en {
 
 	/// en: 'Three fresh cards, using one small AI call.'
 	String get tonightConfirmBody => 'Three fresh cards, using one small AI call.';
+
+	/// en: 'Suggested for you'
+	String get suggestedTitle => 'Suggested for you';
+
+	/// en: 'New lists'
+	String get newLists => 'New lists';
+
+	/// en: 'Making lists…'
+	String get makingLists => 'Making lists…';
+
+	/// en: 'Keep'
+	String get keepList => 'Keep';
+
+	/// en: 'Not for me'
+	String get notForMe => 'Not for me';
+
+	/// en: 'Saved to your lists'
+	String get keptList => 'Saved to your lists';
+
+	/// en: 'Hidden. You'll see fewer lists like it'
+	String get hiddenList => 'Hidden. You\'ll see fewer lists like it';
 }
 
 // Path: ai
@@ -10485,6 +10506,13 @@ extension on Translations {
 			'aiTab.tonightUpdated' => ({required Object time}) => 'Made ${time}',
 			'aiTab.tonightConfirm' => 'Make a new Tonight?',
 			'aiTab.tonightConfirmBody' => 'Three fresh cards, using one small AI call.',
+			'aiTab.suggestedTitle' => 'Suggested for you',
+			'aiTab.newLists' => 'New lists',
+			'aiTab.makingLists' => 'Making lists…',
+			'aiTab.keepList' => 'Keep',
+			'aiTab.notForMe' => 'Not for me',
+			'aiTab.keptList' => 'Saved to your lists',
+			'aiTab.hiddenList' => 'Hidden. You\'ll see fewer lists like it',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.mirrorTv' => 'Use the TV\'s AI',
@@ -10861,6 +10889,8 @@ extension on Translations {
 			'comfort.randomEpisode' => 'Random episode',
 			'comfort.configure' => 'Configure',
 			'comfort.inTheMix' => 'In the mix',
+			_ => null,
+		} ?? switch (path) {
 			'comfort.paused' => 'Paused',
 			'comfort.emptyTitle' => 'No comfort shows yet',
 			'comfort.emptyMessage' => 'Add shows in Configure, or to your "Comfort Shows" list on Trakt',
@@ -10868,8 +10898,6 @@ extension on Translations {
 			'comfort.notConnectedMessage' => 'Comfort shows live in a Trakt list. Connect Trakt in Settings to use them',
 			'comfort.loadFailed' => 'Couldn\'t load your Comfort Shows list from Trakt',
 			'comfort.updateFailed' => 'Couldn\'t update your Comfort Shows list',
-			_ => null,
-		} ?? switch (path) {
 			'comfort.picking' => 'Picking an episode…',
 			'comfort.nothingToPlay' => 'None of the shows in the mix are on your servers',
 			'comfort.noEpisodes' => 'No episodes of this show are on your server',
@@ -11375,6 +11403,8 @@ extension on Translations {
 			'downloads.music' => 'Music',
 			'downloads.tracksQueued' => ({required Object count}) => '${count} tracks queued for download',
 			'downloads.noDownloads' => 'No downloads yet',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.noDownloadsDescription' => 'Downloaded content will appear here for offline viewing',
 			'downloads.downloadNow' => 'Download',
 			'downloads.deleteDownload' => 'Delete download',
@@ -11382,8 +11412,6 @@ extension on Translations {
 			'downloads.downloadQueued' => 'Download queued',
 			'downloads.downloadResumed' => 'Download resumed',
 			'downloads.serverErrorBitrate' => 'Server error: file may exceed the remote bitrate limit',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.storageFull' => 'Downloads stopped to protect available storage. Free some space or choose another download location, then retry.',
 			'downloads.storageUnavailable' => 'Downloads stopped because available storage could not be checked. Check the download location, then retry.',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
@@ -11889,6 +11917,8 @@ extension on Translations {
 			'addServer.connectToMediaBrowserCardSubtitleScoped' => ({required Object product, required Object name}) => 'Sign in to your ${product} server. Binds to ${name}.',
 			'addServer.borrowFromAnotherProfile' => 'Borrow from another profile',
 			'addServer.borrowFromAnotherProfileSubtitle' => 'Reuse another profile\'s connection. PIN-protected profiles require a PIN.',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.invalidCredentials' => 'Invalid username or password',
 			'addServer.authResponseNotJson' => 'The authentication response was not valid JSON',
 			'addServer.authResponseIncomplete' => 'The sign-in response from the server was incomplete',
@@ -11896,8 +11926,6 @@ extension on Translations {
 			'addServer.quickConnectNotJson' => 'The Quick Connect response was not valid JSON',
 			'addServer.quickConnectMissingFields' => 'The Quick Connect response is missing a code or secret',
 			'addServer.quickConnectPollRejected' => 'Quick Connect polling was rejected by the server',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.serverTimedOut' => 'The server did not respond in time',
 			'addServer.responseNotJson' => 'The server response was not valid JSON',
 			'addServer.responseMissingIdentity' => ({required Object product}) => 'The response is missing an ID or server name — is this a ${product} server?',

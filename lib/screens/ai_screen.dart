@@ -42,6 +42,7 @@ import '../services/settings_service.dart';
 import '../services/ai/ai_home_refresher.dart';
 import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_rows.dart';
+import '../services/ai/ai_suggestions.dart';
 import '../services/ai/ai_key_store.dart';
 import '../services/ai/claude_client.dart';
 import '../services/catalog/home_pins.dart';
@@ -56,6 +57,7 @@ import '../widgets/fork_motion_widgets.dart';
 import '../widgets/ai_answer_card.dart';
 import '../widgets/media_card.dart';
 import 'ai_answer_page.dart';
+import 'ai_suggested.dart';
 import 'ai_tonight.dart';
 import '../services/brain/brain_debug.dart';
 import '../widgets/app_icon.dart';
@@ -156,6 +158,10 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// Fork: today's briefing (made on the host once a day, mirrored to phones).
   AiHistoryEntry? _briefingRow;
 
+  /// "Suggested for you": ready-made lists, and whether a new set is coming.
+  List<AiSuggestion> _suggestions = const [];
+  bool _makingLists = false;
+
   /// Saved answers loaded so far, newest first.
   final List<AiHistoryEntry> _saved = [];
   int _savedTotal = 0;
@@ -195,6 +201,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     Customisation.changed.addListener(_onDataChanged);
     RemoteAiSession.instance.addListener(_onRemoteAsks);
     PhoneMode.changed.addListener(_onPhoneModeChanged);
+    AiSuggestions.changed.addListener(_onSuggestionsChanged);
     unawaited(_start());
     WidgetsBinding.instance.addPostFrameCallback((_) => _takeMoreLikeThis());
   }
@@ -257,6 +264,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     Customisation.changed.removeListener(_onDataChanged);
     RemoteAiSession.instance.removeListener(_onRemoteAsks);
     PhoneMode.changed.removeListener(_onPhoneModeChanged);
+    AiSuggestions.changed.removeListener(_onSuggestionsChanged);
     for (final r in _taps.values) {
       r.dispose();
     }
@@ -291,6 +299,77 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     unawaited(_start());
   }
 
+  Future<void> _onSuggestionsChanged() async {
+    final saved = await AiSuggestions.cached();
+    if (mounted) setState(() => _suggestions = saved.lists);
+  }
+
+  /// The shelf as saved, then today's (a new set once a day, or now when
+  /// [force]: "New lists").
+  Future<void> _loadSuggestions({bool force = false}) async {
+    if (_thinClient) return;
+    final saved = await AiSuggestions.cached();
+    if (!mounted) return;
+    setState(() {
+      _suggestions = saved.lists;
+      _makingLists = force || saved.lists.isEmpty;
+    });
+    try {
+      final today = await AiSuggestions.today(
+        clientFor: context.read<MultiServerProvider>().getClientForServer,
+        force: force,
+      );
+      if (!mounted) return;
+      if (force && today.lists.isNotEmpty) ForkMotion.success();
+      setState(() => _suggestions = today.lists);
+    } finally {
+      if (mounted) setState(() => _makingLists = false);
+    }
+  }
+
+  /// A suggested list's page, with Keep and Not for me.
+  void _openSuggestion(AiSuggestion list) {
+    final navigator = Navigator.of(context);
+    navigator.push(
+      MaterialPageRoute<void>(
+        builder: (pageContext) => ItemMenuEntries(
+          build: _pickMenuEntries,
+          child: AiAnswerPage(
+            entry: list.entry,
+            onPick: (item) => unawaited(_openPick(item)),
+            actions: [
+              FilledButton.tonalIcon(
+                icon: const AppIcon(Symbols.bookmark_add_rounded, fill: 1, size: 18),
+                label: Text(t.aiTab.keepList),
+                onPressed: () async {
+                  final kept = await AiSuggestions.keep(list);
+                  ForkMotion.success();
+                  navigator.pop();
+                  if (!mounted) return;
+                  setState(() {
+                    _saved.insert(0, kept);
+                    _savedTotal++;
+                    _askedThisVisit++;
+                  });
+                  showAppSnackBar(context, t.aiTab.keptList);
+                },
+              ),
+              OutlinedButton.icon(
+                icon: const AppIcon(Symbols.visibility_off_rounded, size: 18),
+                label: Text(t.aiTab.notForMe),
+                onPressed: () async {
+                  await AiSuggestions.dismiss(list);
+                  navigator.pop();
+                  if (mounted) showAppSnackBar(context, t.aiTab.hiddenList);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _onRemoteAsks() {
     if (mounted && _thinClient) setState(() {});
   }
@@ -313,6 +392,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       // Touch screens show Tonight's cards; TV keeps its Tonight row.
       if (_cardsInline) {
         unawaited(_briefing());
+        unawaited(_loadSuggestions());
       } else {
         await _tonight();
       }
@@ -1411,6 +1491,15 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                         entry: tonight,
                         onItemTap: _thinClient ? (item) => unawaited(_openPick(item)) : null,
                       ),
+                    ),
+                  ),
+                if (!_thinClient && (_suggestions.isNotEmpty || _makingLists))
+                  SliverToBoxAdapter(
+                    child: AiSuggestedShelf(
+                      lists: _suggestions,
+                      making: _makingLists,
+                      onOpen: _openSuggestion,
+                      onNewLists: _hasKey == true ? () => unawaited(_loadSuggestions(force: true)) : null,
                     ),
                   ),
                 for (final (n, card) in pendingCards.indexed)

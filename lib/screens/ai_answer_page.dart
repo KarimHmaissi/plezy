@@ -38,6 +38,7 @@ class AiAnswerPage extends StatelessWidget {
     this.rowEntries = const [],
     this.badgesFor,
     this.linkify,
+    this.actions = const [],
   });
 
   final AiHistoryEntry entry;
@@ -48,6 +49,9 @@ class AiAnswerPage extends StatelessWidget {
   final List<MediaMenuExtraEntry> rowEntries;
   final List<String> Function(MediaItem item)? badgesFor;
   final List<InlineSpan> Function(String text, TextStyle? style)? linkify;
+
+  /// Buttons under the overview (a suggested list's Keep / Not for me).
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -130,6 +134,10 @@ class AiAnswerPage extends StatelessWidget {
                       TextSpan(children: linkify?.call(overview, overviewStyle) ?? [TextSpan(text: overview)]),
                       style: overviewStyle,
                     ),
+                  ],
+                  if (actions.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Wrap(spacing: 8, runSpacing: 8, children: actions),
                   ],
                   if (topPicks.isNotEmpty)
                     section(t.aiTab.topPicks, [

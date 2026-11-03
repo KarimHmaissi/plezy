@@ -97,6 +97,26 @@ class AiHistoryEntry {
     extended: extended,
   );
 
+  /// This entry saved again under [newId] (a suggested list kept).
+  AiHistoryEntry copyWithId(String newId) => AiHistoryEntry(
+    id: newId,
+    request: request,
+    title: title,
+    intro: intro,
+    answer: answer,
+    writeup: writeup,
+    notes: notes,
+    followUps: followUps,
+    spotlights: spotlights,
+    topPicks: topPicks,
+    watchState: watchState,
+    headline: headline,
+    createdAt: DateTime.now(),
+    items: items,
+    reasons: reasons,
+    extended: extended,
+  );
+
   Map<String, Object?> toJson() => {
     'id': id,
     'request': request,
