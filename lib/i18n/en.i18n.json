@@ -1250,7 +1250,38 @@
     "keepList": "Keep",
     "notForMe": "Not for me",
     "keptList": "Saved to your lists",
-    "hiddenList": "Hidden. You'll see fewer lists like it"
+    "hiddenList": "Hidden. You'll see fewer lists like it",
+    "moodCosy": "Cosy",
+    "moodCosyRequest": "Something cosy and comforting I haven't watched: warm, gentle and low-stakes",
+    "moodEdge": "Edge of my seat",
+    "moodEdgeRequest": "A gripping thriller I haven't watched that will keep me on the edge of my seat",
+    "moodShort": "Something short",
+    "moodShortRequest": "Something good I haven't watched that's short: a film under 90 minutes, or a show with episodes under 30 minutes",
+    "moodBackground": "Background noise",
+    "moodBackgroundRequest": "Easy-going shows I've enjoyed before that work in the background while I do other things",
+    "moodLaugh": "Make me laugh",
+    "moodLaughRequest": "Something properly funny I haven't watched that will make me laugh out loud",
+    "moodMindBending": "Mind-bending",
+    "moodMindBendingRequest": "A mind-bending film I haven't watched, with big ideas or a twist",
+    "weekTitle": "Your week in watching",
+    "weekDates": "${from} to ${to}",
+    "weekHours": {
+      "one": "${n} hour",
+      "other": "${n} hours"
+    },
+    "weekFilms": {
+      "one": "${n} film",
+      "other": "${n} films"
+    },
+    "weekEpisodes": {
+      "one": "${n} episode",
+      "other": "${n} episodes"
+    },
+    "weekFinished": "Finished ${titles}",
+    "weekStarted": "Started ${titles}",
+    "weekBigNight": "${day} was your big night",
+    "weekMostly": "Mostly ${genre}",
+    "weekHide": "Hide until next week"
   },
   "ai": {
     "settingsTitle": "AI",

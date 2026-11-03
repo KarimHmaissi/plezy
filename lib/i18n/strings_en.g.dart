@@ -3473,6 +3473,81 @@ class Translations$aiTab$en {
 
 	/// en: 'Hidden. You'll see fewer lists like it'
 	String get hiddenList => 'Hidden. You\'ll see fewer lists like it';
+
+	/// en: 'Cosy'
+	String get moodCosy => 'Cosy';
+
+	/// en: 'Something cosy and comforting I haven't watched: warm, gentle and low-stakes'
+	String get moodCosyRequest => 'Something cosy and comforting I haven\'t watched: warm, gentle and low-stakes';
+
+	/// en: 'Edge of my seat'
+	String get moodEdge => 'Edge of my seat';
+
+	/// en: 'A gripping thriller I haven't watched that will keep me on the edge of my seat'
+	String get moodEdgeRequest => 'A gripping thriller I haven\'t watched that will keep me on the edge of my seat';
+
+	/// en: 'Something short'
+	String get moodShort => 'Something short';
+
+	/// en: 'Something good I haven't watched that's short: a film under 90 minutes, or a show with episodes under 30 minutes'
+	String get moodShortRequest => 'Something good I haven\'t watched that\'s short: a film under 90 minutes, or a show with episodes under 30 minutes';
+
+	/// en: 'Background noise'
+	String get moodBackground => 'Background noise';
+
+	/// en: 'Easy-going shows I've enjoyed before that work in the background while I do other things'
+	String get moodBackgroundRequest => 'Easy-going shows I\'ve enjoyed before that work in the background while I do other things';
+
+	/// en: 'Make me laugh'
+	String get moodLaugh => 'Make me laugh';
+
+	/// en: 'Something properly funny I haven't watched that will make me laugh out loud'
+	String get moodLaughRequest => 'Something properly funny I haven\'t watched that will make me laugh out loud';
+
+	/// en: 'Mind-bending'
+	String get moodMindBending => 'Mind-bending';
+
+	/// en: 'A mind-bending film I haven't watched, with big ideas or a twist'
+	String get moodMindBendingRequest => 'A mind-bending film I haven\'t watched, with big ideas or a twist';
+
+	/// en: 'Your week in watching'
+	String get weekTitle => 'Your week in watching';
+
+	/// en: '${from} to ${to}'
+	String weekDates({required Object from, required Object to}) => '${from} to ${to}';
+
+	/// en: '(one) {${n} hour} (other) {${n} hours}'
+	String weekHours({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} hour',
+		other: '${n} hours',
+	);
+
+	/// en: '(one) {${n} film} (other) {${n} films}'
+	String weekFilms({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} film',
+		other: '${n} films',
+	);
+
+	/// en: '(one) {${n} episode} (other) {${n} episodes}'
+	String weekEpisodes({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} episode',
+		other: '${n} episodes',
+	);
+
+	/// en: 'Finished ${titles}'
+	String weekFinished({required Object titles}) => 'Finished ${titles}';
+
+	/// en: 'Started ${titles}'
+	String weekStarted({required Object titles}) => 'Started ${titles}';
+
+	/// en: '${day} was your big night'
+	String weekBigNight({required Object day}) => '${day} was your big night';
+
+	/// en: 'Mostly ${genre}'
+	String weekMostly({required Object genre}) => 'Mostly ${genre}';
+
+	/// en: 'Hide until next week'
+	String get weekHide => 'Hide until next week';
 }
 
 // Path: ai
@@ -10513,6 +10588,28 @@ extension on Translations {
 			'aiTab.notForMe' => 'Not for me',
 			'aiTab.keptList' => 'Saved to your lists',
 			'aiTab.hiddenList' => 'Hidden. You\'ll see fewer lists like it',
+			'aiTab.moodCosy' => 'Cosy',
+			'aiTab.moodCosyRequest' => 'Something cosy and comforting I haven\'t watched: warm, gentle and low-stakes',
+			'aiTab.moodEdge' => 'Edge of my seat',
+			'aiTab.moodEdgeRequest' => 'A gripping thriller I haven\'t watched that will keep me on the edge of my seat',
+			'aiTab.moodShort' => 'Something short',
+			'aiTab.moodShortRequest' => 'Something good I haven\'t watched that\'s short: a film under 90 minutes, or a show with episodes under 30 minutes',
+			'aiTab.moodBackground' => 'Background noise',
+			'aiTab.moodBackgroundRequest' => 'Easy-going shows I\'ve enjoyed before that work in the background while I do other things',
+			'aiTab.moodLaugh' => 'Make me laugh',
+			'aiTab.moodLaughRequest' => 'Something properly funny I haven\'t watched that will make me laugh out loud',
+			'aiTab.moodMindBending' => 'Mind-bending',
+			'aiTab.moodMindBendingRequest' => 'A mind-bending film I haven\'t watched, with big ideas or a twist',
+			'aiTab.weekTitle' => 'Your week in watching',
+			'aiTab.weekDates' => ({required Object from, required Object to}) => '${from} to ${to}',
+			'aiTab.weekHours' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} hour', other: '${n} hours', ), 
+			'aiTab.weekFilms' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} film', other: '${n} films', ), 
+			'aiTab.weekEpisodes' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} episode', other: '${n} episodes', ), 
+			'aiTab.weekFinished' => ({required Object titles}) => 'Finished ${titles}',
+			'aiTab.weekStarted' => ({required Object titles}) => 'Started ${titles}',
+			'aiTab.weekBigNight' => ({required Object day}) => '${day} was your big night',
+			'aiTab.weekMostly' => ({required Object genre}) => 'Mostly ${genre}',
+			'aiTab.weekHide' => 'Hide until next week',
 			'ai.settingsTitle' => 'AI',
 			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
 			'ai.mirrorTv' => 'Use the TV\'s AI',
@@ -10867,6 +10964,8 @@ extension on Translations {
 			'history.copy.cancel' => 'Cancel',
 			'history.copy.confirm' => 'Send to Trakt',
 			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
+			_ => null,
+		} ?? switch (path) {
 			'history.copy.done' => ({required Object films, required Object episodes}) => 'Added ${films} films and ${episodes} episodes to Trakt',
 			'history.copy.notFound' => ({required Object n}) => '${n} couldn\'t be found on Trakt',
 			'history.copy.failed' => 'Sending to Trakt failed',
@@ -10889,8 +10988,6 @@ extension on Translations {
 			'comfort.randomEpisode' => 'Random episode',
 			'comfort.configure' => 'Configure',
 			'comfort.inTheMix' => 'In the mix',
-			_ => null,
-		} ?? switch (path) {
 			'comfort.paused' => 'Paused',
 			'comfort.emptyTitle' => 'No comfort shows yet',
 			'comfort.emptyMessage' => 'Add shows in Configure, or to your "Comfort Shows" list on Trakt',
@@ -11381,6 +11478,8 @@ extension on Translations {
 			'watchTogether.ended.expired' => 'The room expired',
 			'watchTogether.ended.replaced' => 'You joined this room on another device',
 			'watchTogether.ended.lost' => 'Lost the connection to the room',
+			_ => null,
+		} ?? switch (path) {
 			'watchTogether.errors.invalidCode' => 'That isn\'t a room code. Codes have 6 letters and digits, without 0, 1, I, L or O.',
 			'watchTogether.errors.roomNotFound' => 'No room has that code. It may have ended.',
 			'watchTogether.errors.roomFull' => 'That room is full.',
@@ -11403,8 +11502,6 @@ extension on Translations {
 			'downloads.music' => 'Music',
 			'downloads.tracksQueued' => ({required Object count}) => '${count} tracks queued for download',
 			'downloads.noDownloads' => 'No downloads yet',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.noDownloadsDescription' => 'Downloaded content will appear here for offline viewing',
 			'downloads.downloadNow' => 'Download',
 			'downloads.deleteDownload' => 'Delete download',
@@ -11895,6 +11992,8 @@ extension on Translations {
 			'addServer.findServer' => 'Find server',
 			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
 			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.username' => 'Username',
 			'addServer.password' => 'Password',
 			'addServer.signIn' => 'Sign in',
@@ -11917,8 +12016,6 @@ extension on Translations {
 			'addServer.connectToMediaBrowserCardSubtitleScoped' => ({required Object product, required Object name}) => 'Sign in to your ${product} server. Binds to ${name}.',
 			'addServer.borrowFromAnotherProfile' => 'Borrow from another profile',
 			'addServer.borrowFromAnotherProfileSubtitle' => 'Reuse another profile\'s connection. PIN-protected profiles require a PIN.',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.invalidCredentials' => 'Invalid username or password',
 			'addServer.authResponseNotJson' => 'The authentication response was not valid JSON',
 			'addServer.authResponseIncomplete' => 'The sign-in response from the server was incomplete',

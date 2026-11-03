@@ -103,6 +103,20 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### Moods and Your week in watching (AI v2, phase 2)
+- **Moods:** a row of chips at the top of the AI page (Cosy, Edge of my
+  seat, Something short, Make me laugh, Mind-bending, Background noise).
+  A tap asks straight away with a request worded to get a good answer, and
+  starts a new conversation. Touch screens and desktop.
+- **Your week in watching:** from Sunday to Tuesday, a card at the top of
+  the AI page with the week's hours, films and episodes, the shows you
+  finished and started, a pattern ("Thursday was your big night", or the
+  genre you watched most) and the week's posters. Counted on the device
+  from the history brain, so no AI call. The close button hides it until
+  next week.
+- Code: `lib/screens/ai_moods.dart`, `lib/services/ai/ai_week.dart`,
+  `lib/screens/ai_week_card.dart`.
+
 ### Suggested for you (AI v2, phase 2)
 - **A shelf of ready-made lists** between Tonight and your answers: up to
   6 lists the AI thinks of from your watching ("90s heist films",

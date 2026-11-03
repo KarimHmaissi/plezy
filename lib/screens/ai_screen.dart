@@ -43,6 +43,7 @@ import '../services/ai/ai_home_refresher.dart';
 import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_rows.dart';
 import '../services/ai/ai_suggestions.dart';
+import '../services/ai/ai_week.dart';
 import '../services/ai/ai_key_store.dart';
 import '../services/ai/claude_client.dart';
 import '../services/catalog/home_pins.dart';
@@ -57,7 +58,9 @@ import '../widgets/fork_motion_widgets.dart';
 import '../widgets/ai_answer_card.dart';
 import '../widgets/media_card.dart';
 import 'ai_answer_page.dart';
+import 'ai_moods.dart';
 import 'ai_suggested.dart';
+import 'ai_week_card.dart';
 import 'ai_tonight.dart';
 import '../services/brain/brain_debug.dart';
 import '../widgets/app_icon.dart';
@@ -160,6 +163,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
 
   /// "Suggested for you": ready-made lists, and whether a new set is coming.
   List<AiSuggestion> _suggestions = const [];
+
+  /// Your week in watching, Sunday to Tuesday.
+  ({WatchWeek week, List<MediaItem> items})? _week;
   bool _makingLists = false;
 
   /// Saved answers loaded so far, newest first.
@@ -304,6 +310,22 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     if (mounted) setState(() => _suggestions = saved.lists);
   }
 
+  /// The week's card, counted on this device (no AI call).
+  Future<void> _loadWeek() async {
+    if (_thinClient) return;
+    try {
+      final week = await AiWeek.load(clientFor: context.read<MultiServerProvider>().getClientForServer);
+      if (mounted) setState(() => _week = week);
+    } catch (e) {
+      appLogger.w('AI week: counting failed', error: e);
+    }
+  }
+
+  void _hideWeek(WatchWeek week) {
+    setState(() => _week = null);
+    unawaited(AiWeek.dismiss(week));
+  }
+
   /// The shelf as saved, then today's (a new set once a day, or now when
   /// [force]: "New lists").
   Future<void> _loadSuggestions({bool force = false}) async {
@@ -393,6 +415,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       if (_cardsInline) {
         unawaited(_briefing());
         unawaited(_loadSuggestions());
+        unawaited(_loadWeek());
       } else {
         await _tonight();
       }
@@ -422,7 +445,7 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
   /// Touch screens: free reloads straight away, then a confirm before
   /// anything that costs a model call (a new Tonight).
   Future<void> _pullRefresh() async {
-    await _loadHistory();
+    await Future.wait([_loadHistory(), _loadWeek()]);
     if (!mounted || _confirming) return;
     if (_thinClient ? !_canEditMirror : _hasKey != true) return;
     // After the refresh indicator settles.
@@ -502,7 +525,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     return box.localToGlobal(Offset.zero) & box.size;
   }
 
-  Future<void> _ask() async {
+  /// Opens the composer; with [request] (a mood chip) it asks straight away.
+  Future<void> _ask({String? request}) async {
     if (_thinClient && !_canEditMirror) {
       // Not linked to the TV right now: say so and try to reconnect, rather
       // than a button that does nothing.
@@ -516,17 +540,19 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       return;
     }
     final remote = _thinClient ? context.read<CompanionRemoteProvider>() : null;
-    final previous = List.of(_conversation);
+    // A mood starts afresh rather than following up the conversation.
+    final previous = request == null ? List.of(_conversation) : <({String request, AiAnswer answer})>[];
     _PendingAsk? lastFailed;
     await AiComposer.open(
       context,
-      followUpOf: _conversation.isEmpty ? null : _conversation.last.request,
+      followUpOf: previous.isEmpty ? null : previous.last.request,
       recent: {
         for (final r in _rows)
           if (r.request != AiAgent.tonightRequest) r.request,
       }.take(5).toList(),
       posters: [for (final r in _rows.take(6)) ...r.items.take(8)],
       origin: _rectOf(_askKey),
+      autoRequest: request,
       run: (text) async {
         // The composer's send moment, then the answer card takes over: as
         // soon as text streams in, or after [_handoff] at most.
@@ -619,6 +645,8 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       }
       final entry = extend == null ? found : mergeFindMore(extend, found);
       if (ask.replaceId == null) {
+        // A fresh ask (a mood) starts a new conversation.
+        if (ask.previous.isEmpty) _conversation.clear();
         _conversation.add((request: ask.request, answer: result.answer));
         await AiHistory.add(entry);
       } else {
@@ -1481,6 +1509,22 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
               if (message != null)
                 SliverFillRemaining(child: message)
               else ...[
+                if (_thinClient || _hasKey == true)
+                  SliverToBoxAdapter(
+                    child: AiMoodChips(onPick: (mood) => unawaited(_ask(request: mood.request))),
+                  ),
+                if (_week case final week? when !_thinClient)
+                  SliverToBoxAdapter(
+                    child: ForkEntrance(
+                      key: ValueKey('week-${week.week.start}'),
+                      child: AiWeekCard(
+                        week: week.week,
+                        items: week.items,
+                        onItemTap: (item) => unawaited(_openPick(item)),
+                        onHide: () => _hideWeek(week.week),
+                      ),
+                    ),
+                  ),
                 // One block per answer: title, what was asked and the write-up,
                 // then its posters; a hairline between blocks.
                 if (_tonightCards case final tonight?)
