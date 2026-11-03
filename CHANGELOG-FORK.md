@@ -103,6 +103,17 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### AI answers you can act on (v2, phase 1)
+- **History answers always bring their cards.** "My most watched shows"
+  came back as text only. The answer tool now asks for every listed title
+  in order with its count as the note ("129 episodes"), and if the model
+  still only names titles in its text, the cards are filled in from the
+  titles the history tools returned, in the order the text names them.
+- **Saved answers show without a key.** The "add your key" page only
+  appears when there's nothing saved; otherwise Ask leads to Settings ▸ AI.
+- **A slow server can't hold up a row.** Each pick (and each Tonight card)
+  gets 8 s to load; one that doesn't answer is dropped.
+
 ### Tonight changes from day to day
 - Tonight always showed the same titles: each card took the single best
   match, so a refresh only re-worded the lines. Now each card is drawn from

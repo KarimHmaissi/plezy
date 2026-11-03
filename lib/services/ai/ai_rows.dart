@@ -12,6 +12,9 @@ import 'ai_agent.dart';
 import 'ai_history.dart';
 import 'claude_client.dart';
 
+/// Fork: how long one pick may take to load from its server.
+const Duration pickFetchTimeout = Duration(seconds: 8);
+
 /// Ask the helper and turn its picks into playable items, as a saved-answer
 /// entry with [id] (a new one when not given); no entry when nothing came
 /// back. Used by the AI tab and by Home's auto-refresh.
@@ -36,7 +39,11 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
       for (final pick in answer.picks)
         () async {
           try {
-            final item = await clientFor(ServerId(pick.title.serverId))?.fetchItem(pick.title.ratingKey);
+            // A server that doesn't answer drops its picks rather than
+            // holding up the whole row.
+            final item = await clientFor(
+              ServerId(pick.title.serverId),
+            )?.fetchItem(pick.title.ratingKey).timeout(pickFetchTimeout);
             return item == null ? null : (item: item, reason: pick.reason, id: pick.title.id);
           } catch (e) {
             appLogger.d('AI: fetching ${pick.title.title} failed', error: e);

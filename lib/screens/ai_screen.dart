@@ -1210,7 +1210,11 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
       FocusableAction(
         debugLabel: 'AiAsk',
         autofocus: _rows.isEmpty,
-        onPressed: _thinClient ? () => unawaited(_ask()) : (_hasKey != true ? null : () => unawaited(_ask())),
+        onPressed: _thinClient || _hasKey == true
+            ? () => unawaited(_ask())
+            : _hasKey == false
+            ? _openKeySettings
+            : null,
         child: Padding(
           key: _askKey,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1261,17 +1265,21 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
     ];
   }
 
+  /// Settings ▸ AI, to add a key; picks up a new one on the way back.
+  void _openKeySettings() => unawaited(
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AiSettingsScreen())).then((_) => _start()),
+  );
+
   Widget? _message() {
-    if (_hasKey == false) {
+    // Without a key the saved answers still show; Ask leads to the key.
+    if (_hasKey == false && _rows.isEmpty) {
       return Center(
         child: EmptyStateWidget(
           message: t.aiTab.noKeyTitle,
           subtitle: t.aiTab.noKeyMessage,
           icon: Symbols.key_rounded,
           actionLabel: t.ai.settingsTitle,
-          onAction: () => Navigator.of(
-            context,
-          ).push(MaterialPageRoute<void>(builder: (_) => const AiSettingsScreen())).then((_) => _start()),
+          onAction: _openKeySettings,
         ),
       );
     }

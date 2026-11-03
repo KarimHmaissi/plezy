@@ -54,6 +54,14 @@ class AiTools {
 
   static final RegExp _lineId = RegExp(r'^([^\s|]+:[^\s|]+) \|', multiLine: true);
 
+  /// A result line's id and the title after it ("id | Title (2018) | ..."),
+  /// year left off.
+  static final RegExp _lineTitle = RegExp(r'^([^\s|]+:[^\s|]+) \| ([^|\n]+?)(?: \(\d{4}\))? \|', multiLine: true);
+
+  /// Titles the history tools named, by id, for answers that name titles in
+  /// their text but leave out the cards ([cardsNamedIn]).
+  final Map<String, String> _historyTitles = {};
+
   /// Remember the ids in a lookup's [result] lines. The model's own
   /// candidates (find_titles) rank first, then titles like ones they loved,
   /// then keyword searches.
@@ -74,6 +82,37 @@ class AiTools {
   List<String> get candidates => [
     for (final c in [..._ranked]..sort((a, b) => a.rank != b.rank ? a.rank - b.rank : a.order - b.order)) c.id,
   ];
+
+  /// Remember the titles a history tool's [result] lists; returns it.
+  String noteHistoryTitles(String result) {
+    for (final m in _lineTitle.allMatches(result)) {
+      _historyTitles.putIfAbsent(m.group(1)!, () => m.group(2)!.trim());
+    }
+    return result;
+  }
+
+  /// Cards for the titles the history tools returned that [text] names,
+  /// in the order the text names them (at most 20).
+  List<AiPick> cardsNamedIn(String text) {
+    final lower = text.toLowerCase();
+    // Longest titles first, so "Desk" inside "The Night Desk" isn't a
+    // second title.
+    final titles = _historyTitles.entries.toList()..sort((a, b) => b.value.length - a.value.length);
+    final taken = <(int, int)>[];
+    final found = <({String id, int at})>[];
+    for (final MapEntry(key: id, value: title) in titles) {
+      if (title.length < 2) continue;
+      final pattern = RegExp('(?<![\\w])${RegExp.escape(title.toLowerCase())}(?![\\w])');
+      for (final m in pattern.allMatches(lower)) {
+        if (taken.any((t) => m.start < t.$2 && t.$1 < m.end)) continue;
+        taken.add((m.start, m.end));
+        found.add((id: id, at: m.start));
+        break;
+      }
+    }
+    found.sort((a, b) => a.at - b.at);
+    return [for (final f in found.take(20)) (id: f.id, reason: '')];
+  }
 
   void _readExtras(Map<String, dynamic> input) {
     List<String> strings(String key) => [
@@ -325,7 +364,18 @@ class AiTools {
             },
           },
         },
-        'required': ['title', 'scope', 'intro', 'headline', 'writeup', 'top_picks', 'spotlights', 'notes', 'follow_ups', 'picks'],
+        'required': [
+          'title',
+          'scope',
+          'intro',
+          'headline',
+          'writeup',
+          'top_picks',
+          'spotlights',
+          'notes',
+          'follow_ups',
+          'picks',
+        ],
         'additionalProperties': false,
       },
     },
@@ -350,8 +400,9 @@ class AiTools {
             'titles': {
               'type': 'array',
               'description':
-                  'Ids (from the tools) of the titles the answer is about, most relevant first, up to 20. '
-                  'Titles "not on servers" have no id; name them in the answer instead.',
+                  'Ids (from the tools) of the titles the answer is about, most relevant first, up to 20: every '
+                  'title a list answer names. For a ranking, keep its order and put the number in the note '
+                  '("129 episodes"). Titles "not on servers" have no id; name them in the answer instead.',
               'items': {
                 'type': 'object',
                 'properties': {
@@ -408,7 +459,7 @@ class AiTools {
         return _ratings([...(input['ids'] as List? ?? const []).whereType<String>()].take(20).toList());
       case final n when history != null && AiHistoryTools.names.contains(n):
         if (n != AiHistoryTools.similarTool) _askedHistory = true;
-        return history!.run(n, input);
+        return noteHistoryTitles(await history!.run(n, input));
       case answerTool:
         title = input['title'] as String?;
         answer = (input['answer'] as String?)?.trim();
@@ -417,6 +468,9 @@ class AiTools {
           for (final p in (input['titles'] as List? ?? const []).whereType<Map>().take(20))
             if (p['id'] is String) (id: p['id'] as String, reason: p['note'] as String? ?? ''),
         ];
+        // An answer that lists titles always comes with their cards, even
+        // when the model only wrote them into the text.
+        if (picks.isEmpty && answer != null) picks = cardsNamedIn(answer!);
         return 'Shown to the user.';
       case showPicksTool:
         intro = input['intro'] as String?;

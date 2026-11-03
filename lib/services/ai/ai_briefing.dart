@@ -15,6 +15,7 @@ import '../customisation/customisation_store.dart';
 import '../library_index/library_index.dart';
 import 'ai_history.dart';
 import 'ai_key_store.dart';
+import 'ai_rows.dart' show pickFetchTimeout;
 import 'ai_spend.dart';
 import 'claude_client.dart';
 
@@ -384,7 +385,7 @@ abstract final class AiBriefing {
 
   static Future<MediaItem?> _item(TitleProfile p, MediaServerClient? Function(ServerId) clientFor) async {
     try {
-      return await clientFor(ServerId(p.serverId!))?.fetchItem(p.ratingKey!);
+      return await clientFor(ServerId(p.serverId!))?.fetchItem(p.ratingKey!).timeout(pickFetchTimeout);
     } catch (e) {
       appLogger.d('AI tonight: a title could not be loaded', error: e);
       return null;
