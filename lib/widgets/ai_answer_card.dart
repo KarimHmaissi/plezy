@@ -508,7 +508,7 @@ String withoutLeadingTitle(String text, String? title) {
     }
     i++;
   }
-  // The title must end at a word break ("Fuze has", not "Fuzed").
+  // The title must end at a word break ("Brindle has", not "Brindled").
   if (matched < want.length || (i < text.length && letter(text[i]))) return text;
   final rest = text.substring(i).replaceFirst(RegExp(r"^('s\b)?[\s:,;.\-–—]*"), '');
   if (rest.isEmpty) return text;
