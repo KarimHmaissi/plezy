@@ -146,6 +146,9 @@ Details of each are in the dated entries below.
   prompt asks for it, and a list "like" a live-action title never takes
   animation. Titles to keep out now apply to theme searches too, and a
   list's page says why it suits you once instead of twice.
+- Haiku ignored the prompt's advice, so each list now has to say whether
+  it is for animation (`none`, `allowed` or `only`), and anything else
+  keeps Animation, Family and Kids titles out in code.
 - Code: `lib/services/ai/ai_suggestions.dart`, `lib/screens/ai_suggested.dart`.
 
 ### AI answers you can act on (v2, phase 1)

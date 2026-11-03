@@ -324,6 +324,11 @@ abstract final class AiSuggestions {
     final like = (search['like'] as String?)?.trim();
     String? seed;
     final none = {for (final g in strings('genres_none')) g.toLowerCase()};
+    // Kids' and animated titles carry grown-up genres too ("Science
+    // Fiction"), so a list keeps them out unless it says it's for them.
+    final animation = search['animation'];
+    if (animation != 'allowed' && animation != 'only') none.addAll(const ['animation', 'family', 'kids']);
+    final animatedOnly = animation == 'only';
     if (brain != null && like != null && like.isNotEmpty) {
       try {
         final store = await brain.store;
@@ -336,7 +341,12 @@ abstract final class AiSuggestions {
         appLogger.d('AI suggestions: brain unavailable', error: e);
       }
     }
-    bool excluded(IndexedTitle t) => t.genres.toLowerCase().split('|').any(none.contains);
+    bool excluded(IndexedTitle t) {
+      final genres = t.genres.toLowerCase().split('|');
+      if (animatedOnly) return !genres.contains('animation') && !t.libraryTitle.toLowerCase().contains('anime');
+      return genres.any(none.contains);
+    }
+
     titles = [
       for (final t in titles)
         if ((t.viewCount ?? 0) == 0 && (t.watchedEpisodeCount ?? 0) == 0 && !excluded(t)) t,
@@ -364,7 +374,7 @@ You suggest ready-made lists for a TV app's AI page, so the user finds something
 - title: 2-5 words, the shelf name. Plain, no emoji.
 - request: the same list as the user would ask for it, one sentence.
 - why: one short line on why it suits them, naming a title they love when it fits. Address them as "you".
-- search: genres use the library's names (Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western). genres_none keeps out what would spoil the list: kids' and animated titles carry most genres too, so put Animation and Family in genres_none unless the list is meant for them (anime, animated, family night). text = 1-3 plot or theme words matched in titles and summaries ("heist", "time loop"). like = the exact title of something they watched and loved, to rank by similarity.''';
+- search: genres use the library's names (Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western). animation: "none" for almost every list (kids' and animated titles carry grown-up genres too, so they are kept out), "only" for anime or animation lists, "allowed" when either fits. text = 1-3 plot or theme words matched in titles and summaries ("heist", "time loop"). like = the exact title of something they watched and loved, to rank by similarity.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'suggest_lists',
@@ -404,7 +414,14 @@ You suggest ready-made lists for a TV app's AI page, so the user finds something
                   'library': {'type': 'string', 'description': 'Library name contains, e.g. "Anime", "Docs"'},
                   'text': {'type': 'string'},
                   'like': {'type': 'string'},
+                  'animation': {
+                    'type': 'string',
+                    'enum': ['none', 'allowed', 'only'],
+                    'description':
+                        'none (the usual): no animated or kids\' titles; allowed: either; only: anime or animation lists',
+                  },
                 },
+                'required': ['animation'],
               },
             },
             'required': ['title', 'request', 'why', 'search'],

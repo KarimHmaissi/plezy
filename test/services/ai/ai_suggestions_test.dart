@@ -73,4 +73,14 @@ void main() {
       ['Vault Night'],
     );
   });
+
+  test('animated titles stay out unless the list is for them', () async {
+    await add('5', 'Robot Racers', 'Animation', summary: 'A heist on wheels.');
+    expect(await titles({'text': 'heist'}), unorderedEquals(['Vault Night', 'Space Rocks']));
+    expect(await titles({'text': 'heist', 'animation': 'only'}), ['Robot Racers']);
+    expect(
+      await titles({'text': 'heist', 'animation': 'allowed'}),
+      unorderedEquals(['Vault Night', 'Space Rocks', 'Robot Racers']),
+    );
+  });
 }
