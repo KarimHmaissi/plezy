@@ -13,6 +13,7 @@ import '../focus/focusable_text_field.dart';
 import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../media/media_item.dart';
+import '../services/ai/voice_input.dart';
 import '../theme/fork_motion.dart';
 import '../theme/fork_spacing.dart';
 import '../theme/mono_tokens.dart';
@@ -182,6 +183,9 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
   bool _reduceMotion = false;
   bool _started = false;
 
+  /// The device takes spoken requests: the empty field's button is a mic.
+  bool _voice = false;
+
   List<String> get _examples => [
     t.aiComposer.example1,
     t.aiComposer.example2,
@@ -210,6 +214,11 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _controller.addListener(() => setState(() {}));
+    unawaited(
+      VoiceInput.available().then((ok) {
+        if (mounted && ok) setState(() => _voice = true);
+      }),
+    );
   }
 
   @override
@@ -411,6 +420,16 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
         if (mounted) unawaited(Navigator.of(context).maybePop());
       }),
     );
+  }
+
+  /// Speak the request: the system recogniser listens, then it's sent.
+  Future<void> _listen() async {
+    if (_thinking) return;
+    ForkMotion.selection();
+    final text = await VoiceInput.listen(prompt: t.aiComposer.voicePrompt);
+    if (!mounted || text == null) return;
+    _controller.text = text;
+    await _send(text);
   }
 
   Future<void> _send([String? text]) async {
@@ -827,16 +846,30 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // Empty, the button listens instead (where the device can).
                   FocusableButton(
                     focusNode: _sendFocus,
-                    onPressed: hasText ? () => unawaited(_send()) : null,
+                    onPressed: hasText
+                        ? () => unawaited(_send())
+                        : _voice
+                        ? () => unawaited(_listen())
+                        : null,
                     onNavigateLeft: _fieldFocus.requestFocus,
                     onNavigateDown: () => _chipNode(0).requestFocus(),
                     child: Pressable(
                       longPress: false,
-                      enabled: hasText,
+                      enabled: hasText || _voice,
                       borderRadius: BorderRadius.circular(tk.radiusMd),
-                      child: _RollButton(enabled: hasText, onTap: () => unawaited(_send()), size: inputSize * 2.3),
+                      child: Semantics(
+                        button: true,
+                        label: hasText || !_voice ? null : t.aiComposer.speak,
+                        child: _RollButton(
+                          enabled: hasText || _voice,
+                          voice: !hasText && _voice,
+                          onTap: () => unawaited(hasText ? _send() : _listen()),
+                          size: inputSize * 2.3,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1216,8 +1249,11 @@ class _Landing {
 
 /// Send: a "roll camera" key, filled with the accent once there's text.
 class _RollButton extends StatelessWidget {
-  const _RollButton({required this.enabled, required this.onTap, required this.size});
+  const _RollButton({required this.enabled, required this.onTap, required this.size, this.voice = false});
   final bool enabled;
+
+  /// A mic: the field is empty and a tap listens.
+  final bool voice;
   final VoidCallback onTap;
   final double size;
 
@@ -1237,11 +1273,16 @@ class _RollButton extends StatelessWidget {
           color: enabled ? tk.accent : Color.alphaBlend(tk.text.withValues(alpha: 0.08), tk.bg),
           border: Border.all(color: enabled ? tk.accent : tk.outline, width: 1.5),
         ),
-        child: Icon(
-          Symbols.play_arrow_rounded,
-          fill: 1,
-          color: enabled ? Theme.of(context).colorScheme.onPrimary : tk.textMuted,
-          size: size * 0.6,
+        child: AnimatedSwitcher(
+          duration: ForkMotion.release,
+          transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+          child: Icon(
+            voice ? Symbols.mic_rounded : Symbols.play_arrow_rounded,
+            key: ValueKey(voice),
+            fill: 1,
+            color: enabled ? Theme.of(context).colorScheme.onPrimary : tk.textMuted,
+            size: size * (voice ? 0.5 : 0.6),
+          ),
         ),
       ),
     );

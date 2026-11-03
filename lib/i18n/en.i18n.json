@@ -2947,6 +2947,8 @@
     "wrap": "That's a wrap",
     "continueBrowsing": "Continue browsing",
     "askAbout": "Ask about this",
+    "voicePrompt": "What would you like to watch?",
+    "speak": "Speak",
     "previouslyOn": "Previously on",
     "episodeCode": "S${season} E${episode}",
     "recapRequest": "Catch me up before ${episode}",

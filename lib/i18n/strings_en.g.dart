@@ -7225,6 +7225,12 @@ class Translations$aiComposer$en {
 	/// en: 'Ask about this'
 	String get askAbout => 'Ask about this';
 
+	/// en: 'What would you like to watch?'
+	String get voicePrompt => 'What would you like to watch?';
+
+	/// en: 'Speak'
+	String get speak => 'Speak';
+
 	/// en: 'Previously on'
 	String get previouslyOn => 'Previously on';
 
@@ -12109,6 +12115,8 @@ extension on Translations {
 			'aiComposer.wrap' => 'That\'s a wrap',
 			'aiComposer.continueBrowsing' => 'Continue browsing',
 			'aiComposer.askAbout' => 'Ask about this',
+			'aiComposer.voicePrompt' => 'What would you like to watch?',
+			'aiComposer.speak' => 'Speak',
 			'aiComposer.previouslyOn' => 'Previously on',
 			'aiComposer.episodeCode' => ({required Object season, required Object episode}) => 'S${season} E${episode}',
 			'aiComposer.recapRequest' => ({required Object episode}) => 'Catch me up before ${episode}',

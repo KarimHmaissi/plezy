@@ -103,6 +103,15 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### Voice requests (AI v2)
+- **Speak instead of typing:** in Ask, while the field is empty, the send
+  button is a mic. A tap opens the system's speech recogniser (Google voice
+  input on phones and Android TV) and what you say is sent straight away.
+  The recogniser owns the microphone, so Plezy asks for no audio
+  permission. Android only; elsewhere the button stays a send button.
+- Code: `android/.../VoiceInputChannel.kt`, `lib/services/ai/voice_input.dart`,
+  the composer's `_listen`.
+
 ### Moods and Your week in watching (AI v2, phase 2)
 - **Moods:** a row of chips at the top of the AI page (Cosy, Edge of my
   seat, Something short, Make me laugh, Mind-bending, Background noise).

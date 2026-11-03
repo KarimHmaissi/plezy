@@ -136,6 +136,7 @@ class PlezyActivity : FlutterActivity() {
   private val userCertificateChannel = UserCertificateChannel()
   private val googleCastChannel by lazy { GoogleCastChannel(applicationContext) }
   private val appIconChannel = AppIconChannel(this)
+  private val voiceInputChannel = VoiceInputChannel(this)
   private val exitDiagnosticsRequested = AtomicBoolean(false)
 
   private inline fun logTextInputDiag(message: () -> String) {
@@ -632,13 +633,16 @@ class PlezyActivity : FlutterActivity() {
   }
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-    if (!externalPlayerChannel.onActivityResult(requestCode, resultCode, data)) {
+    if (!externalPlayerChannel.onActivityResult(requestCode, resultCode, data) &&
+      !voiceInputChannel.onActivityResult(requestCode, resultCode, data)
+    ) {
       super.onActivityResult(requestCode, resultCode, data)
     }
   }
 
   override fun onDestroy() {
     externalPlayerChannel.dispose()
+    voiceInputChannel.dispose()
     googleCastChannel.dispose()
     systemBarsInsetsHost?.setOnApplyWindowInsetsListener(null)
     systemBarsInsetsHost = null
@@ -995,6 +999,7 @@ class PlezyActivity : FlutterActivity() {
     userCertificateChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     googleCastChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     appIconChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
+    voiceInputChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
 
     // Splash screen theme: persist user's chosen theme for next launch (API 31+)
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, THEME_CHANNEL).setMethodCallHandler { call, result ->
