@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:drift/drift.dart' show QueryRow, Variable;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:plezy_brain/plezy_brain.dart';
 
 import '../../media/ids.dart';
@@ -26,6 +28,11 @@ import 'claude_client.dart';
 /// - From your library: rated 8+ by audiences (7.5+ by critics, when
 ///   known) and on the server a year or more, also matching their taste.
 ///
+/// Each card is drawn from the best few candidates, not always the very
+/// best, and a title shown recently ([cooldown]) waits its turn while there
+/// are others, so a new Tonight (pull to refresh, or the next day) brings
+/// different titles.
+///
 /// The titles come from the history brain and the local library index (no
 /// server crawl); Haiku only writes the lines. Made on the host at most
 /// once a day (pull to refresh makes a new one) and kept as one setting, so
@@ -43,6 +50,18 @@ abstract final class AiBriefing {
   static const String slotLibrary = 'library';
 
   static Future<AiHistoryEntry?>? _running;
+
+  /// Titles shown on a card in the last [cooldown] (card id → when), so the
+  /// next Tonight picks others.
+  static const String shownKey = 'ai.briefing.shown';
+  static const Duration cooldown = Duration(days: 5);
+
+  /// How many of the best candidates a card is drawn from.
+  static const int drawFrom = 8;
+
+  static Random _random = Random();
+  @visibleForTesting
+  static set random(Random r) => _random = r;
 
   /// What the last run knew about each card (for checking by hand).
   static List<String> lastFacts = const [];
@@ -80,9 +99,11 @@ abstract final class AiBriefing {
     final watched = await brain.watchedProfiles();
     if (watched.isEmpty) return cached();
 
-    final episode = await _newEpisode(watched, now);
+    final store = await Customisation.store;
+    final shown = _readShown(await store.readSetting(shownKey), now);
+    final episode = await _newEpisode(watched, now, shown);
     final pool = await _tastePool(brain, watched, now);
-    final picked = await _pickAndGem(pool, now);
+    final picked = await _pickAndGem(pool, now, shown);
     final slots = <(String, TitleProfile, String)>[
       if (episode != null) (slotNewEpisode, episode.profile, episode.facts),
       if (picked.pick case final p?) (slotPick, p.profile, p.facts),
@@ -143,7 +164,14 @@ abstract final class AiBriefing {
         reasons: reasons,
         spotlights: slotOf,
       );
-      await (await Customisation.store).writeSetting(settingKey, jsonEncode(entry.toJson()));
+      await store.writeSetting(settingKey, jsonEncode(entry.toJson()));
+      await store.writeSetting(
+        shownKey,
+        jsonEncode({
+          ...shown.map((id, at) => MapEntry(id, at.millisecondsSinceEpoch)),
+          for (final (_, p, _) in slots) ?_cardId(p): now.millisecondsSinceEpoch,
+        }),
+      );
       appLogger.i(
         'AI tonight: ${items.length} cards (${slotOf.values.join(', ')}), \$${cost.toStringAsFixed(4)} '
         '(${usage['input_tokens']} in, ${usage['output_tokens']} out)',
@@ -155,6 +183,46 @@ abstract final class AiBriefing {
     } finally {
       client.close();
     }
+  }
+
+  /// Recently shown titles still in their [cooldown].
+  static Map<String, DateTime> _readShown(String? raw, DateTime now) {
+    if (raw == null) return {};
+    try {
+      final json = jsonDecode(raw);
+      if (json is! Map) return {};
+      return {
+        for (final MapEntry(:key, :value) in json.entries)
+          if (key is String && value is int)
+            if (DateTime.fromMillisecondsSinceEpoch(value) case final at when now.difference(at) < cooldown) key: at,
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// One of the first [drawFrom] of [ranked] (best first), favouring the
+  /// better ones, skipping titles in [shown] unless every candidate is.
+  @visibleForTesting
+  static T? draw<T>(List<T> ranked, {required String? Function(T) id, required Map<String, DateTime> shown}) {
+    if (ranked.isEmpty) return null;
+    final fresh = [
+      for (final c in ranked)
+        if (!shown.containsKey(id(c))) c,
+    ];
+    // Everything was shown lately: the one shown longest ago.
+    if (fresh.isEmpty) {
+      return ([...ranked]..sort((a, b) => shown[id(a)]!.compareTo(shown[id(b)]!))).first;
+    }
+    final top = fresh.take(drawFrom).toList();
+    // Weights n, n-1, ... 1: the best is likeliest, any can come up.
+    final total = top.length * (top.length + 1) ~/ 2;
+    var roll = _random.nextInt(total);
+    for (var i = 0; i < top.length; i++) {
+      roll -= top.length - i;
+      if (roll < 0) return top[i];
+    }
+    return top.first;
   }
 
   static String? _cardId(TitleProfile p) =>
@@ -185,7 +253,11 @@ abstract final class AiBriefing {
   /// A show watched in the last four months and not caught up, with
   /// episodes on the server they haven't seen: new since they last watched
   /// first, then the most recently updated.
-  static Future<({TitleProfile profile, String facts})?> _newEpisode(List<TitleProfile> watched, DateTime now) async {
+  static Future<({TitleProfile profile, String facts})?> _newEpisode(
+    List<TitleProfile> watched,
+    DateTime now,
+    Map<String, DateTime> shown,
+  ) async {
     final shows = {
       for (final p in watched)
         if (!p.isMovie &&
@@ -197,7 +269,7 @@ abstract final class AiBriefing {
     };
     if (shows.isEmpty) return null;
     final rows = await _indexRows(shows.keys);
-    ({TitleProfile profile, int unseen, bool fresh, int updated})? best;
+    final candidates = <({TitleProfile profile, int unseen, bool fresh, int updated})>[];
     for (final MapEntry(key: id, value: p) in shows.entries) {
       final r = rows[id];
       if (r == null) continue;
@@ -205,9 +277,11 @@ abstract final class AiBriefing {
       if (unseen <= 0) continue;
       final updated = r.readNullable<int>('updated_at') ?? 0;
       final fresh = updated * 1000 > p.lastWatched!.millisecondsSinceEpoch;
-      final better = best == null || (fresh && !best.fresh) || (fresh == best.fresh && updated > best.updated);
-      if (better) best = (profile: p, unseen: unseen, fresh: fresh, updated: updated);
+      candidates.add((profile: p, unseen: unseen, fresh: fresh, updated: updated));
     }
+    // New since they last watched first, then the most recently updated.
+    candidates.sort((a, b) => a.fresh != b.fresh ? (a.fresh ? -1 : 1) : b.updated.compareTo(a.updated));
+    final best = draw(candidates, id: (c) => _cardId(c.profile), shown: shown);
     if (best == null) return null;
     return (
       profile: best.profile,
@@ -253,7 +327,11 @@ abstract final class AiBriefing {
   /// library gem (rated 8+, critics 7.5+ when known, on the server a year
   /// or more), not the same.
   static Future<({({TitleProfile profile, String facts})? pick, ({TitleProfile profile, String facts})? gem})>
-  _pickAndGem(List<({TitleProfile profile, double score, List<String> like})> pool, DateTime now) async {
+  _pickAndGem(
+    List<({TitleProfile profile, double score, List<String> like})> pool,
+    DateTime now,
+    Map<String, DateTime> shown,
+  ) async {
     if (pool.isEmpty) return (pick: null, gem: null);
     final top = pool.take(80).toList();
     final rows = await _indexRows([for (final c in top) _cardId(c.profile)!]);
@@ -272,21 +350,30 @@ abstract final class AiBriefing {
       ].where((s) => s.isNotEmpty).join('. ');
     }
 
-    final pick = top.where((c) {
-      final r = rating(c.profile);
-      if (r == null || r < 7) return false;
-      if (!c.profile.isMovie) return true;
-      final minutes = rows[_cardId(c.profile)]?.readNullable<int>('duration_minutes') ?? c.profile.runtimeMinutes;
-      return minutes != null && minutes >= 80 && minutes <= 150;
-    }).firstOrNull;
+    String? id(({TitleProfile profile, double score, List<String> like}) c) => _cardId(c.profile);
+    final pick = draw(
+      top.where((c) {
+        final r = rating(c.profile);
+        if (r == null || r < 7) return false;
+        if (!c.profile.isMovie) return true;
+        final minutes = rows[_cardId(c.profile)]?.readNullable<int>('duration_minutes') ?? c.profile.runtimeMinutes;
+        return minutes != null && minutes >= 80 && minutes <= 150;
+      }).toList(),
+      id: id,
+      shown: shown,
+    );
     final yearAgo = now.subtract(const Duration(days: 365)).millisecondsSinceEpoch ~/ 1000;
-    final gem = top.where((c) {
-      if (identical(c, pick)) return false;
-      final r = rating(c.profile);
-      final critics = rows[_cardId(c.profile)]?.readNullable<double>('critic_rating');
-      final added = rows[_cardId(c.profile)]?.readNullable<int>('added_at');
-      return r != null && r >= 8 && (critics == null || critics >= 7.5) && added != null && added < yearAgo;
-    }).firstOrNull;
+    final gem = draw(
+      top.where((c) {
+        if (identical(c, pick)) return false;
+        final r = rating(c.profile);
+        final critics = rows[_cardId(c.profile)]?.readNullable<double>('critic_rating');
+        final added = rows[_cardId(c.profile)]?.readNullable<int>('added_at');
+        return r != null && r >= 8 && (critics == null || critics >= 7.5) && added != null && added < yearAgo;
+      }).toList(),
+      id: id,
+      shown: shown,
+    );
     return (
       pick: pick == null ? null : (profile: pick.profile, facts: facts(pick)),
       gem: gem == null ? null : (profile: gem.profile, facts: '${facts(gem)}. On their server over a year'),

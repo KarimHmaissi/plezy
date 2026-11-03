@@ -103,6 +103,13 @@ Details of each are in the dated entries below.
 
 ## 2026-11-03
 
+### Tonight changes from day to day
+- Tonight always showed the same titles: each card took the single best
+  match, so a refresh only re-worded the lines. Now each card is drawn from
+  the best 8 candidates (the best still likeliest), and a title shown in
+  the last 5 days waits its turn while there are others. Pull to refresh
+  brings different titles.
+
 ### Google Cast from the phone
 - **A Cast button in the phone's top bar** (Android phones with Google Play
   services), next to Search. It lists the Chromecasts, Cast-enabled TVs,
