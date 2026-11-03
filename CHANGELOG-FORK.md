@@ -126,6 +126,12 @@ Details of each are in the dated entries below.
   The brain now reports what it knows as soon as it opens (at Home's
   start), the checks open it themselves (`HistoryBrain.hasProfiles`), and
   each quiet bail-out is logged.
+- **Quality counts:** suggested lists keep titles rated below 6.5 out
+  unless too few are above it, and every list and Tonight's candidates
+  are ordered by fit with rating mixed in (four places per rating point
+  from 7, `AiSuggestions.rankScore`): fit still leads, but a much better
+  rated title nearby comes first. Sonnet is told to favour the better
+  rated too, without making it a hard rule.
 
 ### AI tab polish
 - **Starter prompts:** with a key but no answers yet, the AI tab shows the

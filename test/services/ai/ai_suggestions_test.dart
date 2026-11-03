@@ -83,4 +83,11 @@ void main() {
       unorderedEquals(['Vault Night', 'Space Rocks', 'Robot Racers']),
     );
   });
+
+  test('rating moves a nearby title ahead, but fit leads', () {
+    // A close 6.0 against a slightly further 8.5: the better rated wins.
+    expect(AiSuggestions.rankScore(3, 8.5), lessThan(AiSuggestions.rankScore(0, 6.0)));
+    // A far 8.5 doesn't jump a close 7.0.
+    expect(AiSuggestions.rankScore(0, 7.0), lessThan(AiSuggestions.rankScore(20, 8.5)));
+  });
 }

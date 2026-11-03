@@ -16,6 +16,7 @@ import 'ai_history.dart';
 import 'ai_key_store.dart';
 import 'ai_rows.dart' show pickFetchTimeout;
 import 'ai_spend.dart';
+import 'ai_suggestions.dart' show AiSuggestions;
 import 'claude_client.dart';
 
 /// Fork: "Tonight" at the top of the AI page on touch screens: three cards,
@@ -362,6 +363,11 @@ abstract final class AiBriefing {
     final top = pool.take(120).toList();
     final rows = await _indexRows([for (final c in top) _cardId(c.profile)!]);
     double? rating(TitleProfile p) => rows[_cardId(p)]?.readNullable<double>('audience_rating') ?? p.audienceRating;
+    // Nearness leads, but a better rated title close by moves ahead, so the
+    // model sees the strongest candidates.
+    final place = {for (final (i, c) in top.indexed) c.profile.id: i};
+    double order(TitleProfile p) => AiSuggestions.rankScore(place[p.id]!, rating(p));
+    top.sort((a, b) => order(a.profile).compareTo(order(b.profile)));
     String facts(({TitleProfile profile, double score, List<String> like}) c) {
       final p = c.profile;
       final minutes = rows[_cardId(p)]?.readNullable<int>('duration_minutes') ?? p.runtimeMinutes;
@@ -423,7 +429,7 @@ abstract final class AiBriefing {
 
   static const String _prompt = '''
 You choose and introduce up to three cards at the top of a TV app tonight.
-- pick: choose the one candidate (p1, p2, ...) they would most enjoy tonight. library: choose the one candidate (g1, g2, ...) from their own library most worth finally watching. Judge by genre, tone, story and audience against their taste. The candidates are only similar by a rough measure that can match on surface words ("Girlfriends" is nothing like "Friends", a kids' cartoon is nothing like a grown-up drama), so ignore any candidate that doesn't genuinely fit.
+- pick: choose the one candidate (p1, p2, ...) they would most enjoy tonight. library: choose the one candidate (g1, g2, ...) from their own library most worth finally watching. Judge by genre, tone, story and audience against their taste, and favour the better rated (the ratings are in the facts): a lower-rated title only when it clearly fits them better. The candidates are only similar by a rough measure that can match on surface words ("Girlfriends" is nothing like "Friends", a kids' cartoon is nothing like a grown-up drama), so ignore any candidate that doesn't genuinely fit.
 - Then one line per card, at most 14 words, plain text, no markdown, no emoji. The card already shows its title: never name it in its line.
 - newEpisode: nudge them back to the show (where they are, what's waiting). pick: why it suits their taste tonight. library: why this one they own is worth finally watching.
 - Be specific: name what it shares with titles they love, from the facts given. Never invent facts.

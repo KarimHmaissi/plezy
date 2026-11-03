@@ -358,7 +358,16 @@ abstract final class AiSuggestions {
       for (final t in titles)
         if ((t.viewCount ?? 0) == 0 && (t.watchedEpisodeCount ?? 0) == 0 && !excluded(t)) t,
     ];
+    // Well rated first: below [ratingFloor] only when too few are above it.
+    final good = [
+      for (final t in titles)
+        if ((rating(t) ?? ratingFloor) >= ratingFloor) t,
+    ];
+    if (good.length >= minPicks) titles = good;
 
+    // How well each fits, best 0: similarity to the "like" title when the
+    // brain knows it, else the search's own order.
+    var fit = {for (final (i, t) in titles.indexed) t.id: i};
     if (brain != null && seed != null && titles.isNotEmpty) {
       try {
         final near = await brain.similar(seed, limit: 60, watched: false);
@@ -367,17 +376,28 @@ abstract final class AiSuggestions {
             if (h.profile.serverId != null && h.profile.ratingKey != null)
               '${h.profile.serverId}:${h.profile.ratingKey}': i,
         };
-        int score(IndexedTitle t) => rank[t.id] ?? 1000;
-        titles = [...titles]..sort((a, b) => score(a).compareTo(score(b)));
+        fit = {for (final t in titles) t.id: rank[t.id] ?? 60 + (fit[t.id] ?? 0)};
       } catch (e) {
         appLogger.d('AI suggestions: similarity unavailable', error: e);
       }
     }
-    return titles;
+    return [...titles]..sort((a, b) => rankScore(fit[a.id]!, rating(a)).compareTo(rankScore(fit[b.id]!, rating(b))));
   }
+
+  /// Titles rated below this lead a list only when too few are above it.
+  static const double ratingFloor = 6.5;
+
+  /// A title's audience rating (0-10), else the critics'.
+  static double? rating(IndexedTitle t) => t.audienceRating ?? t.criticRating;
+
+  /// Lower first: a title's place by fit ([fit], 0 best), moved up four
+  /// places per rating point above 7 and down per point below, so fit
+  /// leads but a much better rated title nearby comes first.
+  static double rankScore(int fit, double? rating) => fit - 4 * ((rating ?? 7) - 7);
 
   static const String _prompt = '''
 You suggest ready-made lists for a TV app's AI page, so the user finds something without asking. From their taste, think of 8 varied lists they would enjoy browsing tonight: specific and inviting ("90s heist films", "Short anime to finish this week", "Slow-burn British crime"), never generic ("Action movies", "Top rated"). Mix films and shows, moods, eras and one or two that stretch their taste a little. The app fills each list from their own library with the search you give, unwatched titles only, so keep searches broad enough to find 10+ titles: usually 1-2 genres plus a year range or a theme word, not every filter at once.
+Lists are for good watching: favour genres, eras and themes where their library has well-rated titles.
 - title: 2-5 words, the shelf name. Plain, no emoji.
 - request: the same list as the user would ask for it, one sentence.
 - why: one short line on why it suits them, naming a title they love when it fits. Address them as "you".
