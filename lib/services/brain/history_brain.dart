@@ -120,8 +120,15 @@ class HistoryBrain {
     if (_store case final s?) return s;
     final dir = await _folder();
     await dir.create(recursive: true);
-    return _store = BrainStore.open(p.join(dir.path, 'history_brain.db'));
+    final opened = _store ??= BrainStore.open(p.join(dir.path, 'history_brain.db'));
+    // What's already built counts from the start, not only after the next
+    // sync (which waits for the servers).
+    _publish(opened, status.value.phase);
+    return opened;
   }
+
+  /// Whether the brain knows any titles yet (opening it if need be).
+  Future<bool> hasProfiles() async => (await store).counts(TransformerEmbedderIds.bgeSmall).profiles > 0;
 
   Future<OnnxEmbedder> get embedder => _embedder ??= _openEmbedder();
 

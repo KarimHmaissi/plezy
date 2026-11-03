@@ -120,6 +120,12 @@ Details of each are in the dated entries below.
 - And it also refuses forced tool use (`tool_choice: tool`), so Sonnet
   calls send `auto` and the prompt says which tool to answer with
   (`ClaudeModel.answerWith`).
+- And after a restart the history brain reported no titles until its
+  next sync (30 seconds or more in), so a new Tonight or New lists right
+  after opening the app quietly did nothing, and Ask ran without history.
+  The brain now reports what it knows as soon as it opens (at Home's
+  start), the checks open it themselves (`HistoryBrain.hasProfiles`), and
+  each quiet bail-out is logged.
 
 ### AI tab polish
 - **Starter prompts:** with a key but no answers yet, the AI tab shows the

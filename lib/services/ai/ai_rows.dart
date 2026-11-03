@@ -125,7 +125,7 @@ AiHistoryEntry mergeFindMore(AiHistoryEntry old, AiHistoryEntry found, {DateTime
 /// once, or seen.
 Future<Map<String, String>> _watchState(List<({MediaItem item, String reason, String id})> picks) async {
   final brain = HistoryBrain.instance;
-  if (brain.status.value.profiles == 0) return const {};
+  if (!await brain.hasProfiles()) return const {};
   try {
     final store = await brain.store;
     final db = await LibraryIndex.instance.database;

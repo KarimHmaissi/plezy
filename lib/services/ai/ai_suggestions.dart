@@ -186,7 +186,10 @@ abstract final class AiSuggestions {
   }) async {
     final key = await AiKeyStore.read();
     final brain = HistoryBrain.instance;
-    if (key == null || brain.status.value.profiles == 0) return const [];
+    if (key == null || !await brain.hasProfiles()) {
+      appLogger.i('AI suggestions: no key or history yet');
+      return const [];
+    }
     final client = ClaudeClient(key);
     try {
       final taste = await brain.taste();

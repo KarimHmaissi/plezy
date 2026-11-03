@@ -624,6 +624,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _revealTimer = Timer(_revealWait, () {
       if (mounted) setState(() => _revealAll = true);
     });
+    // What the history brain already knows is there from the start (Ask,
+    // Tonight); syncing it waits for the index below.
+    if (PhoneMode.runsOwnAi) unawaited(HistoryBrain.instance.store);
     // Build or refresh the library index in the background once the
     // servers have connected and startup has settled.
     _indexStartTimer = Timer(const Duration(seconds: 30), () {

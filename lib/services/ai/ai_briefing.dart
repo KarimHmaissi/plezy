@@ -92,7 +92,10 @@ abstract final class AiBriefing {
   static Future<AiHistoryEntry?> _make(MediaServerClient? Function(ServerId serverId) clientFor) async {
     final key = await AiKeyStore.read();
     final brain = HistoryBrain.instance;
-    if (key == null || brain.status.value.profiles == 0) return cached();
+    if (key == null || !await brain.hasProfiles()) {
+      appLogger.i('AI tonight: no key or history yet');
+      return cached();
+    }
     final now = DateTime.now();
     final watched = await brain.watchedProfiles();
     if (watched.isEmpty) return cached();
@@ -102,7 +105,10 @@ abstract final class AiBriefing {
     final episode = await _newEpisode(watched, now, shown);
     final pool = await _tastePool(brain, watched, now);
     final candidates = await _candidates(pool, now, shown);
-    if (episode == null && candidates.pick.isEmpty && candidates.gem.isEmpty) return cached();
+    if (episode == null && candidates.pick.isEmpty && candidates.gem.isEmpty) {
+      appLogger.i('AI tonight: no candidates (pool ${pool.length})');
+      return cached();
+    }
     String line(String slot, _Candidate c) =>
         '- $slot: ${c.profile.title}${c.profile.year == null ? '' : ' (${c.profile.year})'}. ${c.facts}';
     String options(String prefix, List<_Candidate> list) => [
@@ -172,7 +178,10 @@ abstract final class AiBriefing {
         slotOf[item.globalKey] = slot;
         if (lines[slot] case final line?) reasons[item.globalKey] = line;
       }
-      if (items.isEmpty) return await cached();
+      if (items.isEmpty) {
+        appLogger.i('AI tonight: none of ${slots.length} cards loaded from the servers');
+        return await cached();
+      }
       final entry = AiHistoryEntry(
         id: entryId,
         request: entryId,
