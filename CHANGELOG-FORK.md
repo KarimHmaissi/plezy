@@ -105,6 +105,23 @@ Details of each are in the dated entries below.
 
 ## 2026-11-04
 
+### Phone and TV catch up with each other on connecting
+- A phone working on its own data (the default) now swaps changes with the
+  TV whenever it connects through Companion Remote, and again after any
+  change while they stay connected. Home rows, Comfort pauses, the
+  Shortlist, AI answers and lists, and the AI and other fork settings all
+  travel; the newest edit of each piece wins wherever it was made, and a
+  removed AI answer is removed on the other device too. Both screens show
+  "Synced with <device>" when something moved.
+- Never synced: the API key (kept in secure storage, not this data), each
+  device's AI spend, the AI answer order (rebuilt newest first after a
+  sync), and caches.
+- Each piece now records when it last changed (new `sync_stamps` table in
+  the fork database, schema 2); data from before counts as the oldest
+  possible change, so a device with nothing takes it and any edit beats it.
+- New Companion Remote commands `catchUpOffer` / `catchUpReply` /
+  `catchUpPush` / `catchUpNudge`, appended so older builds ignore them.
+
 ### The Shield hosts the companion remote out of the box
 - Phones on the same Plex account now find the Shield in Companion Remote
   without turning anything on: "Companion Remote Server" defaults to on for

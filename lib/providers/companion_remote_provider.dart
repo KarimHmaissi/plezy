@@ -197,6 +197,10 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   final StreamController<Map<String, dynamic>> _mirrorSnapshots = StreamController.broadcast();
   Stream<Map<String, dynamic>> get mirrorSnapshots => _mirrorSnapshots.stream;
 
+  /// Fork, catch-up sync (phone side): the host's replies and nudges.
+  final StreamController<RemoteCommand> _catchUp = StreamController.broadcast();
+  Stream<RemoteCommand> get catchUpCommands => _catchUp.stream;
+
   /// Phone side: the host's running AI requests (`running`, `labels`).
   final ValueNotifier<Map<String, dynamic>?> hostAiActivity = ValueNotifier(null);
 
@@ -1068,6 +1072,8 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
           _handleSyncState(command);
         } else if (command.type == RemoteCommandType.mirrorSnapshot) {
           _mirrorSnapshots.add(command.data ?? const {});
+        } else if (command.type == RemoteCommandType.catchUpReply || command.type == RemoteCommandType.catchUpNudge) {
+          _catchUp.add(command);
         } else if (command.type == RemoteCommandType.aiActivity) {
           hostAiActivity.value = command.data;
         } else if (command.type == RemoteCommandType.nowPlaying) {
@@ -1438,6 +1444,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     nowPlaying.dispose();
     hostAiActivity.dispose();
     _mirrorSnapshots.close();
+    _catchUp.close();
 
     _boundActiveProfile?.removeListener(_scheduleAuthContextRefresh);
     for (final sub in _profileServiceSubs) {

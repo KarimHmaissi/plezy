@@ -66,6 +66,7 @@ class LocalCustomisationStore implements CustomisationStore {
         });
         await writeSetting(_curatedKey, curated ? 'true' : 'false');
         await writeSetting(_revisionKey, '$revision');
+        await _stamp(SyncUnits.home);
       });
 
   @override
@@ -84,6 +85,7 @@ class LocalCustomisationStore implements CustomisationStore {
           ComfortPausedShowsCompanion.insert(traktId: Value(id), title: Value(title)),
       ]);
     });
+    await _stamp(SyncUnits.comfort);
   });
 
   @override
@@ -91,19 +93,145 @@ class LocalCustomisationStore implements CustomisationStore {
       (await (_db.select(_db.forkSettings)..where((s) => s.key.equals(key))).getSingleOrNull())?.value;
 
   @override
-  Future<void> writeSetting(String key, String? value) async {
+  Future<void> writeSetting(String key, String? value) => _writeSetting(key, value);
+
+  Future<void> _writeSetting(String key, String? value, {int? stamp}) async {
     Customisation.localWrites.value++;
     if (value == null) {
       await (_db.delete(_db.forkSettings)..where((s) => s.key.equals(key))).go();
     } else {
       await _db.into(_db.forkSettings).insertOnConflictUpdate(ForkSettingsCompanion.insert(key: key, value: value));
     }
+    if (SyncUnits.syncsSetting(key)) await _stamp(SyncUnits.setting(key), at: stamp, deleted: value == null);
+  }
+
+  /// Record that [unit] changed now (or at [at], for data from another
+  /// device), for `CatchUpSync`.
+  Future<void> _stamp(String unit, {int? at, bool deleted = false}) => _db
+      .into(_db.syncStamps)
+      .insertOnConflictUpdate(
+        SyncStampsCompanion.insert(
+          unit: unit,
+          stamp: at ?? DateTime.now().millisecondsSinceEpoch,
+          deleted: Value(deleted),
+        ),
+      );
+
+  /// When each syncable unit last changed on this device.
+  Future<Map<String, SyncStamp>> readSyncStamps() async => {
+    for (final r in await _db.select(_db.syncStamps).get())
+      if (SyncUnits.isSyncable(r.unit)) r.unit: (stamp: r.stamp, deleted: r.deleted),
+  };
+
+  /// [units] as they are on this device, each with its stamp, to send to
+  /// another device (see [applySyncUnits]).
+  Future<Map<String, Object?>> readSyncUnits(Iterable<String> units) async {
+    final stamps = await readSyncStamps();
+    final out = <String, Object?>{};
+    for (final unit in units) {
+      final stamp = stamps[unit];
+      if (stamp == null) continue;
+      final Object? value;
+      if (stamp.deleted) {
+        value = null;
+      } else if (unit == SyncUnits.home) {
+        final home = await readHomeLayout();
+        value = home == null
+            ? null
+            : {
+                'curated': home.curated,
+                'revision': home.revision,
+                'rows': [
+                  for (final r in home.rows) {'id': r.id, 'title': r.title, 'sources': r.sources},
+                ],
+              };
+      } else if (unit == SyncUnits.comfort) {
+        value = [
+          for (final MapEntry(key: id, value: title) in (await readComfortPaused()).entries)
+            {'traktId': id, 'title': title},
+        ];
+      } else if (unit == SyncUnits.shortlist) {
+        value = await _shortlistJson();
+      } else {
+        value = await readSetting(SyncUnits.settingKey(unit)!);
+      }
+      out[unit] = {'stamp': stamp.stamp, 'deleted': stamp.deleted, 'value': value};
+    }
+    return out;
+  }
+
+  /// Take the units another device sent ([readSyncUnits]) that changed there
+  /// after they last changed here. Returns the units taken.
+  Future<Set<String>> applySyncUnits(Map<String, Object?> units) => _db.transaction(() async {
+    final local = await readSyncStamps();
+    final taken = <String>{};
+    for (final MapEntry(key: unit, value: raw) in units.entries) {
+      if (!SyncUnits.isSyncable(unit) || raw is! Map) continue;
+      final stamp = raw['stamp'];
+      if (stamp is! int || stamp <= (local[unit]?.stamp ?? 0)) continue;
+      final deleted = raw['deleted'] == true;
+      final value = raw['value'];
+      if (unit == SyncUnits.home) {
+        if (value is! Map) continue;
+        await writeHomeLayout(
+          [
+            for (final r in (value['rows'] as List? ?? const []).whereType<Map>())
+              if (r['id'] case final String id)
+                (
+                  id: id,
+                  title: r['title'] as String? ?? id,
+                  sources: [...(r['sources'] as List? ?? const []).whereType<String>()],
+                ),
+          ],
+          curated: value['curated'] != false,
+          revision: value['revision'] is int ? value['revision'] as int : 1,
+        );
+      } else if (unit == SyncUnits.comfort) {
+        await writeComfortPaused({
+          for (final p in (value as List? ?? const []).whereType<Map>())
+            if (p['traktId'] case final int id) id: p['title'] as String? ?? '',
+        });
+      } else if (unit == SyncUnits.shortlist) {
+        await _writeShortlist(value as List? ?? const []);
+      } else {
+        if (!deleted && value is! String) continue;
+        await _writeSetting(SyncUnits.settingKey(unit)!, deleted ? null : value as String, stamp: stamp);
+        taken.add(unit);
+        continue;
+      }
+      // Whole units keep the other device's stamp, not the time of this write.
+      await _stamp(unit, at: stamp, deleted: deleted);
+      taken.add(unit);
+    }
+    return taken;
+  });
+
+  Future<List<Map<String, Object?>>> _shortlistJson() async => [
+    for (final s in await (_db.select(_db.shortlistItems)..orderBy([(r) => OrderingTerm.asc(r.position)])).get())
+      {'key': s.itemKey, 'title': s.title, 'item': s.itemJson, 'addedAt': s.addedAt},
+  ];
+
+  Future<void> _writeShortlist(List<dynamic> items) async {
+    Customisation.localWrites.value++;
+    await _db.delete(_db.shortlistItems).go();
+    await _db.batch((b) {
+      b.insertAll(_db.shortlistItems, [
+        for (final (i, s) in items.whereType<Map>().indexed)
+          if (s['key'] case final String key)
+            ShortlistItemsCompanion.insert(
+              itemKey: key,
+              position: i,
+              title: s['title'] as String? ?? '',
+              itemJson: s['item'] as String? ?? '{}',
+              addedAt: s['addedAt'] is int ? s['addedAt'] as int : 0,
+            ),
+      ]);
+    });
   }
 
   @override
   Future<Map<String, Object?>> exportAll() async {
     final home = await readHomeLayout();
-    final shortlist = await (_db.select(_db.shortlistItems)..orderBy([(r) => OrderingTerm.asc(r.position)])).get();
     final settings = await _db.select(_db.forkSettings).get();
     return {
       'homeLayout': home == null
@@ -119,9 +247,7 @@ class LocalCustomisationStore implements CustomisationStore {
         for (final MapEntry(key: id, value: title) in (await readComfortPaused()).entries)
           {'traktId': id, 'title': title},
       ],
-      'shortlist': [
-        for (final s in shortlist) {'key': s.itemKey, 'title': s.title, 'item': s.itemJson, 'addedAt': s.addedAt},
-      ],
+      'shortlist': await _shortlistJson(),
       'settings': {
         for (final s in settings)
           if (s.key != _curatedKey && s.key != _revisionKey) s.key: s.value,
@@ -155,18 +281,8 @@ class LocalCustomisationStore implements CustomisationStore {
       for (final p in (data['comfortPaused'] as List? ?? const []).whereType<Map>())
         if (p['traktId'] case final int id) id: p['title'] as String? ?? '',
     });
-    await _db.batch((b) {
-      b.insertAll(_db.shortlistItems, [
-        for (final (i, s) in (data['shortlist'] as List? ?? const []).whereType<Map>().indexed)
-          ShortlistItemsCompanion.insert(
-            itemKey: s['key'] as String,
-            position: i,
-            title: s['title'] as String? ?? '',
-            itemJson: s['item'] as String? ?? '{}',
-            addedAt: s['addedAt'] is int ? s['addedAt'] as int : 0,
-          ),
-      ]);
-    });
+    await _writeShortlist(data['shortlist'] as List? ?? const []);
+    await _stamp(SyncUnits.shortlist);
     final settings = data['settings'];
     if (settings is Map) {
       for (final MapEntry(:key, :value) in settings.entries) {
@@ -182,6 +298,41 @@ class LocalCustomisationStore implements CustomisationStore {
     } catch (_) {
       return const [];
     }
+  }
+}
+
+/// A unit's last change on one device: when (ms since the epoch) and whether
+/// it was a removal.
+typedef SyncStamp = ({int stamp, bool deleted});
+
+/// The pieces of customisation data that catch up between devices (see
+/// `CatchUpSync`), each kept whole: the newer side's copy wins.
+abstract final class SyncUnits {
+  static const String home = 'home';
+  static const String comfort = 'comfort';
+  static const String shortlist = 'shortlist';
+  static const String _settingPrefix = 'setting:';
+
+  static String setting(String key) => '$_settingPrefix$key';
+
+  /// The setting key of a `setting:` unit, else null.
+  static String? settingKey(String unit) =>
+      unit.startsWith(_settingPrefix) ? unit.substring(_settingPrefix.length) : null;
+
+  /// Settings that belong to this device only: Home's own bookkeeping (part of
+  /// [home]), the AI answer order (rebuilt from the answers after a sync),
+  /// this device's AI spend, one-off migrations and caches of Trakt data.
+  static bool syncsSetting(String key) =>
+      key != 'home.curated' &&
+      key != 'home.revision' &&
+      key != 'ai.history.index' &&
+      !key.startsWith('ai.spend.') &&
+      key != 'comfort.pausedMigrated' &&
+      key != 'comfort.shows';
+
+  static bool isSyncable(String unit) {
+    final key = settingKey(unit);
+    return key != null ? syncsSetting(key) : unit == home || unit == comfort || unit == shortlist;
   }
 }
 

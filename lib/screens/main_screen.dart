@@ -20,6 +20,7 @@ import '../services/lab/lab_export.dart';
 import '../services/ai/ai_more_like_this.dart';
 import '../services/ai/ai_remote_asks.dart';
 import '../services/companion_remote/host_media_notification.dart';
+import '../services/companion_remote/catch_up_sync.dart';
 import '../services/companion_remote/mirror_sync.dart';
 import '../services/companion_remote/phone_mode.dart';
 import '../services/trackers/trakt/trakt_client.dart';
@@ -1091,6 +1092,10 @@ class _MainScreenState extends State<MainScreen>
       mirror.sendActivity();
     };
     receiver.onMirrorWrite = (op) => unawaited(mirror.applyWrite(op));
+    // Catch-up sync: phones on their own data swap newer pieces on connecting.
+    final catchUp = _catchUpHost = CatchUpHost(companionRemote)..start();
+    receiver.onCatchUpOffer = (data) => unawaited(catchUp.onOffer(data));
+    receiver.onCatchUpPush = (data) => unawaited(catchUp.onPush(data));
     receiver.onAiAction = (data) => unawaited(
       AiRemoteAsks.runAction(
         data,
@@ -1102,6 +1107,7 @@ class _MainScreenState extends State<MainScreen>
   }
 
   MirrorHost? _mirrorHost;
+  CatchUpHost? _catchUpHost;
 
   TraktClient? get _traktClient =>
       context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client;
@@ -1227,7 +1233,10 @@ class _MainScreenState extends State<MainScreen>
         receiver.onMirrorRequest = null;
         receiver.onMirrorWrite = null;
         receiver.onAiAction = null;
+        receiver.onCatchUpOffer = null;
+        receiver.onCatchUpPush = null;
         _mirrorHost?.stop();
+        _catchUpHost?.stop();
         receiver.navigationOwner = null;
       }
     }

@@ -2434,6 +2434,7 @@
   "companionRemote": {
     "title": "Companion Remote",
     "connectedTo": "Connected to ${name}",
+    "syncedWith": "Synced with ${name}",
     "unknownDevice": "Unknown Device",
     "session": {
       "startingServer": "Starting remote server...",

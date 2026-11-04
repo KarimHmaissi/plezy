@@ -57,6 +57,10 @@ class CompanionRemoteReceiver {
   void Function(Map<String, dynamic> data)? onMirrorWrite;
   void Function(Map<String, dynamic> data)? onAiAction;
 
+  /// Fork, catch-up sync (host side): a phone's offer and its newer data.
+  void Function(Map<String, dynamic> data)? onCatchUpOffer;
+  void Function(Map<String, dynamic> data)? onCatchUpPush;
+
   /// Skip the intro / credits marker the player is in; set by the controls.
   VoidCallback? onSkipMarker;
 
@@ -121,6 +125,10 @@ class CompanionRemoteReceiver {
         onMirrorWrite?.call(command.data ?? const {});
       case RemoteCommandType.aiAction:
         onAiAction?.call(command.data ?? const {});
+      case RemoteCommandType.catchUpOffer:
+        onCatchUpOffer?.call(command.data ?? const {});
+      case RemoteCommandType.catchUpPush:
+        onCatchUpPush?.call(command.data ?? const {});
       case RemoteCommandType.seekForward:
         onSeekForward?.call();
       case RemoteCommandType.seekBackward:
@@ -190,6 +198,8 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.nowPlaying:
       case RemoteCommandType.mirrorSnapshot:
       case RemoteCommandType.aiActivity:
+      case RemoteCommandType.catchUpReply:
+      case RemoteCommandType.catchUpNudge:
         break;
 
       default:
@@ -226,7 +236,11 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.mirrorSnapshot ||
   RemoteCommandType.mirrorWrite ||
   RemoteCommandType.aiAction ||
-  RemoteCommandType.aiActivity => false,
+  RemoteCommandType.aiActivity ||
+  RemoteCommandType.catchUpOffer ||
+  RemoteCommandType.catchUpReply ||
+  RemoteCommandType.catchUpPush ||
+  RemoteCommandType.catchUpNudge => false,
   RemoteCommandType.dpadUp ||
   RemoteCommandType.dpadDown ||
   RemoteCommandType.dpadLeft ||

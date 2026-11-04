@@ -1096,6 +1096,269 @@ class ForkSettingsCompanion extends UpdateCompanion<ForkSettingRecord> {
   }
 }
 
+class $SyncStampsTable extends SyncStamps
+    with TableInfo<$SyncStampsTable, SyncStampRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SyncStampsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _unitMeta = const VerificationMeta('unit');
+  @override
+  late final GeneratedColumn<String> unit = GeneratedColumn<String>(
+    'unit',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _stampMeta = const VerificationMeta('stamp');
+  @override
+  late final GeneratedColumn<int> stamp = GeneratedColumn<int>(
+    'stamp',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _deletedMeta = const VerificationMeta(
+    'deleted',
+  );
+  @override
+  late final GeneratedColumn<bool> deleted = GeneratedColumn<bool>(
+    'deleted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("deleted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [unit, stamp, deleted];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'sync_stamps';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SyncStampRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('unit')) {
+      context.handle(
+        _unitMeta,
+        unit.isAcceptableOrUnknown(data['unit']!, _unitMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_unitMeta);
+    }
+    if (data.containsKey('stamp')) {
+      context.handle(
+        _stampMeta,
+        stamp.isAcceptableOrUnknown(data['stamp']!, _stampMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_stampMeta);
+    }
+    if (data.containsKey('deleted')) {
+      context.handle(
+        _deletedMeta,
+        deleted.isAcceptableOrUnknown(data['deleted']!, _deletedMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {unit};
+  @override
+  SyncStampRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SyncStampRecord(
+      unit: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unit'],
+      )!,
+      stamp: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}stamp'],
+      )!,
+      deleted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}deleted'],
+      )!,
+    );
+  }
+
+  @override
+  $SyncStampsTable createAlias(String alias) {
+    return $SyncStampsTable(attachedDatabase, alias);
+  }
+}
+
+class SyncStampRecord extends DataClass implements Insertable<SyncStampRecord> {
+  final String unit;
+  final int stamp;
+  final bool deleted;
+  const SyncStampRecord({
+    required this.unit,
+    required this.stamp,
+    required this.deleted,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['unit'] = Variable<String>(unit);
+    map['stamp'] = Variable<int>(stamp);
+    map['deleted'] = Variable<bool>(deleted);
+    return map;
+  }
+
+  SyncStampsCompanion toCompanion(bool nullToAbsent) {
+    return SyncStampsCompanion(
+      unit: Value(unit),
+      stamp: Value(stamp),
+      deleted: Value(deleted),
+    );
+  }
+
+  factory SyncStampRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SyncStampRecord(
+      unit: serializer.fromJson<String>(json['unit']),
+      stamp: serializer.fromJson<int>(json['stamp']),
+      deleted: serializer.fromJson<bool>(json['deleted']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'unit': serializer.toJson<String>(unit),
+      'stamp': serializer.toJson<int>(stamp),
+      'deleted': serializer.toJson<bool>(deleted),
+    };
+  }
+
+  SyncStampRecord copyWith({String? unit, int? stamp, bool? deleted}) =>
+      SyncStampRecord(
+        unit: unit ?? this.unit,
+        stamp: stamp ?? this.stamp,
+        deleted: deleted ?? this.deleted,
+      );
+  SyncStampRecord copyWithCompanion(SyncStampsCompanion data) {
+    return SyncStampRecord(
+      unit: data.unit.present ? data.unit.value : this.unit,
+      stamp: data.stamp.present ? data.stamp.value : this.stamp,
+      deleted: data.deleted.present ? data.deleted.value : this.deleted,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncStampRecord(')
+          ..write('unit: $unit, ')
+          ..write('stamp: $stamp, ')
+          ..write('deleted: $deleted')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(unit, stamp, deleted);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SyncStampRecord &&
+          other.unit == this.unit &&
+          other.stamp == this.stamp &&
+          other.deleted == this.deleted);
+}
+
+class SyncStampsCompanion extends UpdateCompanion<SyncStampRecord> {
+  final Value<String> unit;
+  final Value<int> stamp;
+  final Value<bool> deleted;
+  final Value<int> rowid;
+  const SyncStampsCompanion({
+    this.unit = const Value.absent(),
+    this.stamp = const Value.absent(),
+    this.deleted = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SyncStampsCompanion.insert({
+    required String unit,
+    required int stamp,
+    this.deleted = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : unit = Value(unit),
+       stamp = Value(stamp);
+  static Insertable<SyncStampRecord> custom({
+    Expression<String>? unit,
+    Expression<int>? stamp,
+    Expression<bool>? deleted,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (unit != null) 'unit': unit,
+      if (stamp != null) 'stamp': stamp,
+      if (deleted != null) 'deleted': deleted,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SyncStampsCompanion copyWith({
+    Value<String>? unit,
+    Value<int>? stamp,
+    Value<bool>? deleted,
+    Value<int>? rowid,
+  }) {
+    return SyncStampsCompanion(
+      unit: unit ?? this.unit,
+      stamp: stamp ?? this.stamp,
+      deleted: deleted ?? this.deleted,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (unit.present) {
+      map['unit'] = Variable<String>(unit.value);
+    }
+    if (stamp.present) {
+      map['stamp'] = Variable<int>(stamp.value);
+    }
+    if (deleted.present) {
+      map['deleted'] = Variable<bool>(deleted.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncStampsCompanion(')
+          ..write('unit: $unit, ')
+          ..write('stamp: $stamp, ')
+          ..write('deleted: $deleted, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$ForkDatabase extends GeneratedDatabase {
   _$ForkDatabase(QueryExecutor e) : super(e);
   $ForkDatabaseManager get managers => $ForkDatabaseManager(this);
@@ -1104,6 +1367,7 @@ abstract class _$ForkDatabase extends GeneratedDatabase {
       $ComfortPausedShowsTable(this);
   late final $ShortlistItemsTable shortlistItems = $ShortlistItemsTable(this);
   late final $ForkSettingsTable forkSettings = $ForkSettingsTable(this);
+  late final $SyncStampsTable syncStamps = $SyncStampsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1113,6 +1377,7 @@ abstract class _$ForkDatabase extends GeneratedDatabase {
     comfortPausedShows,
     shortlistItems,
     forkSettings,
+    syncStamps,
   ];
 }
 
@@ -1795,6 +2060,168 @@ typedef $$ForkSettingsTableProcessedTableManager =
       ForkSettingRecord,
       PrefetchHooks Function()
     >;
+typedef $$SyncStampsTableCreateCompanionBuilder =
+    SyncStampsCompanion Function({
+      required String unit,
+      required int stamp,
+      Value<bool> deleted,
+      Value<int> rowid,
+    });
+typedef $$SyncStampsTableUpdateCompanionBuilder =
+    SyncStampsCompanion Function({
+      Value<String> unit,
+      Value<int> stamp,
+      Value<bool> deleted,
+      Value<int> rowid,
+    });
+
+class $$SyncStampsTableFilterComposer
+    extends Composer<_$ForkDatabase, $SyncStampsTable> {
+  $$SyncStampsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get unit => $composableBuilder(
+    column: $table.unit,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get stamp => $composableBuilder(
+    column: $table.stamp,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get deleted => $composableBuilder(
+    column: $table.deleted,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SyncStampsTableOrderingComposer
+    extends Composer<_$ForkDatabase, $SyncStampsTable> {
+  $$SyncStampsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get unit => $composableBuilder(
+    column: $table.unit,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get stamp => $composableBuilder(
+    column: $table.stamp,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get deleted => $composableBuilder(
+    column: $table.deleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SyncStampsTableAnnotationComposer
+    extends Composer<_$ForkDatabase, $SyncStampsTable> {
+  $$SyncStampsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get unit =>
+      $composableBuilder(column: $table.unit, builder: (column) => column);
+
+  GeneratedColumn<int> get stamp =>
+      $composableBuilder(column: $table.stamp, builder: (column) => column);
+
+  GeneratedColumn<bool> get deleted =>
+      $composableBuilder(column: $table.deleted, builder: (column) => column);
+}
+
+class $$SyncStampsTableTableManager
+    extends
+        RootTableManager<
+          _$ForkDatabase,
+          $SyncStampsTable,
+          SyncStampRecord,
+          $$SyncStampsTableFilterComposer,
+          $$SyncStampsTableOrderingComposer,
+          $$SyncStampsTableAnnotationComposer,
+          $$SyncStampsTableCreateCompanionBuilder,
+          $$SyncStampsTableUpdateCompanionBuilder,
+          (
+            SyncStampRecord,
+            BaseReferences<_$ForkDatabase, $SyncStampsTable, SyncStampRecord>,
+          ),
+          SyncStampRecord,
+          PrefetchHooks Function()
+        > {
+  $$SyncStampsTableTableManager(_$ForkDatabase db, $SyncStampsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SyncStampsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SyncStampsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SyncStampsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> unit = const Value.absent(),
+                Value<int> stamp = const Value.absent(),
+                Value<bool> deleted = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SyncStampsCompanion(
+                unit: unit,
+                stamp: stamp,
+                deleted: deleted,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String unit,
+                required int stamp,
+                Value<bool> deleted = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SyncStampsCompanion.insert(
+                unit: unit,
+                stamp: stamp,
+                deleted: deleted,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SyncStampsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ForkDatabase,
+      $SyncStampsTable,
+      SyncStampRecord,
+      $$SyncStampsTableFilterComposer,
+      $$SyncStampsTableOrderingComposer,
+      $$SyncStampsTableAnnotationComposer,
+      $$SyncStampsTableCreateCompanionBuilder,
+      $$SyncStampsTableUpdateCompanionBuilder,
+      (
+        SyncStampRecord,
+        BaseReferences<_$ForkDatabase, $SyncStampsTable, SyncStampRecord>,
+      ),
+      SyncStampRecord,
+      PrefetchHooks Function()
+    >;
 
 class $ForkDatabaseManager {
   final _$ForkDatabase _db;
@@ -1807,4 +2234,6 @@ class $ForkDatabaseManager {
       $$ShortlistItemsTableTableManager(_db, _db.shortlistItems);
   $$ForkSettingsTableTableManager get forkSettings =>
       $$ForkSettingsTableTableManager(_db, _db.forkSettings);
+  $$SyncStampsTableTableManager get syncStamps =>
+      $$SyncStampsTableTableManager(_db, _db.syncStamps);
 }

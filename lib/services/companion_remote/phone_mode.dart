@@ -10,6 +10,7 @@ import '../ai/ai_spend.dart';
 import '../catalog/home_pins.dart';
 import '../customisation/customisation_store.dart';
 import '../settings_service.dart';
+import 'catch_up_sync.dart';
 import 'mirror_sync.dart';
 
 /// Fork: how a phone (or tablet) works. On its own, the default, it is a
@@ -38,6 +39,8 @@ abstract final class PhoneMode {
   /// the TV's last mirrored data in once, the first time).
   static Future<void> start(CompanionRemoteProvider remote) async {
     _remote = remote;
+    // Working on its own data, the phone catches up with the TV on connecting.
+    CatchUpClient.instance.start(remote);
     if (mirrorsTv) {
       await MirrorClient.instance.start(remote);
     } else {
@@ -57,6 +60,7 @@ abstract final class PhoneMode {
       MirrorClient.instance.stop();
       Customisation.useLocal();
       await _adoptMirrorOnce();
+      unawaited(CatchUpClient.instance.offer());
     }
     await HomePinsController.instance.ensureLoaded(refresh: true);
     changed.value++;

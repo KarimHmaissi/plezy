@@ -105,6 +105,22 @@ enum RemoteCommandType {
 
   /// Fork, mirror: the host's running AI requests (`running`, `labels`).
   aiActivity,
+
+  /// Fork, catch-up sync: a phone working on its own data offers when each
+  /// piece last changed (`stamps`: unit → [ms, deleted]).
+  catchUpOffer,
+
+  /// Fork, catch-up sync: the host's pieces that are newer than the phone's
+  /// (`units`) and the units it wants from the phone (`want`).
+  catchUpReply,
+
+  /// Fork, catch-up sync: the phone's newer pieces the host asked for
+  /// (`units`).
+  catchUpPush,
+
+  /// Fork, catch-up sync: the host's data changed while a phone is
+  /// connected; the phone answers with a new [catchUpOffer].
+  catchUpNudge,
 }
 
 class _RemoteCommandTypeConverter extends IndexedEnumConverter<RemoteCommandType> {

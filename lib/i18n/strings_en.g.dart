@@ -5968,6 +5968,9 @@ class Translations$companionRemote$en {
 	/// en: 'Connected to ${name}'
 	String connectedTo({required Object name}) => 'Connected to ${name}';
 
+	/// en: 'Synced with ${name}'
+	String syncedWith({required Object name}) => 'Synced with ${name}';
+
 	/// en: 'Unknown Device'
 	String get unknownDevice => 'Unknown Device';
 
@@ -11657,6 +11660,7 @@ extension on Translations {
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Delete "${name}"?',
 			'companionRemote.title' => 'Companion Remote',
 			'companionRemote.connectedTo' => ({required Object name}) => 'Connected to ${name}',
+			'companionRemote.syncedWith' => ({required Object name}) => 'Synced with ${name}',
 			'companionRemote.unknownDevice' => 'Unknown Device',
 			'companionRemote.session.startingServer' => 'Starting remote server...',
 			'companionRemote.session.hostAddress' => 'Host Address',
@@ -12006,9 +12010,9 @@ extension on Translations {
 			'services.libraryFilter.noLibraries' => 'No libraries available',
 			'addServer.addMediaBrowserTitle' => ({required Object product}) => 'Add ${product} server',
 			'addServer.serverUrls' => 'Server URLs',
-			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
 			_ => null,
 		} ?? switch (path) {
+			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
 			'addServer.findServer' => 'Find server',
 			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
 			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',

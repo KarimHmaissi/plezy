@@ -259,6 +259,25 @@ abstract final class AiHistory {
     replaced.value = entry.id;
   }
 
+  /// The setting key prefix of saved answers (`ai.history.<id>`).
+  static const String entryKeyPrefix = 'ai.history.';
+
+  /// After a catch-up sync took answers from another device ([added]) and
+  /// removals ([removed]), by id: put them into the order, newest first.
+  static Future<void> mergeSynced({required Set<String> added, required Set<String> removed}) async {
+    if (added.isEmpty && removed.isEmpty) return;
+    final store = await Customisation.store;
+    final ids = {...await _ids(), ...added}..removeAll(removed);
+    final entries = <({String id, DateTime createdAt})>[];
+    for (final id in ids) {
+      final raw = await store.readSetting(_entryKey(id));
+      final entry = raw == null ? null : AiHistoryEntry.fromJson(jsonDecode(raw));
+      if (entry != null) entries.add((id: id, createdAt: entry.createdAt));
+    }
+    entries.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    await store.writeSetting(_indexKey, jsonEncode([for (final e in entries) e.id]));
+  }
+
   static Future<void> remove(String id) async {
     final store = await Customisation.store;
     await store.writeSetting(_entryKey(id), null);

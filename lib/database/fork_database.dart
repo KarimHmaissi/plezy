@@ -60,7 +60,22 @@ class ForkSettings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [HomeRows, ComfortPausedShows, ShortlistItems, ForkSettings])
+/// When each piece of customisation data last changed, for catching up with
+/// another device (see `CatchUpSync`). A unit is `home`, `comfort`,
+/// `shortlist` or `setting:<key>`; [stamp] is the change time in ms since the
+/// epoch (1 for data that existed before stamps did). [deleted] marks a
+/// removed setting so the removal reaches the other device too.
+@DataClassName('SyncStampRecord')
+class SyncStamps extends Table {
+  TextColumn get unit => text()();
+  IntColumn get stamp => integer()();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {unit};
+}
+
+@DriftDatabase(tables: [HomeRows, ComfortPausedShows, ShortlistItems, ForkSettings, SyncStamps])
 class ForkDatabase extends _$ForkDatabase {
   ForkDatabase(super.executor);
 
@@ -70,10 +85,31 @@ class ForkDatabase extends _$ForkDatabase {
   static const String fileName = 'plezy_fork.db';
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
-  MigrationStrategy get migration => MigrationStrategy(onCreate: (m) => m.createAll());
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) => m.createAll(),
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.createTable(syncStamps);
+        // Data from before stamps counts as the oldest possible change: it
+        // still wins over a device that has nothing, and loses to any edit.
+        await customStatement(
+          "INSERT INTO sync_stamps (unit, stamp, deleted) SELECT 'setting:' || key, 1, 0 FROM fork_settings",
+        );
+        for (final (unit, table) in const [
+          ('home', 'home_rows'),
+          ('comfort', 'comfort_paused_shows'),
+          ('shortlist', 'shortlist_items'),
+        ]) {
+          await customStatement(
+            "INSERT INTO sync_stamps (unit, stamp, deleted) SELECT '$unit', 1, 0 WHERE EXISTS (SELECT 1 FROM $table)",
+          );
+        }
+      }
+    },
+  );
 
   /// The database file beside Plezy's own.
   static Future<ForkDatabase> open() async {
