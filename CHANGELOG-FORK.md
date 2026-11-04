@@ -107,7 +107,7 @@ Details of each are in the dated entries below.
 
 ### The Shield hosts the companion remote out of the box
 - Phones on the same Plex account now find the Shield in Companion Remote
-  without turning anything on: "Allow phones to connect" defaults to on for
+  without turning anything on: "Companion Remote Server" defaults to on for
   TVs as well as desktops (it was desktop-only, so the Shield never
   advertised itself). An explicit off in Settings still wins.
 - Plezy now runs on the real Shield as a profile build (Wi-Fi adb at
