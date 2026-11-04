@@ -1011,9 +1011,12 @@ class SettingsService extends BaseSharedPreferencesService {
     'video_player_navigation_enabled',
     defaultValueProvider: PlatformDetector.isTV,
   );
+  /// Fork: the TV is the home hub, so it hosts the companion remote out of the
+  /// box (like desktops) and phones on the same Plex account find it.
+  static bool _companionRemoteServerDefault() => PlatformDetector.isDesktopOS() || PlatformDetector.isTV();
   static const enableCompanionRemoteServer = BoolPref(
     'enable_companion_remote_server',
-    defaultValueProvider: PlatformDetector.isDesktopOS,
+    defaultValueProvider: _companionRemoteServerDefault,
   );
   static const startInFullscreen = BoolPref('start_in_fullscreen');
 

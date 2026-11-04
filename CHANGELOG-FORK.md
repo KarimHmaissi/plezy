@@ -94,13 +94,24 @@ Details of each are in the dated entries below.
 - **Shield remote volume buttons on Windows** (currently unmapped).
 
 ### Shield & infrastructure
-- **Run it on the real Shield** — confirm the layout (`adb shell wm density` /
-  `wm size`, expected 320 and 1920x1080) and check playback and the remote.
+- **Run it on the real Shield** — layout confirmed on 2026-11-04 (`wm density`
+  320, `wm size` 3840x2160 with a 1920x1080 override, so 960×540 logical at
+  2×); still to check: playback.
 - **Deployment pipeline to the Shield** — build and push changes from the PC
   to the Shield over adb, with hot reload where possible (the project's
   original goal).
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
+
+## 2026-11-04
+
+### The Shield hosts the companion remote out of the box
+- Phones on the same Plex account now find the Shield in Companion Remote
+  without turning anything on: "Allow phones to connect" defaults to on for
+  TVs as well as desktops (it was desktop-only, so the Shield never
+  advertised itself). An explicit off in Settings still wins.
+- Plezy now runs on the real Shield as a profile build (Wi-Fi adb at
+  192.168.1.153:5555); startup about 3.4 s vs about 7.6 s for a debug build.
 
 ## 2026-11-03
 
