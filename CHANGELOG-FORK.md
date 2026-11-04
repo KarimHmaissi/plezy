@@ -105,6 +105,16 @@ Details of each are in the dated entries below.
 
 ## 2026-11-04
 
+### Release builds no longer crash when the AI brain runs
+- R8 renamed ONNX Runtime's Java classes, which its native library finds by
+  name, so release builds aborted on the first embedding ("JNI DETECTED
+  ERROR … java_class == null in call to GetMethodID"). `proguard-rules.pro`
+  now keeps `ai.onnxruntime.**`. Debug and profile builds were never
+  affected (not minified).
+- The Shield and phone now run release builds (debug-key signed by
+  `tools/shield-install.sh`): first frame in about 0.6 s on the Shield
+  instead of about 2.5 s for a profile build.
+
 ### Phone and TV catch up with each other on connecting
 - A phone working on its own data (the default) now swaps changes with the
   TV whenever it connects through Companion Remote, and again after any

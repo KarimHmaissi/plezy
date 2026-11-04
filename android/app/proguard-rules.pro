@@ -35,3 +35,11 @@
   private androidx.media3.extractor.ExtractorOutput extractorOutput;
   private androidx.media3.common.util.ParsableByteArray subtitleSample;
 }
+
+# Fork: ONNX Runtime (the AI history brain's on-device embedding model).
+#
+# libonnxruntime4j_jni looks up ai.onnxruntime classes and their methods/fields by name
+# from native code (e.g. convertToTensorInfo → FindClass("ai/onnxruntime/TensorInfo")).
+# R8 renamed or removed them in release builds, so the first OrtSession.run aborted the
+# process with "JNI DETECTED ERROR ... java_class == null in call to GetMethodID".
+-keep class ai.onnxruntime.** { *; }
