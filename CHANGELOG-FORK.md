@@ -102,6 +102,19 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-05
+
+### Holding a direction sends real key repeats
+- Holding the D-pad or stick on a game controller used to send a fresh
+  press-and-release every 80 ms. It now behaves like a held hardware key:
+  one press, then a repeat every 80 ms after a 400 ms wait, and one release
+  when you let go (`KeyEventSimulatorController.startKeyRepeat`).
+- A hold during playback now commits **one** seek when you let go, with the
+  same speed-up a remote hold gets. Before, every synthetic release
+  committed a seek, so a one-second hold fired about seven.
+- Holding still walks focus down lists and rows, one item per repeat. This
+  is also the base the phone remote's hold will use.
+
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)
