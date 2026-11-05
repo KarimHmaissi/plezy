@@ -71,6 +71,7 @@ class PlezyActivity : FlutterActivity() {
     private const val EXIT_DIAGNOSTICS_PREFS = "plezy_exit_diagnostics"
     private const val LAST_EXIT_DEDUPE_KEY = "last_reported_exit"
     private const val LAST_STARTUP_PHASE_KEY = "last_startup_phase"
+    private const val LOW_MEMORY_KILLS_WATERMARK_KEY = "low_memory_kills_watermark"
     private val startupPhaseLock = Any()
 
     @Volatile private var startupPhaseInitializationAttempted = false
@@ -111,6 +112,7 @@ class PlezyActivity : FlutterActivity() {
   private val DEVICE_ADJUSTMENT_CHANNEL = "com.plezy/device_adjustment"
   private val TEXT_INPUT_CHANNEL = "com.plezy/text_input"
   private val APP_EXIT_CHANNEL = "com.plezy/app_exit"
+  private val MEMORY_TRIM_CHANNEL = "com.plezy/memory_trim"
   private val CAR_RESTRICTIONS_CHANNEL = "com.plezy/car_restrictions"
   private val ASSISTIVE_TECHNOLOGY_CHANNEL = "com.plezy/assistive_technology"
 
@@ -121,6 +123,7 @@ class PlezyActivity : FlutterActivity() {
   private var carRestrictionsChannel: MethodChannel? = null
   private var assistiveTechnology: AssistiveTechnologyMonitor? = null
   private var assistiveTechnologyChannel: MethodChannel? = null
+  private var memoryTrimChannel: MethodChannel? = null
   private var nativeTextInputFocused = false
   private var imeLeakRestartBudget = 0
   private var lastImeLeakRestartUptime = 0L
@@ -138,6 +141,7 @@ class PlezyActivity : FlutterActivity() {
   private val appIconChannel = AppIconChannel(this)
   private val voiceInputChannel = VoiceInputChannel(this)
   private val exitDiagnosticsRequested = AtomicBoolean(false)
+  private val lowMemoryKillsRequested = AtomicBoolean(false)
 
   private inline fun logTextInputDiag(message: () -> String) {
     if (TEXT_INPUT_DIAGNOSTICS_ENABLED) {
@@ -435,6 +439,42 @@ class PlezyActivity : FlutterActivity() {
     }
   }
 
+  private fun handleLowMemoryKills(result: MethodChannel.Result) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !lowMemoryKillsRequested.compareAndSet(false, true)) {
+      completePreviousExit(result, null)
+      return
+    }
+    try {
+      exitDiagnosticsExecutor.execute {
+        val summary = try {
+          readLowMemoryKills()
+        } catch (_: Throwable) {
+          Log.w(TAG, "Low-memory kill count failed")
+          null
+        }
+        runOnUiThread { completePreviousExit(result, summary) }
+      }
+    } catch (_: Throwable) {
+      completePreviousExit(result, null)
+    }
+  }
+
+  @RequiresApi(Build.VERSION_CODES.R)
+  private fun readLowMemoryKills(): Map<String, Any> {
+    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    // Own package only: other packages' history needs the DUMP permission.
+    val records = activityManager.getHistoricalProcessExitReasons(packageName, 0, 0).map {
+      HistoricalExitRecord(reason = it.reason, status = it.status, importance = it.importance, timestamp = it.timestamp)
+    }
+    val preferences = getSharedPreferences(EXIT_DIAGNOSTICS_PREFS, Context.MODE_PRIVATE)
+    val watermark = preferences.getLong(LOW_MEMORY_KILLS_WATERMARK_KEY, -1L).takeIf { it >= 0 }
+    val summary = LowMemoryKillCounter.summarize(records, watermark)
+    records.maxOfOrNull { it.timestamp }?.let {
+      preferences.edit().putLong(LOW_MEMORY_KILLS_WATERMARK_KEY, it).apply()
+    }
+    return summary
+  }
+
   private fun completePreviousExit(result: MethodChannel.Result, report: Map<String, Any>?) {
     try {
       result.success(report)
@@ -653,6 +693,7 @@ class PlezyActivity : FlutterActivity() {
     assistiveTechnology?.release()
     assistiveTechnology = null
     assistiveTechnologyChannel = null
+    memoryTrimChannel = null
     activityStarted = false
     flutterSurfaceReconnectPending = false
     flutterTextureView = null
@@ -761,6 +802,18 @@ class PlezyActivity : FlutterActivity() {
       ) { surface ->
         flutterTextureView.isAvailable && flutterTextureView.surfaceTexture === surface
       }
+  }
+
+  // See TrimMemoryRouting: UI_HIDDEN skips FlutterActivity's handler, whose
+  // memory-pressure message would wipe the image cache on every Back to the
+  // launcher; Dart's MemoryTrimPolicy halves the caches for it instead.
+  override fun onTrimMemory(level: Int) {
+    memoryTrimChannel?.invokeMethod("onTrimMemory", level)
+    if (TrimMemoryRouting.reachesFlutterDelegate(level)) {
+      super.onTrimMemory(level)
+    } else {
+      flutterEngine?.renderer?.onTrimMemory(level)
+    }
   }
 
   override fun onStop() {
@@ -913,6 +966,7 @@ class PlezyActivity : FlutterActivity() {
           result.success(target != null && BackgroundWorkDiagnostics.openSettings(this, target))
         }
         "getPreviousExit" -> handlePreviousExit(result)
+        "getLowMemoryKills" -> handleLowMemoryKills(result)
         "setStartupPhase" -> queueStartupPhase(call.arguments as? String, result)
         "setRuntimeUiState" -> {
           val uiState = AndroidRuntimeDiagnostics.sanitizeUiState(call.arguments as? String)
@@ -991,9 +1045,20 @@ class PlezyActivity : FlutterActivity() {
             finishAndRemoveTask()
           }
         }
+        // Root Back on Android TV: keep the process and its task warm behind
+        // the launcher. singleTop + onNewIntent deliver the next plezy:// link
+        // (Arc's Watch Next) to this same activity.
+        "moveToBack" -> {
+          result.success(true)
+          window.decorView.post {
+            if (!moveTaskToBack(true)) finishAndRemoveTask()
+          }
+        }
         else -> result.notImplemented()
       }
     }
+
+    memoryTrimChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEMORY_TRIM_CHANNEL)
 
     externalPlayerChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     userCertificateChannel.attach(flutterEngine.dartExecutor.binaryMessenger)

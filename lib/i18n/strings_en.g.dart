@@ -961,6 +961,12 @@ class Translations$settings$en {
 	/// en: 'App information and licenses'
 	String get aboutDescription => 'App information and licenses';
 
+	/// en: 'Quit Plezy'
+	String get quitApp => 'Quit Plezy';
+
+	/// en: 'Back keeps Plezy ready behind the home screen. This closes it completely'
+	String get quitAppDescription => 'Back keeps Plezy ready behind the home screen. This closes it completely';
+
 	/// en: 'Updates'
 	String get updates => 'Updates';
 
@@ -9751,6 +9757,8 @@ extension on Translations {
 			'settings.resetShortcutsConfirm' => 'This will replace your custom shortcuts with the defaults. Continue?',
 			'settings.about' => 'About',
 			'settings.aboutDescription' => 'App information and licenses',
+			'settings.quitApp' => 'Quit Plezy',
+			'settings.quitAppDescription' => 'Back keeps Plezy ready behind the home screen. This closes it completely',
 			'settings.updates' => 'Updates',
 			'settings.updateAvailable' => 'Update Available',
 			'settings.checkForUpdates' => 'Check for Updates',
@@ -9949,10 +9957,10 @@ extension on Translations {
 			'themeEditor.preview' => 'Preview',
 			'themeEditor.slots.bg' => 'Background',
 			'themeEditor.slots.surface' => 'Surface',
-			'themeEditor.slots.outline' => 'Outline',
-			'themeEditor.slots.text' => 'Text',
 			_ => null,
 		} ?? switch (path) {
+			'themeEditor.slots.outline' => 'Outline',
+			'themeEditor.slots.text' => 'Text',
 			'themeEditor.slots.textMuted' => 'Secondary text',
 			'themeEditor.slots.accent' => 'Accent',
 			'themeEditor.opacity' => 'Opacity',
@@ -10463,10 +10471,10 @@ extension on Translations {
 			'profiles.newProfile' => 'New profile',
 			'profiles.profileNameHint' => 'e.g. Guests, Kids, Family Room',
 			'profiles.pinProtectionOptional' => 'PIN protection (optional)',
-			'profiles.pinExplain' => '4-digit PIN required to switch profiles.',
-			'profiles.continueButton' => 'Continue',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.pinExplain' => '4-digit PIN required to switch profiles.',
+			'profiles.continueButton' => 'Continue',
 			'profiles.pinsDontMatch' => 'PINs don\'t match',
 			'profiles.tokenIdentityMismatch' => 'The Plex profile token resolved to an unexpected server',
 			'connections.sectionTitle' => 'Connections',
@@ -10977,10 +10985,10 @@ extension on Translations {
 			'history.copy.skipped' => 'Skipped',
 			'history.copy.alreadyOnTrakt' => ({required Object n}) => '${n} already on Trakt',
 			'history.copy.bulk' => ({required Object n}) => '${n} with mark-as-watched dates, not real viewings, so your Trakt timeline doesn\'t get made-up dates',
-			'history.copy.noIds' => ({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)',
-			'history.copy.howItWorks' => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.',
 			_ => null,
 		} ?? switch (path) {
+			'history.copy.noIds' => ({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)',
+			'history.copy.howItWorks' => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.',
 			'history.copy.cancel' => 'Cancel',
 			'history.copy.confirm' => 'Send to Trakt',
 			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
@@ -11491,10 +11499,10 @@ extension on Translations {
 			'watchTogether.notices.shareFailed' => 'Couldn\'t share this video with the room',
 			'watchTogether.notices.downloadNotShared' => 'Downloads aren\'t shared with the room while their server is offline',
 			'watchTogether.notices.openFailed' => 'Couldn\'t open the room\'s video',
-			'watchTogether.ended.ended' => 'The host ended the room',
-			'watchTogether.ended.kicked' => 'You were removed from the room',
 			_ => null,
 		} ?? switch (path) {
+			'watchTogether.ended.ended' => 'The host ended the room',
+			'watchTogether.ended.kicked' => 'You were removed from the room',
 			'watchTogether.ended.expired' => 'The room expired',
 			'watchTogether.ended.replaced' => 'You joined this room on another device',
 			'watchTogether.ended.lost' => 'Lost the connection to the room',
@@ -12005,10 +12013,10 @@ extension on Translations {
 			'services.libraryFilter.libraries' => 'Libraries',
 			'services.libraryFilter.noLibraries' => 'No libraries available',
 			'addServer.addMediaBrowserTitle' => ({required Object product}) => 'Add ${product} server',
-			'addServer.serverUrls' => 'Server URLs',
-			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
 			_ => null,
 		} ?? switch (path) {
+			'addServer.serverUrls' => 'Server URLs',
+			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
 			'addServer.findServer' => 'Find server',
 			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
 			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',

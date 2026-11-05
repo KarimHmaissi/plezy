@@ -215,6 +215,54 @@ abstract final class AndroidExitDiagnostics {
     }
   }
 
+  /// Logs how often Android's low-memory killer took Plezy while it sat in the
+  /// background, from the platform's exit history (ApplicationExitInfo keeps a
+  /// bounded number of recent records per package). This answers whether
+  /// keeping Plezy warm behind the launcher costs it its process; it sees only
+  /// Plezy's own exits, so other apps' kills come from
+  /// `adb shell dumpsys activity exit-info`. Local log only, never Sentry.
+  static Future<void> logLowMemoryKills() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final line = describeLowMemoryKills(await deviceChannel.invokeMapMethod<String, Object?>('getLowMemoryKills'));
+      if (line != null) appLogger.i(line);
+    } catch (_) {
+      // Historical diagnostics are best-effort and must never escape startup.
+    }
+  }
+
+  static const _lowMemoryKillCounts = [
+    'lowMemoryBackground',
+    'lowMemoryBackgroundNew',
+    'lowMemoryForeground',
+    'otherBackground',
+    'exitsInHistory',
+  ];
+
+  /// The `[LmkCounter]` log line for a native summary, or null if malformed.
+  @visibleForTesting
+  static String? describeLowMemoryKills(Map<String, Object?>? raw) {
+    if (raw == null) return null;
+    final counts = <String, int>{};
+    for (final key in _lowMemoryKillCounts) {
+      final value = raw[key];
+      if (value is! int || value < 0) return null;
+      counts[key] = value;
+    }
+    final firstSummary = raw['firstSummary'];
+    if (firstSummary is! bool) return null;
+    String timestamp(String key) => switch (raw[key]) {
+      final int ms => DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toIso8601String(),
+      _ => 'none',
+    };
+    return '[LmkCounter] background low-memory kills: '
+        '${counts['lowMemoryBackground']} in history, '
+        '${counts['lowMemoryBackgroundNew']} ${firstSummary ? '(first count)' : 'since last launch'}; '
+        'foreground low-memory=${counts['lowMemoryForeground']} '
+        'other background exits=${counts['otherBackground']} '
+        'history=${counts['exitsInHistory']} exits ${timestamp('oldestTimestamp')}..${timestamp('newestTimestamp')}';
+  }
+
   /// The Sentry message for an exit worth an event, or null for a routine one.
   ///
   /// Android kills cached processes all the time - for memory, for idling, or

@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/device_performance.dart';
+import 'package:plezy/utils/platform_detector.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -89,6 +91,39 @@ void main() {
       DevicePerformance.debugReset(autoReduced: true, override: VisualEffectsSetting.auto);
       detectAt(2160);
       expect(DevicePerformance.displayBudgetFactor(), 1.0);
+    });
+  });
+
+  group('tier sizes MemoryTrimPolicy restores', () {
+    tearDown(() {
+      TvDetectionService.debugSetAppleTVOverride(null);
+      PlatformDetector.debugSetIsDesktopOSOverride(null);
+    });
+
+    void expectTierMatchesBudget() {
+      DevicePerformance.applyImageCacheBudget();
+      expect(PaintingBinding.instance.imageCache.maximumSizeBytes, DevicePerformance.imageCacheTierBytes());
+    }
+
+    test('match what the boot budget sets on desktop, TV at 4K and the reduced tier', () {
+      DevicePerformance.debugReset(autoReduced: false, override: VisualEffectsSetting.auto, totalMemBytes: 2870 << 20);
+      PlatformDetector.debugSetIsDesktopOSOverride(true);
+      expectTierMatchesBudget();
+      expect(DevicePerformance.imageCacheTierBytes(), 150 << 20);
+
+      PlatformDetector.debugSetIsDesktopOSOverride(false);
+      TvDetectionService.debugSetAppleTVOverride(true);
+      DevicePerformance.debugDisplayShortestSideOverride = 2160;
+      expectTierMatchesBudget();
+      expect(DevicePerformance.imageCacheTierBytes(), 128 << 20, reason: 'the 4K display budget doubles the TV tier');
+
+      DevicePerformance.debugReset(autoReduced: true, override: VisualEffectsSetting.auto);
+      expectTierMatchesBudget();
+      expect(DevicePerformance.imageCacheTierBytes(), 64 << 20);
+    });
+
+    test('Skia has no tier off Android, so trims leave it alone there', () {
+      expect(DevicePerformance.skiaResourceCacheTierBytes(), isNull);
     });
   });
 }

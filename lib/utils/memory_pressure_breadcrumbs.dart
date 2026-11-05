@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
+import '../services/memory_trim_policy.dart';
 import '../services/playback_coordinator.dart';
 import 'app_logger.dart';
 
@@ -20,9 +21,12 @@ import 'app_logger.dart';
 ///
 /// It wraps the whole dispatch because the framework's own handler runs first:
 /// [PaintingBinding.handleMemoryPressure] empties the keep-alive image cache
-/// before any `WidgetsBindingObserver.didHaveMemoryPressure` is called, so an
-/// observer only ever sees an empty cache. The `…After` numbers are sampled
-/// once every observer — the app's own eviction included — has run.
+/// before any `WidgetsBindingObserver.didHaveMemoryPressure` is called. That
+/// wipe is held off here: the rest of the dispatch (the asset bundle cache,
+/// every observer) still runs, and [MemoryTrimPolicy.onMemoryPressure] halves
+/// the cache's budget instead, so artwork Plezy will show again on a warm
+/// return survives. The `…After` numbers are sampled once every observer and
+/// the halving have run.
 ///
 /// iOS delivers warnings in bursts (15 within 1.2 seconds in one #445 report),
 /// so at most one breadcrumb is recorded per [breadcrumbInterval]; the next one
@@ -36,28 +40,47 @@ mixin MemoryPressureBreadcrumbs on PaintingBinding {
   int _suppressedMemoryPressureSignals = 0;
 
   @override
+  ImageCache createImageCache() => _TrimmingImageCache();
+
+  void _holdImageCacheClear(bool hold) {
+    final cache = imageCache;
+    if (cache is _TrimmingImageCache) cache._holdClear = hold;
+  }
+
+  @override
   void handleMemoryPressure() {
     final now = clock.now();
     final last = _lastMemoryPressureBreadcrumb;
     // A wall clock set backwards must not silence the breadcrumb until it
     // catches up again.
-    if (last != null && !now.isBefore(last) && now.difference(last) < breadcrumbInterval) {
-      _suppressedMemoryPressureSignals++;
-      super.handleMemoryPressure();
-      return;
-    }
-    _lastMemoryPressureBreadcrumb = now;
-
+    final throttled = last != null && !now.isBefore(last) && now.difference(last) < breadcrumbInterval;
     final cache = imageCache;
-    final data = <String, Object>{
-      ...?_megabytes('rssMb', () => ProcessInfo.currentRss),
-      ...?_megabytes('maxRssMb', () => ProcessInfo.maxRss),
-      'imageCacheMb': cache.currentSizeBytes >> 20,
-      'imageCacheImages': cache.currentSize,
-      'liveImages': cache.liveImageCount,
-      ..._playbackData(),
-    };
-    super.handleMemoryPressure();
+    Map<String, Object>? data;
+    if (throttled) {
+      _suppressedMemoryPressureSignals++;
+    } else {
+      _lastMemoryPressureBreadcrumb = now;
+      data = <String, Object>{
+        ...?_megabytes('rssMb', () => ProcessInfo.currentRss),
+        ...?_megabytes('maxRssMb', () => ProcessInfo.maxRss),
+        'imageCacheMb': cache.currentSizeBytes >> 20,
+        'imageCacheImages': cache.currentSize,
+        'liveImages': cache.liveImageCount,
+        ..._playbackData(),
+      };
+    }
+
+    // The framework's handler and the observers, with their image-cache wipe
+    // held off; then the policy halves the budget instead.
+    _holdImageCacheClear(true);
+    try {
+      super.handleMemoryPressure();
+    } finally {
+      _holdImageCacheClear(false);
+    }
+    MemoryTrimPolicy.instance.onMemoryPressure();
+    if (data == null) return;
+
     data
       ..['imageCacheMbAfter'] = cache.currentSizeBytes >> 20
       ..['imageCacheImagesAfter'] = cache.currentSize
@@ -99,5 +122,19 @@ mixin MemoryPressureBreadcrumbs on PaintingBinding {
         'bufferAheadMs': math.max(0, (player.buffer - player.position).inMilliseconds),
       },
     };
+  }
+}
+
+/// The app's image cache. [clear] is ignored only during the memory-pressure
+/// dispatch ([MemoryPressureBreadcrumbs]), whose framework handler and
+/// observers would otherwise empty it; every other caller, the watchdog's last
+/// resort included, clears as usual.
+class _TrimmingImageCache extends ImageCache {
+  bool _holdClear = false;
+
+  @override
+  void clear() {
+    if (_holdClear) return;
+    super.clear();
   }
 }
