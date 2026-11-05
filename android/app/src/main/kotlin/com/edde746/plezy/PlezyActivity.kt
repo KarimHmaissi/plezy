@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -1048,10 +1049,22 @@ class PlezyActivity : FlutterActivity() {
         // Root Back on Android TV: keep the process and its task warm behind
         // the launcher. singleTop + onNewIntent deliver the next plezy:// link
         // (Arc's Watch Next) to this same activity.
+        //
+        // moveTaskToBack alone is not enough on the Shield (Android 11): the
+        // task sits alone in its own root stack, so moving it to the back of
+        // that stack changes nothing on screen and Plezy stays in front.
+        // Bringing the launcher forward is what actually leaves.
         "moveToBack" -> {
           result.success(true)
           window.decorView.post {
-            if (!moveTaskToBack(true)) finishAndRemoveTask()
+            val home = Intent(Intent.ACTION_MAIN)
+              .addCategory(Intent.CATEGORY_HOME)
+              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+              startActivity(home)
+            } catch (e: ActivityNotFoundException) {
+              if (!moveTaskToBack(true)) finishAndRemoveTask()
+            }
           }
         }
         else -> result.notImplemented()
