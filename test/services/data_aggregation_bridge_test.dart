@@ -61,6 +61,8 @@ class _LibrariesClient implements MediaServerClient {
     this.hangLibraries = false,
     this.hangSearch = false,
     this.hangPeople = false,
+    this.continueWatching = const [],
+    this.hangContinueWatching = false,
   });
 
   @override
@@ -78,6 +80,8 @@ class _LibrariesClient implements MediaServerClient {
   final bool hangLibraries;
   final bool hangSearch;
   final bool hangPeople;
+  final List<MediaItem> continueWatching;
+  final bool hangContinueWatching;
   Set<String>? lastExcludedLibraryIds;
   Set<String>? lastPeopleExcludedLibraryIds;
   AbortController? lastSearchAbort;
@@ -93,6 +97,12 @@ class _LibrariesClient implements MediaServerClient {
     if (hangLibraries) await Completer<void>().future;
     if (error != null) throw error!;
     return libraries;
+  }
+
+  @override
+  Future<List<MediaItem>> fetchContinueWatching({int? count = 20, Set<String> excludedLibraryIds = const {}}) async {
+    if (hangContinueWatching) await Completer<void>().future;
+    return continueWatching;
   }
 
   @override
@@ -712,6 +722,31 @@ void main() {
         expect(result!.libraries.map((l) => l.title), ['Movies']);
         expect(result!.succeededServerIds, {'ok'});
         expect(result!.failedServerIds, {'hung'});
+      });
+    });
+
+    test('a server that stops answering Continue Watching fails on its own at the per-server deadline', () {
+      fakeAsync((async) {
+        final row = testMediaItem(
+          id: 'movie-1',
+          backend: MediaBackend.plex,
+          kind: MediaKind.movie,
+          title: 'Movie 1',
+          serverId: 'ok',
+        );
+        manager.debugRegisterClientForTesting(_LibrariesClient(ServerId('ok'), continueWatching: [row]));
+        manager.debugRegisterClientForTesting(_LibrariesClient(ServerId('hung'), hangContinueWatching: true));
+
+        OnDeckAggregationResult? result;
+        service.getOnDeckFromAllServers(limit: 10).then((r) => result = r);
+        async.elapse(MediaServerTimeouts.continueWatchingServerDeadline - const Duration(seconds: 1));
+        expect(result, isNull, reason: 'a slow server is still waited for inside its deadline');
+
+        async.elapse(const Duration(seconds: 1));
+        expect(result!.items.map((item) => item.id), ['movie-1']);
+        expect(result!.succeededServerIds, {'ok'});
+        expect(result!.failedServerIds, {'hung'}, reason: 'a missed deadline is a failure, not a cancellation');
+        expect(result!.cancelledServerIds, isEmpty);
       });
     });
 

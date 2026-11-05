@@ -14,6 +14,7 @@ import '../services/data_aggregation_service.dart';
 import '../services/system_shelf_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/coalesced_load_coordinator.dart';
+import '../utils/continue_watching_logo_notifier.dart';
 import '../utils/deletion_notifier.dart';
 import '../utils/media_event_keys.dart';
 import '../utils/global_key_utils.dart';
@@ -139,6 +140,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       onEvent: _onDeletion,
     );
     _libraryEventSubscription = LibraryContentNotifier().stream.listen(_onLibraryContentChanged);
+    _logoSubscription = ContinueWatchingLogoNotifier().stream.listen(_onContinueWatchingLogos);
   }
 
   final MultiServerProvider _multiServer;
@@ -222,6 +224,14 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   StreamSubscription<WatchStateEvent>? _watchStateSubscription;
   StreamSubscription<DeletionEvent>? _deletionSubscription;
+  StreamSubscription<ContinueWatchingLogoPatch>? _logoSubscription;
+
+  /// Show logos a server resolved after its Continue Watching rows returned
+  /// ([ContinueWatchingLogoPatch]), by [MediaItem.seriesGlobalKey]. Kept so
+  /// rows committed after their patch landed (another server's leg was still
+  /// in flight, or a later refresh) get the logo too instead of flashing the
+  /// title first.
+  final Map<String, String> _backfilledLogos = {};
 
   List<MediaItem> _onDeck = [];
 
@@ -953,7 +963,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   }
 
   void _replaceOnDeck(List<MediaItem> onDeck, {required bool hasMore}) {
-    _onDeck = onDeck;
+    _onDeck = _withBackfilledLogos(onDeck) ?? onDeck;
     _hasMoreContinueWatching = hasMore;
     ++_commitRevision;
   }
@@ -963,7 +973,42 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     ++_commitRevision;
   }
 
+  /// [items] with every logo-less row whose show is in [_backfilledLogos]
+  /// given that logo, in the same order; null when no row changes.
+  List<MediaItem>? _withBackfilledLogos(List<MediaItem> items) {
+    if (_backfilledLogos.isEmpty) return null;
+    List<MediaItem>? patched;
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item.clearLogoPath?.isNotEmpty ?? false) continue;
+      final logo = _backfilledLogos[item.seriesGlobalKey];
+      if (logo == null) continue;
+      (patched ??= List.of(items))[i] = item.copyWith(clearLogoPath: logo);
+    }
+    return patched;
+  }
+
   // --- Event reactions -----------------------------------------------------
+
+  /// Fill the logos a server resolved late into the visible row in place:
+  /// same rows, same order, same ids, so the hero and focus stay put. Not a
+  /// commit (no [_commitRevision] bump) — it lands while the load that
+  /// produced the rows may still be awaiting hubs, and must not make that
+  /// pass look superseded.
+  void _onContinueWatchingLogos(ContinueWatchingLogoPatch patch) {
+    if (isDisposed) return;
+    _backfilledLogos.addAll(patch.logosBySeriesGlobalKey);
+    final onDeck = _withBackfilledLogos(_onDeck);
+    Map<String, List<MediaItem>>? copies;
+    for (final MapEntry(:key, :value) in _continueWatchingCopies.entries) {
+      final patched = _withBackfilledLogos(value);
+      if (patched != null) (copies ??= Map.of(_continueWatchingCopies))[key] = patched;
+    }
+    if (copies != null) _continueWatchingCopies = copies;
+    if (onDeck == null) return;
+    _onDeck = onDeck;
+    safeNotifyListeners();
+  }
 
   /// Watch on-deck items and their parent shows/seasons (an episode's watch
   /// flip changes what Continue Watching should show for its series), plus
@@ -1185,6 +1230,8 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     _deletionSubscription = null;
     _libraryEventSubscription?.cancel();
     _libraryEventSubscription = null;
+    _logoSubscription?.cancel();
+    _logoSubscription = null;
     _libraryEventPacer.dispose();
     _loadCoordinator.dispose();
     _pendingSystemShelfItems = null;

@@ -102,6 +102,23 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-05
+
+### Continue Watching no longer waits on a slow server
+- When PRM2-Xtra was slow in the evening, the Continue Watching row and
+  the hero could sit empty for 15 to 30 seconds. The older-items top-up
+  (`/library/onDeck`) now runs at the same time as the main Continue
+  Watching request instead of after it, and gets 5 seconds; if it misses
+  that, the row shows without the older items for that load (the log says
+  `ContinueWatching: /library/onDeck top-up ... missed its 5s deadline`).
+- Show logos that a server leaves off episode rows are looked up after the
+  row is shown and filled in a moment later, in place: same cards, same
+  order, focus and hero stay where they are. Also capped at 5 seconds.
+- Each server's Continue Watching now has its own 20-second limit, like the
+  library list already had, so one server that stops answering can't hold
+  back the others. No extra requests to the servers: same calls, just
+  started together.
+
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)
