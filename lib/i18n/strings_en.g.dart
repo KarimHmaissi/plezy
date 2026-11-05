@@ -3570,8 +3570,8 @@ class Translations$ai$en {
 	/// en: 'AI'
 	String get settingsTitle => 'AI';
 
-	/// en: 'Anthropic API key for the AI helper'
-	String get settingsSubtitle => 'Anthropic API key for the AI helper';
+	/// en: 'Anthropic API key for the AI helper, and the TMDB key'
+	String get settingsSubtitle => 'Anthropic API key for the AI helper, and the TMDB key';
 
 	/// en: 'Use the TV's AI'
 	String get mirrorTv => 'Use the TV\'s AI';
@@ -3650,6 +3650,63 @@ class Translations$ai$en {
 
 	/// en: 'The page closed after 5 minutes without a key'
 	String get receiveTimedOut => 'The page closed after 5 minutes without a key';
+
+	/// en: 'TMDB'
+	String get tmdbTitle => 'TMDB';
+
+	/// en: 'Plezy will use TMDB (themoviedb.org) for trailers and art your servers don't have. Use either the API key or the API Read Access Token from themoviedb.org ▸ Settings ▸ API. It's stored encrypted on this device only, never shown in full, and never included in exports or backups.'
+	String get tmdbExplainer => 'Plezy will use TMDB (themoviedb.org) for trailers and art your servers don\'t have. Use either the API key or the API Read Access Token from themoviedb.org ▸ Settings ▸ API. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.';
+
+	/// en: 'Paste TMDB key'
+	String get tmdbPasteKey => 'Paste TMDB key';
+
+	/// en: 'Replace TMDB key'
+	String get tmdbReplaceKey => 'Replace TMDB key';
+
+	/// en: 'TMDB API key or Read Access Token'
+	String get tmdbKeyLabel => 'TMDB API key or Read Access Token';
+
+	/// en: 'Use the 32-character API key or the long Read Access Token (it starts with eyJ)'
+	String get tmdbKeyFormat => 'Use the 32-character API key or the long Read Access Token (it starts with eyJ)';
+
+	/// en: 'No TMDB key on this device yet'
+	String get tmdbNoKey => 'No TMDB key on this device yet';
+
+	/// en: 'TMDB key ${hint} saved on this device'
+	String tmdbKeySet({required Object hint}) => 'TMDB key ${hint} saved on this device';
+
+	/// en: 'The TMDB key works'
+	String get tmdbKeyWorks => 'The TMDB key works';
+
+	/// en: 'TMDB rejected that key; check it and try again'
+	String get tmdbKeyRejected => 'TMDB rejected that key; check it and try again';
+
+	/// en: 'Couldn't reach TMDB to check the key; it's saved and will be checked on first use'
+	String get tmdbKeyUnreachable => 'Couldn\'t reach TMDB to check the key; it\'s saved and will be checked on first use';
+
+	/// en: 'works'
+	String get tmdbKeyStatusWorks => 'works';
+
+	/// en: 'rejected by TMDB'
+	String get tmdbKeyStatusRejected => 'rejected by TMDB';
+
+	/// en: 'not checked (TMDB unreachable)'
+	String get tmdbKeyStatusUnreachable => 'not checked (TMDB unreachable)';
+
+	/// en: 'Receive TMDB key from another device'
+	String get tmdbReceiveKey => 'Receive TMDB key from another device';
+
+	/// en: 'Test TMDB key'
+	String get tmdbTestKey => 'Test TMDB key';
+
+	/// en: 'Remove TMDB key'
+	String get tmdbRemoveKey => 'Remove TMDB key';
+
+	/// en: 'Remove the TMDB key?'
+	String get tmdbRemoveKeyTitle => 'Remove the TMDB key?';
+
+	/// en: 'Plezy stops using TMDB on this device until a key is added again.'
+	String get tmdbRemoveKeyMessage => 'Plezy stops using TMDB on this device until a key is added again.';
 
 	/// en: 'Try a request'
 	String get tryRequest => 'Try a request';
@@ -10629,7 +10686,7 @@ extension on Translations {
 			'aiTab.weekMostly' => ({required Object genre}) => 'Mostly ${genre}',
 			'aiTab.weekHide' => 'Hide until next week',
 			'ai.settingsTitle' => 'AI',
-			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper',
+			'ai.settingsSubtitle' => 'Anthropic API key for the AI helper, and the TMDB key',
 			'ai.mirrorTv' => 'Use the TV\'s AI',
 			'ai.mirrorTvOn' => 'Requests, answers, Home and lists come from the TV this phone is connected to',
 			'ai.mirrorTvOff' => 'This phone runs the AI on its own, with its own key, library index and watch history',
@@ -10656,6 +10713,25 @@ extension on Translations {
 			'ai.receiveNoNetwork' => 'This device isn\'t on a home network, so the key can\'t be sent from another device',
 			'ai.receiveTooManyAttempts' => 'Too many wrong codes; the page is closed',
 			'ai.receiveTimedOut' => 'The page closed after 5 minutes without a key',
+			'ai.tmdbTitle' => 'TMDB',
+			'ai.tmdbExplainer' => 'Plezy will use TMDB (themoviedb.org) for trailers and art your servers don\'t have. Use either the API key or the API Read Access Token from themoviedb.org ▸ Settings ▸ API. It\'s stored encrypted on this device only, never shown in full, and never included in exports or backups.',
+			'ai.tmdbPasteKey' => 'Paste TMDB key',
+			'ai.tmdbReplaceKey' => 'Replace TMDB key',
+			'ai.tmdbKeyLabel' => 'TMDB API key or Read Access Token',
+			'ai.tmdbKeyFormat' => 'Use the 32-character API key or the long Read Access Token (it starts with eyJ)',
+			'ai.tmdbNoKey' => 'No TMDB key on this device yet',
+			'ai.tmdbKeySet' => ({required Object hint}) => 'TMDB key ${hint} saved on this device',
+			'ai.tmdbKeyWorks' => 'The TMDB key works',
+			'ai.tmdbKeyRejected' => 'TMDB rejected that key; check it and try again',
+			'ai.tmdbKeyUnreachable' => 'Couldn\'t reach TMDB to check the key; it\'s saved and will be checked on first use',
+			'ai.tmdbKeyStatusWorks' => 'works',
+			'ai.tmdbKeyStatusRejected' => 'rejected by TMDB',
+			'ai.tmdbKeyStatusUnreachable' => 'not checked (TMDB unreachable)',
+			'ai.tmdbReceiveKey' => 'Receive TMDB key from another device',
+			'ai.tmdbTestKey' => 'Test TMDB key',
+			'ai.tmdbRemoveKey' => 'Remove TMDB key',
+			'ai.tmdbRemoveKeyTitle' => 'Remove the TMDB key?',
+			'ai.tmdbRemoveKeyMessage' => 'Plezy stops using TMDB on this device until a key is added again.',
 			'ai.tryRequest' => 'Try a request',
 			'ai.tryRequestDescription' => 'Ask for something to watch and see what the helper picks from your library',
 			'ai.tryRequestLabel' => 'What do you feel like watching?',
@@ -10960,6 +11036,8 @@ extension on Translations {
 			'history.topGenres' => 'Top genres',
 			'history.directors' => 'Directors',
 			'history.actors' => 'Actors',
+			_ => null,
+		} ?? switch (path) {
 			'history.rewatches' => 'Watched again',
 			'history.decades' => 'Films by decade',
 			'history.longestBinge' => 'Longest binge',
@@ -10979,8 +11057,6 @@ extension on Translations {
 			'history.copy.bulk' => ({required Object n}) => '${n} with mark-as-watched dates, not real viewings, so your Trakt timeline doesn\'t get made-up dates',
 			'history.copy.noIds' => ({required Object n}) => '${n} that Trakt can\'t identify (no IMDb, TMDB or TVDB id)',
 			'history.copy.howItWorks' => 'Each watch keeps its Plex date. Trakt ignores a watch it already has at the same minute, and you can undo this send afterwards.',
-			_ => null,
-		} ?? switch (path) {
 			'history.copy.cancel' => 'Cancel',
 			'history.copy.confirm' => 'Send to Trakt',
 			'history.copy.sending' => ({required Object done, required Object total}) => 'Sending… ${done} of ${total}',
@@ -11474,6 +11550,8 @@ extension on Translations {
 			'watchTogether.notices.roomJumpedTo' => ({required Object position}) => 'Jumped to ${position}',
 			'watchTogether.notices.changedSpeed' => ({required Object name, required Object speed}) => '${name} set the speed to ${speed}',
 			'watchTogether.notices.speedChanged' => ({required Object speed}) => 'Speed set to ${speed}',
+			_ => null,
+		} ?? switch (path) {
 			'watchTogether.notices.startedMedia' => ({required Object name, required Object title}) => '${name} started ${title}',
 			'watchTogether.notices.mediaStarted' => ({required Object title}) => 'Now playing ${title}',
 			'watchTogether.notices.stoppedMedia' => ({required Object name}) => '${name} stopped the video',
@@ -11493,8 +11571,6 @@ extension on Translations {
 			'watchTogether.notices.openFailed' => 'Couldn\'t open the room\'s video',
 			'watchTogether.ended.ended' => 'The host ended the room',
 			'watchTogether.ended.kicked' => 'You were removed from the room',
-			_ => null,
-		} ?? switch (path) {
 			'watchTogether.ended.expired' => 'The room expired',
 			'watchTogether.ended.replaced' => 'You joined this room on another device',
 			'watchTogether.ended.lost' => 'Lost the connection to the room',
@@ -11988,6 +12064,8 @@ extension on Translations {
 			'services.deviceCode.waitingForAuthorization' => 'Waiting for authorization…',
 			'services.deviceCode.codeCopied' => 'Code copied',
 			'services.oauthProxy.title' => ({required Object service}) => 'Sign in to ${service}',
+			_ => null,
+		} ?? switch (path) {
 			'services.oauthProxy.body' => 'Scan this QR code or open the URL on any device.',
 			'services.oauthProxy.openToSignIn' => ({required Object service}) => 'Open ${service} to sign in',
 			'services.pendingAuth.copyUrl' => 'Copy sign-in URL',
@@ -12007,8 +12085,6 @@ extension on Translations {
 			'addServer.addMediaBrowserTitle' => ({required Object product}) => 'Add ${product} server',
 			'addServer.serverUrls' => 'Server URLs',
 			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.findServer' => 'Find server',
 			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
 			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',

@@ -109,6 +109,8 @@ void main() {
         'vault key': credentialVaultKeyPref,
         'tracker session': profileScopedPrefsKey('abc', 'trakt_session'),
         'seerr session': profileScopedPrefsKey('abc', seerrSessionBaseKey),
+        'Anthropic key': aiApiKeyPref,
+        'TMDB key': tmdbApiKeyPref,
       };
 
       for (final entry in families.entries) {

@@ -4,6 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:plezy/services/ai/ai_key_receiver.dart';
 import 'package:plezy/services/ai/ai_key_store.dart';
+import 'package:plezy/services/credential_vault.dart';
+import 'package:plezy/services/tmdb/tmdb_key_store.dart';
+
+import '../../test_helpers/prefs.dart';
 
 void main() {
   late List<String> saved;
@@ -14,7 +18,8 @@ void main() {
     nextCheck = AiKeyCheck.ok;
   });
 
-  Future<AiKeyReceiver> start() async => (await AiKeyReceiver.start(
+  Future<AiKeyReceiver> start({KeyReceiverKind kind = KeyReceiverKind.anthropic}) async => (await AiKeyReceiver.start(
+    kind: kind,
     bindTo: InternetAddress.loopbackIPv4,
     checkKey: (_) async => nextCheck,
     saveKey: (key) async => saved.add(key),
@@ -53,6 +58,85 @@ void main() {
     expect((await post(r, r.code, 'sk-ant-bad')).body, contains('rejected'));
     expect(await r.result, AiKeyReceiveResult.rejected);
     expect(saved, isEmpty);
+  });
+
+  group('TMDB key', () {
+    const fakeApiKey = '0123456789abcdef0123456789abcdef';
+
+    test('the page asks for a TMDB key, not an Anthropic one', () async {
+      final r = await start(kind: KeyReceiverKind.tmdb);
+      final page = (await http.get(Uri.parse(r.address))).body;
+      expect(page, contains('Plezy · TMDB key'));
+      expect(page, contains('TMDB API key or Read Access Token'));
+      expect(page, isNot(contains('Anthropic')));
+      expect(page, isNot(contains('sk-ant-')));
+      r.cancel();
+    });
+
+    test('checks and saves with the TMDB checker and saver', () async {
+      final checked = <String>[];
+      final r = (await AiKeyReceiver.start(
+        kind: KeyReceiverKind.tmdb,
+        bindTo: InternetAddress.loopbackIPv4,
+        checkKey: (key) async {
+          checked.add(key);
+          return AiKeyCheck.ok;
+        },
+        saveKey: (key) async => saved.add(key),
+      ))!;
+      expect((await post(r, r.code, 'sk-ant-wrong-service')).body, contains('look like a TMDB key'));
+      expect(checked, isEmpty);
+      expect((await post(r, r.code, ' $fakeApiKey ')).body, contains('Key saved'));
+      expect(await r.result, AiKeyReceiveResult.saved);
+      expect(checked, [fakeApiKey]);
+      expect(saved, [fakeApiKey]);
+    });
+
+    test('a rejected key names TMDB and is not saved', () async {
+      nextCheck = AiKeyCheck.invalid;
+      final r = await start(kind: KeyReceiverKind.tmdb);
+      final body = (await post(r, r.code, fakeApiKey)).body;
+      expect(body, contains('TMDB rejected that key'));
+      expect(await r.result, AiKeyReceiveResult.rejected);
+      expect(saved, isEmpty);
+    });
+
+    test('an unreachable TMDB still saves, and says so', () async {
+      nextCheck = AiKeyCheck.unreachable;
+      final r = await start(kind: KeyReceiverKind.tmdb);
+      expect((await post(r, r.code, fakeApiKey)).body, contains('couldn&#39;t reach TMDB'));
+      expect(await r.result, AiKeyReceiveResult.savedUnchecked);
+      expect(saved, [fakeApiKey]);
+    });
+
+    test('by default the TMDB kind checks with TmdbKeyStore and saves into it, encrypted', () async {
+      // The prefs fixture starts the test binding, which fakes every
+      // HttpClient (status 400); this test talks to a real loopback server.
+      final overrides = HttpOverrides.current;
+      resetSharedPreferencesForTest();
+      HttpOverrides.global = overrides;
+      CredentialVault.resetKeyForTesting();
+      expect(KeyReceiverKind.tmdb.check == TmdbKeyStore.check, isTrue);
+      expect(KeyReceiverKind.anthropic.check == AiKeyStore.check, isTrue);
+      // Only the network check is replaced; the real saver runs.
+      final r = (await AiKeyReceiver.start(
+        kind: KeyReceiverKind.tmdb,
+        bindTo: InternetAddress.loopbackIPv4,
+        checkKey: (_) async => AiKeyCheck.ok,
+      ))!;
+      await post(r, r.code, fakeApiKey);
+      expect(await r.result, AiKeyReceiveResult.saved);
+      expect(await TmdbKeyStore.read(), fakeApiKey);
+      expect(await AiKeyStore.read(), isNull);
+    });
+  });
+
+  test('the Anthropic page keeps its wording', () async {
+    final r = await start();
+    final page = (await http.get(Uri.parse(r.address))).body;
+    expect(page, contains('Anthropic API key'));
+    expect(page, isNot(contains('TMDB')));
+    r.cancel();
   });
 
   test('only private and loopback addresses count as local', () {
