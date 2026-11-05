@@ -32,6 +32,7 @@ import com.edde746.plezy.car.CarRestrictionsMonitor
 import com.edde746.plezy.cast.GoogleCastChannel
 import com.edde746.plezy.deeplink.DeepLinkPlugin
 import com.edde746.plezy.exoplayer.ExoPlayerPlugin
+import com.edde746.plezy.exoplayer.PlaybackCapabilitiesChannel
 import com.edde746.plezy.mpv.MpvAudioPlayerPlugin
 import com.edde746.plezy.mpv.MpvPlayerPlugin
 import com.edde746.plezy.shared.AssistiveTechnologyMonitor
@@ -137,6 +138,7 @@ class PlezyActivity : FlutterActivity() {
   private val googleCastChannel by lazy { GoogleCastChannel(applicationContext) }
   private val appIconChannel = AppIconChannel(this)
   private val voiceInputChannel = VoiceInputChannel(this)
+  private val playbackCapabilitiesChannel = PlaybackCapabilitiesChannel(this)
   private val exitDiagnosticsRequested = AtomicBoolean(false)
 
   private inline fun logTextInputDiag(message: () -> String) {
@@ -643,6 +645,7 @@ class PlezyActivity : FlutterActivity() {
   override fun onDestroy() {
     externalPlayerChannel.dispose()
     voiceInputChannel.dispose()
+    playbackCapabilitiesChannel.dispose()
     googleCastChannel.dispose()
     systemBarsInsetsHost?.setOnApplyWindowInsetsListener(null)
     systemBarsInsetsHost = null
@@ -1000,6 +1003,7 @@ class PlezyActivity : FlutterActivity() {
     googleCastChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     appIconChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     voiceInputChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
+    playbackCapabilitiesChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
 
     // Splash screen theme: persist user's chosen theme for next launch (API 31+)
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, THEME_CHANNEL).setMethodCallHandler { call, result ->

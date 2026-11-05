@@ -93,6 +93,20 @@ class VideoDecodeCapabilities {
     };
   }
 
+  /// The hardware probe's own answer for [codec], ignoring the user's
+  /// refusals: true or false once the platform answered, null before the
+  /// probe and where it is never answered (desktop, a failed probe). H.264 is
+  /// always true. For callers that judge a stream rather than negotiate one,
+  /// such as `PlaybackCapabilitiesService`.
+  static bool? hardwareDecodes(RankedVideoCodec codec) {
+    final instance = _singleton.instance;
+    return switch (codec) {
+      RankedVideoCodec.av1 => instance?._hardwareAv1,
+      RankedVideoCodec.hevc => instance?._hardwareHevc,
+      RankedVideoCodec.h264 => true,
+    };
+  }
+
   /// Transcode outputs to offer, in [RankedVideoCodec] order. Never empty:
   /// H.264 cannot be refused.
   static List<RankedVideoCodec> get transcodeVideoCodecs => [
