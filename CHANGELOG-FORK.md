@@ -102,6 +102,19 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-05
+
+### Watch Next row on the Shield's home works again (A1)
+- Since 31 Oct every Watch Next sync was refused with "Too many items":
+  Plezy sent up to 60 Continue Watching items and Android TV takes 20, so
+  Arc's row went stale. Plezy now sends the first 20, in Continue
+  Watching's own order (`SystemShelf.maxItems`), so next-up episodes are
+  kept.
+- Next-up episodes (never viewed) were stamped with "now" on every sync,
+  which reshuffled the row each time. Each one now keeps the time it was
+  first published (remembered across restarts, pruned to what's on the
+  row), so a new next episode leads once and then holds its place.
+
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)

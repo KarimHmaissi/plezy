@@ -1,5 +1,6 @@
-import 'dart:io' show Platform;
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -12,9 +13,69 @@ import '../media/media_kind.dart';
 import '../media/media_server_client.dart';
 import '../utils/app_logger.dart';
 import '../utils/platform_detector.dart';
+import 'base_shared_preferences_service.dart';
 import 'jellyfin_client.dart';
 import 'plex_client.dart';
 import 'settings_service.dart' show EpisodePosterMode;
+
+/// Limits of the platform launcher shelf.
+abstract final class SystemShelf {
+  /// Android TV rejects a Watch Next sync over this many items. Mirrors
+  /// `SystemShelfArtworkStore.MAX_ITEMS` in SystemShelfArtworkProvider.kt;
+  /// the native side answers "Too many items" to anything longer.
+  static const int maxItems = 20;
+}
+
+/// Remembers when each shelf item was first published, so items without a
+/// `lastViewedAt` (next-up episodes) keep one engagement time across syncs
+/// instead of being re-stamped with "now" every time. Launchers sort the
+/// Watch Next row by that time, so re-stamping reshuffled the row.
+abstract class ShelfFirstPublishedStore {
+  Future<Map<String, int>> load();
+  Future<void> save(Map<String, int> firstPublished);
+}
+
+/// In-memory [ShelfFirstPublishedStore], for tests.
+@visibleForTesting
+class MemoryShelfFirstPublishedStore implements ShelfFirstPublishedStore {
+  Map<String, int> value = {};
+
+  @override
+  Future<Map<String, int>> load() async => Map.of(value);
+
+  @override
+  Future<void> save(Map<String, int> firstPublished) async => value = Map.of(firstPublished);
+}
+
+class _PrefsShelfFirstPublishedStore implements ShelfFirstPublishedStore {
+  static const _key = 'system_shelf_first_published_v1';
+
+  @override
+  Future<Map<String, int>> load() async {
+    try {
+      final raw = (await BaseSharedPreferencesService.sharedCache()).getString(_key);
+      if (raw == null) return {};
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      return {
+        for (final entry in decoded.entries)
+          if (entry.key is String && entry.value is num) entry.key as String: (entry.value as num).toInt(),
+      };
+    } catch (e) {
+      appLogger.w('System shelf: could not read first-published times', error: e);
+      return {};
+    }
+  }
+
+  @override
+  Future<void> save(Map<String, int> firstPublished) async {
+    try {
+      await (await BaseSharedPreferencesService.sharedCache()).setString(_key, jsonEncode(firstPublished));
+    } catch (e) {
+      appLogger.w('System shelf: could not save first-published times', error: e);
+    }
+  }
+}
 
 /// Syncs Continue Watching content to platform launcher surfaces.
 ///
@@ -29,16 +90,25 @@ class SystemShelfService {
   static SystemShelfService? _testingInstance;
   factory SystemShelfService() => _testingInstance ?? _instance;
 
-  SystemShelfService._internal() : _channelOverride = null, _supportOverride = null, _tvosTargetOverride = null;
+  SystemShelfService._internal()
+    : _channelOverride = null,
+      _supportOverride = null,
+      _tvosTargetOverride = null,
+      _firstPublishedStore = _PrefsShelfFirstPublishedStore(),
+      _clock = DateTime.now;
 
   @visibleForTesting
   SystemShelfService.forTesting({
     required MethodChannel channel,
     Future<bool> Function()? isSupported,
     bool Function()? isTvosTarget,
+    ShelfFirstPublishedStore? firstPublishedStore,
+    DateTime Function()? clock,
   }) : _channelOverride = channel,
        _supportOverride = isSupported,
-       _tvosTargetOverride = isTvosTarget;
+       _tvosTargetOverride = isTvosTarget,
+       _firstPublishedStore = firstPublishedStore ?? MemoryShelfFirstPublishedStore(),
+       _clock = clock ?? DateTime.now;
 
   @visibleForTesting
   static void debugOverrideInstance(SystemShelfService? service) {
@@ -48,6 +118,9 @@ class SystemShelfService {
   final MethodChannel? _channelOverride;
   final Future<bool> Function()? _supportOverride;
   final bool Function()? _tvosTargetOverride;
+  final ShelfFirstPublishedStore _firstPublishedStore;
+  final DateTime Function() _clock;
+  Map<String, int>? _firstPublished;
 
   String? _activeOwner;
   int _generation = 0;
@@ -70,6 +143,7 @@ class SystemShelfService {
     _activeOwner = null;
     _generation = 0;
     _mutationTail = Future<void>.value();
+    _firstPublished = null;
   }
 
   /// Whether this process targets the tvOS Top Shelf (as opposed to the
@@ -197,16 +271,22 @@ class SystemShelfService {
     if (channel == null || _activeOwner != profileId) return false;
     final generation = _generation;
 
-    final items = continueWatchingItems
-        .map((item) {
-          return _convertToShelfItem(
-            item,
-            getClientForServerId,
-            hideSpoilers: hideSpoilers,
-            episodePosterMode: episodePosterMode,
-          );
-        })
-        .toList(growable: false);
+    // Keep the caller's order: Continue Watching is already recency-sorted
+    // and next-up episodes (no lastViewedAt) sit where they belong. Re-sorting
+    // here would sink them below the cap. Exact duplicates keep the first.
+    final seen = <String>{};
+    final items = <Map<String, dynamic>>[];
+    for (final item in continueWatchingItems) {
+      if (items.length >= SystemShelf.maxItems) break;
+      final shelfItem = _convertToShelfItem(
+        item,
+        getClientForServerId,
+        hideSpoilers: hideSpoilers,
+        episodePosterMode: episodePosterMode,
+      );
+      if (seen.add(shelfItem['contentId'] as String)) items.add(shelfItem);
+    }
+    await _applyStableEngagement(items);
     if (!_owns(profileId, generation)) return false;
 
     final supported = await isSupported();
@@ -224,6 +304,26 @@ class SystemShelfService {
           false;
     });
     return result ?? false;
+  }
+
+  /// Gives every item without a `lastViewedAt` the time it was first
+  /// published, and records that time for items seen for the first time.
+  /// A new next-up episode still gets "now", so it leads the row once, and
+  /// after that it holds its place. The map is pruned to the current items.
+  Future<void> _applyStableEngagement(List<Map<String, dynamic>> items) async {
+    final known = _firstPublished ??= await _firstPublishedStore.load();
+    final now = _clock().millisecondsSinceEpoch;
+    final next = <String, int>{};
+    for (final item in items) {
+      final contentId = item['contentId'] as String;
+      final firstPublished = known[contentId] ?? now;
+      next[contentId] = firstPublished;
+      item['lastEngagementTime'] ??= firstPublished;
+    }
+    if (!mapEquals(known, next)) {
+      _firstPublished = next;
+      await _firstPublishedStore.save(next);
+    }
   }
 
   /// Remove a single launcher shelf item for the current profile owner.
@@ -376,9 +476,9 @@ class SystemShelfService {
       episodeTitle = null;
     }
 
-    final lastEngagementTime = item.lastViewedAt != null
-        ? item.lastViewedAt! * 1000
-        : DateTime.now().millisecondsSinceEpoch;
+    // Null when never viewed: [_applyStableEngagement] fills in the item's
+    // first-published time so it does not change between syncs.
+    final lastEngagementTime = item.lastViewedAt != null ? item.lastViewedAt! * 1000 : null;
 
     return {
       'contentId': contentId,
