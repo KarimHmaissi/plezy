@@ -15,6 +15,7 @@ import 'ai_history.dart';
 import 'ai_key_store.dart';
 import 'ai_rows.dart' show pickFetchTimeout;
 import 'ai_spend.dart';
+import 'ai_watch_state.dart';
 import 'claude_client.dart';
 
 /// One list the AI suggests: what it's called, the request it stands for
@@ -297,6 +298,9 @@ abstract final class AiSuggestions {
         search['person'] != null ||
         search['country'] != null ||
         search['library'] != null;
+    // Fork: seen per the history brain too (other copies, Trakt, bulk
+    // marks), not only this copy's play count.
+    final watch = await WatchStates.load(brain);
     final filtered = structured || search['text'] == null
         ? await index.search(
             IndexQuery(
@@ -313,6 +317,7 @@ abstract final class AiSuggestions {
               watch: IndexWatchFilter.unwatched,
               limit: 120,
             ),
+            seen: watch.seen,
           )
         : null;
     final text = (search['text'] as String?)?.trim();
@@ -356,7 +361,7 @@ abstract final class AiSuggestions {
 
     titles = [
       for (final t in titles)
-        if ((t.viewCount ?? 0) == 0 && (t.watchedEpisodeCount ?? 0) == 0 && !excluded(t)) t,
+        if (!watch.seen(t) && !excluded(t)) t,
     ];
     // Well rated first: below [ratingFloor] only when too few are above it.
     final good = [

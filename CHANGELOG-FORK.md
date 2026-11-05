@@ -102,6 +102,26 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-05
+
+### Ask knows what you've seen, and its top-ups stay clean
+- Ask read "watched" from each server copy's own play count, so films
+  marked watched on Trakt or imported (The Prestige, Ex Machina, The
+  Departed: no play on any copy) looked unwatched. It recommended them
+  and wrote "you haven't seen any of these" over cards with Watched
+  badges. The tools now merge in the history brain once per ask and say
+  "seen 2025-03", "seen (logged, no date)" or "watched 12/40 eps"
+  (`WatchStates`), and an "unwatched" search leaves those titles out.
+  Suggested for you lists use the same watched state. Rewatch asks still
+  work: seen only means seen.
+- A short broad row is now topped up only from the model's own title
+  list and its library searches, not from keyword or "similar" matches
+  (where the Hot Wheels style picks came from). Kids' libraries stay out
+  unless the model picked from one, titles rated under 6.5 stay out, and
+  unrated titles count as unknown rather than bad. If that runs out, the
+  row stays short. Nothing it leaves out is remembered: a title skipped
+  today can be picked tomorrow.
+
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)

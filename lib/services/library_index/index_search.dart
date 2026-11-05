@@ -64,7 +64,11 @@ class IndexQuery {
 extension LibraryIndexSearch on LibraryIndex {
   /// Titles matching [query], one per film/show (4K copies and the second
   /// server collapsed), best first.
-  Future<List<IndexedTitle>> search(IndexQuery query) async {
+  ///
+  /// Fork: [seen] says a title was already seen somewhere the row doesn't
+  /// know about (the history brain: other copies, Trakt, bulk marks); an
+  /// `unwatched` search over-fetches and drops those.
+  Future<List<IndexedTitle>> search(IndexQuery query, {bool Function(IndexedTitle t)? seen}) async {
     final db = await database;
     final where = <String>[];
     final args = <Variable<Object>>[];
@@ -121,9 +125,13 @@ extension LibraryIndexSearch on LibraryIndex {
     final sql =
         'SELECT * FROM index_titles${where.isEmpty ? '' : ' WHERE ${where.join(' AND ')}'} '
         'ORDER BY $order LIMIT ?';
-    args.add(Variable<Object>(query.limit * 4));
+    final dropSeen = seen != null && query.watch == IndexWatchFilter.unwatched;
+    args.add(Variable<Object>(query.limit * (dropSeen ? 12 : 4)));
     final rows = await db.customSelect(sql, variables: args, readsFrom: {db.indexTitles}).get();
-    return _onePerGroup([for (final r in rows) db.indexTitles.map(r.data)], query.limit);
+    return _onePerGroup([
+      for (final r in rows)
+        if (db.indexTitles.map(r.data) case final t when !dropSeen || !seen(t)) t,
+    ], query.limit);
   }
 
   /// Full-text search over titles, summaries, taglines, cast, directors and
