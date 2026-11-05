@@ -102,6 +102,22 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-05
+
+### The next episode shows up as soon as an episode ends (A6)
+- Finishing an episode used to drop its show from Continue Watching and
+  Arc's Watch Next until Plex's on-deck caught up, so pressing Home showed
+  the wrong first card. Now the moment the episode is marked watched, the
+  player's queue puts the **next episode** of that show at the front of
+  Continue Watching and the shelf is synced straight away.
+- The row is provisional until Plex names the show: a refresh that still
+  lags (show missing, or the episode just watched) keeps it in place
+  instead of removing it and bringing it back. If Plex names a different
+  episode, that one wins. An unconfirmed row is dropped after 6 hours
+  (`DiscoverProvider.provisionalNextEpisodeTtl`).
+- Only the same show's next unwatched episode counts (a playlist's next
+  title doesn't). Playing it fetches its metadata fresh, as any row does.
+
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)

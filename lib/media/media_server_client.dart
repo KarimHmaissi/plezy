@@ -987,12 +987,16 @@ extension MediaServerClientScope on MediaServerClient {
   /// The event remains unacknowledged because reporting success proves only
   /// receipt, not that the server classified the item as played. The caller
   /// keeps the returned patch id so a later explicit mark can promote it.
-  WatchPatchId? notifyWatchedFromPlaybackSession(MediaItem item) {
+  ///
+  /// [nextItem] is the series' next episode from the player's queue, carried
+  /// on the event so Continue Watching can show it at once.
+  WatchPatchId? notifyWatchedFromPlaybackSession(MediaItem item, {MediaItem? nextItem}) {
     return WatchStateNotifier().notifyWatched(
       item: item,
       isNowWatched: true,
       cacheServerId: cacheServerId,
       serverAcknowledged: false,
+      nextItem: nextItem,
     );
   }
 }

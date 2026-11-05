@@ -151,6 +151,20 @@ extension _VideoPlayerEpisodeQueueMethods on VideoPlayerScreenState {
     _primeNextEpisodePlaybackMetadata(adjacentEpisodes.next);
   }
 
+  /// The episode Continue Watching should show once [watched] is marked
+  /// watched: the queue's next item, but only when it is the next episode of
+  /// the same show on the same server. A playlist or collection queue moves
+  /// on to another title, and a stale queue can still point at [watched]
+  /// itself; neither is what the server's on-deck will name.
+  MediaItem? _nextEpisodeForWatchedEvent(MediaItem watched) {
+    final next = _episode.next;
+    if (next == null || !next.isEpisode || !watched.isEpisode) return null;
+    if (next.globalKey == watched.globalKey) return null;
+    if (next.serverId != watched.serverId || next.grandparentId == null) return null;
+    if (next.grandparentId != watched.grandparentId) return null;
+    return next;
+  }
+
   /// Best-effort prefetch of the next episode's full metadata row into the
   /// API cache while the current episode plays (#1867).
   ///
