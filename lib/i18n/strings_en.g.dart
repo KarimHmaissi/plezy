@@ -6230,6 +6230,15 @@ class Translations$performanceOverlay$en {
 
 	/// en: '${converted} (${failures} failed)'
 	String dvRpuFailed({required Object converted, required Object failures}) => '${converted} (${failures} failed)';
+
+	/// en: 'Signal'
+	String get signal => 'Signal';
+
+	/// en: '${rate} matched'
+	String rateMatched({required Object rate}) => '${rate} matched';
+
+	/// en: '${rate} no switch'
+	String rateNotSwitched({required Object rate}) => '${rate} no switch';
 }
 
 // Path: externalPlayer
@@ -11799,6 +11808,9 @@ extension on Translations {
 			'performanceOverlay.decoderHardware' => 'Hardware',
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
+			'performanceOverlay.signal' => 'Signal',
+			'performanceOverlay.rateMatched' => ({required Object rate}) => '${rate} matched',
+			'performanceOverlay.rateNotSwitched' => ({required Object rate}) => '${rate} no switch',
 			'externalPlayer.title' => 'External Player',
 			'externalPlayer.useExternalPlayer' => 'Use External Player',
 			'externalPlayer.useExternalPlayerDescription' => 'Open videos in another app',
@@ -12004,11 +12016,11 @@ extension on Translations {
 			'services.libraryFilter.modeHintWhitelist' => 'Sync only the libraries checked below.',
 			'services.libraryFilter.libraries' => 'Libraries',
 			'services.libraryFilter.noLibraries' => 'No libraries available',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.addMediaBrowserTitle' => ({required Object product}) => 'Add ${product} server',
 			'addServer.serverUrls' => 'Server URLs',
 			'addServer.serverUrlsHelper' => 'Multiple URLs allowed, separated by commas.',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.findServer' => 'Find server',
 			'addServer.searchingLocalMediaBrowserServers' => ({required Object product}) => 'Looking for local ${product} servers...',
 			'addServer.localMediaBrowserServers' => ({required Object product}) => 'Local ${product} servers',

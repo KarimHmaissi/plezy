@@ -2587,7 +2587,10 @@
     "decoderSoftware": "Software",
     "decoderHardware": "Hardware",
     "tunnelingActive": "Active",
-    "dvRpuFailed": "${converted} (${failures} failed)"
+    "dvRpuFailed": "${converted} (${failures} failed)",
+    "signal": "Signal",
+    "rateMatched": "${rate} matched",
+    "rateNotSwitched": "${rate} no switch"
   },
   "externalPlayer": {
     "title": "External Player",

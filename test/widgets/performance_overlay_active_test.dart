@@ -77,4 +77,23 @@ void main() {
 
     await tester.pumpWidget(wrap(const SizedBox.shrink()));
   });
+
+  testWidgets('the signal line sits across the top of the card and follows each refresh', (tester) async {
+    final player = _CountingStatsPlayer();
+    var signal = '23.976 · Direct Play · E-AC3 5.1';
+
+    await tester.pumpWidget(wrap(PlayerPerformanceOverlay(player: player, active: true, signalLine: () => signal)));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Signal: 23.976 · Direct Play · E-AC3 5.1'), findsOneWidget);
+
+    signal = '23.976 matched · Direct Play · E-AC3 5.1';
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Signal: 23.976 matched · Direct Play · E-AC3 5.1'), findsOneWidget);
+
+    await tester.pumpWidget(wrap(PlayerPerformanceOverlay(player: player, active: true)));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.textContaining('Signal: '), findsNothing);
+
+    await tester.pumpWidget(wrap(const SizedBox.shrink()));
+  });
 }

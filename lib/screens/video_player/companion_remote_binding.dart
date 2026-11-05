@@ -39,12 +39,16 @@ class CompanionRemoteBinding {
     required this._onHome,
     required this._readProvider,
     required this._metadata,
+    required this._signal,
     required this._hasPreviousItem,
     required this._onSelectAudio,
     required this._onSelectSubtitle,
   });
 
   final MediaItem Function() _metadata;
+
+  /// The signal line ("23.976 matched · Direct Play · E-AC3 5.1"), or null.
+  final String? Function() _signal;
   final bool Function() _hasPreviousItem;
   final void Function(AudioTrack track) _onSelectAudio;
   final void Function(SubtitleTrack track) _onSelectSubtitle;
@@ -169,19 +173,19 @@ class CompanionRemoteBinding {
           {'id': t.id, 'label': _trackLabel(t.title, t.language, t.id)},
     ];
     final isEpisode = item.grandparentTitle != null && item.index != null;
-    // Position moves all the time, so it only goes out with the heartbeat;
-    // anything else changing goes out at once.
-    final key = [
-      state,
-      item.id,
-      st.duration.inSeconds,
-      st.track.audio?.id,
-      st.track.subtitle?.id,
-      audio.length,
-      subtitles.length,
-      marker,
-      _hasNextItem(),
-    ].join('|');
+    final signal = _signal();
+    final key = nowPlayingKey(
+      state: state,
+      itemId: item.id,
+      duration: st.duration,
+      audioId: st.track.audio?.id,
+      subtitleId: st.track.subtitle?.id,
+      audioCount: audio.length,
+      subtitleCount: subtitles.length,
+      marker: marker,
+      hasNext: _hasNextItem(),
+      signal: signal,
+    );
     final now = DateTime.now();
     final heartbeat = now.difference(_lastNowPlayingAt) >= Duration(seconds: state == 'playing' ? 1 : 5);
     if (!heartbeat && key == _lastNowPlayingKey) return;
@@ -209,9 +213,38 @@ class CompanionRemoteBinding {
         'marker': marker,
         'hasNext': _hasNextItem(),
         'hasPrevious': _hasPreviousItem(),
+        'signal': signal,
       },
     );
   }
+
+  /// What decides whether a now-playing update goes out at once. Position
+  /// moves all the time, so it only goes out with the heartbeat; anything
+  /// else changing goes out at once.
+  @visibleForTesting
+  static String nowPlayingKey({
+    required String state,
+    required String itemId,
+    required Duration duration,
+    required String? audioId,
+    required String? subtitleId,
+    required int audioCount,
+    required int subtitleCount,
+    required String? marker,
+    required bool hasNext,
+    required String? signal,
+  }) => [
+    state,
+    itemId,
+    duration.inSeconds,
+    audioId,
+    subtitleId,
+    audioCount,
+    subtitleCount,
+    marker,
+    hasNext,
+    signal,
+  ].join('|');
 
   void _dispatchSeek({required bool forward}) {
     final currentPlayer = _player();
