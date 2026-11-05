@@ -102,6 +102,13 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-05
+
+### Sharper Watch Next art on the Shield's home (A8)
+- Plezy now publishes Watch Next art at 1280×720 instead of 640×360, so
+  Arc's cards on the 4K TV aren't upscaled from half size. Arc's side of
+  this (decoding at the card's real pixel size) is in the Arc fork.
+
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)
