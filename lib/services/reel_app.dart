@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -30,6 +31,7 @@ import 'catalog/library_watchlist_candidates.dart';
 import 'catalog/trakt_lists_catalog_source.dart';
 import 'companion_remote/phone_mode.dart';
 import 'customisation/customisation_store.dart';
+import 'deep_links/deep_link_launcher.dart' show deepLinkServerWait, waitForServers;
 import 'library_index/library_index.dart';
 import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
@@ -39,8 +41,11 @@ import 'reel/reel_controller.dart';
 import 'reel/reel_decks.dart';
 import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
+import 'reel/reel_metadata.dart';
+import 'reel/reel_playback_profile.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
+import 'reel_playback_watcher.dart';
 import 'reel_servers_plex.dart';
 import 'trackers/fribb_mapping_store.dart';
 
@@ -60,9 +65,9 @@ abstract final class ReelApp {
     final store = ReelStore.instance;
     final facts = IndexTitleFactsSource.app();
     final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
-    final resolver = resolverFor(servers, store);
+    final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
     final pool = ReelPool(store: store, library: library, model: _sonnet);
-    final media = _AppReelMedia(servers);
+    final media = _AppReelMedia(servers, store);
     final resolverRows = catalog == null
         ? null
         : HomeRowResolver(sources: catalog, clientFor: (id) => multi.getClientForServer(id));
@@ -223,8 +228,28 @@ abstract final class ReelApp {
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).
-  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store) =>
-      ClipResolver(servers: PlexReelServers(servers), store: store, aniList: _aniList);
+  /// With [serversChanged], a server that isn't connected yet is waited for
+  /// as long as a deep link waits ([deepLinkServerWait]), once per start or
+  /// resume: after a wake the Reel opens before the servers reconnect. With
+  /// [profile], a clip's file is picked for the device as it is now (plan
+  /// V2-16); without it, by the standard profile.
+  static ClipResolver resolverFor(
+    MultiServerManager servers,
+    ReelStore store, {
+    Listenable? serversChanged,
+    ValueListenable<ReelPlaybackProfile>? profile,
+  }) {
+    final plex = PlexReelServers(servers);
+    return ClipResolver(
+      servers: plex,
+      store: store,
+      aniList: _aniList,
+      profile: profile,
+      waitForServer: serversChanged == null
+          ? null
+          : (id) => waitForServers(serversChanged, () => plex.connected(id), timeout: deepLinkServerWait),
+    );
+  }
 
   /// Answers worth a deck: the user's own asks, not Tonight or the briefing.
   static Future<List<AiHistoryEntry>> _answers() async {
@@ -258,14 +283,14 @@ abstract final class ReelApp {
   }
 
   /// Season 1's AniList id through the Fribb mapping (tvdb, then tmdb).
+  /// Throws when the mapping itself couldn't be read, so the resolver
+  /// counts the title as unknown rather than caching a miss.
   static Future<int?> _aniList(ReelTitle t) async {
-    try {
-      final rows = await FribbMappingStore.instance.lookup(movie: !t.isShow, tvdbId: t.tvdbId, tmdbId: t.tmdbId);
-      final s1 = rows.where((r) => r.tvdbSeason == 1 || r.tmdbSeason == 1).firstOrNull ?? rows.firstOrNull;
-      return s1?.anilistId;
-    } catch (_) {
-      return null;
-    }
+    final fribb = FribbMappingStore.instance;
+    final rows = await fribb.lookup(movie: !t.isShow, tvdbId: t.tvdbId, tmdbId: t.tmdbId);
+    if (rows.isEmpty && !await fribb.available()) throw StateError('Fribb mapping unavailable');
+    final s1 = rows.where((r) => r.tvdbSeason == 1 || r.tmdbSeason == 1).firstOrNull ?? rows.firstOrNull;
+    return s1?.anilistId;
   }
 
   /// The daily build's one Sonnet call (spend recorded like every AI call).
@@ -298,14 +323,26 @@ abstract final class ReelApp {
 }
 
 class _AppReelMedia implements ReelMedia {
-  _AppReelMedia(this._servers);
+  _AppReelMedia(this._servers, ReelStore store) : _plex = PlexReelMetadata(_servers) {
+    _metadata = ReelMetadata(source: _plex, store: store);
+  }
 
   final MultiServerManager _servers;
+  final PlexReelMetadata _plex;
+  late final ReelMetadata _metadata;
 
   MediaServerClient? _client(String serverId) => _servers.getClient(ServerId(serverId));
 
+  /// Plex: cache-first, else one lean read (plan V2-03). Other backends keep
+  /// their own item read.
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async {
+    if (_plex.serves(serverId)) return _metadata.item(serverId, ratingKey);
+    return fullItem(serverId, ratingKey);
+  }
+
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) async {
     final c = _client(serverId);
     if (c == null) return null;
     return c.fetchItem(ratingKey).timeout(const Duration(seconds: 15));

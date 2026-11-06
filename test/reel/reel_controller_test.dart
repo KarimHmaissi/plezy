@@ -21,6 +21,8 @@ import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
+import 'package:plezy/services/reel/reel_playback_profile.dart';
+import 'package:plezy/services/reel/reel_prefetcher.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 import 'clip_player_test.dart' show FakeClipEngine;
@@ -41,7 +43,34 @@ class _Servers implements ReelServers {
   String? clipUrl(String serverId, String partKey) => 'https://$serverId.example$partKey';
 }
 
+/// Two trailers per title, on servers that can be taken offline.
+class _FlakyServers implements ReelServers {
+  final Set<String> offline = {};
+  int reads = 0;
+
+  PlexExtraClip _x(String rk, String title, int i) => PlexExtraClip(
+    ratingKey: rk,
+    title: title,
+    partKey: '/services/iva/assets/$rk/video.mp4',
+    subtype: 'trailer',
+    index: i,
+  );
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
+    if (offline.contains(serverId)) throw ReelServerUnavailable(serverId);
+    reads++;
+    return [_x('a$ratingKey', 'Official Trailer', 0), _x('b$ratingKey', 'Trailer 2', 1)];
+  }
+
+  @override
+  String? clipUrl(String serverId, String partKey) =>
+      offline.contains(serverId) ? null : 'https://$serverId.example$partKey';
+}
+
 class _Media implements ReelMedia {
+  int fullReads = 0;
+
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async => MediaItem(
     id: ratingKey,
@@ -50,6 +79,19 @@ class _Media implements ReelMedia {
     title: 'Title $ratingKey',
     serverId: serverId,
   );
+
+  /// The full read: tells itself apart from the card's (lean) item.
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) async {
+    fullReads++;
+    return MediaItem(
+      id: ratingKey,
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: 'Full $ratingKey',
+      serverId: serverId,
+    );
+  }
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
@@ -78,6 +120,77 @@ class _GatedMedia extends _Media {
     if (ratingKey == gated) await gate.future;
     return super.item(serverId, ratingKey);
   }
+}
+
+/// A full read that fails (the server went away before Watch).
+class _NoFullMedia extends _Media {
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) async => throw StateError('offline');
+}
+
+/// Counts metadata reads.
+class _CountingMedia extends _Media {
+  _CountingMedia(this.onRead);
+
+  final void Function() onRead;
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) {
+    onRead();
+    return super.item(serverId, ratingKey);
+  }
+}
+
+/// One card's extras that answer only when the test says so.
+class _GatedServers extends _Servers {
+  _GatedServers(this.gated);
+
+  final String gated;
+  final gate = Completer<void>();
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
+    if (ratingKey == gated) await gate.future;
+    return super.extras(serverId, ratingKey, timeout: timeout);
+  }
+}
+
+/// Records which cards' extras and metadata were read, in order; one
+/// card's extras can be held until the test says.
+class _RecordingServers extends _Servers {
+  _RecordingServers({this.gated});
+
+  final String? gated;
+  final gate = Completer<void>();
+  final reads = <String>[];
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
+    reads.add(ratingKey);
+    if (ratingKey == gated) await gate.future;
+    return super.extras(serverId, ratingKey, timeout: timeout);
+  }
+}
+
+class _RecordingMedia extends _Media {
+  final reads = <String>[];
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) {
+    reads.add(ratingKey);
+    return super.item(serverId, ratingKey);
+  }
+}
+
+/// Titles in [bare] have no extras: they end as AI cards.
+class _BareServers extends _Servers {
+  _BareServers(this.bare);
+
+  final Set<String> bare;
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async =>
+      bare.contains(ratingKey) ? const [] : super.extras(serverId, ratingKey, timeout: timeout);
 }
 
 class _Deck extends ReelDeck {
@@ -201,6 +314,10 @@ void main() {
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
     void Function(bool active)? onActive,
+    ReelServers? servers,
+    AniListLookup? aniList,
+    AnimeThemesFetch? animeThemes,
+    ValueListenable<ReelPlaybackProfile>? profile,
   }) => ReelController(
     decks:
         decks ??
@@ -208,10 +325,11 @@ void main() {
           _Deck('a', [_card('1'), _card('2'), _card('3')]),
         ],
     resolver: ClipResolver(
-      servers: _Servers(),
+      servers: servers ?? _Servers(),
       store: store,
-      aniList: (_) async => null,
-      animeThemes: (_) async => const {},
+      aniList: aniList ?? (_) async => null,
+      animeThemes: animeThemes ?? (_) async => const {},
+      profile: profile,
     ),
     clips: ClipPlayer(
       engine: () {
@@ -271,12 +389,15 @@ void main() {
     expect(heard, [true, false]);
   });
 
-  test('the first card plays its trailer and the next one is preloaded', () async {
+  test('the first card plays its trailer and the next one is preloaded after its first frame', () async {
     final c = make();
     await c.start();
     await Future<void>.delayed(Duration.zero);
     expect(c.current.card?.id, 't1');
     expect(engine.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+    expect(engine.calls.where((x) => x.startsWith('preload ')), isEmpty, reason: 'the lookahead waits for the frame');
+    engine.firstFrameCtl.add(null);
+    await pumpEventQueue();
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
     c.dispose();
   });
@@ -350,12 +471,94 @@ void main() {
       c.dispose();
     });
 
+    test('Watch hands over the full read, not the card\'s own item', () async {
+      final media = _Media();
+      final watched = <String>[];
+      final c = make(
+        media: media,
+        onWatch: (item, {required onTv}) async {
+          watched.add(item.title ?? '');
+          return true;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.item?.title, 'Title 1');
+      expect(await c.watch(), isTrue);
+      expect(watched, ['Full 1']);
+      expect(media.fullReads, 1);
+      c.dispose();
+    });
+
+    test('Watch falls back to the card\'s item when the full read fails', () async {
+      final watched = <String>[];
+      final c = make(
+        media: _NoFullMedia(),
+        onWatch: (item, {required onTv}) async {
+          watched.add(item.title ?? '');
+          return true;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(await c.watch(), isTrue);
+      expect(watched, ['Title 1']);
+      c.dispose();
+    });
+
     test('Watch on TV that cannot reach the TV keeps the pick and says when it lands', () async {
       final c = make(onWatch: (_, {required onTv}) async => false, reachesTvNow: () => false);
       await c.start();
       expect(await c.watch(onTv: true), isFalse);
       expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
       expect(c.toast.value, ReelController.savedForLater);
+      c.dispose();
+    });
+  });
+
+  group('the clip never waits on metadata (V2-03)', () {
+    test('the clip opens while the card\'s metadata is still on its way', () async {
+      final media = _GatedMedia('1');
+      final c = make(media: media);
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+      expect(c.current.item, isNull, reason: 'title-only until the art and text land');
+
+      var redraws = 0;
+      c.addListener(() => redraws++);
+      media.gate.complete();
+      await pumpEventQueue();
+      expect(c.current.item?.title, 'Title 1');
+      expect(redraws, greaterThan(0));
+      c.dispose();
+    });
+
+    test('a failed metadata read is asked again when the card is next needed', () async {
+      final c = make(media: _LateMedia());
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.item, isNull, reason: 'the first read failed');
+      await c.step(1);
+      await c.step(-1);
+      await pumpEventQueue();
+      expect(c.current.card?.id, 't1');
+      expect(c.current.item?.title, 'Title 1');
+      c.dispose();
+    });
+
+    test('an item that landed is read only once', () async {
+      var reads = 0;
+      final c = make(media: _CountingMedia(() => reads++));
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(reads, 3, reason: 'the card on screen and the two ahead');
+      await c.step(1);
+      await c.step(-1);
+      await pumpEventQueue();
+      expect(c.current.item, isNotNull);
+      expect(reads, 3, reason: 'items that landed are kept for the session');
       c.dispose();
     });
   });
@@ -429,6 +632,8 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(engines, greaterThan(made), reason: 'the clip core is rebuilt');
     expect(engine.calls.where((x) => x.startsWith('open ')), isNotEmpty);
+    engine.firstFrameCtl.add(null);
+    await pumpEventQueue();
     expect(engine.calls.where((x) => x.startsWith('preload ')), isNotEmpty);
     c.dispose();
     restored.value++;
@@ -469,6 +674,8 @@ void main() {
   test('level 1 tells the views, so the phone feed can shrink', () async {
     final c = make(externalClips: true);
     await c.start();
+    // The cards' art and text land after start (they never hold the clip).
+    await pumpEventQueue();
     var told = 0;
     c.addListener(() => told++);
     await c.trimForWatchdog(WatchdogTrim.halved);
@@ -510,6 +717,140 @@ void main() {
     await c.step(1);
     expect(c.current.card?.id, 't2');
     expect(engines, 0);
+    c.dispose();
+  });
+
+  test('a new playback profile re-picks the files of the cards ahead, not the one on screen (V2-16)', () async {
+    ReelCardData anime(String id) => ReelCardData(
+      title: ReelTitle(
+        titleId: 't$id',
+        groupKey: 'g$id',
+        title: 'Harbor Lights $id',
+        isShow: true,
+        anime: true,
+        tvdbId: int.parse(id),
+        copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+      ),
+      facts: TitleFacts(
+        ref: TitleRef(id: 't$id', groupKey: 'g$id'),
+        seen: SeenState.unseen,
+      ),
+      best: _copy(id),
+    );
+    Map<String, dynamic> record(int id) => {
+      'animethemes': [
+        {
+          'type': 'OP',
+          'sequence': 1,
+          'animethemeentries': [
+            {
+              'episodes': '1-12',
+              'videos': [
+                for (final res in [720, 1080])
+                  {
+                    'id': id * 10000 + res,
+                    'link': 'https://v.animethemes.moe/OP$id-$res.webm',
+                    'nc': true,
+                    'resolution': res,
+                    'overlap': 'NONE',
+                  },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    final profile = ValueNotifier(const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080));
+    addTearDown(profile.dispose);
+    final c = make(
+      externalClips: true,
+      decks: [
+        _Deck('a', [anime('1'), anime('2'), anime('3')]),
+      ],
+      aniList: (t) async => t.tvdbId,
+      animeThemes: (ids) async => {for (final id in ids) id: record(id)},
+      profile: profile,
+    );
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.current.clip?.height, 1080);
+    expect(c.slotAt(1).clip?.height, 1080);
+    var told = 0;
+    c.addListener(() => told++);
+
+    // The Fold folds to its cover screen.
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
+    expect(c.current.clip?.height, 1080, reason: 'the clip on screen keeps playing its file');
+    expect(c.slotAt(1).clip?.height, 720);
+    expect(c.slotAt(1).clip?.source.uri, 'https://v.animethemes.moe/OP2-720.webm');
+    expect(told, 1);
+
+    c.dispose();
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
+    expect(told, 1, reason: 'a disposed controller stops listening');
+  });
+
+  test('opening a deck asks AnimeThemes once for all its anime shows (V2-12)', () async {
+    ReelCardData anime(String id) => ReelCardData(
+      title: ReelTitle(
+        titleId: 't$id',
+        groupKey: 'g$id',
+        title: 'Harbor Lights $id',
+        isShow: true,
+        anime: true,
+        tvdbId: int.parse(id),
+        copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+      ),
+      facts: TitleFacts(
+        ref: TitleRef(id: 't$id', groupKey: 'g$id'),
+        seen: SeenState.unseen,
+      ),
+      best: _copy(id),
+    );
+    final batches = <List<int>>[];
+    final c = make(
+      decks: [
+        _Deck('a', [anime('1'), anime('2'), _card('3'), anime('4'), anime('5')]),
+      ],
+      aniList: (t) async => t.tvdbId,
+      animeThemes: (ids) async {
+        batches.add(ids);
+        return {
+          for (final id in ids)
+            id: {
+              'animethemes': [
+                {
+                  'type': 'OP',
+                  'sequence': 1,
+                  'animethemeentries': [
+                    {
+                      'episodes': '1-12',
+                      'videos': [
+                        {
+                          'id': id,
+                          'link': 'https://v.animethemes.moe/OP$id.webm',
+                          'resolution': 1080,
+                          'overlap': 'NONE',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+        };
+      },
+    );
+    await c.start();
+    await c.step(1);
+    await c.step(1);
+    engine.firstFrameCtl.add(null);
+    await pumpEventQueue();
+    expect(c.current.card?.id, 't3');
+    expect(c.slotAt(3).clip?.assetId, 'at:4');
+    expect(batches, [
+      [1, 2, 4, 5],
+    ], reason: 'the first card waits for the batch; no card asks on its own');
     c.dispose();
   });
 
@@ -652,7 +993,7 @@ void main() {
       final c = make(externalClips: true, clock: clock);
       await c.start();
       c.clipStarted('t1');
-      c.clipFailed('t1');
+      await c.clipFailed('t1');
       now = now.add(const Duration(milliseconds: 300));
       await c.step(1);
       expect(await actions(), [ReelAction.unplayed.name]);
@@ -686,6 +1027,8 @@ void main() {
 
       await Future.wait([for (var k = 0; k < 5; k++) c.step(1)]);
       await Future<void>.delayed(Duration.zero);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
 
       expect(c.index, 5);
       expect(c.current.card?.id, 't6');
@@ -698,10 +1041,10 @@ void main() {
     });
 
     test('a step while the last one is still resolving lands on the later card', () async {
-      final media = _GatedMedia('2');
+      final media = _GatedServers('2');
       final c = make(
         clock: clock,
-        media: media,
+        servers: media,
         decks: [
           _Deck('a', [for (var i = 1; i <= 4; i++) _card('$i')]),
         ],
@@ -714,9 +1057,11 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(c.index, 1);
       final second = c.step(1);
-      await second;
+      await Future<void>.delayed(Duration.zero);
+      // Card 2's extras answer only now; the resolver's queue held card 3
+      // behind them.
       media.gate.complete();
-      await first;
+      await Future.wait([first, second]);
       await Future<void>.delayed(Duration.zero);
 
       expect(c.current.card?.id, 't3');
@@ -746,6 +1091,7 @@ void main() {
       await c.start();
       await c.step(1);
       expect(c.current.card?.id, 't2');
+      engine.firstFrameCtl.add(null);
       d.land([_card('7'), _card('1'), _card('8'), _card('9')]);
       await settle();
       expect(ids(c), ['t1', 't2', 't7', 't8', 't9']);
@@ -852,6 +1198,359 @@ void main() {
       await c.start();
       expect(loads, 1);
       expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
+  });
+
+  group('a failed clip looks again, and unknown answers come back (V2-56)', () {
+    test('a TV clip that fails clears its cached answer and plays the next trailer', () async {
+      final c = make(servers: _FlakyServers());
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/a1/video.mp4'));
+
+      engine.errorCtl.add(const PlayerError('source gone'));
+      await pumpEventQueue();
+      expect(c.current.clip?.assetId, 'plex:b1');
+      // The outgoing clip fades out (250 ms) before the new one opens.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/b1/video.mp4'));
+      expect(await store.cached('src:g1'), contains('plex:b1'));
+      c.dispose();
+    });
+
+    test('a phone clip that fails is looked up once more, without the failed asset', () async {
+      final servers = _FlakyServers();
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+
+      await c.clipFailed('t1');
+      expect(c.current.clip?.assetId, 'plex:b1');
+      final reads = servers.reads;
+
+      // The second clip failing too leaves the card as it is: once only.
+      await c.clipFailed('t1');
+      expect(servers.reads, reads);
+      expect(c.current.clip?.assetId, 'plex:b1');
+      c.dispose();
+    });
+
+    test('a failure on a card that is not on screen does nothing', () async {
+      final servers = _FlakyServers();
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      final reads = servers.reads;
+      await c.clipFailed('t2');
+      expect(servers.reads, reads);
+      c.dispose();
+    });
+
+    test('a card whose server was offline is looked up again on resume', () async {
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      expect(c.current.isAiCard, isTrue);
+      expect(await store.cached('src:g1'), isNull, reason: 'unknown is never a cached miss');
+
+      await c.suspend();
+      servers.offline.clear();
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+      c.dispose();
+    });
+
+    test('a definitive answer is not looked up again on resume', () async {
+      final servers = _FlakyServers();
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      await pumpEventQueue();
+      final reads = servers.reads;
+      await c.suspend();
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, reads);
+      c.dispose();
+    });
+  });
+
+  group('one prefetch queue (V2-11)', () {
+    List<ReelDeck> deckOf(int n) => [
+      _Deck('a', [for (var i = 1; i <= n; i++) _card('$i')]),
+    ];
+
+    test('on the TV the cards around wait for the first frame of the one on screen', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4));
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, ['1']);
+      expect(c.prefetcher.held, isTrue);
+
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(c.prefetcher.held, isFalse);
+      expect(servers.reads, ['1', '2', '3']);
+      c.dispose();
+    });
+
+    test('after five fast steps the landed card is read first, then +1, -1 and +2', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(9));
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      servers.reads.clear();
+
+      await Future.wait([for (var k = 0; k < 5; k++) c.step(1)]);
+      await pumpEventQueue();
+      expect(servers.reads, ['6'], reason: 'cards passed over are never read');
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['6', '7', '5', '8']);
+      c.dispose();
+    });
+
+    test('back up the deck, the window leans the other way', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(9));
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      await Future.wait([for (var k = 0; k < 6; k++) c.step(1)]);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      servers.reads.clear();
+
+      await c.step(-1);
+      await c.step(-1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['5', '4'], reason: 'the card on screen and the one above it, then two above');
+      c.dispose();
+    });
+
+    for (final (name, leave) in [
+      ('Watch', (ReelController c) => c.watch()),
+      ('suspend', (ReelController c) => c.suspend()),
+    ]) {
+      test('$name clears the queue: no Reel read follows it', () async {
+        final servers = _RecordingServers(gated: '2');
+        final media = _RecordingMedia();
+        final c = make(servers: servers, media: media, decks: deckOf(4), onWatch: (_, {required onTv}) async => true);
+        await c.start();
+        engine.firstFrameCtl.add(null);
+        await pumpEventQueue();
+        expect(servers.reads, ['1', '2'], reason: "card 2's read is in flight");
+
+        await leave(c);
+        servers.gate.complete();
+        await pumpEventQueue();
+        expect(servers.reads, ['1', '2'], reason: 'the read in flight finishes; nothing queued starts');
+        expect(media.reads, ['1']);
+        expect(c.prefetcher.queued, isEmpty);
+        c.dispose();
+      });
+    }
+
+    test('Watch on TV clears the queue for the hand-over, then the phone\'s window comes back', () async {
+      final servers = _RecordingServers(gated: '2');
+      final handedOver = <String>[];
+      final c = make(
+        servers: servers,
+        decks: deckOf(4),
+        externalClips: true,
+        onWatch: (item, {required onTv}) async {
+          handedOver.add(servers.reads.join(','));
+          return true;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2'], reason: "card 2's read is in flight");
+
+      expect(await c.watch(onTv: true), isTrue);
+      expect(handedOver, ['1,2'], reason: 'nothing new starts before the hand-over');
+      servers.gate.complete();
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2', '3'], reason: 'the lookahead goes on after Watch on TV');
+      c.dispose();
+    });
+
+    test('on mobile data only the card on screen and the next are fetched', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      addTearDown(profile.dispose);
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), profile: profile);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2']);
+      expect(c.slotAt(2).resolved, isFalse);
+      c.dispose();
+    });
+
+    test('memory pressure narrows the queue to the card on screen and the next', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4));
+      await c.start();
+      await pumpEventQueue();
+      await c.trimMemory();
+      expect(c.memoryLevel, 1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2']);
+      c.dispose();
+    });
+
+    test('the phone feed never holds the queue: its parked players need the cards ahead', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), externalClips: true);
+      await c.start();
+      await pumpEventQueue();
+      expect(c.prefetcher.held, isFalse);
+      expect(servers.reads, ['1', '2', '3']);
+      c.dispose();
+    });
+  });
+  group('the next two cards\' art is warmed ahead (V2-13)', () {
+    List<ReelDeck> deckOf(int n) => [
+      _Deck('a', [for (var i = 1; i <= n; i++) _card('$i')]),
+    ];
+
+    /// Records each warm: the card, the item it was given, and whether the
+    /// card had a clip.
+    List<(String, String, bool)> warmOn(ReelController c) {
+      final warmed = <(String, String, bool)>[];
+      c.artPrecache = (card, item, {required clip}) async => warmed.add((card.id, item.title ?? '', clip));
+      return warmed;
+    }
+
+    Iterable<String> artQueued(ReelController c) =>
+        c.prefetcher.queued.where((t) => t.stage == ReelPrefetchStage.art).map((t) => t.cardId);
+
+    test('+1 and +2, after their clip and text, once the card on screen shows a frame', () async {
+      final c = make(decks: deckOf(5));
+      final warmed = warmOn(c);
+      await c.start();
+      await pumpEventQueue();
+      expect(warmed, isEmpty, reason: 'the lookahead waits for the first frame');
+      expect(artQueued(c), ['t2', 't3'], reason: 'never the card on screen or the one behind');
+
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, [('t2', 'Title 2', true), ('t3', 'Title 3', true)]);
+      c.dispose();
+    });
+
+    test('each card is warmed once: a step on warms only the new +2', () async {
+      final c = make(decks: deckOf(5));
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      warmed.clear();
+
+      await c.step(1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed.map((w) => w.$1), ['t4']);
+      c.dispose();
+    });
+
+    test('an AI card is warmed as one: the TV gives it the full backdrop', () async {
+      final c = make(decks: deckOf(4), servers: _BareServers({'3'}));
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, [('t2', 'Title 2', true), ('t3', 'Title 3', false)]);
+      c.dispose();
+    });
+
+    test('nothing is warmed under memory pressure', () async {
+      final c = make(decks: deckOf(4));
+      final warmed = warmOn(c);
+      await c.start();
+      await pumpEventQueue();
+      await c.trimMemory();
+      expect(artQueued(c), isEmpty);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, isEmpty);
+      c.dispose();
+    });
+
+    test('with no view to build the art, no art task is queued', () async {
+      final c = make(decks: deckOf(4));
+      await c.start();
+      await pumpEventQueue();
+      expect(artQueued(c), isEmpty);
+      c.dispose();
+    });
+
+    test('suspend forgets what was warmed: the art is evicted, so the next visit warms it again', () async {
+      final c = make(decks: deckOf(4));
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, hasLength(2));
+
+      await c.suspend();
+      warmed.clear();
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed.map((w) => w.$1), ['t2', 't3']);
+      c.dispose();
+    });
+
+    test('a warm that fails is tried again on the next window', () async {
+      final c = make(decks: deckOf(5));
+      var fail = true;
+      final warmed = <String>[];
+      c.artPrecache = (card, item, {required clip}) async {
+        if (fail && card.id == 't3') throw StateError('decode failed');
+        warmed.add(card.id);
+      };
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, ['t2']);
+
+      fail = false;
+      await c.step(1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, ['t2', 't3', 't4'], reason: 't3 is +1 now and is warmed again');
+      c.dispose();
+    });
+
+    test('Watch: an art task still waiting on its card\'s text fetches nothing after it', () async {
+      final media = _GatedMedia('2');
+      final c = make(decks: deckOf(4), media: media, onWatch: (_, {required onTv}) async => true);
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(c.prefetcher.running.map((t) => t.key), contains('t2/art'), reason: "waiting on t2's text");
+
+      await c.watch();
+      media.gate.complete();
+      await pumpEventQueue();
+      expect(warmed, isEmpty);
+      c.dispose();
+    });
+
+    test('the phone feed warms ahead at once: it has no clip core to wait for', () async {
+      final c = make(decks: deckOf(4), externalClips: true);
+      final warmed = warmOn(c);
+      await c.start();
+      await pumpEventQueue();
+      expect(warmed.map((w) => w.$1), ['t2', 't3']);
       c.dispose();
     });
   });

@@ -4,6 +4,7 @@ import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/screens/reel/reel_card_view.dart';
 import 'package:plezy/screens/reel/reel_feed_view.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
@@ -13,23 +14,34 @@ import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/feed_players.dart';
+import 'package:plezy/services/reel/reel_art.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/utils/media_image_helper.dart';
+import 'package:plezy/widgets/cycling_media_backdrop.dart';
+import 'package:plezy/widgets/optimized_media_image.dart';
+import 'package:plezy/widgets/tv_spotlight_background.dart';
 
+import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 class _Servers implements ReelServers {
+  /// Titles with no extras: they end as AI cards.
+  final Set<String> bare = {};
+
   @override
   Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async => [
-    PlexExtraClip(
-      ratingKey: 'x$ratingKey',
-      title: 'Trailer',
-      partKey: '/iva/$ratingKey.mp4',
-      subtype: 'trailer',
-      index: 0,
-    ),
+    if (!bare.contains(ratingKey))
+      PlexExtraClip(
+        ratingKey: 'x$ratingKey',
+        title: 'Trailer',
+        partKey: '/iva/$ratingKey.mp4',
+        subtype: 'trailer',
+        index: 0,
+      ),
   ];
 
   @override
@@ -45,6 +57,9 @@ class _Media implements ReelMedia {
     title: 'Title $ratingKey',
     year: 2020,
   );
+
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) => item(serverId, ratingKey);
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
@@ -143,8 +158,10 @@ void main() {
   late int decksOpened, watched, sheets;
   late ValueNotifier<int> restored;
   late _Deck first;
+  late _Servers servers;
 
   setUp(() {
+    ReelArt.resetForTesting();
     db = ForkDatabase.memory();
     final settings = LocalCustomisationStore(db);
     final store = ReelStore(database: () async => db, settings: () async => settings);
@@ -157,7 +174,7 @@ void main() {
         _Deck('b', ['9']),
       ],
       resolver: ClipResolver(
-        servers: _Servers(),
+        servers: servers = _Servers(),
         store: store,
         aniList: (_) async => null,
         animeThemes: (_) async => const {},
@@ -308,5 +325,73 @@ void main() {
     expect(opened.single.id, '1');
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
+  });
+
+  testWidgets('the still under the clip sizes from its frame, not a fixed 960 px', (tester) async {
+    await pump(tester);
+    final stills = [
+      for (final a in tester.widgetList<OptimizedMediaImage>(find.byType(OptimizedMediaImage)))
+        if (a.width != 36) a,
+    ];
+    expect(stills, isNotEmpty);
+    for (final still in stills) {
+      // No explicit size: OptimizedMediaImage decodes at its constraints,
+      // the card's 16:9 frame, where 960 x DPR hit the 1920x1080 cap.
+      expect((still.width, still.height), (null, null));
+      expect(still.imageType, ImageType.art);
+      expect(still.onImageProvider, ReelArt.track, reason: "the Reel's art is let go on suspend");
+      final size = tester.getSize(find.byWidget(still));
+      expect(size.width, lessThanOrEqualTo(420));
+      expect(size.height, moreOrLessEquals(size.width * 9 / 16, epsilon: 1));
+      // The frame the next cards' art is warmed at (V2-13).
+      expect(size, reelStillFrame(tester.getSize(find.byType(ReelFeedView)), 16 / 9));
+    }
+  });
+
+  testWidgets('the feed warms the next cards\' art while it is mounted (V2-13)', (tester) async {
+    await pump(tester);
+    expect(c.artPrecache, isNotNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(c.artPrecache, isNull, reason: 'a feed that has gone builds no art');
+  });
+
+  group('TV card art', () {
+    Future<void> pumpCard(WidgetTester tester) async {
+      resetSharedPreferencesForTest();
+      await tester.runAsync(SettingsService.getInstance);
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.runAsync(c.start);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    TvSpotlightBackground spotlight(WidgetTester tester) =>
+        tester.widget<TvSpotlightBackground>(find.byType(TvSpotlightBackground));
+
+    testWidgets('a clip card decodes its art at the thumbnail cap', (tester) async {
+      await pumpCard(tester);
+      expect(c.current.clip, isNotNull);
+      expect(spotlight(tester).lightArt, isTrue);
+      expect(tester.widget<CyclingMediaBackdrop>(find.byType(CyclingMediaBackdrop)).imageType, ImageType.thumb);
+      expect(spotlight(tester).onArtProvider, ReelArt.track);
+    });
+
+    testWidgets('an AI card keeps the full backdrop', (tester) async {
+      servers.bare.add('1');
+      await pumpCard(tester);
+      expect(c.current.isAiCard, isTrue);
+      expect(spotlight(tester).lightArt, isFalse);
+      expect(tester.widget<CyclingMediaBackdrop>(find.byType(CyclingMediaBackdrop)).imageType, ImageType.art);
+    });
   });
 }

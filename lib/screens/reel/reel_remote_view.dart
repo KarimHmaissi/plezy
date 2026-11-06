@@ -308,7 +308,7 @@ class _NextRow extends StatelessWidget {
           child: SizedBox(
             width: 96,
             height: 54,
-            child: _Art(server: card['server'] as String?, path: (card['art'] ?? card['thumb']) as String?, width: 240),
+            child: _Art(server: card['server'] as String?, path: (card['art'] ?? card['thumb']) as String?, width: 96),
           ),
         ),
         const SizedBox(width: 12),

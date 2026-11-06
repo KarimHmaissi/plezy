@@ -1915,12 +1915,40 @@ class PlexClient
     Duration timeout = const Duration(seconds: 30),
   }) async {
     final response = await _http.get('/library/metadata/$ratingKey/extras', timeout: timeout);
+    // A 401 or 5xx is a failed read, not "no extras": the Reel must not
+    // cache it as a miss.
+    throwIfHttpError(response);
     final rows = _getMediaContainer(response)?['Metadata'];
     if (rows is! List) return const [];
     return [
       for (var i = 0; i < rows.length; i++)
         if (rows[i] is Map<String, dynamic>) ?PlexExtraClip.fromJson(rows[i] as Map<String, dynamic>, i),
     ];
+  }
+
+  /// Fork (Reel): a card's art and text in one lean read (plan V2-03): no
+  /// `checkFiles`, no `includeStreams`, no chapters or markers, and no cache
+  /// write. The shared `/library/metadata/{id}` row is left alone, so the
+  /// file-info and play paths never find a thin row there. Returns the item
+  /// JSON (with its library section), or null when the server has no such
+  /// item; any other failed read throws.
+  Future<Map<String, dynamic>?> fetchReelMetadataJson(
+    String ratingKey, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final response = await _http.get('/library/metadata/$ratingKey', timeout: timeout);
+    if (response.statusCode == 404) return null;
+    throwIfHttpError(response);
+    final json = _getFirstMetadataJson(response);
+    if (json == null) return null;
+    final container = _getMediaContainer(response);
+    final sectionId = _librarySectionIdFromJson(json) ?? _librarySectionIdFromJson(container);
+    final sectionTitle = _librarySectionTitleFromJson(json) ?? _librarySectionTitleFromJson(container);
+    return {
+      ...json,
+      if (sectionId != null && json['librarySectionID'] == null) 'librarySectionID': sectionId,
+      if (sectionTitle != null && json['librarySectionTitle'] == null) 'librarySectionTitle': sectionTitle,
+    };
   }
 
   /// Fork (Reel): the direct-play URL of a clip part. The token rides in

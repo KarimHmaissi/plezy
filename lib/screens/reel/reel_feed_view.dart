@@ -5,9 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../media/ids.dart';
+import '../../media/media_item.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
+import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_library.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/optimized_media_image.dart';
@@ -60,6 +63,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     super.initState();
     _deck = _c.deck.id;
     _c.addListener(_onController);
+    _c.artPrecache = _precacheArt;
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
@@ -68,15 +72,42 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     super.didUpdateWidget(old);
     if (!identical(old.controller, widget.controller)) {
       old.controller.removeListener(_onController);
+      if (old.controller.artPrecache == _precacheArt) old.controller.artPrecache = null;
       widget.controller.addListener(_onController);
+      widget.controller.artPrecache = _precacheArt;
     }
   }
 
   @override
   void dispose() {
     _c.removeListener(_onController);
+    if (_c.artPrecache == _precacheArt) _c.artPrecache = null;
     _pages.dispose();
     super.dispose();
+  }
+
+  /// Decodes [card]'s ambient backdrop and still into the image cache
+  /// exactly as its page will build them (plan V2-13): the same path, and
+  /// the still at the frame it gets in a page of this feed (its parked
+  /// clip's shape when that is known, else 16:9).
+  Future<void> _precacheArt(ReelCardData card, MediaItem item, {required bool clip}) async {
+    if (!mounted) return;
+    final box = context.findRenderObject();
+    final page = box is RenderBox && box.hasSize ? box.size : MediaQuery.sizeOf(context);
+    final still = reelStillFrame(page, widget.players.videoFor(card.id)?.aspectRatio ?? _stillAspect);
+    final client = context.tryGetMediaClientWithFallback(serverIdOrNull(card.best.serverId));
+    final providers = [
+      for (final slot in [_ambientSize, still])
+        ?MediaImageHelper.serverArtworkProviderFor(
+          context,
+          client: client,
+          thumbPath: _artPath(item),
+          width: slot.width,
+          height: slot.height,
+          imageType: ImageType.art,
+        )?.provider,
+    ];
+    await Future.wait([for (final p in providers) ReelArt.precache(p, context)]);
   }
 
   void _onController() {
@@ -258,6 +289,28 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   }
 }
 
+/// The ambient backdrop's slot: the art fetched tiny and scaled up.
+const Size _ambientSize = Size(36, 64);
+
+/// The still's shape until the card's clip reports its own.
+const double _stillAspect = 16 / 9;
+
+String? _artPath(MediaItem item) => item.artPath ?? item.thumbPath;
+
+/// The frame the picture gets in a [page]: as wide as the page at [aspect],
+/// or as tall as the page when that is too tall (an [AspectRatio] under the
+/// page's loose constraints).
+@visibleForTesting
+Size reelStillFrame(Size page, double aspect) {
+  var width = page.width;
+  var height = width / aspect;
+  if (height > page.height) {
+    height = page.height;
+    width = height * aspect;
+  }
+  return Size(width, height);
+}
+
 /// The card's own art, full-bleed and dimmed, behind the picture.
 class _Backdrop extends StatelessWidget {
   const _Backdrop({required this.slot, required this.dim});
@@ -276,11 +329,12 @@ class _Backdrop extends StatelessWidget {
         if (item != null)
           OptimizedMediaImage(
             client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
-            imagePath: item.artPath ?? item.thumbPath,
-            width: 36,
-            height: 64,
+            imagePath: _artPath(item),
+            width: _ambientSize.width,
+            height: _ambientSize.height,
             fit: BoxFit.cover,
             imageType: ImageType.art,
+            onImageProvider: ReelArt.track,
             placeholder: (_, _) => const SizedBox.shrink(),
             errorWidget: (_, _, _) => const SizedBox.shrink(),
           ),
@@ -305,7 +359,7 @@ class _Picture extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final v = video;
-    final aspect = v?.aspectRatio ?? 16 / 9;
+    final aspect = v?.aspectRatio ?? _stillAspect;
     final item = slot.item;
     return AspectRatio(
       aspectRatio: aspect,
@@ -315,11 +369,12 @@ class _Picture extends StatelessWidget {
           if (item != null)
             OptimizedMediaImage(
               client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
-              imagePath: item.artPath ?? item.thumbPath,
-              width: 960,
-              height: 540,
+              imagePath: _artPath(item),
+              // No explicit size: it sizes from the card's own frame, so the
+              // decode matches what is shown (plan V2-05).
               fit: BoxFit.cover,
               imageType: ImageType.art,
+              onImageProvider: ReelArt.track,
               placeholder: (_, _) => const ColoredBox(color: Colors.black26),
               errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
             ),

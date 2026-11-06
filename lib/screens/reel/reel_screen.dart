@@ -9,13 +9,16 @@ import 'package:provider/provider.dart';
 import '../../focus/dpad_navigator.dart';
 import '../../focus/dpad_select_long_press_controller.dart';
 import '../../focus/transport_keys.dart';
+import '../../media/media_item.dart';
 import '../../mixins/refreshable.dart';
 import '../../navigation/navigation_tabs.dart';
 import '../../mixins/tab_visibility_aware.dart';
 import '../../providers/companion_remote_provider.dart';
 import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
+import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_library.dart';
 import '../../services/reel/reel_perf.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/settings_service.dart';
@@ -111,7 +114,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   late final ReelFeedPlayers _players = ReelFeedPlayers(
     onLooped: (_) => _controller?.clipEnded(),
     onStarted: (id) => _controller?.clipStarted(id),
-    onFailed: (id) => _controller?.clipFailed(id),
+    onFailed: (id) => unawaited(_controller?.clipFailed(id)),
   );
 
   bool get _isTv => PlatformDetector.isTV();
@@ -198,6 +201,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
             }
             setState(() => _controller = c..addListener(_onChanged));
             c.toast.addListener(_onToast);
+            // TV: the next two cards' spotlight art is warmed ahead (plan V2-13);
+            // the phone feed registers its own, sized to its pages.
+            if (_isTv) c.artPrecache = _precacheTvArt;
             return c;
           },
           onError: (Object e, StackTrace s) {
@@ -228,11 +234,19 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     }
   }
 
-  /// Stops the card and lets go of every decoder (rebuilt on the next start).
+  /// Stops the card, lets go of every decoder (rebuilt on the next start)
+  /// and of the Reel's art (plan V2-05), so its cards don't stay in the
+  /// image cache that Home's artwork shares.
   void _release() {
     _heldInactive = false;
     unawaited(_controller?.suspend());
     unawaited(_players.releaseAll());
+    ReelArt.evict();
+  }
+
+  Future<void> _precacheTvArt(ReelCardData card, MediaItem item, {required bool clip}) async {
+    if (!mounted) return;
+    await ReelCardView.precacheArt(context, card, item, clip: clip);
   }
 
   /// Confirmations ("On the TV tonight") as the app's own snackbar.

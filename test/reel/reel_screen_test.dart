@@ -49,6 +49,9 @@ class _Media implements ReelMedia {
       MediaItem(id: ratingKey, backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Harbor Lights', year: 2020);
 
   @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) => item(serverId, ratingKey);
+
+  @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
 }
 

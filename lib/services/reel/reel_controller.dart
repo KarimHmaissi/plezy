@@ -10,13 +10,19 @@ import 'clip_player.dart';
 import 'clip_resolver.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
+import 'reel_playback_profile.dart';
 import 'reel_pool.dart';
+import 'reel_prefetcher.dart';
 import 'reel_store.dart';
 
-/// Metadata and art for a card (one cheap read per card built), through the
-/// app's server seam.
+/// Metadata and art for a card, through the app's server seam.
 abstract interface class ReelMedia {
+  /// The card's art and text: cache-first, else one lean read (plan V2-03).
+  /// Null when there is nothing to show; throws when it couldn't be read.
   Future<MediaItem?> item(String serverId, String ratingKey);
+
+  /// The full, network-first read Watch hands to real playback.
+  Future<MediaItem?> fullItem(String serverId, String ratingKey);
 
   /// A display-size image URL for [path] on [serverId].
   String? imageUrl(String serverId, String? path, {required int width});
@@ -29,6 +35,12 @@ typedef ReelWatch = Future<bool> Function(MediaItem item, {required bool onTv});
 
 /// Adds a title to the Plex watchlist (Save's mirror).
 typedef ReelWatchlist = Future<bool> Function(MediaItem item);
+
+/// Decodes a card's art into the image cache before it shows, with exactly
+/// the providers the view will build for it ([clip]: the card has a clip,
+/// which on the TV picks the lighter art). Set by the view on screen, which
+/// knows its own frame; completes when the art has decoded or failed.
+typedef ReelArtPrecache = Future<void> Function(ReelCardData card, MediaItem item, {required bool clip});
 
 enum ReelSlotKind { card, poolEnd, empty, loading }
 
@@ -51,9 +63,10 @@ class ReelSlot {
   bool get isAiCard => resolved && clip == null;
 }
 
-/// The Reel's session: decks, the card cursor, resolving two cards ahead and
-/// preloading one, the signals, and the hand-over to real playback. The
-/// views (TV, phone, Fold remote) only call these methods.
+/// The Reel's session: decks, the card cursor, the prefetch window around the
+/// card on screen ([ReelPrefetcher]) and the next card's preload, the
+/// signals, and the hand-over to real playback. The views (TV, phone, Fold
+/// remote) only call these methods.
 class ReelController extends ChangeNotifier {
   ReelController({
     required this.decks,
@@ -71,9 +84,12 @@ class ReelController extends ChangeNotifier {
     this.memoryRestored,
     this.onActive,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now {
+    ReelPrefetcher? prefetcher,
+  }) : _clock = clock ?? DateTime.now,
+       _prefetch = prefetcher ?? ReelPrefetcher() {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
+    resolver.profile?.addListener(_onProfile);
     decks.forEach(_watchDeck);
   }
 
@@ -141,6 +157,34 @@ class ReelController extends ChangeNotifier {
 
   final DateTime Function() _clock;
 
+  /// The one queue for the cards around the one on screen (plan V2-11).
+  final ReelPrefetcher _prefetch;
+
+  @visibleForTesting
+  ReelPrefetcher get prefetcher => _prefetch;
+
+  /// Warms the next two cards' art (plan V2-13); null while no view is
+  /// there to build it.
+  ReelArtPrecache? artPrecache;
+
+  /// Cards whose art is warm (`id/clip`), so a card is precached once per
+  /// visit. Forgotten on suspend and under memory pressure, which evict it.
+  final Set<String> _artWarm = {};
+
+  /// Bumped each time the queue is cleared (Watch, suspend, a deck change,
+  /// memory pressure), so an art task already running but still waiting on
+  /// its card's clip and text fetches nothing after it.
+  int _cleared = 0;
+
+  void _clearPrefetch() {
+    _cleared++;
+    _prefetch.clear();
+  }
+
+  /// The direction of travel (1 down the deck, -1 back up it): which way the
+  /// prefetch window and the preload lean.
+  int _direction = 1;
+
   int _deck = 0;
   final Map<String, List<ReelCardData>> _cards = {};
   final Map<String, int> _cursor = {};
@@ -150,8 +194,21 @@ class ReelController extends ChangeNotifier {
   final Map<String, String> _loadedOn = {};
   final Map<String, ResolvedClip?> _clip = {};
   final Set<String> _resolved = {};
-  final Map<String, MediaItem?> _item = {};
+  final Map<String, MediaItem> _item = {};
   final Map<String, Future<void>> _resolving = {};
+
+  /// Metadata reads in flight. Only an item that landed is kept: a failed
+  /// or empty read is asked again the next time the card is needed.
+  final Map<String, Future<void>> _itemLoading = {};
+
+  /// Cards whose clip answer was unknown (a server offline, a failed read):
+  /// looked up again when the Reel comes back, never cached as a miss.
+  final Set<String> _unknown = {};
+
+  /// Per card, the assets that failed to play this session, and the cards
+  /// already looked up again after a failure (once each).
+  final Map<String, Set<String>> _excluded = {};
+  final Set<String> _retried = {};
   bool _active = false;
   bool _firstClip = true;
   bool _clipEnded = false;
@@ -225,6 +282,7 @@ class ReelController extends ChangeNotifier {
 
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
+    if (!_active) _comeBack();
     _setActive(true);
     // The degrade ladder carries over: coming back from Watch or another tab
     // says nothing about memory. Only the policy's restore resets it.
@@ -247,11 +305,28 @@ class ReelController extends ChangeNotifier {
     await _show();
   }
 
+  /// Coming back (first open, resume or tab show): servers that weren't
+  /// connected are waited for again, and cards whose answer was unknown
+  /// are looked up again when next needed.
+  void _comeBack() {
+    resolver.resumed();
+    for (final id in _unknown) {
+      unawaited(_resolving.remove(id));
+      _resolved.remove(id);
+      _clip.remove(id);
+    }
+    _unknown.clear();
+  }
+
   /// Tab hidden, Home pressed or the app paused: stop and release the
   /// player (it is rebuilt on the next start).
   Future<void> suspend() async {
     _setActive(false);
     _generation++;
+    _clearPrefetch();
+    _prefetch.release();
+    // The view evicts the Reel's art on suspend: warm it again next visit.
+    _artWarm.clear();
     await _leaveCard();
     await clips.release();
     _firstClip = true;
@@ -272,6 +347,9 @@ class ReelController extends ChangeNotifier {
           '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
         );
         _cards[d.id] = loaded;
+        // One AnimeThemes batch for the deck's anime shows (plan V2-12);
+        // the first card waits for it rather than asking on its own.
+        unawaited(resolver.warm([for (final c in loaded) c.title]));
         return loaded;
       } catch (e) {
         appLogger.w('Reel: deck ${d.id} failed to load', error: e);
@@ -307,6 +385,9 @@ class ReelController extends ChangeNotifier {
     }
     if (_disposed || fresh.isEmpty) return;
     _loadedOn[d.id] = _today();
+    // The new build's anime shows, in one batch (titles already answered
+    // are skipped).
+    unawaited(resolver.warm([for (final c in fresh) c.title]));
     final old = _cards[d.id] ?? const <ReelCardData>[];
     if (!identical(deck, d)) {
       _cards[d.id] = fresh;
@@ -333,7 +414,10 @@ class ReelController extends ChangeNotifier {
       return;
     }
     notifyListeners();
-    if (_active) _prepareAhead(list, 1, _generation);
+    if (_active) {
+      _plan(list, _generation);
+      _preloadNext(list, _generation);
+    }
   }
 
   /// Next / previous card.
@@ -360,6 +444,7 @@ class ReelController extends ChangeNotifier {
   /// Next / previous deck (wraps), with the deck strip.
   Future<void> switchDeck(int dir) async {
     if (decks.length < 2) return;
+    _clearPrefetch();
     await _leaveCard();
     _deck = (_deck + dir) % decks.length;
     if (_deck < 0) _deck += decks.length;
@@ -372,6 +457,7 @@ class ReelController extends ChangeNotifier {
   Future<void> openDeck(String id) async {
     final i = await _deckIndex(id);
     if (i < 0 || i == _deck) return;
+    _clearPrefetch();
     await _leaveCard();
     _deck = i;
     _showStrip();
@@ -393,35 +479,71 @@ class ReelController extends ChangeNotifier {
     _toastTimer = Timer(const Duration(seconds: 3), () => toast.value = null);
   }
 
-  /// Resolves (metadata + clip) a card once; the views redraw when it lands.
-  Future<void> _resolve(ReelCardData c) => _resolving[c.id] ??= () async {
+  /// Resolves a card's clip once. Its art and text are a separate prefetch
+  /// stage ([_loadItem]) that never holds the clip (plan V2-03); the views
+  /// redraw as each lands.
+  Future<void> _resolve(ReelCardData c) => _resolving[c.id] ??= _resolveClip(c);
+
+  Future<void> _resolveClip(ReelCardData c) async {
     try {
-      final (item, clip) = await (
-        media.item(c.best.serverId, c.best.ratingKey).catchError((Object _) => null),
-        resolver.resolve(c.title),
-      ).wait;
-      _item[c.id] = item;
-      _clip[c.id] = clip;
+      final found = await resolver.lookup(c.title, exclude: _excluded[c.id] ?? const {});
+      _clip[c.id] = found.clip;
+      found.answer == ClipAnswer.unknown ? _unknown.add(c.id) : _unknown.remove(c.id);
     } catch (e) {
       appLogger.d('Reel: card resolve failed', error: e);
       _clip[c.id] = null;
+      _unknown.add(c.id);
     } finally {
       _resolved.add(c.id);
       notifyListeners();
     }
-  }();
+  }
+
+  /// The card's art and text. Kept once they land; a failed or empty read
+  /// is never memoised.
+  Future<void> _loadItem(ReelCardData c) {
+    if (_item.containsKey(c.id)) return Future<void>.value();
+    final pending = _itemLoading[c.id];
+    if (pending != null) return pending;
+    final read = _readItem(c);
+    _itemLoading[c.id] = read;
+    unawaited(
+      read.whenComplete(() {
+        if (identical(_itemLoading[c.id], read)) _itemLoading.remove(c.id);
+      }),
+    );
+    return read;
+  }
+
+  Future<void> _readItem(ReelCardData c) async {
+    try {
+      final item = await media.item(c.best.serverId, c.best.ratingKey);
+      if (item == null || _disposed) return;
+      _item[c.id] = item;
+      notifyListeners();
+    } catch (e) {
+      appLogger.d('Reel: card metadata read failed (${e.runtimeType})');
+    }
+  }
 
   Future<void> _show({int direction = 1}) async {
     if (_disposed) return;
     final gen = ++_generation;
+    _direction = direction < 0 ? -1 : 1;
     notifyListeners();
     cardChanged.value++;
     final list = cards;
     if (list == null || index >= list.length) {
+      _prefetch.release();
+      if (list != null) _plan(list, gen);
       if (!externalClips) await clips.pause();
       return;
     }
     final c = list[index];
+    // The card's own clip and art start at once; on the TV the cards around
+    // it wait until its clip shows a frame (or turns out to be a still).
+    if (!externalClips) _prefetch.hold();
+    _plan(list, gen);
     await _resolve(c);
     if (gen != _generation || !_active) return;
     // An AI card only with room (at most 1 in 6); otherwise the title waits
@@ -457,24 +579,122 @@ class ReelController extends ChangeNotifier {
       await clips.play(clip.source, first: _firstClip);
       _firstClip = false;
     }
-    _prepareAhead(list, direction, gen);
+    _syncHold();
+    _preloadNext(list, gen);
   }
 
-  /// Two ahead: resolve; one ahead (in the swipe direction): preload.
-  void _prepareAhead(List<ReelCardData> list, int direction, int gen) {
-    for (var k = 1; k <= 2; k++) {
-      final j = index + k * (direction < 0 ? -1 : 1);
-      if (j >= 0 && j < list.length) unawaited(_resolve(list[j]));
+  /// Hands the prefetcher the window around the card on screen, nearest
+  /// first (0, +1, -1, +2 in the direction of travel), each card's clip
+  /// before its art and text, and for +1 and +2 their art decoded last
+  /// (plan V2-13). On a metered or offline link, or under memory pressure,
+  /// only the card on screen and the next; under memory pressure no art is
+  /// decoded ahead.
+  void _plan(List<ReelCardData> list, int gen) {
+    if (_disposed || gen != _generation) return;
+    final lean = memoryLevel >= 1 || resolver.playback.link != ReelLink.unmetered;
+    final tasks = <ReelPrefetchTask>[];
+    for (final offset in lean ? ReelPrefetcher.leanOffsets : ReelPrefetcher.offsets) {
+      final j = index + offset * _direction;
+      if (j < 0 || j >= list.length) continue;
+      final c = list[j];
+      if (!_resolved.contains(c.id)) {
+        tasks.add(
+          ReelPrefetchTask(
+            cardId: c.id,
+            offset: offset,
+            stage: ReelPrefetchStage.resolve,
+            lane: ReelPrefetcher.laneFor(c.title),
+            run: () => _resolve(c),
+          ),
+        );
+      }
+      if (!_item.containsKey(c.id)) {
+        tasks.add(
+          ReelPrefetchTask(
+            cardId: c.id,
+            offset: offset,
+            stage: ReelPrefetchStage.metadata,
+            lane: c.best.serverId,
+            run: () => _loadItem(c),
+          ),
+        );
+      }
+      if (offset > 0 && memoryLevel == 0 && artPrecache != null && !_artIsWarm(c)) {
+        tasks.add(
+          ReelPrefetchTask(
+            cardId: c.id,
+            offset: offset,
+            stage: ReelPrefetchStage.art,
+            lane: ReelPrefetcher.artLaneOf(c.best.serverId),
+            run: () => _warmArt(c),
+          ),
+        );
+      }
     }
-    final ahead = index + (direction < 0 ? -1 : 1);
-    if (!externalClips && memoryLevel == 0 && ahead >= 0 && ahead < list.length) {
-      final next = list[ahead];
-      unawaited(
-        _resolve(next).then((_) {
-          if (gen == _generation && _active) unawaited(clips.preload(_clip[next.id]?.source));
-        }),
-      );
+    _prefetch.schedule(gen, tasks);
+  }
+
+  /// Whether [c]'s art is warm for the clip answer it has now (an unresolved
+  /// card isn't).
+  bool _artIsWarm(ReelCardData c) => _resolved.contains(c.id) && _artWarm.contains(_artKey(c));
+
+  String _artKey(ReelCardData c) => '${c.id}/${_clip[c.id] != null}';
+
+  /// The art stage: once the card's clip answer and text are in (the TV's
+  /// art depends on both), its art is decoded at the size its view shows
+  /// it. Skipped when either is missing, under memory pressure, or once the
+  /// queue was cleared (Watch, suspend) or the Reel has gone.
+  Future<void> _warmArt(ReelCardData c) async {
+    final cleared = _cleared;
+    await _prefetch.done(ReelPrefetcher.keyOf(c.id, ReelPrefetchStage.resolve));
+    await _prefetch.done(ReelPrefetcher.keyOf(c.id, ReelPrefetchStage.metadata));
+    final precache = artPrecache;
+    final item = _item[c.id];
+    if (_disposed ||
+        !_active ||
+        cleared != _cleared ||
+        memoryLevel != 0 ||
+        precache == null ||
+        item == null ||
+        !_resolved.contains(c.id)) {
+      return;
     }
+    final key = _artKey(c);
+    if (!_artWarm.add(key)) return;
+    try {
+      await precache(c, item, clip: _clip[c.id] != null);
+    } catch (e) {
+      _artWarm.remove(key);
+      appLogger.d('Reel: art precache failed (${e.runtimeType})');
+    }
+  }
+
+  /// TV: the next card in the direction of travel is preloaded on the clip
+  /// core once the queue has resolved it (unless its server is slow:
+  /// [ClipSource.preloadable]).
+  void _preloadNext(List<ReelCardData> list, int gen) {
+    final ahead = index + _direction;
+    if (externalClips || memoryLevel != 0 || ahead < 0 || ahead >= list.length) return;
+    final next = list[ahead];
+    unawaited(
+      _prefetch.done(ReelPrefetcher.keyOf(next.id, ReelPrefetchStage.resolve)).then((_) {
+        if (gen != _generation || !_active || memoryLevel != 0 || !_resolved.contains(next.id)) return;
+        unawaited(clips.preload(_clip[next.id]?.source));
+      }),
+    );
+  }
+
+  /// TV: the lookahead goes on once the card on screen's clip shows its
+  /// first frame, fails, or isn't played (a still).
+  void _syncHold() {
+    final opening =
+        !externalClips &&
+        memoryLevel < 2 &&
+        _cardShown != null &&
+        _cardClip != null &&
+        _cardSince == null &&
+        !_cardFailed;
+    if (!opening) _prefetch.release();
   }
 
   /// TV: the clock starts on this card's first frame (the core moves from
@@ -485,9 +705,10 @@ class ReelController extends ChangeNotifier {
     final uri = _cardClip;
     if (externalClips || _cardShown == null || uri == null || clips.current?.uri != uri) return;
     if (now == ClipPhase.failed) {
-      _cardFailed = true;
+      unawaited(clipFailed(_cardShown!));
     } else if (was == ClipPhase.loading && now == ClipPhase.playing && _cardSince == null && !_cardFailed) {
       _cardSince = _clock();
+      _syncHold();
     }
   }
 
@@ -501,9 +722,44 @@ class ReelController extends ChangeNotifier {
     }
   }
 
-  /// Phone feed: [cardId]'s player failed to open or broke mid-play.
-  void clipFailed(String cardId) {
-    if (externalClips && cardId == _cardShown) _cardFailed = true;
+  /// [cardId]'s clip failed to open or broke mid-play (the phone feed's
+  /// player, or the TV's clip core). How the card is left then says nothing
+  /// about the title. Its cached answer is cleared and it is looked up once
+  /// more without the failed asset: the next rung plays, or an AI card.
+  Future<void> clipFailed(String cardId) async {
+    if (cardId != _cardShown) return;
+    _cardFailed = true;
+    _syncHold();
+    final failed = _clip[cardId];
+    final c = cards?.where((x) => x.id == cardId).firstOrNull;
+    if (c == null || failed == null || !_retried.add(cardId)) return;
+    appLogger.i('Reel: a clip failed to play; looking for another');
+    (_excluded[cardId] ??= {}).add(failed.assetId);
+    await resolver.forget(c.title);
+    unawaited(_resolving.remove(cardId));
+    _resolved.remove(cardId);
+    _clip.remove(cardId);
+    notifyListeners();
+    await _resolve(c);
+    if (_disposed || !_active || _cardShown != cardId) return;
+    final clip = _clip[cardId];
+    if (clip == null) {
+      // An AI card now: a still, seen whole from here; still neutral.
+      if (!externalClips) {
+        _sinceAiCard = 0;
+        await clips.pause();
+      }
+      return;
+    }
+    // The new clip's first frame starts the clock.
+    _cardFailed = false;
+    _cardSince = null;
+    if (externalClips || memoryLevel >= 2) return;
+    _cardClip = clip.source.uri;
+    _prefetch.hold();
+    await clips.play(clip.source, first: _firstClip);
+    _firstClip = false;
+    _syncHold();
   }
 
   /// Records how the card was left, timed from its first frame: a quick
@@ -541,15 +797,34 @@ class ReelController extends ChangeNotifier {
     final s = current;
     final c = s.card;
     if (c == null) return false;
-    final item = s.item ?? await media.item(c.best.serverId, c.best.ratingKey);
-    if (item == null) return false;
+    // No Reel prefetch competes with the hand-over, or follows it.
+    _clearPrefetch();
+    // Watch keeps its full read (file checks, streams): the card's own
+    // item may be a lean row. The card's item stands in only when that read
+    // fails.
+    final item = await media.fullItem(c.best.serverId, c.best.ratingKey).catchError((Object _) => null) ?? s.item;
+    if (item == null) {
+      // Nothing to hand over: the Reel stays, and so does its window.
+      final list = cards;
+      if (list != null && _active) _plan(list, _generation);
+      return false;
+    }
     await store.record(c.id, onTv ? ReelAction.watchOnTv : ReelAction.watch, deck: deck.id);
     if (!onTv) {
+      // A card change still on its way stops here: real playback is next.
+      _generation++;
+      _prefetch.release();
       _cardShown = null;
       await clips.release();
       _firstClip = true;
     }
     final ok = await onWatch(item, onTv: onTv);
+    // Watch on TV hands over and the phone's Reel stays: its window comes
+    // back, so the next card is still resolved before the swipe.
+    if (onTv && _active && !_disposed) {
+      final list = cards;
+      if (list != null) _plan(list, _generation);
+    }
     // The TV couldn't be reached: keep the pick instead, and say where it
     // went (or that it couldn't be kept).
     if (!ok && onTv) await save();
@@ -709,12 +984,19 @@ class ReelController extends ChangeNotifier {
     if (to <= memoryLevel) return;
     memoryLevel = to;
     appLogger.w('Reel: memory pressure, level $memoryLevel');
+    // The queue narrows to the card on screen and the next, and no art is
+    // decoded ahead; art warmed so far may be trimmed, so it is forgotten.
+    _clearPrefetch();
+    _artWarm.clear();
+    final list = cards;
+    if (list != null) _plan(list, _generation);
     if (to == 1) {
       if (!externalClips) await clips.dropPreload();
     } else {
       await clips.release();
       _firstClip = true;
     }
+    _syncHold();
     // The phone feed re-syncs its players to the new level.
     notifyListeners();
   }
@@ -726,6 +1008,25 @@ class ReelController extends ChangeNotifier {
     appLogger.i('Reel: memory restored, ladder back to 0 from $memoryLevel');
     memoryLevel = 0;
     notifyListeners();
+  }
+
+  /// The playback profile changed (the Fold switched screens, the network
+  /// changed, data saver was turned on): every resolved card except the one
+  /// on screen picks its file again, so the next card plays at the new
+  /// height. The card on screen keeps its file until it is shown again.
+  void _onProfile() {
+    if (_disposed) return;
+    final onScreen = {?_cardShown, ?current.card?.id};
+    var changed = false;
+    for (final MapEntry(key: id, value: clip) in _clip.entries.toList()) {
+      if (clip == null || onScreen.contains(id)) continue;
+      final next = resolver.repick(clip);
+      if (identical(next, clip)) continue;
+      _clip[id] = next;
+      changed = true;
+    }
+    appLogger.d('Reel: playback profile now ${resolver.playback}');
+    if (changed) notifyListeners();
   }
 
   /// The On TV state the TV broadcasts on every card change: what the
@@ -776,10 +1077,12 @@ class ReelController extends ChangeNotifier {
     _generation++;
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);
+    resolver.profile?.removeListener(_onProfile);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);
     }
     _rebuiltListeners.clear();
+    _prefetch.dispose();
     _stripTimer?.cancel();
     _toastTimer?.cancel();
     deckStrip.dispose();
