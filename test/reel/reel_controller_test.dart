@@ -2176,20 +2176,36 @@ void main() {
       expect(c.current.clip?.assetId, 'plex:b1');
       final reads = servers.reads;
 
-      // The second clip failing too leaves the card as it is: once only.
+      // The second clip failing too is looked up no more (once only): the
+      // card becomes an AI card, its art and premise, not a broken clip.
       await c.clipFailed('t1');
       expect(servers.reads, reads);
-      expect(c.current.clip?.assetId, 'plex:b1');
+      expect(c.current.clip, isNull);
+      expect(c.current.isAiCard, isTrue);
       c.dispose();
     });
 
-    test('a failure on a card that is not on screen does nothing', () async {
+    test('TV: a failure on a card that is not on screen does nothing', () async {
       final servers = _FlakyServers();
-      final c = make(servers: servers, externalClips: true);
+      final c = make(servers: servers);
       await c.start();
+      await pumpEventQueue();
       final reads = servers.reads;
       await c.clipFailed('t2');
       expect(servers.reads, reads);
+      expect(c.current.clip?.assetId, 'plex:a1');
+      c.dispose();
+    });
+
+    test('phone: a parked card whose clip failed is looked up again before it comes on screen', () async {
+      final servers = _FlakyServers();
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      await pumpEventQueue();
+      expect(c.slotAt(1).clip?.assetId, 'plex:a2');
+      await c.clipFailed('t2');
+      expect(c.slotAt(1).clip?.assetId, 'plex:b2');
+      expect(c.current.clip?.assetId, 'plex:a1', reason: 'the card on screen is left alone');
       c.dispose();
     });
 

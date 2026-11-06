@@ -1463,13 +1463,28 @@ class ReelController extends ChangeNotifier {
   /// player, or the TV's clip core). How the card is left then says nothing
   /// about the title. Its cached answer is cleared and it is looked up once
   /// more without the failed asset: the next rung plays, or an AI card.
+  ///
+  /// Phone: the feed also tells of a parked card's clip, and of the card
+  /// under the thumb before its swipe commits, so those are looked up again
+  /// too. A card whose clip fails a second time becomes an AI card (its art
+  /// and premise) rather than a page with a broken clip.
   Future<void> clipFailed(String cardId) async {
-    if (cardId != _cardShown) return;
-    _cardFailed = true;
-    _syncHold();
+    final shown = cardId == _cardShown;
+    if (!shown && !externalClips) return;
+    if (shown) {
+      _cardFailed = true;
+      _syncHold();
+    }
     final failed = _clip[cardId];
     final c = cards?.where((x) => x.id == cardId).firstOrNull;
-    if (c == null || failed == null || !_retried.add(cardId)) return;
+    if (c == null || failed == null) return;
+    if (!_retried.add(cardId)) {
+      if (externalClips && _resolved.contains(cardId)) {
+        _clip[cardId] = null;
+        notifyListeners();
+      }
+      return;
+    }
     appLogger.i('Reel: a clip failed to play; looking for another');
     (_excluded[cardId] ??= {}).add(failed.assetId);
     await resolver.forget(c.title);

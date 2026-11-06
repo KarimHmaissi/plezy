@@ -18,6 +18,7 @@ import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
+import 'package:plezy/services/reel/feed_players.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
@@ -50,13 +51,55 @@ class _Remote extends CompanionRemoteProvider {
   void sendCommand(RemoteCommandType type, {Map<String, dynamic>? data}) => sent.add((type, data));
 }
 
+/// A feed player that opens at once and plays (the plugin's can't open a
+/// clip in a widget test).
+class _PlayingVideo extends ChangeNotifier implements FeedVideo {
+  bool _ready = false, _playing = false;
+  @override
+  bool get ready => _ready;
+  @override
+  bool get failed => false;
+  @override
+  double get aspectRatio => 16 / 9;
+  @override
+  Duration get position => Duration.zero;
+  @override
+  Duration get duration => const Duration(seconds: 60);
+  @override
+  bool get playing => _playing;
+  @override
+  bool get buffering => false;
+  @override
+  bool get completed => false;
+  @override
+  Duration get buffered => duration;
+  @override
+  Future<void> initialize() async => _ready = true;
+  @override
+  Future<void> play() async => _playing = true;
+  @override
+  Future<void> pause() async => _playing = false;
+  @override
+  Future<void> seekTo(Duration position) async {}
+  @override
+  Future<void> setVolume(double volume) async {}
+  @override
+  Future<void> setLooping(bool looping) async {}
+  @override
+  Future<void> dispose() async => super.dispose();
+  @override
+  Widget view() => const SizedBox.shrink();
+}
+
 /// Whether the servers have trailers for every title (off by default).
 var _withClips = false;
 
 class _Servers implements ReelServers {
-  /// Two per title: the feed's players can't open a clip in a widget test,
-  /// and a clip that fails is looked up once more without it (V2-56), so
-  /// the second keeps the card a clip card.
+  /// Two per title: the plugin's players can't open a clip in a widget test,
+  /// and a clip that fails is looked up once more without it (V2-56); a
+  /// card whose second clip fails too becomes an AI card. Tests that need a
+  /// clip card to stay one hand the screen players that open
+  /// ([ReelScreen.debugFeedVideo]).
   @override
   Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async => [
     if (_withClips)
@@ -186,7 +229,10 @@ void main() {
     );
   });
 
-  tearDown(() => db.close());
+  tearDown(() {
+    ReelScreen.debugFeedVideo = null;
+    return db.close();
+  });
 
   Future<void> settle(WidgetTester tester) async {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
@@ -291,6 +337,8 @@ void main() {
 
     testWidgets('Spoiled me needs a clip, and the state tells the phone whether there is one', (tester) async {
       _withClips = true;
+      // Clips that open: a card whose clips all fail becomes an AI card.
+      ReelScreen.debugFeedVideo = (_) => _PlayingVideo();
       await show(tester);
       expect(c.remoteState()['hasClip'], isTrue);
       ReelScreen.remoteAction('spoiled');

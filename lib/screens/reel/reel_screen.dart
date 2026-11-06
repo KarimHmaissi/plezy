@@ -132,6 +132,11 @@ class ReelScreen extends StatefulWidget {
   @visibleForTesting
   static set debugIntroDeferred(bool value) => _introDeferred = value;
 
+  /// Widget tests: the phone feed's players, in place of the plugin's (which
+  /// can't open a clip in a test, so every clip there fails).
+  @visibleForTesting
+  static FeedVideo Function(Uri uri)? debugFeedVideo;
+
   @override
   State<ReelScreen> createState() => ReelScreenState();
 }
@@ -174,7 +179,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// hold the screen on only while a card really plays. A clip plays as
   /// often as the clip-end pref says, then holds (V2-47).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
-    create: (uri) => PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
+    create: (uri) =>
+        ReelScreen.debugFeedVideo?.call(uri) ??
+        PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
     plays: () => ReelController.clipEndPref().plays,
     keepAwake: _awake.setEnabled,
     onLooped: (_) => _controller?.clipEnded(),

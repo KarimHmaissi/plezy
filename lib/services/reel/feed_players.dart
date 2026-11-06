@@ -62,8 +62,10 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
   bool _failed = false;
   bool _disposed = false;
 
+  /// A player that reported an error is never ready, so its page shows the
+  /// card's art instead of a frozen frame.
   @override
-  bool get ready => _c.value.isInitialized && !_failed;
+  bool get ready => _c.value.isInitialized && !failed;
   @override
   bool get failed => _failed || _c.value.hasError;
   @override
@@ -158,6 +160,21 @@ abstract final class FeedStaging {
   static const fullSlack = Duration(milliseconds: 500);
 }
 
+/// How long the card on screen may take to show it is playing (its position
+/// moving) once it is asked to play, before its clip counts as failed. A
+/// clip that never opens, or opens and never moves, would otherwise leave a
+/// still on screen with nothing said.
+abstract final class FeedWatchdog {
+  static const after = Duration(seconds: 6);
+}
+
+/// Where a clip failed: still opening, opened but never moved, or broke
+/// after it had played.
+enum FeedFailStage { open, start, play }
+
+/// How a clip failed: the player said so, or the watchdog ran out.
+enum FeedFailCause { error, timeout }
+
 /// How a card comes in on screen (V2-19). Clips differ in loudness (one
 /// source may be mastered far louder than the next), so a card never starts
 /// at full volume: it starts at [from] and rises to full over [over], in
@@ -223,6 +240,7 @@ class ReelFeedPlayers extends ChangeNotifier {
     this.onLeft,
     this.keepAwake,
     this.riseOver = FeedRamp.over,
+    this.stuckAfter = FeedWatchdog.after,
     int? Function()? plays,
   }) : _create = create ?? PluginFeedVideo.new,
        _plays = plays ?? _forever;
@@ -253,8 +271,15 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// was put on screen (`isPlaying` alone flips at the play() call).
   final void Function(String cardId)? onStarted;
 
-  /// The card on screen failed to open, or broke mid-play.
+  /// A card's clip failed: it errored (on screen or parked), or the card on
+  /// screen didn't start playing within [stuckAfter]. Its player is let go
+  /// and its address isn't opened again, so the page shows the card's art
+  /// until the controller finds another clip or makes it an AI card (V2-56).
   final void Function(String cardId)? onFailed;
+
+  /// How long the card on screen may take to start once asked to play
+  /// ([FeedWatchdog]); null never times it out.
+  final Duration? stuckAfter;
 
   /// The card stopped being the one on screen (a swipe went past the middle,
   /// or everything was let go). Its next [onStarted] is a new visit.
@@ -268,6 +293,13 @@ class ReelFeedPlayers extends ChangeNotifier {
   bool _awake = false;
 
   final Map<String, _Entry> _byId = {};
+
+  /// Clip addresses that failed here, and where. Never opened again: the
+  /// controller looks the card up once more without that clip.
+  final Map<Uri, FeedFailStage> _broken = {};
+
+  /// Let go of everything ([releaseAll]) and not synced since.
+  bool _letGo = false;
   final Map<String, _CardNotifier> _cards = {};
   String? _current;
 
@@ -295,6 +327,18 @@ class ReelFeedPlayers extends ChangeNotifier {
   bool get paused => _paused;
 
   String? get current => _current;
+
+  /// Everything was let go ([releaseAll]: the tab went away, or Watch), as
+  /// opposed to a page with no card on it.
+  bool get letGo => _letGo;
+
+  /// Where [cardId]'s clip failed, while the window still offers that clip.
+  FeedFailStage? failure(String cardId) {
+    for (final w in _window) {
+      if (w.id == cardId) return _broken[w.uri];
+    }
+    return null;
+  }
 
   /// The player for [cardId], once it has a picture to show.
   FeedVideo? videoFor(String cardId) {
@@ -337,6 +381,7 @@ class ReelFeedPlayers extends ChangeNotifier {
     bool resume = false,
   }) {
     if (_disposed) return;
+    _letGo = false;
     _window = window;
     _memoryLevel = memoryLevel;
     _metered = metered;
@@ -355,8 +400,51 @@ class ReelFeedPlayers extends ChangeNotifier {
       if (left != null) onLeft?.call(left);
     }
     if (_byId[_current] case final e?) unawaited(e.opened!.then((_) => _apply(e, resume: resume)));
+    _arm();
     unawaited(_syncAwake());
     notifyListeners();
+  }
+
+  /// Starts the card on screen's watchdog ([stuckAfter]) if it hasn't shown
+  /// it is playing this visit. A tap pause stops it; leaving the card, or
+  /// its position moving, ends it.
+  void _arm() {
+    final after = stuckAfter;
+    final e = _byId[_current];
+    if (after == null || e == null || _paused || e.started || e.held || e.watchdog != null) return;
+    e.watchdog = Timer(after, () {
+      e.watchdog = null;
+      if (!_isLive(e) || e.id != _current || _paused || e.started || e.held) return;
+      // Asked to play and stopped by the system before it moved (a call
+      // took the audio focus): not broken, and left stopped (V2-22).
+      if (e.open && e.voiced && !e.video.playing && !e.video.buffering) return;
+      _fail(e, _stageOf(e), FeedFailCause.timeout);
+    });
+  }
+
+  /// How far [e] got: still opening, open but never moved this visit, or
+  /// moved and then broke.
+  static FeedFailStage _stageOf(_Entry e) => e.started
+      ? FeedFailStage.play
+      : e.open
+      ? FeedFailStage.start
+      : FeedFailStage.open;
+
+  /// [e]'s clip failed: logged, its player let go (the page shows the card's
+  /// art), its address kept from opening again, and the controller told so
+  /// it can look for another clip (V2-56). The window then opens as for a
+  /// card with no clip.
+  void _fail(_Entry e, FeedFailStage stage, FeedFailCause cause) {
+    if (!_isLive(e) || _broken.containsKey(e.uri)) return;
+    _broken[e.uri] = stage;
+    final where = e.id == _current ? 'screen' : 'parked';
+    appLogger.i('[ReelFeed] clip failed stage=${stage.name} cause=${cause.name} on=$where');
+    unawaited(_drop(e.id));
+    if (_memoryLevel == 0) _stage = math.max(_stage, _stageNow());
+    _reconcile(apply: false);
+    unawaited(_syncAwake());
+    notifyListeners();
+    onFailed?.call(e.id);
   }
 
   /// Tells [keepAwake] whether the card on screen is really playing. A stall
@@ -379,9 +467,9 @@ class ReelFeedPlayers extends ChangeNotifier {
   List<FeedClip> get _kept => switch (_memoryLevel) {
     0 => [
       for (final w in _window)
-        if (w.id == _holding || _reach(w.offset) <= _linkReach) w,
+        if (!_broken.containsKey(w.uri) && (w.id == _holding || _reach(w.offset) <= _linkReach)) w,
     ],
-    1 => _window.where((w) => w.id == _current).toList(),
+    1 => _window.where((w) => w.id == _current && !_broken.containsKey(w.uri)).toList(),
     _ => const <FeedClip>[],
   };
 
@@ -398,8 +486,8 @@ class ReelFeedPlayers extends ChangeNotifier {
 
   /// How far the window may open now, by what the card on screen has loaded.
   int _stageNow() {
-    // No clip on screen (a still): nothing to share with.
-    if (!_window.any((w) => w.id == _current)) return 2;
+    // No clip on screen (a still, or one that failed): nothing to share with.
+    if (!_window.any((w) => w.id == _current && !_broken.containsKey(w.uri))) return 2;
     final v = _byId[_current]?.video;
     if (v == null) return 0;
     if (v.failed) return 2;
@@ -443,6 +531,11 @@ class ReelFeedPlayers extends ChangeNotifier {
           if (!_isLive(entry)) return;
           await entry.video.initialize();
           if (!_isLive(entry)) return;
+          // Failed to open: let go, and the ones after it open.
+          if (entry.video.failed || !entry.video.ready) {
+            return _fail(entry, FeedFailStage.open, FeedFailCause.error);
+          }
+          entry.open = true;
           // Parked (paused, so silent) at the volume a card comes in at
           // ([FeedRamp]), so a swipe onto it plays without first waiting on
           // a volume change.
@@ -537,6 +630,8 @@ class ReelFeedPlayers extends ChangeNotifier {
     e.held = false;
     e.ended = false;
     e.ramp?.cancel();
+    e.watchdog?.cancel();
+    e.watchdog = null;
     if (!e.video.ready || !e.video.playing) return;
     await _volume(e, 0);
     await e.video.pause();
@@ -603,13 +698,18 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// One play-through: a looping clip's position jumps back to the start,
   /// or a clip on its last play stops at its end (V2-47).
   void _watchLoop(_Entry e) {
-    if (e.id != _current) return;
-    _advance();
+    // A parked card that breaks is let go too, so it never comes on screen
+    // as a frozen frame, and its card is looked up again early.
     if (e.video.failed) {
-      if (!e.failedTold) onFailed?.call(e.id);
-      e.failedTold = true;
+      if (!_isLive(e)) return;
+      // After this notification: the player is let go, and a notifier
+      // can't be disposed while it is notifying.
+      final stage = _stageOf(e);
+      scheduleMicrotask(() => _fail(e, stage, FeedFailCause.error));
       return;
     }
+    if (e.id != _current) return;
+    _advance();
     // Stopped at its end (the plugin pauses on it): told once per end.
     if (e.video.completed && !e.video.playing) {
       if (e.started && !e.ended && _isLive(e)) {
@@ -623,6 +723,8 @@ class ReelFeedPlayers extends ChangeNotifier {
     final pos = e.video.position;
     if (!e.started && pos > Duration.zero) {
       e.started = true;
+      e.watchdog?.cancel();
+      e.watchdog = null;
       onStarted?.call(e.id);
     }
     if (pos + const Duration(seconds: 1) < e.last && e.last > const Duration(seconds: 3)) {
@@ -678,6 +780,8 @@ class ReelFeedPlayers extends ChangeNotifier {
     final e = _byId.remove(id);
     if (e == null) return;
     e.ramp?.cancel();
+    e.watchdog?.cancel();
+    e.watchdog = null;
     if (!e.dropped.isCompleted) e.dropped.complete();
     try {
       await e.video.dispose();
@@ -692,6 +796,12 @@ class ReelFeedPlayers extends ChangeNotifier {
     if (e == null || !e.video.ready) return;
     if (e.held) return replay();
     _paused = !_paused;
+    if (_paused) {
+      e.watchdog?.cancel();
+      e.watchdog = null;
+    } else {
+      _arm();
+    }
     unawaited(_syncAwake());
     _paused ? await e.video.pause() : await e.video.play();
     unawaited(_syncAwake());
@@ -720,8 +830,11 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// The tab went away or the screen locked: everything stops, players stay.
   Future<void> pauseAll() async {
     for (final e in _byId.values) {
-      // Played afresh when the feed comes back (a new visit).
+      // Played afresh when the feed comes back (a new visit); timed again
+      // from then.
       e.voiced = false;
+      e.watchdog?.cancel();
+      e.watchdog = null;
       if (e.video.ready && e.video.playing) await e.video.pause();
     }
     await _syncAwake();
@@ -734,6 +847,7 @@ class ReelFeedPlayers extends ChangeNotifier {
     _current = null;
     _holding = null;
     _window = const [];
+    _letGo = true;
     if (left != null) onLeft?.call(left);
     final drops = [for (final id in _byId.keys.toList()) _drop(id), _syncAwake()];
     notifyListeners();
@@ -806,10 +920,14 @@ class _Entry {
   final Completer<void> dropped = Completer<void>();
   Duration last = Duration.zero;
 
-  /// Told [ReelFeedPlayers.onStarted] / [ReelFeedPlayers.onFailed] for
-  /// this visit to the screen.
+  /// Told [ReelFeedPlayers.onStarted] for this visit to the screen.
   bool started = false;
-  bool failedTold = false;
+
+  /// Times the card on screen from its ask to play ([FeedWatchdog]).
+  Timer? watchdog;
+
+  /// Its open finished with a picture.
+  bool open = false;
 
   /// Has had its first play of this visit, so its volume rise has begun
   /// (or is owed on unmute).

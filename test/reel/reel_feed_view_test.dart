@@ -343,6 +343,9 @@ void main() {
       // Full volume at once: the rise (V2-19) is covered in
       // feed_players_test.dart and would leave a timer behind here.
       riseOver: Duration.zero,
+      // No stuck-card watchdog (it would leave a timer behind too): the
+      // tests that time it out make their own players.
+      stuckAfter: null,
       plays: () => clipEnd.plays,
     );
   });
@@ -1238,7 +1241,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(ambient(tester, 't1'), 1);
       expect(still(tester, 't1'), 1);
-      expect(clip(tester, 't1'), 0, reason: 'the broken picture no longer covers the still');
+      expect(players.videoFor('t1'), isNull, reason: 'the broken player is let go');
+      expect(
+        find.descendant(
+          of: find
+              .ancestor(of: find.byKey(const ValueKey(('reel-still-art', 't1'))), matching: find.byType(Stack))
+              .first,
+          matching: find.byWidgetPredicate((w) => w is ColoredBox && w.color == Colors.teal),
+        ),
+        findsNothing,
+        reason: 'the broken picture no longer covers the still',
+      );
     });
 
     testWidgets('an AI card keeps its art', (tester) async {
@@ -1310,6 +1323,42 @@ void main() {
       expect(c.current.isAiCard, isTrue);
       expect(find.text(premise), findsOneWidget);
       expect(find.textContaining('learns why'), findsNothing, reason: 'the first sentence only');
+    });
+
+    testWidgets('a card whose clip never starts falls back to its art and premise (stuck card)', (tester) async {
+      // The players as the Reel screen wires them: a failed clip is told to
+      // the controller, and the card on screen is timed out.
+      players.dispose();
+      final failures = <String>[];
+      players = ReelFeedPlayers(
+        create: (uri) {
+          final id = uri.pathSegments.last.split('.').first;
+          // Card 1's clip opens and never moves.
+          return videos[id] = _Video()..opening = opening;
+        },
+        riseOver: Duration.zero,
+        onFailed: (id) {
+          failures.add(id);
+          unawaited(c.clipFailed(id));
+        },
+      );
+      await pump(tester);
+      expect(c.current.clip, isNotNull);
+      expect(players.videoFor('t1'), isNotNull);
+      expect(find.text(premise), findsNothing);
+
+      await tester.pump(FeedWatchdog.after - const Duration(milliseconds: 500));
+      expect(failures, isEmpty);
+      await tester.pump(const Duration(seconds: 1));
+      expect(failures, ['t1']);
+      // Looked up once more without the failed trailer: the card has no other.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(c.current.isAiCard, isTrue);
+      expect(players.videoFor('t1'), isNull, reason: 'no frozen picture is left on the page');
+      expect(find.text(premise), findsOneWidget);
+      // No timer left behind for the tree's teardown.
+      await tester.runAsync(players.releaseAll);
     });
 
     testWidgets("a trailer card doesn't: the trailer tells you", (tester) async {

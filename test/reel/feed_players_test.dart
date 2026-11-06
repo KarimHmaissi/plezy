@@ -396,7 +396,7 @@ void main() {
     expect(started, ['a', 'b', 'a']);
   });
 
-  test('a player that breaks on screen is reported once', () async {
+  test('a player that breaks, on screen or parked, is reported once and let go for good', () async {
     players.sync(current: 'a', window: _win('a', ['b']));
     await _settle();
     made['b']!
@@ -406,8 +406,24 @@ void main() {
       ..broken = true
       ..tick(Duration.zero)
       ..tick(Duration.zero);
-    expect(failed, ['a']);
+    await _settle();
+    expect(failed, ['b', 'a'], reason: 'a parked card is looked up again early too');
     expect(started, isEmpty);
+    expect(made['a']!.disposed && made['b']!.disposed, isTrue, reason: 'no frozen frame stays on the page');
+    expect(players.videoFor('a'), isNull);
+    expect(players.failure('a'), FeedFailStage.start);
+    expect(players.failure('b'), FeedFailStage.start);
+
+    // The same clips are never opened again; another clip for the card is.
+    players.sync(current: 'a', window: _win('a', ['b']));
+    await _settle();
+    expect(players.held, isEmpty);
+    expect(made['a']!.disposed, isTrue, reason: 'not replaced by a new player');
+    players.sync(current: 'a', window: [(id: 'a', uri: Uri.parse('https://cdn.example/a2.mp4'), offset: 0)]);
+    await _settle();
+    expect(players.held, ['a']);
+    expect(players.failure('a'), isNull);
+    expect(made['a2']!.playing, isTrue);
   });
 
   group('the window opens by what the card on screen has loaded (V2-08)', () {
@@ -473,11 +489,16 @@ void main() {
       await _settle();
       expect(players.held.toSet(), {'b', 'c'});
 
-      final p = ReelFeedPlayers(create: (uri) => _FakeVideo(uri, loaded: s1)..broken = true);
+      // A clip on screen that fails to open is let go, and the next opens
+      // at once.
+      final p = ReelFeedPlayers(
+        create: (uri) => _FakeVideo(uri, loaded: s1)..broken = uri.pathSegments.last == 'a.mp4',
+      );
       addTearDown(p.dispose);
       p.sync(current: 'a', window: _win('a', ['b']));
       await _settle();
-      expect(p.held.toSet(), {'a', 'b'});
+      expect(p.held.toSet(), {'b'});
+      expect(p.failure('a'), FeedFailStage.open);
     });
 
     test('on a metered link only the card on screen and the next, however much is loaded', () async {
@@ -996,6 +1017,117 @@ void main() {
       await _settle();
       expect(ended, isEmpty);
       expect(plays, isEmpty);
+    });
+  });
+  group('a card that never plays counts as a failed clip (stuck card)', () {
+    late List<String> fails;
+
+    ReelFeedPlayers make() => ReelFeedPlayers(
+      create: (uri) {
+        final id = uri.pathSegments.last.split('.').first;
+        return made[id] = _FakeVideo(uri, gate: hanging.contains(id) ? Completer<void>() : null);
+      },
+      onFailed: (id) => fails.add(id),
+    );
+
+    setUp(() => fails = []);
+
+    test('an open that never finishes fails after the watchdog, and the window opens on', () {
+      fakeAsync((async) {
+        hanging = {'a'};
+        final p = make();
+        p.sync(current: 'a', window: _win('a', ['b']));
+        async.elapse(FeedWatchdog.after - const Duration(milliseconds: 100));
+        expect(fails, isEmpty);
+        expect(made['b'], isNull, reason: 'b waits for a to open');
+
+        async.elapse(const Duration(milliseconds: 200));
+        expect(fails, ['a']);
+        expect(p.failure('a'), FeedFailStage.open);
+        expect(made['a']!.disposed, isTrue);
+        expect(p.card('a').value.video, isNull, reason: 'the page shows the card art, not a frozen still');
+        expect(made['b']!.ready, isTrue, reason: 'no longer held up by the stuck open');
+        p.dispose();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('a clip that opens and never moves fails at the start stage', () {
+      fakeAsync((async) {
+        final p = make();
+        p.sync(current: 'a', window: _win('a', ['b']));
+        async.flushMicrotasks();
+        expect(made['a']!.playing, isTrue, reason: 'asked to play');
+        async.elapse(FeedWatchdog.after);
+        expect(fails, ['a']);
+        expect(p.failure('a'), FeedFailStage.start);
+        expect(p.held, ['b']);
+        expect(made['b']!.playing, isFalse, reason: 'a parked card is never timed out or played');
+        async.elapse(FeedWatchdog.after * 2);
+        expect(fails, ['a']);
+        p.dispose();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('the watchdog runs again for each visit, both ways through the feed', () {
+      fakeAsync((async) {
+        final p = make();
+        p.sync(current: 'a', window: _win('a', ['b']));
+        async.flushMicrotasks();
+        made['a']!.tick(const Duration(milliseconds: 100));
+        p.sync(current: 'b', window: _win('b', [], 'a'));
+        async.flushMicrotasks();
+        made['b']!.tick(const Duration(milliseconds: 100));
+        unawaited(p.settle());
+        async.flushMicrotasks();
+        // Back onto a: parked at its start, and this time it never moves.
+        p.sync(current: 'a', window: _win('a', ['b']));
+        async.elapse(FeedWatchdog.after);
+        expect(fails, ['a']);
+        p.dispose();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('a playing card, a tap pause, a card left and a system stop are never timed out', () {
+      fakeAsync((async) {
+        final p = make();
+        p.sync(current: 'a', window: _win('a', ['b', 'c']));
+        async.flushMicrotasks();
+        made['a']!.tick(const Duration(milliseconds: 100));
+        async.elapse(FeedWatchdog.after * 2);
+
+        // Left before it moved: the watchdog goes with the visit.
+        p.sync(current: 'b', window: _win('b', ['c'], 'a'));
+        async.elapse(const Duration(seconds: 1));
+        p.sync(current: 'c', window: _win('c', [], 'b'));
+        async.flushMicrotasks();
+        // Paused by a tap before it moved.
+        unawaited(p.togglePause());
+        async.elapse(FeedWatchdog.after * 2);
+        expect(fails, isEmpty);
+
+        // Played again, then stopped by the system (a call) before it moved.
+        unawaited(p.togglePause());
+        async.flushMicrotasks();
+        made['c']!.systemPlaying(false);
+        async.elapse(FeedWatchdog.after * 2);
+        expect(fails, isEmpty);
+        p.dispose();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('off with no watchdog time', () {
+      fakeAsync((async) {
+        final p = ReelFeedPlayers(create: _FakeVideo.new, onFailed: fails.add, stuckAfter: null);
+        p.sync(current: 'a', window: _win('a'));
+        async.elapse(FeedWatchdog.after * 3);
+        expect(fails, isEmpty);
+        p.dispose();
+        async.flushMicrotasks();
+      });
     });
   });
 }

@@ -27,8 +27,11 @@ class _Video extends ChangeNotifier implements FeedVideo {
 
   @override
   bool get ready => _ready;
+
+  /// The player reported an error.
+  bool broken = false;
   @override
-  bool get failed => false;
+  bool get failed => broken;
   @override
   double get aspectRatio => 16 / 9;
   @override
@@ -365,6 +368,111 @@ void main() {
       probe.screenChanged();
       at(100);
       expect(perf.samples, isEmpty);
+    });
+
+    test('every change writes a line, back swipes too', () async {
+      players.sync(current: 'a', window: [clip('a'), clip('b', 1)]);
+      await _settle();
+      made['a']!.tick(const Duration(milliseconds: 100));
+      players.sync(current: 'b', window: [clip('b'), clip('a', -1)]);
+      await _settle();
+      made['b']!.tick(const Duration(milliseconds: 100));
+      await players.settle();
+      // Back: a was rewound to its start when the page settled.
+      at(500);
+      players.sync(current: 'a', window: [clip('a'), clip('b', 1)]);
+      await _settle();
+      at(580);
+      made['a']!.tick(const Duration(milliseconds: 80));
+      expect(
+        [for (final s in perf.samples) s.trigger],
+        [ReelPerfTrigger.open, ReelPerfTrigger.swipe, ReelPerfTrigger.swipe],
+      );
+      expect(perf.last!.totalMs, 80);
+      expect(perf.last!.end, isNull);
+    });
+
+    test('a clip that fails writes its line with the stage it failed at', () async {
+      players.sync(current: 'a', window: [clip('a'), clip('b', 1)]);
+      await _settle();
+      made['a']!.tick(const Duration(milliseconds: 100));
+      at(1000);
+      players.sync(current: 'b', window: [clip('b'), clip('a', -1)]);
+      await _settle();
+      at(1300);
+      made['b']!
+        ..broken = true
+        ..tick(Duration.zero);
+      await _settle();
+      final s = perf.last!;
+      expect(perf.samples, hasLength(2));
+      expect(s.trigger, ReelPerfTrigger.swipe);
+      expect(s.end, 'failed:start');
+      expect(s.totalMs, 300);
+      expect(s.renderMs, isNull);
+      expect(s.logLine(), contains('end=failed:start'));
+      expect(perf.p50((s) => s.totalMs, trigger: ReelPerfTrigger.swipe), isNull, reason: 'kept out of the medians');
+
+      // Visited again (back, then forward): a line each time.
+      players.sync(current: 'a', window: [clip('a'), clip('b', 1)]);
+      await _settle();
+      made['a']!.tick(const Duration(milliseconds: 200));
+      players.sync(current: 'b', window: [clip('b'), clip('a', -1)]);
+      await _settle();
+      expect(perf.samples, hasLength(4));
+      expect(perf.last!.end, 'failed:start');
+    });
+
+    test('a card that never plays is timed out and written', () async {
+      final p = ReelFeedPlayers(
+        create: (uri) => made[uri.pathSegments.last.split('.').first] = _Video(),
+        stuckAfter: const Duration(milliseconds: 30),
+      );
+      final q = ReelFeedProbe(p, perf, deckId: () => deck);
+      addTearDown(() {
+        q.dispose();
+        p.dispose();
+      });
+      p.sync(current: 'a', window: [clip('a')]);
+      at(6000);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(perf.last?.end, 'failed:start');
+      expect(perf.last?.trigger, ReelPerfTrigger.open);
+      expect(perf.last?.totalMs, 6000);
+    });
+
+    test('a card left before its first frame, or with no clip, is written as it ends', () async {
+      players.sync(current: 'a', window: [clip('a'), clip('b', 1)]);
+      at(200);
+      // Swiped on before a's picture moved.
+      players.sync(current: 'b', window: [clip('b'), clip('a', -1)]);
+      await _settle();
+      expect(perf.last!.end, 'left');
+      expect(perf.last!.trigger, ReelPerfTrigger.open);
+      expect(perf.last!.totalMs, 200);
+
+      made['b']!.tick(const Duration(milliseconds: 100));
+      // An AI card: no clip in the window.
+      at(1000);
+      players.sync(current: 'ai', window: [clip('b', -1)]);
+      await _settle();
+      at(4000);
+      players.sync(current: 'b', window: [clip('b')]);
+      await _settle();
+      final ai = perf.samples[perf.samples.length - 1];
+      expect(ai.end, 'noclip');
+      expect(ai.trigger, ReelPerfTrigger.swipe);
+
+      // A page with no card ends the change before it, and the next card
+      // is still a swipe, not an open.
+      players.sync(current: null, window: [clip('b', -1)]);
+      await _settle();
+      expect(perf.last!.end, 'left');
+      players.sync(current: 'b', window: [clip('b')]);
+      await _settle();
+      made['b']!.tick(const Duration(seconds: 1));
+      expect(perf.last!.trigger, ReelPerfTrigger.swipe);
+      expect(perf.last!.end, isNull);
     });
   });
 }
