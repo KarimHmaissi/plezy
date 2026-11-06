@@ -192,6 +192,10 @@ void main() {
     Future<Set<String>> catchUp(LocalCustomisationStore from, LocalCustomisationStore to) async =>
         to.applySyncUnits(await from.readSyncUnits((await from.readSyncStamps()).keys));
 
+    // Sync stamps come from the wall clock in milliseconds: a later edit on
+    // the other device must not share the earlier one's millisecond.
+    Future<void> tick() => Future<void>.delayed(const Duration(milliseconds: 3));
+
     test('Spoiled me bans and Not for me from both devices all survive', () async {
       await store.spoiled('x', 'plex:1');
       await store.notForMe('m');
@@ -219,6 +223,7 @@ void main() {
       expect((await phone.freshPicks()).map((p) => p.titleId), ['b', 'a']);
 
       now = now.add(const Duration(minutes: 1));
+      await tick();
       await phone.removePick('a');
       await catchUp(phoneSettings, tvSettings);
       expect((await store.picks()).map((p) => p.titleId), ['b']);
@@ -227,9 +232,22 @@ void main() {
     test('the same title edited on both: the newer edit of that title wins', () async {
       await store.notForMe('x');
       now = now.add(const Duration(minutes: 1));
+      await tick();
       await phone.markFact('x', 'seen');
       await catchUp(phoneSettings, tvSettings);
       expect(jsonDecode((await tvSettings.readSetting(ReelStore.vetoKey('x')))!), {'k': 'seen'});
+    });
+
+    test('a pick removed on one device is not brought back by the other moving the old key', () async {
+      // Both devices hold the same old copy (synced before the update).
+      final oldCopy = jsonEncode([pick('a', now.subtract(const Duration(days: 2))).toJson()]);
+      await tvSettings.writeSetting(ReelStore.picksKey, oldCopy);
+      await phoneSettings.writeSetting(ReelStore.picksKey, oldCopy);
+      await store.removePick('a');
+      await tick();
+      await catchUp(tvSettings, phoneSettings);
+      expect(await phone.picks(), isEmpty);
+      expect(await phoneSettings.readSetting(ReelStore.pickKey('a')), isNull);
     });
   });
 

@@ -310,6 +310,9 @@ class ReelStore {
     String markerKey,
     String digest,
   ) async {
+    // A read that saw no marker may get here just after another read's move
+    // finished: that copy is already moved.
+    if (await settings.readSetting(markerKey) == digest) return;
     await move();
     await settings.writeSetting(markerKey, digest);
   }
@@ -330,8 +333,15 @@ class ReelStore {
     decode: _decodeOldPicks,
     move: (old) async {
       final now = _clock();
+      // A title removed after it was saved (here, or on the other device and
+      // synced here) stays removed: the old copy only brings back a later save.
+      final stamps = settings is LocalCustomisationStore
+          ? await settings.readSyncStamps()
+          : const <String, SyncStamp>{};
       for (final p in old.values) {
         if (!p.isFresh(now)) continue;
+        final gone = stamps[SyncUnits.setting(pickKey(p.titleId))];
+        if (gone != null && gone.deleted && gone.stamp >= p.at.millisecondsSinceEpoch) continue;
         final have = _decodePick(await settings.readSetting(pickKey(p.titleId)));
         if (have != null && !p.at.isAfter(have.at)) continue;
         await settings.writeSetting(pickKey(p.titleId), jsonEncode(p.toJson()));
