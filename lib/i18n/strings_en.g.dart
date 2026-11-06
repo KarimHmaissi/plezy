@@ -8396,6 +8396,9 @@ class Translations$reel$card$en {
 
 	late final Translations$reel$card$clipKind$en clipKind = Translations$reel$card$clipKind$en.internal(_root);
 
+	/// en: 'Trailer via YouTube'
+	String get youtubeCredit => 'Trailer via YouTube';
+
 	/// en: 'Replay'
 	String get replay => 'Replay';
 
@@ -11755,6 +11758,7 @@ extension on Translations {
 			'reel.card.clipKind.trailer' => 'Trailer',
 			'reel.card.clipKind.teaser' => 'Teaser',
 			'reel.card.clipKind.opening' => ({required Object n}) => 'Opening ${n}',
+			'reel.card.youtubeCredit' => 'Trailer via YouTube',
 			'reel.card.replay' => 'Replay',
 			'reel.card.watch' => 'Watch',
 			'reel.card.watchOnTv' => 'Watch on TV',
@@ -12243,9 +12247,9 @@ extension on Translations {
 			'collections.collection' => 'Collection',
 			'collections.empty' => 'Collection is empty',
 			'collections.deleteCollection' => 'Delete Collection',
-			'collections.deleteConfirm' => ({required Object title}) => 'Delete "${title}"? This can\'t be undone.',
 			_ => null,
 		} ?? switch (path) {
+			'collections.deleteConfirm' => ({required Object title}) => 'Delete "${title}"? This can\'t be undone.',
 			'collections.deleted' => 'Collection deleted',
 			'collections.deleteFailed' => 'Failed to delete collection',
 			'collections.deleteFailedWithError' => ({required Object error}) => 'Failed to delete collection: ${error}',
@@ -12757,9 +12761,9 @@ extension on Translations {
 			'externalPlayer.useExternalPlayer' => 'Use External Player',
 			'externalPlayer.useExternalPlayerDescription' => 'Open videos in another app',
 			'externalPlayer.selectPlayer' => 'Select Player',
-			'externalPlayer.customPlayers' => 'Custom Players',
 			_ => null,
 		} ?? switch (path) {
+			'externalPlayer.customPlayers' => 'Custom Players',
 			'externalPlayer.systemDefault' => 'System Default',
 			'externalPlayer.addCustomPlayer' => 'Add Custom Player',
 			'externalPlayer.playerName' => 'Player Name',

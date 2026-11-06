@@ -349,7 +349,26 @@ class ReelController extends ChangeNotifier {
   void _onSettingsChanged() {
     if (_disposed) return;
     appLogger.d('Reel: a setting changed; the views take it up now');
+    _dropGatedEmbeds();
     notifyListeners();
+  }
+
+  /// The TMDB rung went off (V2-63: Data saver or Stills only on mobile
+  /// data, V2-53): the YouTube trailers already found become AI cards for
+  /// now, and are looked up again when the Reel comes back. A card on
+  /// screen that was waiting on one is a still from here.
+  void _dropGatedEmbeds() {
+    if (!externalClips || resolver.tmdbOn) return;
+    var dropped = 0;
+    for (final MapEntry(:key, :value) in _clip.entries.toList()) {
+      if (value?.source.origin != ClipOrigin.youtube) continue;
+      _clip[key] = null;
+      _unknown.add(key);
+      dropped++;
+    }
+    if (dropped == 0) return;
+    appLogger.i('[ReelTmdb] rung off ($_budget): $dropped trailers left for now');
+    if (_cardShown != null && _clip[_cardShown] == null && _cardSince == null) _settle(_generation, playing: false);
   }
 
   /// The Reel on mobile data (V2-53, `reel_cellular`). Null reads the
@@ -389,6 +408,10 @@ class ReelController extends ChangeNotifier {
     // screen is a still and waits on no first frame (the TV's clip plays
     // on until the next card).
     if (externalClips && !_budget.clips && _cardShown != null) _settle(_generation, playing: false);
+    // Data saver or Stills only on mobile data turns the TMDB rung off:
+    // trailers found for the phone feed become stills before the window is
+    // planned again.
+    _dropGatedEmbeds();
     // The prefetch window follows the budget: wider again off mobile data,
     // narrower on it.
     final list = cards;
@@ -673,6 +696,25 @@ class ReelController extends ChangeNotifier {
 
   @visibleForTesting
   Duration? stuckAfter = defaultStuckAfter;
+
+  /// Phone: how long a card whose clip plays in a player page (the TMDB
+  /// trailer rung, V2-63) may go without a first frame, from when its clip
+  /// is known. Longer than the feed's own watchdog for such a page
+  /// (`FeedWatchdog.embedAfter`), so a page that never plays falls back
+  /// before the stuck notice could show.
+  static const Duration defaultEmbedStuckAfter = Duration(seconds: 15);
+
+  @visibleForTesting
+  Duration embedStuckAfter = defaultEmbedStuckAfter;
+
+  /// Phone: the card on screen plays [clip] in a player page, which loads
+  /// a page and a player before its video: the watchdog is timed again from
+  /// now with [embedStuckAfter] (a null [stuckAfter] still times nothing).
+  void _allowEmbed(ResolvedClip clip) {
+    if (_disposed || !externalClips || clip.source.origin != ClipOrigin.youtube || stuckAfter == null) return;
+    _stuckTimer?.cancel();
+    _stuckTimer = Timer(embedStuckAfter, _onStuck);
+  }
 
   /// Set when the watchdog ran out ([ReelStuck]), cleared by the next start,
   /// card change or settle. The views then show the card's art (or a
@@ -1569,6 +1611,7 @@ class ReelController extends ChangeNotifier {
         _settle(gen, playing: clip != null && _cardSince != null);
       } else {
         _stage = ReelStage.frame;
+        _allowEmbed(clip);
       }
     } else if (clip == null) {
       _sinceAiCard = 0;
@@ -1896,7 +1939,7 @@ class ReelController extends ChangeNotifier {
     if (memoryLevel >= 2 || !_budget.clips) return _settle(gen, playing: false);
     _arm();
     _stage = externalClips ? ReelStage.frame : ReelStage.open;
-    if (externalClips) return;
+    if (externalClips) return _allowEmbed(clip);
     _cardClip = clip.source.uri;
     _prefetch.hold();
     await clips.play(clip.source, first: _firstClip);

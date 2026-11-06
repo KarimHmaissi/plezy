@@ -106,6 +106,13 @@ dependencies:
   # (packages/video_player_android/README.md lists every change).
   video_player_android:
     path: packages/video_player_android
+  # The Reel's TMDB trailer rung on the phone (V2-63, D16): YouTube's IFrame
+  # player in a WebView. No WebView package was in the tree before. 4.14.1
+  # (published 2026-07-07, needs Flutter 3.38+) is the newest release.
+  webview_flutter: ^4.14.1
+  # Its Android controller, for setMediaPlaybackRequiresUserGesture(false).
+  # 4.14.1 (published 2026-08-28, needs Flutter 3.44+) is the newest release.
+  webview_flutter_android: ^4.14.1
 
 dev_dependencies:
   archive: ^4.0.9
@@ -127,6 +134,8 @@ dev_dependencies:
   connectivity_plus_platform_interface: ^2.1.0
   # The Reel feed's buffer test drives the vendored video_player_android.
   video_player_platform_interface: ^6.9.0
+  # A fake WebView platform for the Reel's YouTube page bridge (V2-63).
+  webview_flutter_platform_interface: ^2.15.1
   # Exercise vendored desktop preference stores against real file I/O,
   # including #1732 repair and atomic writes.
   shared_preferences_linux: ^2.4.1

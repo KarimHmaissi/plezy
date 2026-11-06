@@ -12,7 +12,9 @@ import 'reel_volume.dart';
 
 /// Where a clip comes from. Clips never carry request headers: the Plex
 /// token rides in the PMS URL only, so nothing Plex reaches AnimeThemes.
-enum ClipOrigin { plexExtra, animeTheme }
+/// [youtube] is the phone's TMDB trailer rung (V2-63): a YouTube video played
+/// in the IFrame player, never opened by a native player.
+enum ClipOrigin { plexExtra, animeTheme, youtube }
 
 class ClipSource {
   const ClipSource({required this.uri, required this.origin, this.length, this.preloadable = true});
