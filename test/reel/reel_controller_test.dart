@@ -68,6 +68,8 @@ class _FlakyServers implements ReelServers {
 }
 
 class _Media implements ReelMedia {
+  int fullReads = 0;
+
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async => MediaItem(
     id: ratingKey,
@@ -76,6 +78,19 @@ class _Media implements ReelMedia {
     title: 'Title $ratingKey',
     serverId: serverId,
   );
+
+  /// The full read: tells itself apart from the card's (lean) item.
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) async {
+    fullReads++;
+    return MediaItem(
+      id: ratingKey,
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: 'Full $ratingKey',
+      serverId: serverId,
+    );
+  }
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
@@ -103,6 +118,39 @@ class _GatedMedia extends _Media {
   Future<MediaItem?> item(String serverId, String ratingKey) async {
     if (ratingKey == gated) await gate.future;
     return super.item(serverId, ratingKey);
+  }
+}
+
+/// A full read that fails (the server went away before Watch).
+class _NoFullMedia extends _Media {
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) async => throw StateError('offline');
+}
+
+/// Counts metadata reads.
+class _CountingMedia extends _Media {
+  _CountingMedia(this.onRead);
+
+  final void Function() onRead;
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) {
+    onRead();
+    return super.item(serverId, ratingKey);
+  }
+}
+
+/// One card's extras that answer only when the test says so.
+class _GatedServers extends _Servers {
+  _GatedServers(this.gated);
+
+  final String gated;
+  final gate = Completer<void>();
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
+    if (ratingKey == gated) await gate.future;
+    return super.extras(serverId, ratingKey, timeout: timeout);
   }
 }
 
@@ -357,12 +405,93 @@ void main() {
       c.dispose();
     });
 
+    test('Watch hands over the full read, not the card\'s own item', () async {
+      final media = _Media();
+      final watched = <String>[];
+      final c = make(
+        media: media,
+        onWatch: (item, {required onTv}) async {
+          watched.add(item.title ?? '');
+          return true;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.item?.title, 'Title 1');
+      expect(await c.watch(), isTrue);
+      expect(watched, ['Full 1']);
+      expect(media.fullReads, 1);
+      c.dispose();
+    });
+
+    test('Watch falls back to the card\'s item when the full read fails', () async {
+      final watched = <String>[];
+      final c = make(
+        media: _NoFullMedia(),
+        onWatch: (item, {required onTv}) async {
+          watched.add(item.title ?? '');
+          return true;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(await c.watch(), isTrue);
+      expect(watched, ['Title 1']);
+      c.dispose();
+    });
+
     test('Watch on TV that cannot reach the TV keeps the pick and says when it lands', () async {
       final c = make(onWatch: (_, {required onTv}) async => false, reachesTvNow: () => false);
       await c.start();
       expect(await c.watch(onTv: true), isFalse);
       expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
       expect(c.toast.value, ReelController.savedForLater);
+      c.dispose();
+    });
+  });
+
+  group('the clip never waits on metadata (V2-03)', () {
+    test('the clip opens while the card\'s metadata is still on its way', () async {
+      final media = _GatedMedia('1');
+      final c = make(media: media);
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+      expect(c.current.item, isNull, reason: 'title-only until the art and text land');
+
+      var redraws = 0;
+      c.addListener(() => redraws++);
+      media.gate.complete();
+      await pumpEventQueue();
+      expect(c.current.item?.title, 'Title 1');
+      expect(redraws, greaterThan(0));
+      c.dispose();
+    });
+
+    test('a failed metadata read is asked again when the card is next needed', () async {
+      final c = make(media: _LateMedia());
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.item, isNull, reason: 'the first read failed');
+      await c.step(1);
+      await c.step(-1);
+      await pumpEventQueue();
+      expect(c.current.card?.id, 't1');
+      expect(c.current.item?.title, 'Title 1');
+      c.dispose();
+    });
+
+    test('an item that landed is read only once', () async {
+      var reads = 0;
+      final c = make(media: _CountingMedia(() => reads++));
+      await c.start();
+      await pumpEventQueue();
+      expect(reads, 3, reason: 'the card on screen and the two ahead');
+      await c.step(1);
+      await c.step(-1);
+      await pumpEventQueue();
+      expect(c.current.item, isNotNull);
+      expect(reads, 3, reason: 'items that landed are kept for the session');
       c.dispose();
     });
   });
@@ -476,6 +605,8 @@ void main() {
   test('level 1 tells the views, so the phone feed can shrink', () async {
     final c = make(externalClips: true);
     await c.start();
+    // The cards' art and text land after start (they never hold the clip).
+    await pumpEventQueue();
     var told = 0;
     c.addListener(() => told++);
     await c.trimForWatchdog(WatchdogTrim.halved);
@@ -838,10 +969,10 @@ void main() {
     });
 
     test('a step while the last one is still resolving lands on the later card', () async {
-      final media = _GatedMedia('2');
+      final media = _GatedServers('2');
       final c = make(
         clock: clock,
-        media: media,
+        servers: media,
         decks: [
           _Deck('a', [for (var i = 1; i <= 4; i++) _card('$i')]),
         ],
@@ -854,9 +985,11 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(c.index, 1);
       final second = c.step(1);
-      await second;
+      await Future<void>.delayed(Duration.zero);
+      // Card 2's extras answer only now; the resolver's queue held card 3
+      // behind them.
       media.gate.complete();
-      await first;
+      await Future.wait([first, second]);
       await Future<void>.delayed(Duration.zero);
 
       expect(c.current.card?.id, 't3');

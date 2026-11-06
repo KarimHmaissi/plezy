@@ -40,6 +40,7 @@ import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
 import 'reel/reel_decks.dart';
 import 'reel/reel_library.dart';
+import 'reel/reel_metadata.dart';
 import 'reel/reel_playback_profile.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
@@ -65,7 +66,7 @@ abstract final class ReelApp {
     final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
     final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
     final pool = ReelPool(store: store, library: library, model: _sonnet);
-    final media = _AppReelMedia(servers);
+    final media = _AppReelMedia(servers, store);
     final resolverRows = catalog == null
         ? null
         : HomeRowResolver(sources: catalog, clientFor: (id) => multi.getClientForServer(id));
@@ -322,14 +323,26 @@ abstract final class ReelApp {
 }
 
 class _AppReelMedia implements ReelMedia {
-  _AppReelMedia(this._servers);
+  _AppReelMedia(this._servers, ReelStore store) : _plex = PlexReelMetadata(_servers) {
+    _metadata = ReelMetadata(source: _plex, store: store);
+  }
 
   final MultiServerManager _servers;
+  final PlexReelMetadata _plex;
+  late final ReelMetadata _metadata;
 
   MediaServerClient? _client(String serverId) => _servers.getClient(ServerId(serverId));
 
+  /// Plex: cache-first, else one lean read (plan V2-03). Other backends keep
+  /// their own item read.
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async {
+    if (_plex.serves(serverId)) return _metadata.item(serverId, ratingKey);
+    return fullItem(serverId, ratingKey);
+  }
+
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) async {
     final c = _client(serverId);
     if (c == null) return null;
     return c.fetchItem(ratingKey).timeout(const Duration(seconds: 15));

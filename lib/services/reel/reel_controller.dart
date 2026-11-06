@@ -13,10 +13,14 @@ import 'reel_library.dart';
 import 'reel_pool.dart';
 import 'reel_store.dart';
 
-/// Metadata and art for a card (one cheap read per card built), through the
-/// app's server seam.
+/// Metadata and art for a card, through the app's server seam.
 abstract interface class ReelMedia {
+  /// The card's art and text: cache-first, else one lean read (plan V2-03).
+  /// Null when there is nothing to show; throws when it couldn't be read.
   Future<MediaItem?> item(String serverId, String ratingKey);
+
+  /// The full, network-first read Watch hands to real playback.
+  Future<MediaItem?> fullItem(String serverId, String ratingKey);
 
   /// A display-size image URL for [path] on [serverId].
   String? imageUrl(String serverId, String? path, {required int width});
@@ -145,8 +149,12 @@ class ReelController extends ChangeNotifier {
   final Map<String, String> _loadedOn = {};
   final Map<String, ResolvedClip?> _clip = {};
   final Set<String> _resolved = {};
-  final Map<String, MediaItem?> _item = {};
+  final Map<String, MediaItem> _item = {};
   final Map<String, Future<void>> _resolving = {};
+
+  /// Metadata reads in flight. Only an item that landed is kept: a failed
+  /// or empty read is asked again the next time the card is needed.
+  final Map<String, Future<void>> _itemLoading = {};
 
   /// Cards whose clip answer was unknown (a server offline, a failed read):
   /// looked up again when the Reel comes back, never cached as a miss.
@@ -407,14 +415,18 @@ class ReelController extends ChangeNotifier {
     _toastTimer = Timer(const Duration(seconds: 3), () => toast.value = null);
   }
 
-  /// Resolves (metadata + clip) a card once; the views redraw when it lands.
-  Future<void> _resolve(ReelCardData c) => _resolving[c.id] ??= () async {
+  /// Resolves a card's clip once, and starts its metadata alongside: the
+  /// clip plays as soon as it resolves, and the art and text land when they
+  /// do (plan V2-03). The views redraw as each lands.
+  Future<void> _resolve(ReelCardData c) {
+    final clip = _resolving[c.id] ??= _resolveClip(c);
+    unawaited(_loadItem(c));
+    return clip;
+  }
+
+  Future<void> _resolveClip(ReelCardData c) async {
     try {
-      final (item, found) = await (
-        media.item(c.best.serverId, c.best.ratingKey).catchError((Object _) => null),
-        resolver.lookup(c.title, exclude: _excluded[c.id] ?? const {}),
-      ).wait;
-      _item[c.id] = item;
+      final found = await resolver.lookup(c.title, exclude: _excluded[c.id] ?? const {});
       _clip[c.id] = found.clip;
       found.answer == ClipAnswer.unknown ? _unknown.add(c.id) : _unknown.remove(c.id);
     } catch (e) {
@@ -425,7 +437,34 @@ class ReelController extends ChangeNotifier {
       _resolved.add(c.id);
       notifyListeners();
     }
-  }();
+  }
+
+  /// The card's art and text. Kept once they land; a failed or empty read
+  /// is never memoised.
+  Future<void> _loadItem(ReelCardData c) {
+    if (_item.containsKey(c.id)) return Future<void>.value();
+    final pending = _itemLoading[c.id];
+    if (pending != null) return pending;
+    final read = _readItem(c);
+    _itemLoading[c.id] = read;
+    unawaited(
+      read.whenComplete(() {
+        if (identical(_itemLoading[c.id], read)) _itemLoading.remove(c.id);
+      }),
+    );
+    return read;
+  }
+
+  Future<void> _readItem(ReelCardData c) async {
+    try {
+      final item = await media.item(c.best.serverId, c.best.ratingKey);
+      if (item == null || _disposed) return;
+      _item[c.id] = item;
+      notifyListeners();
+    } catch (e) {
+      appLogger.d('Reel: card metadata read failed (${e.runtimeType})');
+    }
+  }
 
   Future<void> _show({int direction = 1}) async {
     if (_disposed) return;
@@ -589,7 +628,10 @@ class ReelController extends ChangeNotifier {
     final s = current;
     final c = s.card;
     if (c == null) return false;
-    final item = s.item ?? await media.item(c.best.serverId, c.best.ratingKey);
+    // Watch keeps its full read (file checks, streams): the card's own
+    // item may be a lean row. The card's item stands in only when that read
+    // fails.
+    final item = await media.fullItem(c.best.serverId, c.best.ratingKey).catchError((Object _) => null) ?? s.item;
     if (item == null) return false;
     await store.record(c.id, onTv ? ReelAction.watchOnTv : ReelAction.watch, deck: deck.id);
     if (!onTv) {
