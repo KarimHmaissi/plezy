@@ -19,6 +19,7 @@ import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
+import 'package:plezy/services/reel/reel_deck_prefs.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
@@ -201,6 +202,7 @@ void main() {
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
     Listenable? settingsChanged,
+    Listenable? deckPrefsChanged,
   }) => ReelController(
     decks:
         decks ??
@@ -228,6 +230,7 @@ void main() {
     externalClips: externalClips,
     memoryRestored: memoryRestored,
     settingsChanged: settingsChanged,
+    deckPrefsChanged: deckPrefsChanged,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -854,4 +857,163 @@ void main() {
       c.dispose();
     });
   });
+
+  group('deck order, hidden decks and the start deck (V2-52)', () {
+    List<ReelDeck> four() => [
+      _Deck('for-you', [_card('1')]),
+      _Deck('anime-openings', [_card('2')]),
+      _Deck('most-watched', [_card('3')]),
+      _Deck('ai:7', [_card('4')]),
+    ];
+    List<String> ids(List<ReelDeck> d) => [for (final x in d) x.id];
+
+    test('with nothing arranged the Reel opens on For You and offers every deck in the app order', () async {
+      final decks = four()..insert(0, decks0());
+      final c = make(decks: decks);
+      await c.start();
+      expect(c.deck.id, 'for-you', reason: 'For You is the start deck even when it is not first');
+      expect(ids(c.shownDecks), ['other', 'for-you', 'anime-openings', 'most-watched', 'ai:7']);
+      expect(built, isEmpty, reason: 'For You is looked up, never built');
+      c.dispose();
+    });
+
+    test('the user order and hidden decks drive the pickers, → and the On TV state', () async {
+      await store.writeDeckPrefs(
+        const ReelDeckPrefs(order: ['ai:7', 'for-you'], hidden: {'most-watched'}),
+        was: ReelDeckPrefs.none,
+      );
+      final c = make(decks: four());
+      await c.start();
+      expect(c.deck.id, 'for-you');
+      expect(ids(c.shownDecks), ['ai:7', 'for-you', 'anime-openings']);
+      expect(c.nextDeck?.id, 'anime-openings');
+      await c.switchDeck(1);
+      expect(c.deck.id, 'anime-openings');
+      await c.switchDeck(1);
+      expect(c.deck.id, 'ai:7', reason: 'the hidden deck is skipped and the cycle wraps');
+      expect(
+        [for (final d in c.remoteState()['decks']! as List) (d as Map)['id']],
+        ['ai:7', 'for-you', 'anime-openings'],
+      );
+      c.dispose();
+    });
+
+    test('a link still opens a hidden deck; it stays ticked while playing and → leaves it for its neighbour', () async {
+      await store.writeDeckPrefs(const ReelDeckPrefs(hidden: {'most-watched'}), was: ReelDeckPrefs.none);
+      final c = make(decks: four());
+      await c.start(deckId: 'most-watched');
+      expect(c.deck.id, 'most-watched');
+      expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'most-watched', 'ai:7']);
+      await c.switchDeck(1);
+      expect(c.deck.id, 'ai:7');
+      expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'ai:7']);
+      await c.openDeck('most-watched');
+      expect(c.deck.id, 'most-watched');
+      c.dispose();
+    });
+
+    test('"Where I left off" opens the deck this device was last on', () async {
+      final first = make(decks: four());
+      await first.start();
+      await first.switchDeck(1);
+      expect(first.deck.id, 'anime-openings');
+      await pumpEventQueue();
+      first.dispose();
+
+      await store.writeDeckPrefs(const ReelDeckPrefs(start: ReelStartDeck.last), was: ReelDeckPrefs.none);
+      final last = make(decks: four());
+      await last.start();
+      expect(last.deck.id, 'anime-openings');
+      last.dispose();
+
+      await store.writeDeckPrefs(ReelDeckPrefs.none, was: const ReelDeckPrefs(start: ReelStartDeck.last));
+      final forYou = make(decks: four());
+      await forYou.start();
+      expect(forYou.deck.id, 'for-you', reason: 'For You starts For You, wherever this device left off');
+      forYou.dispose();
+    });
+
+    test('a hidden start deck gives way to the first shown deck', () async {
+      await store.writeDeckPrefs(
+        const ReelDeckPrefs(order: ['anime-openings'], hidden: {'for-you'}),
+        was: ReelDeckPrefs.none,
+      );
+      final c = make(decks: four());
+      await c.start();
+      expect(c.deck.id, 'anime-openings');
+      c.dispose();
+    });
+
+    test('coming back to a warm Reel keeps the deck that was playing', () async {
+      final c = make(decks: four());
+      await c.start();
+      await c.switchDeck(1);
+      await c.suspend();
+      await c.start();
+      expect(c.deck.id, 'anime-openings');
+      c.dispose();
+    });
+
+    test('moving and hiding from a picker is kept, synced, and shown at once', () async {
+      final c = make(decks: four());
+      await c.start();
+      var notified = 0;
+      c.addListener(() => notified++);
+      await c.moveDeck('ai:7', -99);
+      expect(ids(c.shownDecks), ['ai:7', 'for-you', 'anime-openings', 'most-watched']);
+      await c.moveDeck('for-you', 1);
+      expect(ids(c.shownDecks), ['ai:7', 'anime-openings', 'for-you', 'most-watched']);
+      await c.hideDeck('most-watched', hide: true);
+      expect(ids(c.shownDecks), ['ai:7', 'anime-openings', 'for-you']);
+      expect(notified, greaterThanOrEqualTo(3));
+      final stored = await store.deckPrefs();
+      expect(stored.order.take(3), ['ai:7', 'anime-openings', 'for-you']);
+      expect(stored.hidden, {'most-watched'});
+
+      await c.hideDeck('most-watched', hide: false);
+      expect(ids(c.shownDecks), contains('most-watched'));
+      c.dispose();
+    });
+
+    test('the last shown deck is never hidden', () async {
+      final c = make(
+        decks: [
+          _Deck('for-you', [_card('1')]),
+          _Deck('ai:7', [_card('4')]),
+        ],
+      );
+      await c.start();
+      await c.hideDeck('ai:7', hide: true);
+      await c.hideDeck('for-you', hide: true);
+      expect(c.deckPrefs.hidden, {'ai:7'});
+      expect(ids(c.shownDecks), ['for-you']);
+      c.dispose();
+    });
+
+    test('an arrangement made elsewhere (the Decks screen, the other device) is taken up at once', () async {
+      final changed = ValueNotifier(0);
+      final c = make(decks: four(), deckPrefsChanged: changed);
+      await c.start();
+      await store.writeDeckPrefs(const ReelDeckPrefs(hidden: {'anime-openings'}), was: ReelDeckPrefs.none);
+      changed.value++;
+      await pumpEventQueue();
+      expect(ids(c.shownDecks), ['for-you', 'most-watched', 'ai:7']);
+      c.dispose();
+    });
+
+    test('on a mirror that lost its TV an arrangement is not kept, and it says so', () async {
+      store = ReelStore(
+        database: () async => db,
+        settings: () async => MirrorCustomisationStore({}, send: (_) => false),
+      );
+      final c = make(decks: four());
+      await c.start();
+      await expectLater(c.moveDeck('ai:7', -1), completes);
+      expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'most-watched', 'ai:7']);
+      expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+  });
 }
+
+ReelDeck decks0() => _Deck('other', [_card('8')]);

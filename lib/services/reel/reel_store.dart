@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../../database/fork_database.dart';
 import '../customisation/customisation_store.dart';
 import 'reel_decay.dart';
+import 'reel_deck_prefs.dart';
 
 /// What the Reel records (spec §7). Scrolling past records nothing.
 enum ReelAction {
@@ -278,4 +279,36 @@ class ReelStore {
   Future<Set<String>> spoiledAssets(String titleId) async => {
     ...(((await _vetoes())[titleId]?['s'] as List?) ?? const []).map((e) => '$e'),
   };
+
+  // ---- deck order, hidden decks and start deck (synced; V2-52) ----
+
+  /// Bumped when this device writes the deck prefs, so a playing Reel and
+  /// the Decks screen take the change up.
+  static final ValueNotifier<int> deckPrefsChanged = ValueNotifier(0);
+
+  Future<ReelDeckPrefs> deckPrefs() async {
+    final s = await _settings();
+    return ReelDeckPrefs.decode(
+      await s.readSetting(ReelDeckPrefs.decksKey),
+      await s.readSetting(ReelDeckPrefs.startKey),
+    );
+  }
+
+  /// Writes the parts of [next] that differ from [was] (each key syncs as
+  /// its own unit, so an untouched one keeps its stamp).
+  Future<void> writeDeckPrefs(ReelDeckPrefs next, {required ReelDeckPrefs was}) async {
+    final s = await _settings();
+    if (next.encodeDecks() != was.encodeDecks()) await s.writeSetting(ReelDeckPrefs.decksKey, next.encodeDecks());
+    if (next.start != was.start) await s.writeSetting(ReelDeckPrefs.startKey, next.start.name);
+    deckPrefsChanged.value++;
+  }
+
+  // ---- the last deck (this device only) ----
+
+  static const String _lastDeckKey = 'lastDeck';
+
+  /// The deck this device was last on, for the "Where I left off" start.
+  Future<String?> lastDeck() => cached(_lastDeckKey);
+
+  Future<void> rememberDeck(String id) => cache(_lastDeckKey, id);
 }

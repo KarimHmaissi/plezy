@@ -123,10 +123,8 @@ class ReelCardView extends StatelessWidget {
     );
   }
 
-  String _nextDeckName() {
-    final d = controller.decks;
-    return d.length < 2 ? 'another deck' : d[(controller.deckIndex + 1) % d.length].name;
-  }
+  /// The deck → goes to: the next shown deck in the user's order.
+  String _nextDeckName() => controller.nextDeck?.name ?? 'another deck';
 }
 
 /// The spotlight's metadata line (ratings with their badges, certificate,

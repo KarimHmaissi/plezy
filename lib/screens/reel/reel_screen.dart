@@ -328,6 +328,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         await c.openDetails();
       case ReelSheetAction.settings:
         await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ReelSettingsScreen()));
+      case ReelSheetAction.arrangeDecks:
+        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => reelDecksScreenFor(c)));
       case ReelSheetAction.deck:
         break;
       case null:

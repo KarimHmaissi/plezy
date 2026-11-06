@@ -1699,6 +1699,27 @@
       "captionsDescription": "Where an anime has one, pick the opening with on-screen lyrics or subtitles",
       "showTab": "Show the Reel tab",
       "showTabDescription": "Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place"
+    },
+    "decks": {
+      "title": "Decks",
+      "subtitle": "Their order, hidden decks and where the Reel starts",
+      "startOn": "Start on",
+      "startForYou": "For You",
+      "startLast": "Where I left off",
+      "yourDecks": "Your decks",
+      "hidden": "Hidden",
+      "hiddenDescription": "Hidden. A link still opens it",
+      "moveToTop": "Move to the top",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "hide": "Hide",
+      "show": "Show again",
+      "arrange": "Arrange decks",
+      "arrangeHintTv": "Or hold OK on a deck to move or hide it",
+      "arrangeHintPhone": "Or hold a deck to move or hide it",
+      "none": "No decks yet",
+      "syncedNote": "The order, hidden decks and start deck are the same on the TV and the phone. A link to a hidden deck still opens it.",
+      "saveFailed": "Couldn't save the decks"
     }
   },
   "history": {

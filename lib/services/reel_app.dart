@@ -52,17 +52,26 @@ abstract final class ReelApp {
   /// Saved AI answers offered as decks (newest first).
   static const int answerDecks = 12;
 
-  static Future<ReelController> controller(BuildContext context) async {
+  /// The decks the Reel offers here, in the app's own order, by id and name
+  /// (the Decks screen, V2-52). Builds the deck objects without loading any.
+  static Future<List<({String id, String name})>> deckList(BuildContext context) async => [
+    for (final d in await _decks(context, library: _library(), store: ReelStore.instance)) (id: d.id, name: d.name),
+  ];
+
+  static ReelLibrary _library() =>
+      ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app());
+
+  /// The decks in the app's own order: For You, Anime openings, Most Watched
+  /// (with Trakt) and the saved answers. The controller applies the user's
+  /// order and hidden decks ([ReelController.shownDecks]).
+  static Future<List<ReelDeck>> _decks(
+    BuildContext context, {
+    required ReelLibrary library,
+    required ReelStore store,
+  }) async {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
-    final remote = context.read<CompanionRemoteProvider?>();
-    final servers = multi.serverManager;
-    final store = ReelStore.instance;
-    final facts = IndexTitleFactsSource.app();
-    final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
-    final resolver = resolverFor(servers, store);
     final pool = ReelPool(store: store, library: library, model: _sonnet);
-    final media = _AppReelMedia(servers);
     final resolverRows = catalog == null
         ? null
         : HomeRowResolver(sources: catalog, clientFor: (id) => multi.getClientForServer(id));
@@ -83,7 +92,7 @@ abstract final class ReelApp {
       }
     }
 
-    final decks = <ReelDeck>[
+    return <ReelDeck>[
       ForYouDeck(
         pool: pool,
         library: library,
@@ -101,6 +110,18 @@ abstract final class ReelApp {
         ),
       for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
     ];
+  }
+
+  static Future<ReelController> controller(BuildContext context) async {
+    final multi = context.read<MultiServerProvider>();
+    final catalog = context.read<CatalogSourcesProvider?>();
+    final remote = context.read<CompanionRemoteProvider?>();
+    final servers = multi.serverManager;
+    final store = ReelStore.instance;
+    final library = _library();
+    final resolver = resolverFor(servers, store);
+    final media = _AppReelMedia(servers);
+    final decks = await _decks(context, library: library, store: store);
 
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;

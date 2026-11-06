@@ -48,6 +48,13 @@ void main() {
     expect(find.text(s.okAction), findsNothing, reason: 'the OK button is the TV remote');
   });
 
+  testWidgets('both devices have a way to the Decks screen', (tester) async {
+    for (final tv in [false, true]) {
+      await pump(tester, tv: tv);
+      expect(find.text(t.reel.decks.subtitle), findsOneWidget);
+    }
+  });
+
   testWidgets('TV: the OK button instead of mobile data', (tester) async {
     await pump(tester, tv: true);
 

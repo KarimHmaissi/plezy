@@ -4491,6 +4491,7 @@ class Translations$reel$en {
 
 	// Translations
 	late final Translations$reel$settings$en settings = Translations$reel$settings$en.internal(_root);
+	late final Translations$reel$decks$en decks = Translations$reel$decks$en.internal(_root);
 }
 
 // Path: history
@@ -8359,6 +8360,72 @@ class Translations$reel$settings$en {
 	String get showTabDescription => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place';
 }
 
+// Path: reel.decks
+class Translations$reel$decks$en {
+	Translations$reel$decks$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Decks'
+	String get title => 'Decks';
+
+	/// en: 'Their order, hidden decks and where the Reel starts'
+	String get subtitle => 'Their order, hidden decks and where the Reel starts';
+
+	/// en: 'Start on'
+	String get startOn => 'Start on';
+
+	/// en: 'For You'
+	String get startForYou => 'For You';
+
+	/// en: 'Where I left off'
+	String get startLast => 'Where I left off';
+
+	/// en: 'Your decks'
+	String get yourDecks => 'Your decks';
+
+	/// en: 'Hidden'
+	String get hidden => 'Hidden';
+
+	/// en: 'Hidden. A link still opens it'
+	String get hiddenDescription => 'Hidden. A link still opens it';
+
+	/// en: 'Move to the top'
+	String get moveToTop => 'Move to the top';
+
+	/// en: 'Move up'
+	String get moveUp => 'Move up';
+
+	/// en: 'Move down'
+	String get moveDown => 'Move down';
+
+	/// en: 'Hide'
+	String get hide => 'Hide';
+
+	/// en: 'Show again'
+	String get show => 'Show again';
+
+	/// en: 'Arrange decks'
+	String get arrange => 'Arrange decks';
+
+	/// en: 'Or hold OK on a deck to move or hide it'
+	String get arrangeHintTv => 'Or hold OK on a deck to move or hide it';
+
+	/// en: 'Or hold a deck to move or hide it'
+	String get arrangeHintPhone => 'Or hold a deck to move or hide it';
+
+	/// en: 'No decks yet'
+	String get none => 'No decks yet';
+
+	/// en: 'The order, hidden decks and start deck are the same on the TV and the phone. A link to a hidden deck still opens it.'
+	String get syncedNote => 'The order, hidden decks and start deck are the same on the TV and the phone. A link to a hidden deck still opens it.';
+
+	/// en: 'Couldn't save the decks'
+	String get saveFailed => 'Couldn\'t save the decks';
+}
+
 // Path: history.copy
 class Translations$history$copy$en {
 	Translations$history$copy$en.internal(this._root);
@@ -11185,6 +11252,25 @@ extension on Translations {
 			'reel.settings.captionsDescription' => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles',
 			'reel.settings.showTab' => 'Show the Reel tab',
 			'reel.settings.showTabDescription' => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place',
+			'reel.decks.title' => 'Decks',
+			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
+			'reel.decks.startOn' => 'Start on',
+			'reel.decks.startForYou' => 'For You',
+			'reel.decks.startLast' => 'Where I left off',
+			'reel.decks.yourDecks' => 'Your decks',
+			'reel.decks.hidden' => 'Hidden',
+			'reel.decks.hiddenDescription' => 'Hidden. A link still opens it',
+			'reel.decks.moveToTop' => 'Move to the top',
+			'reel.decks.moveUp' => 'Move up',
+			'reel.decks.moveDown' => 'Move down',
+			'reel.decks.hide' => 'Hide',
+			'reel.decks.show' => 'Show again',
+			'reel.decks.arrange' => 'Arrange decks',
+			'reel.decks.arrangeHintTv' => 'Or hold OK on a deck to move or hide it',
+			'reel.decks.arrangeHintPhone' => 'Or hold a deck to move or hide it',
+			'reel.decks.none' => 'No decks yet',
+			'reel.decks.syncedNote' => 'The order, hidden decks and start deck are the same on the TV and the phone. A link to a hidden deck still opens it.',
+			'reel.decks.saveFailed' => 'Couldn\'t save the decks',
 			'history.title' => 'History',
 			'history.allTime' => 'All time',
 			'history.hours' => 'Hours',
@@ -11659,6 +11745,8 @@ extension on Translations {
 			'watchTogether.joinCurrentPlayback' => 'Join Current Playback',
 			'watchTogether.joinCurrentPlaybackDescription' => 'Jump back into what the host is currently watching',
 			'watchTogether.stopMedia' => 'Stop Video for Everyone',
+			_ => null,
+		} ?? switch (path) {
 			'watchTogether.syncOffset' => 'Sync Offset',
 			'watchTogether.syncOffsetDescription' => 'Shift your video if it runs ahead of or behind the room.',
 			'watchTogether.offsetHint' => ({required Object difference}) => 'Your copy is ${difference} than the room\'s video.',
@@ -11678,8 +11766,6 @@ extension on Translations {
 			'watchTogether.matchSearching' => 'Searching',
 			'watchTogether.matchMatched' => 'Has the video',
 			'watchTogether.matchMismatched' => 'Different length',
-			_ => null,
-		} ?? switch (path) {
 			'watchTogether.matchUnavailable' => 'Doesn\'t have the video',
 			'watchTogether.participantOffset' => ({required Object offset}) => 'Offset ${offset}',
 			'watchTogether.makeHost' => 'Make host',
@@ -12173,6 +12259,8 @@ extension on Translations {
 			'seerr.allSeasons' => 'All seasons',
 			'seerr.advancedOptions' => 'Advanced',
 			'seerr.destinationServer' => 'Destination server',
+			_ => null,
+		} ?? switch (path) {
 			'seerr.qualityProfile' => 'Quality profile',
 			'seerr.rootFolder' => 'Root folder',
 			'seerr.languageProfile' => 'Language profile',
@@ -12192,8 +12280,6 @@ extension on Translations {
 			'seerr.couldNotReach' => ({required Object url, required Object error}) => 'Could not reach ${url}: ${error}',
 			'seerr.noInstanceAtUrl' => ({required Object url, required Object status}) => 'No Seerr instance at ${url} (HTTP ${status})',
 			'seerr.behindAuthProxy' => 'An authenticating reverse proxy (SSO or HTTP auth) answered instead of Seerr. Plezy cannot sign in through it: let Seerr\'s /api/v1 path bypass the proxy for this app, or use an address that reaches Seerr directly.',
-			_ => null,
-		} ?? switch (path) {
 			'seerr.invalidUrl' => 'Enter a server address like https://seerr.example.com',
 			'seerr.quickConnectUnsupported' => 'This Seerr instance does not support Quick Connect. It needs Seerr 3.4 or newer.',
 			'seerr.notInitialized' => 'This Seerr instance has not completed first-run setup',

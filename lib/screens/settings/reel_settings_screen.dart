@@ -7,6 +7,7 @@ import '../../utils/platform_detector.dart';
 import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_page.dart';
 import '../../widgets/settings_section.dart';
+import 'reel_decks_screen.dart';
 import 'settings_utils.dart';
 
 /// Fork: the Reel's settings (plan V2-46), from the fork group in Settings
@@ -14,7 +15,8 @@ import 'settings_utils.dart';
 /// prefs (V2-46a): the TV and the phone each keep their own. A playing Reel
 /// takes a change up at once (`ReelController.settingsChanged`), and Show
 /// the Reel tab brings the tab and rail item in or out like Explore's
-/// toggle.
+/// toggle. Decks (order, hidden decks, start deck; synced) have their own
+/// screen ([ReelDecksScreen]).
 class ReelSettingsScreen extends StatelessWidget {
   const ReelSettingsScreen({super.key, this.tv});
 
@@ -39,6 +41,17 @@ class ReelSettingsScreen extends StatelessWidget {
               icon: Symbols.lyrics_rounded,
               title: s.captions,
               subtitle: s.captionsDescription,
+            ),
+          ],
+        ),
+        SettingsGroup(
+          title: t.reel.decks.title,
+          children: [
+            SettingNavigationTile(
+              icon: Symbols.view_carousel_rounded,
+              title: t.reel.decks.title,
+              subtitle: t.reel.decks.subtitle,
+              destinationBuilder: (_) => const ReelDecksScreen(),
             ),
           ],
         ),
