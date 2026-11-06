@@ -1,12 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/reel/feed_players.dart';
 
 /// A player that opens at once and remembers what was asked of it.
 class _FakeVideo extends ChangeNotifier implements FeedVideo {
-  _FakeVideo(this.uri, {this.loaded});
+  _FakeVideo(this.uri, {this.loaded, this.gate});
 
   final Uri uri;
+
+  /// Holds the open until completed; one never completed is an open that
+  /// never finishes (a slow link).
+  final Completer<void>? gate;
 
   /// How far it has loaded once open; null loads the whole clip at once.
   Duration? loaded;
@@ -36,6 +42,7 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
   @override
   Future<void> initialize() async {
     calls.add('init');
+    await gate?.future;
     _ready = true;
   }
 
@@ -107,14 +114,21 @@ void main() {
   /// How far each new player has loaded once open (null: the whole clip).
   Duration? loadedAtOpen;
 
+  /// Cards whose open never finishes.
+  late Set<String> hanging;
+
   setUp(() {
     loadedAtOpen = null;
+    hanging = {};
     made = {};
     looped = [];
     started = [];
     failed = [];
     players = ReelFeedPlayers(
-      create: (uri) => made[uri.pathSegments.last.split('.').first] = _FakeVideo(uri, loaded: loadedAtOpen),
+      create: (uri) {
+        final id = uri.pathSegments.last.split('.').first;
+        return made[id] = _FakeVideo(uri, loaded: loadedAtOpen, gate: hanging.contains(id) ? Completer<void>() : null);
+      },
       onLooped: looped.add,
       onStarted: started.add,
       onFailed: failed.add,
@@ -261,6 +275,46 @@ void main() {
     await players.releaseAll();
     expect(made.values.every((v) => v.disposed), isTrue);
     expect(players.held, isEmpty);
+  });
+
+  group('release paths never wait for an open (V2-06)', () {
+    test('Watch lets every player go while one is still opening', () async {
+      hanging = {'b'};
+      players.sync(current: 'a', window: _win('a', ['b', 'c']));
+      await _settle();
+      expect(made['b']!.calls, ['init'], reason: 'b is stuck opening');
+      var released = false;
+      unawaited(players.releaseAll().then((_) => released = true));
+      await _settle();
+      expect(released, isTrue);
+      expect(made.values.every((v) => v.disposed), isTrue);
+      expect(players.held, isEmpty);
+    });
+
+    test('a memory trim lets go of a neighbour that is still opening', () async {
+      hanging = {'b'};
+      players.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      players.sync(current: 'a', window: _win('a', ['b']), memoryLevel: 1);
+      await _settle();
+      expect(made['b']!.disposed, isTrue);
+      expect(players.held, ['a']);
+    });
+
+    test('a player let go mid-open does not hold up the ones after it', () async {
+      // A still on screen: the whole window opens at once, in order, so c
+      // waits on b.
+      hanging = {'b'};
+      players.sync(current: 'a', window: [_clip('b', 1), _clip('c', 2)]);
+      await _settle();
+      expect(made['c']!.calls, isEmpty, reason: 'c waits for b to open');
+      players.sync(current: 'a', window: [_clip('c', 1), _clip('d', 2)]);
+      await _settle();
+      expect(made['b']!.disposed, isTrue);
+      expect(made['c']!.calls, contains('init'));
+      expect(made['c']!.ready, isTrue);
+      expect(made['d']!.ready, isTrue);
+    });
   });
 
   test('the card on screen reports playing once its position moves, again after a revisit', () async {

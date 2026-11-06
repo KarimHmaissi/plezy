@@ -44,6 +44,7 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
 
   final VideoPlayerController _c;
   bool _failed = false;
+  bool _disposed = false;
 
   @override
   bool get ready => _c.value.isInitialized && !_failed;
@@ -70,8 +71,11 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
   Future<void> initialize() async {
     try {
       await _c.initialize();
+      // Let go while it was opening (the feed doesn't wait for an open).
+      if (_disposed) return;
       await _c.setLooping(true);
     } catch (e) {
+      if (_disposed) return;
       _failed = true;
       appLogger.d('Reel feed: clip failed to open', error: e);
       notifyListeners();
@@ -89,6 +93,9 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
 
   @override
   Future<void> dispose() async {
+    // The plugin's own dispose waits only for the player to be created, not
+    // for the open; an open still in flight then never finishes.
+    _disposed = true;
     _c.removeListener(notifyListeners);
     await _c.dispose();
     super.dispose();
@@ -302,16 +309,21 @@ class ReelFeedPlayers extends ChangeNotifier {
       final entry = e;
       // Opening in order: each waits for the one before it, and the staging
       // above holds the neighbours back until the card on screen has loaded
-      // enough of its own clip.
-      entry.opened ??= () async {
-        await before?.catchError((Object _) {});
-        if (!_isLive(entry)) return;
-        await entry.video.initialize();
-        if (!_isLive(entry)) return;
-        await entry.video.setVolume(_muted ? 0 : 1);
-        notifyListeners();
-        if (entry.id == _current) _advance();
-      }();
+      // enough of its own clip. A player let go mid-open counts as done
+      // ([_Entry.dropped]): its open may never finish once disposed, and the
+      // ones after it must not wait on it.
+      entry.opened ??= Future.any([
+        () async {
+          await before?.catchError((Object _) {});
+          if (!_isLive(entry)) return;
+          await entry.video.initialize();
+          if (!_isLive(entry)) return;
+          await entry.video.setVolume(_muted ? 0 : 1);
+          notifyListeners();
+          if (entry.id == _current) _advance();
+        }(),
+        entry.dropped.future,
+      ]);
       before = entry.opened;
       if (apply) unawaited(entry.opened!.then((_) => _apply(entry)));
     }
@@ -389,11 +401,17 @@ class ReelFeedPlayers extends ChangeNotifier {
     e.last = pos;
   }
 
+  /// Lets [id]'s player go at once, without waiting for its open (V2-06): a
+  /// slow open of a neighbour must not hold up Watch or a memory trim.
   Future<void> _drop(String id) async {
     final e = _byId.remove(id);
     if (e == null) return;
-    await e.opened?.catchError((Object _) {});
-    await e.video.dispose();
+    if (!e.dropped.isCompleted) e.dropped.complete();
+    try {
+      await e.video.dispose();
+    } catch (err) {
+      appLogger.d('Reel feed: clip player failed to dispose', error: err);
+    }
   }
 
   Future<void> togglePause() async {
@@ -419,17 +437,17 @@ class ReelFeedPlayers extends ChangeNotifier {
     }
   }
 
-  /// Real playback is about to start, or the Reel closed: free every decoder.
+  /// Real playback is about to start, or the Reel closed: free every decoder,
+  /// all at once (V2-06). The pages stop drawing the players before they go.
   Future<void> releaseAll() async {
     final left = _current;
     _current = null;
     _holding = null;
     _window = const [];
     if (left != null) onLeft?.call(left);
-    for (final id in _byId.keys.toList()) {
-      await _drop(id);
-    }
+    final drops = [for (final id in _byId.keys.toList()) _drop(id)];
     notifyListeners();
+    await Future.wait(drops);
   }
 
   @override
@@ -490,6 +508,9 @@ class _Entry {
   final Uri uri;
   final FeedVideo video;
   Future<void>? opened;
+
+  /// Completes when the player is let go, so [opened] does too.
+  final Completer<void> dropped = Completer<void>();
   Duration last = Duration.zero;
 
   /// Told [ReelFeedPlayers.onStarted] / [ReelFeedPlayers.onFailed] for
