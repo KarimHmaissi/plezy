@@ -320,13 +320,19 @@ abstract final class ReelApp {
 
   static ReelWarmer? _warmer;
 
+  /// The Home the warm start decodes art through: the latest one armed
+  /// from, so a Home built again (a profile switch) replaces the one gone.
+  static BuildContext? _warmContext;
+
   /// TV, from the app's post-startup idle point (Home's background start,
   /// after the library index): arms the warm start before the Reel opens
   /// (V2-14), once per app run, while the Reel is turned on. It never runs
   /// while a video plays, in the background or with the Reel open, and
   /// reads no server but for the first card's art.
   static void warmBeforeOpen(BuildContext context) {
-    if (_warmer != null || !PlatformDetector.isTV() || !ReelScreen.enabled) return;
+    if (!PlatformDetector.isTV() || !ReelScreen.enabled) return;
+    _warmContext = context;
+    if (_warmer != null) return;
     final servers = context.read<MultiServerProvider>().serverManager;
     final store = ReelStore.instance;
     final media = _AppReelMedia(servers, store);
@@ -336,11 +342,13 @@ abstract final class ReelApp {
       playing: () => PlaybackCoordinator.instance.hasVideoSession,
       foreground: () => WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
       cachedItem: media.cachedItem,
-      // Decoded as the TV's card view builds it, through Home's context
-      // (the same screen size); skipped once Home has gone.
+      // Decoded as the TV's card view builds it, through the latest Home's
+      // context (the same screen size); with no Home mounted it isn't, and
+      // the done line says art=failed.
       precacheArt: (card, item, {required clip}) async {
-        if (!context.mounted) return;
-        await ReelCardView.precacheArt(context, card, item, clip: clip);
+        final home = _warmContext;
+        if (home == null || !home.mounted) throw StateError('Home is not mounted');
+        await ReelCardView.precacheArt(home, card, item, clip: clip);
       },
       // Not while a memory trim has the Reel's art budget cut.
       artAllowed: () => ReelArt.budgetBytes() >= DevicePerformance.reelImageBudgetBytes(),

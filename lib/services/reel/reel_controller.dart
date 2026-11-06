@@ -652,6 +652,12 @@ class ReelController extends ChangeNotifier {
   /// follow): the decision card doesn't wait at its end yet.
   bool _partial(String deckId) => _provisional.contains(deckId) || _restFor.containsKey(deckId);
 
+  /// More of [deckId]'s list is on its way now (its rest loading, or its
+  /// own load after a replayed head card): the end of what it has shows as
+  /// loading, not as the deck's end or an empty deck.
+  bool _stillComing(String deckId) =>
+      _restFor.containsKey(deckId) || (_provisional.contains(deckId) && _loading.containsKey(deckId));
+
   /// Drops what is still to come for [deckId]'s list (a fresh build or a new
   /// day replaced it).
   void _dropPartial(String deckId) {
@@ -942,14 +948,15 @@ class ReelController extends ChangeNotifier {
   ReelSlot slotAt(int p) {
     final list = cards;
     if (list == null) return _failed.contains(deck.id) ? const ReelSlot.failed() : const ReelSlot.loading();
-    if (list.isEmpty) return const ReelSlot.empty();
+    final coming = _stillComing(deck.id);
+    if (list.isEmpty) return coming ? const ReelSlot.loading() : const ReelSlot.empty();
     var i = p;
     final at = _decideAt(deck.id, list);
     if (at != null) {
       if (p == at) return _decideSlot();
       if (p > at) i = p - 1;
     }
-    if (i >= list.length) return const ReelSlot.poolEnd();
+    if (i >= list.length) return coming ? const ReelSlot.loading() : const ReelSlot.poolEnd();
     final c = list[i];
     return ReelSlot._(
       ReelSlotKind.card,
@@ -1382,8 +1389,10 @@ class ReelController extends ChangeNotifier {
           : _cards.containsKey(d.id)
           ? null
           : await keptCursor;
+      // The first entries left no card (all filtered out): the rest is
+      // loaded now too (bounded), so the deck never shows as empty first.
       final more = rest;
-      if (target != null && more != null && target.seekIn(loaded) == null) {
+      if (more != null && (loaded.isEmpty || (target != null && target.seekIn(loaded) == null))) {
         final whole = await _wholeList(d, loaded, more);
         if (whole != null) {
           loaded = whole;

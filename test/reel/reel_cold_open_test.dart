@@ -145,6 +145,7 @@ class _PartsDeck extends _Deck {
   _PartsDeck(super.id, super.cards);
 
   static const int headCount = 3;
+  List<ReelCardData>? headCards;
   List<ReelCardData>? restCards;
   Completer<void>? restGate;
   int failRests = 0;
@@ -160,7 +161,7 @@ class _PartsDeck extends _Deck {
     loads++;
     await gate?.future;
     final more = restCards ?? cards.sublist(headCount);
-    return ReelDeckParts(cards.take(headCount).toList(), () async {
+    return ReelDeckParts(headCards ?? cards.take(headCount).toList(), () async {
       restCalls++;
       await restGate?.future;
       if (failRests > 0) {
@@ -342,11 +343,38 @@ void main() {
       for (var i = 0; i < 3; i++) {
         await c.step(1);
       }
-      expect(c.current.kind, ReelSlotKind.poolEnd);
+      expect(c.current.kind, ReelSlotKind.loading, reason: "the rest is on its way: not the deck's end");
       deck.restGate!.complete();
       await pumpEventQueue();
       expect(c.current.card!.id, 't4');
       expect(engines.last.calls.last, 'open ${_clip('4')}');
+      c.dispose();
+    });
+
+    test("first entries that leave no card: the rest loads first, and the deck never shows as empty", () async {
+      final deck = _PartsDeck('p', _cards(['1', '2', '3', '4', '5']))
+        ..headCards = const []
+        ..restCards = _cards(['4', '5']);
+      final c = make(decks: [deck]);
+      final kinds = <ReelSlotKind>[];
+      c.addListener(() {
+        if (c.cards != null) kinds.add(c.current.kind);
+      });
+      await c.start();
+      expect(deck.restCalls, 1);
+      expect(c.cards!.map((x) => x.id), ['t4', 't5']);
+      expect(c.current.card!.id, 't4');
+      expect(kinds, isNot(contains(ReelSlotKind.empty)));
+      expect(_log('[ReelDeck] p: +'), isEmpty, reason: 'loaded whole, nothing follows');
+      c.dispose();
+    });
+
+    test("a rest that failed leaves the deck's end showing until it is asked again", () async {
+      final deck = _PartsDeck('p', _cards(['1', '2', '3', '4']))..failRests = 1;
+      final c = make(decks: [deck]);
+      await c.start();
+      await pumpEventQueue();
+      expect(c.slotAt(3).kind, ReelSlotKind.poolEnd);
       c.dispose();
     });
 
