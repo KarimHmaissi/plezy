@@ -107,6 +107,38 @@ enum ContinueWatchingAction { play, details }
 
 enum EpisodeAction { play, details }
 
+/// Fork: how a Reel card's sound starts (plan D5). [sound] plays it; once
+/// V2-22 lands it takes audio focus, so music pauses. [mutedIfOtherAudio]
+/// starts muted while other audio is playing.
+enum ReelStartSound { sound, mutedIfOtherAudio }
+
+/// Fork: what a Reel clip does when it ends (plan D6, V2-47).
+enum ReelClipEnd {
+  /// Play again, forever.
+  loop,
+
+  /// Play twice, then hold on the last frame with Replay.
+  twiceThenHold,
+
+  /// Move on to the next card (Lean back on the TV).
+  nextCard,
+}
+
+/// Fork: how the Reel treats mobile data (plan V2-53).
+enum ReelCellular {
+  /// Play clips as on Wi-Fi.
+  normal,
+
+  /// Smaller clips and fewer preloads; a fast swipe may show a still.
+  dataSaver,
+
+  /// No clips on mobile data, only the card's art.
+  stillsOnly,
+}
+
+/// Fork: what OK does on a Reel card on the TV (plan D12, V2-50).
+enum ReelOkAction { watch, details }
+
 /// How Specials (season 0) are placed in the episode watch order — the
 /// sequence auto-advance, offline next/prev, and "download next N" walk.
 enum SpecialsOrdering {
@@ -735,6 +767,62 @@ class SettingsService extends BaseSharedPreferencesService {
   static const autoCheckUpdatesOnStartup = BoolPref('auto_check_updates_on_startup', defaultValue: true);
   static const showPerformanceOverlay = BoolPref('show_performance_overlay');
   static const autoHidePerformanceOverlay = BoolPref('auto_hide_performance_overlay', defaultValue: true);
+
+  /// Fork: the Reel's debug overlay and `[ReelPerf]` ring (plan V2-07). Off by
+  /// default; switched from the hidden developer setting (V2-62). Per-device
+  /// runtime state, so it takes part in neither reset nor export.
+  static const reelDebugOverlay = BoolPref('reel_debug_overlay');
+
+  // Fork: the Reel's per-device prefs (plan V2-46a). The synced Reel prefs
+  // (deck order, start deck, sources) live in CustomisationStore instead.
+  // Each default is what the Reel does today; an item that builds a new
+  // behaviour moves its default to the approved one when it lands (V2-53:
+  // Data saver). Nothing reads these until the Reel's lanes wire them up, and
+  // the settings page (V2-46) shows them.
+
+  /// How a card's sound starts (D5). Today: with sound.
+  static const reelStartSound = EnumPref<ReelStartSound>(
+    'reel_start_sound',
+    values: ReelStartSound.values,
+    defaultValue: ReelStartSound.sound,
+  );
+
+  /// What a clip does when it ends (D6). Today the TV plays twice then holds,
+  /// the approved default for both devices; the phone loops until V2-47.
+  static const reelClipEnd = EnumPref<ReelClipEnd>(
+    'reel_clip_end',
+    values: ReelClipEnd.values,
+    defaultValue: ReelClipEnd.twiceThenHold,
+  );
+
+  /// The Reel on mobile data (V2-53). Today: [ReelCellular.normal].
+  static const reelCellular = EnumPref<ReelCellular>(
+    'reel_cellular',
+    values: ReelCellular.values,
+    defaultValue: ReelCellular.normal,
+  );
+
+  /// What OK does on a TV card (D12). Today: Watch.
+  static const reelOkAction = EnumPref<ReelOkAction>(
+    'reel_ok_action',
+    values: ReelOkAction.values,
+    defaultValue: ReelOkAction.watch,
+  );
+
+  /// The Reel's mute toggle, kept across cards and launches (V2-22). This is
+  /// runtime state, so it is reset but not exported.
+  static const reelMuted = BoolPref('reel_muted');
+
+  /// Rank lyrics or subbed openings first (V2-54, V2-17). Today: off.
+  static const reelCaptions = BoolPref('reel_captions');
+
+  /// Set once the first-run intro has been shown (V2-55). Reset shows it again;
+  /// not exported, as it belongs to this device.
+  static const reelIntroSeen = BoolPref('reel_intro_seen');
+
+  /// Show the Reel tab, which takes Explore's slot (D14). Works like
+  /// [showExploreTab]. Today: shown.
+  static const showReelTab = BoolPref('show_reel_tab', defaultValue: true);
   static const enableDiscordRPC = BoolPref('enable_discord_rpc');
   static const enableTraktWatchedSync = BoolPref('enable_trakt_watched_sync', defaultValue: true);
 
@@ -1019,6 +1107,7 @@ class SettingsService extends BaseSharedPreferencesService {
     'video_player_navigation_enabled',
     defaultValueProvider: PlatformDetector.isTV,
   );
+
   /// Fork: the TV is the home hub, so it hosts the companion remote out of the
   /// box (like desktops) and phones on the same Plex account find it.
   static bool _companionRemoteServerDefault() => PlatformDetector.isDesktopOS() || PlatformDetector.isTV();
@@ -1571,6 +1660,12 @@ class SettingsService extends BaseSharedPreferencesService {
     useExoPlayer,
     startupSection,
     showExploreTab,
+    showReelTab,
+    reelStartSound,
+    reelClipEnd,
+    reelCellular,
+    reelOkAction,
+    reelCaptions,
     alwaysKeepSidebarOpen,
     librariesSectionExpanded,
     showUnwatchedCount,
@@ -1680,6 +1775,8 @@ class SettingsService extends BaseSharedPreferencesService {
     rememberedBrightnessLevel,
     refusedVideoCodecs,
     audioOutputDevice,
+    reelMuted,
+    reelIntroSeen,
   ];
 
   /// Settings that "Reset All Settings" actually resets.

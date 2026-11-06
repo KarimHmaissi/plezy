@@ -1561,8 +1561,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       // restores the tier size once RSS has stayed under for its cooldown.
       final trim = MemoryTrimPolicy.instance.onWatchdogTick(overThreshold: rss > threshold);
       if (trim == WatchdogTrim.none) return;
-      // Fork: past the threshold the Reel releases its clip core.
-      ReelScreen.trimMemory(severe: true);
+      // Fork: the Reel follows the tier: halved keeps only the card on
+      // screen, cleared releases its clip players for stills.
+      ReelScreen.trimForWatchdog(trim);
       appLogger.w('RSS high (${rss >> 20}MB > ${threshold >> 20}MB), image cache ${trim.name} (cache $before)');
     });
   }

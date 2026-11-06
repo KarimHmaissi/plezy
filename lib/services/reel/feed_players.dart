@@ -93,12 +93,20 @@ typedef FeedClip = ({String id, Uri uri});
 /// of a still that later flashes into video. Players outside that window are
 /// disposed; opening is in priority order (on screen first, then the next).
 class ReelFeedPlayers extends ChangeNotifier {
-  ReelFeedPlayers({FeedVideo Function(Uri uri)? create, this.onLooped}) : _create = create ?? PluginFeedVideo.new;
+  ReelFeedPlayers({FeedVideo Function(Uri uri)? create, this.onLooped, this.onStarted, this.onFailed})
+    : _create = create ?? PluginFeedVideo.new;
 
   final FeedVideo Function(Uri uri) _create;
 
   /// The card on screen played through once (it loops on).
   final void Function(String cardId)? onLooped;
+
+  /// The card on screen is really playing: its position has moved since it
+  /// was put on screen (`isPlaying` alone flips at the play() call).
+  final void Function(String cardId)? onStarted;
+
+  /// The card on screen failed to open, or broke mid-play.
+  final void Function(String cardId)? onFailed;
 
   final Map<String, _Entry> _byId = {};
   String? _current;
@@ -186,12 +194,23 @@ class ReelFeedPlayers extends ChangeNotifier {
     if (e.video.playing) await e.video.pause();
     if (e.video.position > Duration.zero) await e.video.seekTo(Duration.zero);
     e.last = Duration.zero;
+    e.started = false;
   }
 
   /// A looping clip's position jumps back to the start: one play-through.
   void _watchLoop(_Entry e) {
-    if (e.id != _current || !e.video.playing) return;
+    if (e.id != _current) return;
+    if (e.video.failed) {
+      if (!e.failedTold) onFailed?.call(e.id);
+      e.failedTold = true;
+      return;
+    }
+    if (!e.video.playing) return;
     final pos = e.video.position;
+    if (!e.started && pos > Duration.zero) {
+      e.started = true;
+      onStarted?.call(e.id);
+    }
     if (pos + const Duration(seconds: 1) < e.last && e.last > const Duration(seconds: 3)) onLooped?.call(e.id);
     e.last = pos;
   }
@@ -256,4 +275,9 @@ class _Entry {
   final FeedVideo video;
   Future<void>? opened;
   Duration last = Duration.zero;
+
+  /// Told [ReelFeedPlayers.onStarted] / [ReelFeedPlayers.onFailed] for
+  /// this visit to the screen.
+  bool started = false;
+  bool failedTold = false;
 }

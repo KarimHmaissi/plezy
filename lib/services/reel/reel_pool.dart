@@ -56,30 +56,54 @@ class ReelPool {
   static String dayKey(DateTime d) =>
       'pool:${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  /// Today's pool if built, else the newest earlier one's remainder, else
-  /// null (the caller falls back to code order).
+  /// Today's day key, by this pool's clock.
+  String today() => dayKey(_clock());
+
+  /// Today's pool if built, else the newest earlier one, else null (the
+  /// caller falls back to code order). Either way it is the remainder:
+  /// titles already gone through in the Reel since that pool's day are
+  /// dropped, so a reopen (or the next day, on yesterday's pool) carries on
+  /// rather than starting over. Gone through is any recorded event except
+  /// [ReelAction.unplayed], which is neutral. Rows written before the pool
+  /// kept title ids are returned whole.
   Future<List<DeckEntry>?> cachedPool() async {
     final now = _clock();
     for (var back = 0; back < 3; back++) {
-      final raw = await store.cached(dayKey(now.subtract(Duration(days: back))));
+      final day = now.subtract(Duration(days: back));
+      final raw = await store.cached(dayKey(day));
       if (raw == null) continue;
+      final List<({String? id, DeckEntry entry})> rows;
       try {
-        return [
+        rows = [
           for (final j in jsonDecode(raw) as List)
             if (j is Map && j['sv'] is String && j['rk'] is String)
-              DeckEntry(
-                serverId: j['sv'] as String,
-                ratingKey: j['rk'] as String,
-                why: j['why'] as String?,
-                cluster: j['cl'] as String?,
+              (
+                id: j['id'] as String?,
+                entry: DeckEntry(
+                  serverId: j['sv'] as String,
+                  ratingKey: j['rk'] as String,
+                  why: j['why'] as String?,
+                  cluster: j['cl'] as String?,
+                ),
               ),
         ];
       } catch (_) {
         continue;
       }
+      final gone = await goneThrough(since: DateTime(day.year, day.month, day.day));
+      return [
+        for (final r in rows)
+          if (r.id == null || !gone.contains(r.id)) r.entry,
+      ];
     }
     return null;
   }
+
+  /// Titles with a recorded Reel event (other than unplayed) since [since].
+  Future<Set<String>> goneThrough({required DateTime since}) async => {
+    for (final e in await store.events(since: since))
+      if (e.action != ReelAction.unplayed.name) e.titleId,
+  };
 
   Future<bool> hasToday() async => await store.cached(dayKey(_clock())) != null;
 
@@ -133,11 +157,13 @@ class ReelPool {
       final picked = input?['cards'];
       if (picked is! List) return null;
       final out = <DeckEntry>[];
+      final ids = <String>[];
       final used = <String>{};
       for (final p in picked) {
         if (p is! Map) continue;
         final c = idOf['${p['id']}'];
         if (c == null || !used.add('${p['id']}')) continue;
+        ids.add(byRow[c.entry.rowId]!.id);
         out.add(
           DeckEntry(
             serverId: c.entry.serverId,
@@ -151,7 +177,8 @@ class ReelPool {
       await store.cache(
         dayKey(now),
         jsonEncode([
-          for (final e in out) {'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster},
+          for (final (i, e) in out.indexed)
+            {'id': ids[i], 'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster},
         ]),
       );
       return out;

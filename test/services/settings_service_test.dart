@@ -128,6 +128,95 @@ void main() {
     });
   });
 
+  group('SettingsService Reel prefs', () {
+    test('default to what the Reel does today', () async {
+      final settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
+      expect(settings.read(SettingsService.reelCellular), ReelCellular.normal);
+      expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
+      expect(settings.read(SettingsService.reelMuted), isFalse);
+      expect(settings.read(SettingsService.reelCaptions), isFalse);
+      expect(settings.read(SettingsService.reelIntroSeen), isFalse);
+      expect(settings.read(SettingsService.showReelTab), isTrue);
+    });
+
+    test('persist by enum name across a restart', () async {
+      var settings = await SettingsService.getInstance();
+
+      await settings.write(SettingsService.reelStartSound, ReelStartSound.mutedIfOtherAudio);
+      await settings.write(SettingsService.reelClipEnd, ReelClipEnd.nextCard);
+      await settings.write(SettingsService.reelCellular, ReelCellular.stillsOnly);
+      await settings.write(SettingsService.reelOkAction, ReelOkAction.details);
+      await settings.write(SettingsService.reelMuted, true);
+      await settings.write(SettingsService.showReelTab, false);
+      expect(settings.prefs.getString(SettingsService.reelClipEnd.key), 'nextCard');
+      expect(settings.prefs.getString(SettingsService.reelCellular.key), 'stillsOnly');
+
+      BaseSharedPreferencesService.resetForTesting();
+      SettingsService.resetForTesting();
+      settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.mutedIfOtherAudio);
+      expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.nextCard);
+      expect(settings.read(SettingsService.reelCellular), ReelCellular.stillsOnly);
+      expect(settings.read(SettingsService.reelOkAction), ReelOkAction.details);
+      expect(settings.read(SettingsService.reelMuted), isTrue);
+      expect(settings.read(SettingsService.showReelTab), isFalse);
+    });
+
+    test('an unknown stored value reads as the default', () async {
+      final settings = await SettingsService.getInstance();
+
+      await settings.prefs.setString(SettingsService.reelClipEnd.key, 'removedMode');
+
+      expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
+    });
+
+    test('reset clears every Reel pref', () async {
+      final settings = await SettingsService.getInstance();
+
+      await settings.write(SettingsService.reelStartSound, ReelStartSound.mutedIfOtherAudio);
+      await settings.write(SettingsService.reelClipEnd, ReelClipEnd.loop);
+      await settings.write(SettingsService.reelCellular, ReelCellular.dataSaver);
+      await settings.write(SettingsService.reelOkAction, ReelOkAction.details);
+      await settings.write(SettingsService.reelMuted, true);
+      await settings.write(SettingsService.reelCaptions, true);
+      await settings.write(SettingsService.reelIntroSeen, true);
+      await settings.write(SettingsService.showReelTab, false);
+
+      await settings.resetAllSettings();
+
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
+      expect(settings.read(SettingsService.reelCellular), ReelCellular.normal);
+      expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
+      expect(settings.read(SettingsService.reelMuted), isFalse);
+      expect(settings.read(SettingsService.reelCaptions), isFalse);
+      expect(settings.read(SettingsService.reelIntroSeen), isFalse);
+      expect(settings.read(SettingsService.showReelTab), isTrue);
+    });
+
+    test('choices are exported; mute and the intro flag stay on the device', () {
+      final portable = SettingsService.portablePrefs.toSet();
+
+      expect(
+        portable,
+        containsAll(<Pref<Object?>>[
+          SettingsService.reelStartSound,
+          SettingsService.reelClipEnd,
+          SettingsService.reelCellular,
+          SettingsService.reelOkAction,
+          SettingsService.reelCaptions,
+          SettingsService.showReelTab,
+        ]),
+      );
+      expect(portable, isNot(contains(SettingsService.reelMuted)));
+      expect(portable, isNot(contains(SettingsService.reelIntroSeen)));
+    });
+  });
+
   group('SettingsService skip marker modes', () {
     test('default to showing the button, independently per marker kind', () async {
       final settings = await SettingsService.getInstance();

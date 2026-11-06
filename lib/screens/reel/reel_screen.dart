@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -11,12 +12,17 @@ import '../../mixins/refreshable.dart';
 import '../../navigation/navigation_tabs.dart';
 import '../../mixins/tab_visibility_aware.dart';
 import '../../providers/companion_remote_provider.dart';
+import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_perf.dart';
+import '../../services/reel/reel_store.dart';
+import '../../services/settings_service.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../services/reel/feed_players.dart';
 import 'reel_card_view.dart';
+import 'reel_debug_overlay.dart';
 import 'reel_feed_view.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
@@ -48,10 +54,17 @@ class ReelScreen extends StatefulWidget {
   /// The showing Reel's session (the measure-day probe reads its card).
   static ReelController? get liveController => _live?._controller;
 
-  /// Memory pressure (main.dart): the showing Reel steps down its ladder.
-  static void trimMemory({bool severe = false}) {
+  /// The system's memory pressure (main.dart): the showing Reel steps down
+  /// its ladder.
+  static void trimMemory() {
     final c = _live?._controller;
-    if (c != null && c.active) unawaited(c.trimMemory(severe: severe));
+    if (c != null && c.active) unawaited(c.trimMemory());
+  }
+
+  /// One RSS watchdog tier (main.dart): halved is level 1, cleared level 2.
+  static void trimForWatchdog(WatchdogTrim trim) {
+    final c = _live?._controller;
+    if (c != null && c.active) unawaited(c.trimForWatchdog(trim));
   }
 
   /// On TV mode (host side): `reelStep` from the phone.
@@ -80,9 +93,19 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _sheetOpen = false;
 
   /// Phone: the feed's players (the TV plays on the native clip core).
-  late final ReelFeedPlayers _players = ReelFeedPlayers(onLooped: (_) => _controller?.clipEnded());
+  late final ReelFeedPlayers _players = ReelFeedPlayers(
+    onLooped: (_) => _controller?.clipEnded(),
+    onStarted: (id) => _controller?.clipStarted(id),
+    onFailed: (id) => _controller?.clipFailed(id),
+  );
 
   bool get _isTv => PlatformDetector.isTV();
+
+  /// The debug overlay's tape (V2-07): records only under kDebugMode or
+  /// with the hidden developer setting on.
+  final ReelPerf _perf = ReelPerf.instance;
+  ValueNotifier<bool>? _overlayPref;
+  ReelFeedProbe? _feedProbe;
 
   @override
   void initState() {
@@ -90,7 +113,35 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     WidgetsBinding.instance.addObserver(this);
     ReelScreen.requestedDeck.addListener(_takeRequest);
     _takeRequest();
+    _bindPerf();
   }
+
+  void _bindPerf() {
+    _overlayPref = SettingsService.instanceOrNull?.listenable(SettingsService.reelDebugOverlay)
+      ?..addListener(_onOverlayPref);
+    _onOverlayPref();
+    _perf.ring ??= (read: ReelStore.instance.cached, write: ReelStore.instance.cache);
+    _perf.liveDecoders = _liveDecoders;
+    if (!_isTv) {
+      _feedProbe = ReelFeedProbe(
+        _players,
+        _perf,
+        deckId: () => _controller?.deck.id,
+        origin: () => _controller?.current.clip?.source.origin.name,
+      );
+    }
+  }
+
+  void _onOverlayPref() {
+    final on = _overlayPref?.value ?? false;
+    _perf.overlay.value = on;
+    _perf.recording = kDebugMode || on;
+  }
+
+  /// TV: the clip core holds the decoder; phone: each player with a picture.
+  int _liveDecoders() => _isTv
+      ? (_controller?.clips.engine == null ? 0 : 1)
+      : _players.held.where((id) => _players.videoFor(id) != null).length;
 
   void _takeRequest() {
     final deck = ReelScreen.requestedDeck.value;
@@ -105,6 +156,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (identical(ReelScreen._live, this)) ReelScreen._live = null;
     ReelScreen.requestedDeck.removeListener(_takeRequest);
     ReelScreen.showing.value = false;
+    _overlayPref?.removeListener(_onOverlayPref);
+    _feedProbe?.dispose();
+    _perf.detachFrames();
+    _perf.cancel();
+    if (_perf.liveDecoders == _liveDecoders) _perf.liveDecoders = null;
     _controller?.removeListener(_onChanged);
     _controller?.toast.removeListener(_onToast);
     _controller?.dispose();
@@ -163,8 +219,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (c == null || !_shown) return;
     final dir = data['dir'];
     final deckDir = data['deckDir'];
-    if (dir is int && dir != 0) unawaited(c.step(dir.sign));
-    if (deckDir is int && deckDir != 0) unawaited(c.switchDeck(deckDir.sign));
+    if (dir is int && dir != 0) {
+      _perf.begin(ReelPerfTrigger.remote);
+      unawaited(c.step(dir.sign));
+    }
+    if (deckDir is int && deckDir != 0) {
+      _perf.begin(ReelPerfTrigger.deck);
+      unawaited(c.switchDeck(deckDir.sign));
+    }
   }
 
   void _remoteAction(String action) {
@@ -185,6 +247,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     ReelScreen._live = this;
     _shown = true;
     ReelScreen.showing.value = true;
+    _perf.attachFrames();
     unawaited(_start());
   }
 
@@ -192,6 +255,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void onTabHidden() {
     _shown = false;
     ReelScreen.showing.value = false;
+    _perf.detachFrames();
     unawaited(_controller?.suspend());
     unawaited(_players.releaseAll());
   }
@@ -289,12 +353,16 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowDown) {
+      _perf.begin(ReelPerfTrigger.key);
       unawaited(c.step(1));
     } else if (key == LogicalKeyboardKey.arrowUp) {
+      _perf.begin(ReelPerfTrigger.key);
       unawaited(c.step(-1));
     } else if (key == LogicalKeyboardKey.arrowRight) {
+      _perf.begin(ReelPerfTrigger.deck);
       unawaited(c.switchDeck(1));
     } else if (key == LogicalKeyboardKey.arrowLeft) {
+      _perf.begin(ReelPerfTrigger.deck);
       unawaited(c.switchDeck(-1));
     } else if (key == LogicalKeyboardKey.mediaFastForward) {
       unawaited(c.clips.seekBy(const Duration(seconds: 10)));
@@ -318,8 +386,29 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onKeyEvent: _onKey,
       child: ColoredBox(
         color: Colors.transparent,
-        child: c == null ? const ReelCurtain() : (_isTv ? _tv(c) : _phone(c)),
+        child: c == null
+            ? const ReelCurtain()
+            : Stack(
+                fit: StackFit.expand,
+                children: [
+                  _isTv ? _tv(c) : _phone(c),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _perf.overlay,
+                    builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
       ),
+    );
+  }
+
+  /// V2-07: the debug overlay; on the TV it follows the clip core, which is
+  /// rebuilt after every release.
+  Widget _debugOverlay(ReelController c) {
+    if (!_isTv) return ReelDebugOverlay(perf: _perf, tv: false);
+    return ValueListenableBuilder<ClipPhase>(
+      valueListenable: c.clips.phase,
+      builder: (context, _, _) => ReelDebugOverlay(perf: _perf, tv: true, player: c.clips.engine?.player),
     );
   }
 

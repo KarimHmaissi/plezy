@@ -1,15 +1,20 @@
 // The fake engine's controllers are closed in tearDown.
 // ignore_for_file: close_sinks
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
+import 'package:plezy/mpv/models.dart';
 import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
+import 'package:plezy/services/customisation/mirror_store.dart';
+import 'package:plezy/services/memory_trim_policy.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
@@ -50,6 +55,31 @@ class _Media implements ReelMedia {
   String? imageUrl(String serverId, String? path, {required int width}) => null;
 }
 
+/// Metadata that isn't there yet the first time each card asks.
+class _LateMedia extends _Media {
+  final Set<String> _asked = {};
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) async {
+    if (_asked.add(ratingKey)) throw StateError('not yet');
+    return super.item(serverId, ratingKey);
+  }
+}
+
+/// Metadata for one card that lands only when the test says so.
+class _GatedMedia extends _Media {
+  _GatedMedia(this.gated);
+
+  final String gated;
+  final gate = Completer<void>();
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) async {
+    if (ratingKey == gated) await gate.future;
+    return super.item(serverId, ratingKey);
+  }
+}
+
 class _Deck extends ReelDeck {
   _Deck(this.id, this.cards);
 
@@ -60,14 +90,62 @@ class _Deck extends ReelDeck {
   @override
   String get name => 'Deck $id';
 
+  bool keeps = true;
+
   @override
-  bool get keepsSeen => true;
+  bool get keepsSeen => keeps;
 
   @override
   bool get raw => true;
 
   @override
   Future<List<ReelCardData>> load() async => cards;
+}
+
+class _CountingDeck extends _Deck {
+  _CountingDeck(super.id, super.cards, this.onLoad);
+
+  final void Function() onLoad;
+
+  @override
+  Future<List<ReelCardData>> load() {
+    onLoad();
+    return super.load();
+  }
+}
+
+/// A daily deck whose build can land after it loaded.
+class _DailyDeck extends ReelDeck {
+  _DailyDeck(this.id, this.cards);
+
+  @override
+  final String id;
+  List<ReelCardData> cards;
+  int loads = 0;
+
+  @override
+  String get name => 'Deck $id';
+  @override
+  bool get keepsSeen => true;
+  @override
+  bool get raw => true;
+  @override
+  bool get daily => true;
+
+  @override
+  final ValueNotifier<int> rebuilt = ValueNotifier(0);
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    loads++;
+    return cards;
+  }
+
+  /// Today's build lands: [next] is what the deck loads from now on.
+  void land(List<ReelCardData> next) {
+    cards = next;
+    rebuilt.value++;
+  }
 }
 
 IndexedTitle _copy(String id) => IndexedTitle(
@@ -112,7 +190,17 @@ void main() {
   late int seated;
   late List<String> built;
 
-  ReelController make({List<ReelDeck>? decks, bool externalClips = false, List<MediaItem>? opened}) => ReelController(
+  ReelController make({
+    List<ReelDeck>? decks,
+    bool externalClips = false,
+    List<MediaItem>? opened,
+    DateTime Function()? clock,
+    ReelMedia? media,
+    ReelWatch? onWatch,
+    ReelWatchlist? addToWatchlist,
+    bool Function()? reachesTvNow,
+    Listenable? memoryRestored,
+  }) => ReelController(
     decks:
         decks ??
         [
@@ -131,11 +219,14 @@ void main() {
       },
     ),
     store: store,
-    media: _Media(),
-    onWatch: (_, {required onTv}) async => false,
-    addToWatchlist: (_) async => true,
+    media: media ?? _Media(),
+    onWatch: onWatch ?? (_, {required onTv}) async => false,
+    addToWatchlist: addToWatchlist ?? (_) async => true,
     onSaved: () async => seated++,
+    reachesTvNow: reachesTvNow,
     externalClips: externalClips,
+    memoryRestored: memoryRestored,
+    clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
       built.add(id);
@@ -172,8 +263,77 @@ void main() {
     await c.save();
     expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
     expect(seated, 1);
-    expect(c.toast.value, 'On the TV tonight');
+    expect(c.toast.value, ReelController.savedOnTv);
     c.dispose();
+  });
+
+  group('card actions say where the pick lives', () {
+    void readOnlyMirror() => store = ReelStore(
+      database: () async => db,
+      settings: () async => MirrorCustomisationStore({}, send: (_) => false),
+    );
+
+    test('a phone on its own data, with no TV connected, says the pick waits for the next connect', () async {
+      final c = make(reachesTvNow: () => false);
+      await c.start();
+      await c.save();
+      expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
+      expect(c.toast.value, ReelController.savedForLater);
+      c.dispose();
+    });
+
+    test('Save on a mirror that lost its TV says it could not save, and keeps nothing', () async {
+      readOnlyMirror();
+      final c = make();
+      await c.start();
+      await expectLater(c.save(), completes);
+      expect(await store.freshPicks(), isEmpty);
+      expect(seated, 0);
+      expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+
+    test('Not for me and Seen it on a read-only mirror leave the card where it was', () async {
+      readOnlyMirror();
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2')])..keeps = false,
+        ],
+      );
+      await c.start();
+      await expectLater(c.notForMe(), completes);
+      expect(c.current.card?.id, 't1');
+      await expectLater(c.seenIt(), completes);
+      expect(c.current.card?.id, 't1');
+      expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+
+    test('a card saved before its metadata landed still goes to the watchlist', () async {
+      final mirrored = <String>[];
+      final c = make(
+        media: _LateMedia(),
+        addToWatchlist: (item) async {
+          mirrored.add(item.id);
+          return true;
+        },
+      );
+      await c.start();
+      expect(c.current.item, isNull);
+      await c.save();
+      await pumpEventQueue();
+      expect(mirrored, ['1']);
+      c.dispose();
+    });
+
+    test('Watch on TV that cannot reach the TV keeps the pick and says when it lands', () async {
+      final c = make(onWatch: (_, {required onTv}) async => false, reachesTvNow: () => false);
+      await c.start();
+      expect(await c.watch(onTv: true), isFalse);
+      expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
+      expect(c.toast.value, ReelController.savedForLater);
+      c.dispose();
+    });
   });
 
   test('Not for me rests the title and moves on', () async {
@@ -222,18 +382,97 @@ void main() {
     c.dispose();
   });
 
-  test('a new visit starts with clips again after memory pressure', () async {
-    final c = make();
+  test('the ladder holds across visits until the memory policy restores', () async {
+    final restored = ValueNotifier(0);
+    final c = make(memoryRestored: restored);
     await c.start();
-    await c.trimMemory(severe: true);
+    await c.trimMemory();
+    await c.trimMemory();
     expect(c.memoryLevel, 2);
     await c.suspend();
     final made = engines;
     await c.start();
     await Future<void>.delayed(Duration.zero);
+    expect(c.memoryLevel, 2, reason: 'coming back says nothing about memory');
+    expect(engines, made, reason: 'still stills only');
+
+    var told = 0;
+    c.addListener(() => told++);
+    restored.value++;
     expect(c.memoryLevel, 0);
+    expect(told, 1);
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
     expect(engines, greaterThan(made), reason: 'the clip core is rebuilt');
     expect(engine.calls.where((x) => x.startsWith('open ')), isNotEmpty);
+    expect(engine.calls.where((x) => x.startsWith('preload ')), isNotEmpty);
+    c.dispose();
+    restored.value++;
+    restored.dispose();
+  });
+
+  test('the watchdog tiers map to the ladder: halved is 1, cleared is 2', () async {
+    final c = make();
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final first = engine;
+    await c.trimForWatchdog(WatchdogTrim.none);
+    expect(c.memoryLevel, 0);
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 1);
+    expect(first.calls.last, 'clearPreloads');
+    expect(first.disposed, isFalse, reason: 'level 1 keeps the card on screen playing');
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 1, reason: 'a second halving tick is not a second step');
+    await c.trimMemory();
+    expect(c.memoryLevel, 2);
+    expect(first.disposed, isTrue);
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 2, reason: 'the ladder never climbs back on a trim');
+    c.dispose();
+  });
+
+  test('a cleared watchdog tick goes straight to stills', () async {
+    final c = make();
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    await c.trimForWatchdog(WatchdogTrim.cleared);
+    expect(c.memoryLevel, 2);
+    expect(engine.disposed, isTrue);
+    c.dispose();
+  });
+
+  test('level 1 tells the views, so the phone feed can shrink', () async {
+    final c = make(externalClips: true);
+    await c.start();
+    var told = 0;
+    c.addListener(() => told++);
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 1);
+    expect(told, 1);
+    expect(engines, 0, reason: 'the phone has no clip core to trim');
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(told, 1, reason: 'nothing changed, nothing to redraw');
+    c.dispose();
+  });
+
+  test('trims and suspend do not wait for an open that never finishes', () async {
+    final c = make();
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    // The next card's open hangs (a stalled server), so its step never returns.
+    final core = engine..openGate = Completer<void>();
+    unawaited(c.step(1));
+    bool opening() => core.calls.any((x) => x.startsWith('open ') && x.endsWith('/2/video.mp4'));
+    // The outgoing clip fades out first.
+    for (var i = 0; i < 50 && !opening(); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(opening(), isTrue);
+    await c.trimForWatchdog(WatchdogTrim.cleared).timeout(const Duration(seconds: 1));
+    expect(core.disposed, isTrue);
+    await c.suspend().timeout(const Duration(seconds: 1));
+    expect(c.active, isFalse);
     c.dispose();
   });
 
@@ -253,6 +492,7 @@ void main() {
   test('a clip the feed played through is recorded as watched to the end', () async {
     final c = make(externalClips: true);
     await c.start();
+    c.clipStarted('t1');
     c.clipEnded();
     await c.step(1);
     final events = await store.events(since: DateTime(2000));
@@ -283,5 +523,312 @@ void main() {
     await c.suspend();
     expect(c.remoteState()['active'], isFalse);
     c.dispose();
+  });
+
+  group('fatigue is timed from the first frame', () {
+    late DateTime now;
+    DateTime clock() => now;
+
+    setUp(() => now = DateTime.utc(2026, 3, 1, 20));
+
+    Future<List<String>> actions() async => [for (final e in await store.events(since: DateTime(2000))) e.action];
+
+    test('a TV card left while its clip is still loading is unplayed, not a quick skip', () async {
+      final c = make(clock: clock);
+      await c.start();
+      now = now.add(const Duration(milliseconds: 500));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      expect(await store.quickSkips(), isEmpty);
+      c.dispose();
+    });
+
+    test('the TV clock starts at the first frame, not when the card was shown', () async {
+      final c = make(clock: clock);
+      await c.start();
+      // A slow open: 5 s of loading, then a first frame, then left 1 s in.
+      now = now.add(const Duration(seconds: 5));
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 1));
+      await c.step(1);
+      expect(await actions(), [ReelAction.quickSkip.name]);
+
+      // The next card plays 9 s after its frame: a sample of 9 s.
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 9));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.action, ReelAction.sampled.name);
+      expect(events.last.seconds, 9);
+      c.dispose();
+    });
+
+    test('a resume from pause before any frame does not start the clock', () async {
+      final c = make(clock: clock);
+      await c.start();
+      await c.clips.pause();
+      await c.clips.resume();
+      expect(c.clips.phase.value, ClipPhase.playing);
+      now = now.add(const Duration(seconds: 1));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      c.dispose();
+    });
+
+    test('a TV clip that failed records nothing about the title', () async {
+      final c = make(clock: clock);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      engine.errorCtl.add(const PlayerError('decoder gave up'));
+      now = now.add(const Duration(milliseconds: 800));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      expect(await store.quickSkips(), isEmpty);
+      c.dispose();
+    });
+
+    test('a phone card swiped past before its player moved is unplayed', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      now = now.add(const Duration(milliseconds: 700));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      c.dispose();
+    });
+
+    test('the phone clock starts when the feed says the card is playing', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      now = now.add(const Duration(seconds: 4));
+      c.clipStarted('t1');
+      now = now.add(const Duration(seconds: 1));
+      await c.step(1);
+      expect(await actions(), [ReelAction.quickSkip.name]);
+      c.dispose();
+    });
+
+    test('a parked phone player that starts before the card is on screen still counts', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      c.clipStarted('t1');
+      // The feed's next player moves before the controller has shown it.
+      final stepping = c.step(1);
+      c.clipStarted('t2');
+      await stepping;
+      now = now.add(const Duration(seconds: 10));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.titleId, 't2');
+      expect(events.last.action, ReelAction.sampled.name);
+      expect(events.last.seconds, 10);
+      c.dispose();
+    });
+
+    test('a phone player that broke records nothing about the title', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      c.clipStarted('t1');
+      c.clipFailed('t1');
+      now = now.add(const Duration(milliseconds: 300));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      c.dispose();
+    });
+  });
+
+  group('a held key coalesces steps', () {
+    late DateTime now;
+    DateTime clock() => now;
+
+    setUp(() => now = DateTime.utc(2026, 3, 1, 20));
+
+    List<String> opens() => [
+      for (final x in engine.calls)
+        if (x.startsWith('open ')) x.substring(x.lastIndexOf('/assets/') + 8).split('/').first,
+    ];
+
+    test('five steps at once move five cards, open one clip and record nothing in between', () async {
+      final c = make(
+        clock: clock,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 7; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 9));
+      engine.calls.clear();
+
+      await Future.wait([for (var k = 0; k < 5; k++) c.step(1)]);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.index, 5);
+      expect(c.current.card?.id, 't6');
+      expect(opens(), ['6'], reason: 'only the landed card opens');
+      expect(engine.calls, contains('preload https://s1.example/services/iva/assets/7/video.mp4'));
+      final events = await store.events(since: DateTime(2000));
+      expect([for (final e in events) '${e.titleId} ${e.action}'], ['t1 ${ReelAction.sampled.name}']);
+      expect(await store.quickSkips(), isEmpty);
+      c.dispose();
+    });
+
+    test('a step while the last one is still resolving lands on the later card', () async {
+      final media = _GatedMedia('2');
+      final c = make(
+        clock: clock,
+        media: media,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 4; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      engine.calls.clear();
+
+      final first = c.step(1);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.index, 1);
+      final second = c.step(1);
+      await second;
+      media.gate.complete();
+      await first;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.current.card?.id, 't3');
+      expect(opens(), ['3'], reason: 'the card passed over while resolving never opens');
+      final events = await store.events(since: DateTime(2000));
+      expect([for (final e in events) e.titleId], ['t1']);
+      c.dispose();
+    });
+
+    test('steps back past the start stop at the first card', () async {
+      final c = make(clock: clock);
+      await c.start();
+      await Future.wait([c.step(1), c.step(-1), c.step(-1)]);
+      expect(c.index, 0);
+      expect(c.current.card?.id, 't1');
+      c.dispose();
+    });
+  });
+
+  group("today's build in a session already showing the deck", () {
+    Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 20));
+    List<String?> ids(ReelController c) => [for (final x in c.cards ?? const <ReelCardData>[]) x.id];
+
+    test('it follows the card on screen; the cursor and the card stay put', () async {
+      final d = _DailyDeck('fy', [_card('1'), _card('2'), _card('3')]);
+      final c = make(decks: [d]);
+      await c.start();
+      await c.step(1);
+      expect(c.current.card?.id, 't2');
+      d.land([_card('7'), _card('1'), _card('8'), _card('9')]);
+      await settle();
+      expect(ids(c), ['t1', 't2', 't7', 't8', 't9']);
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't2');
+      expect(engine.calls, contains('preload https://s1.example/services/iva/assets/7/video.mp4'));
+      await c.step(1);
+      expect(c.current.card?.id, 't7');
+      c.dispose();
+    });
+
+    test('a deck that is not on screen takes the new list from its start', () async {
+      final d = _DailyDeck('fy', [_card('1'), _card('2')]);
+      final c = make(
+        decks: [
+          d,
+          _Deck('b', [_card('5')]),
+        ],
+      );
+      await c.start();
+      await c.step(1);
+      await c.switchDeck(1);
+      d.land([_card('7'), _card('8')]);
+      await settle();
+      await c.switchDeck(-1);
+      expect(ids(c), ['t7', 't8']);
+      expect(c.index, 0);
+      c.dispose();
+    });
+
+    test('at the end of the deck, the first new card comes on screen', () async {
+      final d = _DailyDeck('fy', [_card('1')]);
+      final c = make(decks: [d]);
+      await c.start();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      d.land([_card('1'), _card('6')]);
+      await settle();
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
+
+    test('a build that lands empty leaves the list alone', () async {
+      final d = _DailyDeck('fy', [_card('1'), _card('2')]);
+      final c = make(decks: [d]);
+      await c.start();
+      d.land(const []);
+      await settle();
+      expect(ids(c), ['t1', 't2']);
+      c.dispose();
+    });
+
+    test('a deck that has not loaded yet reads the build when it loads', () async {
+      final d = _DailyDeck('fy', [_card('1')]);
+      final c = make(
+        decks: [
+          _Deck('b', [_card('5')]),
+          d,
+        ],
+      );
+      await c.start();
+      d.land([_card('4')]);
+      await settle();
+      expect(d.loads, 0);
+      await c.switchDeck(1);
+      expect(ids(c), ['t4']);
+      c.dispose();
+    });
+  });
+
+  group('a warm controller on a new day', () {
+    test('a daily deck loads again on start, from its first card', () async {
+      var now = DateTime(2026, 3, 10, 23);
+      final d = _DailyDeck('fy', [_card('1'), _card('2')]);
+      final keep = _Deck('b', [_card('5'), _card('6')]);
+      final c = make(decks: [d, keep], clock: () => now);
+      await c.start();
+      await c.step(1);
+      await c.suspend();
+      await c.start();
+      expect(d.loads, 1, reason: 'same day: the list is kept');
+      expect(c.index, 1);
+      await c.suspend();
+
+      now = DateTime(2026, 3, 11, 8);
+      d.cards = [_card('3'), _card('4')];
+      await c.start();
+      expect(d.loads, 2);
+      expect(c.index, 0);
+      expect(c.current.card?.id, 't3');
+      c.dispose();
+    });
+
+    test('decks that are not daily keep their list and place', () async {
+      var now = DateTime(2026, 3, 10, 23);
+      var loads = 0;
+      final keep = _CountingDeck('b', [_card('5'), _card('6')], () => loads++);
+      final c = make(decks: [keep], clock: () => now);
+      await c.start();
+      await c.step(1);
+      await c.suspend();
+      now = DateTime(2026, 3, 11, 8);
+      await c.start();
+      expect(loads, 1);
+      expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
   });
 }

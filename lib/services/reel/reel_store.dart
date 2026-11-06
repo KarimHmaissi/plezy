@@ -24,6 +24,10 @@ enum ReelAction {
 
   /// Opened the title's own page from its card.
   details,
+
+  /// Left before its clip showed a first frame, or after the clip failed.
+  /// Neutral: it adds no fatigue and is not a sample.
+  unplayed,
 }
 
 /// One saved pick, waiting on the TV's Home for 3 days.

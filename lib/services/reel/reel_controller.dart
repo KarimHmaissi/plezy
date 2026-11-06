@@ -4,10 +4,13 @@ import 'package:flutter/foundation.dart';
 
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
+import '../customisation/mirror_store.dart';
+import '../memory_trim_policy.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
+import 'reel_pool.dart';
 import 'reel_store.dart';
 
 /// Metadata and art for a card (one cheap read per card built), through the
@@ -61,11 +64,17 @@ class ReelController extends ChangeNotifier {
     required this.onWatch,
     required this.addToWatchlist,
     this.onSaved,
+    this.reachesTvNow,
     this.deckFor,
     this.onOpen,
     this.externalClips = false,
+    this.memoryRestored,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  }) : _clock = clock ?? DateTime.now {
+    clips.phase.addListener(_onPhase);
+    memoryRestored?.addListener(_onMemoryRestored);
+    decks.forEach(_watchDeck);
+  }
 
   final List<ReelDeck> decks;
   final ClipResolver resolver;
@@ -78,6 +87,12 @@ class ReelController extends ChangeNotifier {
   /// After a Save: seats the Home row the first time (ReelApp).
   final Future<void> Function()? onSaved;
 
+  /// Whether a Save lands on the TV's Home now: this is the TV, or a phone
+  /// writing to (or catching up with) a connected TV. False for a phone on
+  /// its own data with no TV connected: the pick reaches the TV when it next
+  /// connects. Null means now.
+  final bool Function()? reachesTvNow;
+
   /// Opens the title's own page (the app's detail screen).
   final Future<void> Function(MediaItem item)? onOpen;
 
@@ -87,6 +102,11 @@ class ReelController extends ChangeNotifier {
   /// you swipe through, a card that jumps away under your thumb is worse
   /// than a still.
   final bool externalClips;
+
+  /// Fires when the app's memory policy puts its caches back to the device
+  /// tier (`MemoryTrimPolicy.restores`): the only thing that brings the
+  /// degrade ladder back to 0.
+  final Listenable? memoryRestored;
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -98,7 +118,19 @@ class ReelController extends ChangeNotifier {
     final made = await deckFor?.call(id).catchError((Object _) => null);
     if (made == null) return -1;
     decks.add(made);
+    _watchDeck(made);
     return decks.length - 1;
+  }
+
+  /// Listeners on each deck's [ReelDeck.rebuilt], removed on dispose.
+  final Map<ReelDeck, VoidCallback> _rebuiltListeners = {};
+
+  void _watchDeck(ReelDeck d) {
+    final rebuilt = d.rebuilt;
+    if (rebuilt == null || _rebuiltListeners.containsKey(d)) return;
+    void listener() => unawaited(_onRebuilt(d));
+    _rebuiltListeners[d] = listener;
+    rebuilt.addListener(listener);
   }
 
   final DateTime Function() _clock;
@@ -107,6 +139,9 @@ class ReelController extends ChangeNotifier {
   final Map<String, List<ReelCardData>> _cards = {};
   final Map<String, int> _cursor = {};
   final Map<String, Future<List<ReelCardData>>> _loading = {};
+
+  /// The day ([ReelPool.dayKey]) each deck's list was loaded on.
+  final Map<String, String> _loadedOn = {};
   final Map<String, ResolvedClip?> _clip = {};
   final Set<String> _resolved = {};
   final Map<String, MediaItem?> _item = {};
@@ -114,8 +149,24 @@ class ReelController extends ChangeNotifier {
   bool _active = false;
   bool _firstClip = true;
   bool _clipEnded = false;
-  DateTime? _cardSince;
+
+  /// The card on screen, and when its clip showed a first frame (the
+  /// fatigue clock); null until then. A still (AI) card is seen whole the
+  /// moment it is shown.
   String? _cardShown;
+  DateTime? _cardSince;
+
+  /// The card's clip failed: how it was left says nothing about the title.
+  bool _cardFailed = false;
+
+  /// TV: the clip the card handed to [clips], so a first frame or error
+  /// from the outgoing clip (still fading out) isn't taken for this card's.
+  String? _cardClip;
+  ClipPhase _lastPhase = ClipPhase.idle;
+
+  /// Phone: a parked player can start the moment the feed moves, before
+  /// [_show] has the card on screen.
+  ({String id, DateTime at})? _feedStarted;
   int _sinceAiCard = 99;
   int _generation = 0;
 
@@ -123,7 +174,7 @@ class ReelController extends ChangeNotifier {
   final ValueNotifier<String?> deckStrip = ValueNotifier(null);
   Timer? _stripTimer;
 
-  /// One-line confirmations ("On the TV tonight").
+  /// One-line confirmations ([savedOnTv]).
   final ValueNotifier<String?> toast = ValueNotifier(null);
   Timer? _toastTimer;
 
@@ -159,13 +210,21 @@ class ReelController extends ChangeNotifier {
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
     _active = true;
-    // Each visit starts at the top of the degrade ladder: pressure from an
-    // earlier visit (or while the Reel was hidden) has usually passed, and a
-    // fresh callback steps it down again.
-    memoryLevel = 0;
+    // The degrade ladder carries over: coming back from Watch or another tab
+    // says nothing about memory. Only the policy's restore resets it.
     if (deckId != null) {
       final i = await _deckIndex(deckId);
       if (i >= 0) _deck = i;
+    }
+    // A warm controller on a new day: daily decks (For You) load again, so
+    // today's pool (or yesterday's remainder while it builds) replaces the
+    // list kept from an earlier day.
+    final today = _today();
+    for (final d in decks) {
+      if (d.daily && _cards.containsKey(d.id) && _loadedOn[d.id] != today) {
+        _cards.remove(d.id);
+        _cursor.remove(d.id);
+      }
     }
     await _ensureDeck(deck);
     if (!_active) return;
@@ -187,6 +246,7 @@ class ReelController extends ChangeNotifier {
     final have = _cards[d.id];
     if (have != null) return have;
     final f = _loading[d.id] ??= () async {
+      _loadedOn[d.id] = _today();
       try {
         final sw = Stopwatch()..start();
         final raw = await d.load();
@@ -209,14 +269,75 @@ class ReelController extends ChangeNotifier {
     return f;
   }
 
+  String _today() => ReelPool.dayKey(_clock());
+
+  /// A fresh build of [d] landed after its list was loaded. On screen, the
+  /// cards up to and including the one showing stay put and the new list
+  /// follows them (titles already there are left out), so the cursor and
+  /// the phone's page index don't move. A deck that isn't on screen just
+  /// takes the new list from its start. A deck not loaded yet reads the new
+  /// build when it loads.
+  Future<void> _onRebuilt(ReelDeck d) async {
+    if (_disposed) return;
+    final pending = _loading[d.id];
+    if (pending != null) await pending;
+    if (_disposed || !_cards.containsKey(d.id)) return;
+    final List<ReelCardData> fresh;
+    try {
+      fresh = await finishDeck(d, await d.load(), store: store, hasClip: (_) => true);
+    } catch (e) {
+      appLogger.w('Reel: deck ${d.id} rebuild failed to load', error: e);
+      return;
+    }
+    if (_disposed || fresh.isEmpty) return;
+    _loadedOn[d.id] = _today();
+    final old = _cards[d.id] ?? const <ReelCardData>[];
+    if (!identical(deck, d)) {
+      _cards[d.id] = fresh;
+      _cursor.remove(d.id);
+      appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${fresh.length} cards');
+      notifyListeners();
+      return;
+    }
+    final at = index;
+    final keep = old.take(at + 1).toList();
+    final kept = {for (final c in keep) c.id};
+    final list = [
+      ...keep,
+      for (final c in fresh)
+        if (!kept.contains(c.id)) c,
+    ];
+    _cards[d.id] = list;
+    appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${list.length} cards (new after card ${keep.length})');
+    if (at >= old.length) {
+      // It was at the end of the deck (or the deck was empty): the first new
+      // card comes on screen.
+      if (_active) return _show();
+      notifyListeners();
+      return;
+    }
+    notifyListeners();
+    if (_active) _prepareAhead(list, 1, _generation);
+  }
+
   /// Next / previous card.
+  ///
+  /// The target is computed and committed before any await, under the
+  /// generation counter, so a held D-pad's repeats coalesce: each one moves
+  /// the cursor on from where the last left it, and only the card the
+  /// cursor lands on is resolved and opened. Cards passed over were never on
+  /// screen, so they record nothing.
   Future<void> step(int dir) async {
     final list = cards;
     if (list == null) return;
     final to = (index + dir).clamp(0, list.length);
     if (to == index) return;
-    await _leaveCard();
     _cursor[deck.id] = to;
+    final gen = ++_generation;
+    await _leaveCard();
+    // A later step moved the cursor on while this one was leaving: that
+    // step shows the card it lands on.
+    if (gen != _generation) return;
     await _show(direction: dir);
   }
 
@@ -297,24 +418,34 @@ class ReelController extends ChangeNotifier {
       _cursor[deck.id] = index + (direction == 0 ? 1 : direction);
       return _show(direction: direction == 0 ? 1 : direction);
     }
-    _cardSince = _clock();
-    _cardShown = c.id;
-    _clipEnded = false;
     final clip = _clip[c.id];
+    _cardShown = c.id;
+    _cardSince = clip == null ? _clock() : null;
+    _cardFailed = false;
+    _cardClip = null;
+    _clipEnded = false;
     if (externalClips) {
-      // The feed plays it; only the two ahead need resolving.
+      // The feed plays it ([clipStarted]); only the two ahead need resolving.
+      final started = _feedStarted;
+      _feedStarted = null;
+      if (clip != null && started?.id == c.id) _cardSince = started!.at;
     } else if (clip == null) {
       _sinceAiCard = 0;
       await clips.pause();
     } else if (memoryLevel >= 2) {
-      // Low memory: the backdrop as a still, no clip core.
+      // Low memory: the backdrop as a still, no clip core (and no clock).
       _sinceAiCard++;
     } else {
       _sinceAiCard++;
+      _cardClip = clip.source.uri;
       await clips.play(clip.source, first: _firstClip);
       _firstClip = false;
     }
-    // Two ahead: resolve; one ahead (in the swipe direction): preload.
+    _prepareAhead(list, direction, gen);
+  }
+
+  /// Two ahead: resolve; one ahead (in the swipe direction): preload.
+  void _prepareAhead(List<ReelCardData> list, int direction, int gen) {
     for (var k = 1; k <= 2; k++) {
       final j = index + k * (direction < 0 ? -1 : 1);
       if (j >= 0 && j < list.length) unawaited(_resolve(list[j]));
@@ -330,15 +461,53 @@ class ReelController extends ChangeNotifier {
     }
   }
 
-  /// Records how the card was left: a quick skip (<2 s) adds fatigue; 8 s
-  /// or more is a sample; scrolling past in between records nothing.
+  /// TV: the clock starts on this card's first frame (the core moves from
+  /// loading to playing only then; a resume from pause doesn't count).
+  void _onPhase() {
+    final now = clips.phase.value, was = _lastPhase;
+    _lastPhase = now;
+    final uri = _cardClip;
+    if (externalClips || _cardShown == null || uri == null || clips.current?.uri != uri) return;
+    if (now == ClipPhase.failed) {
+      _cardFailed = true;
+    } else if (was == ClipPhase.loading && now == ClipPhase.playing && _cardSince == null && !_cardFailed) {
+      _cardSince = _clock();
+    }
+  }
+
+  /// Phone feed: [cardId]'s player is playing (its position has moved).
+  void clipStarted(String cardId) {
+    if (!externalClips) return;
+    if (cardId != _cardShown) {
+      _feedStarted = (id: cardId, at: _clock());
+    } else if (_cardSince == null && !_cardFailed) {
+      _cardSince = _clock();
+    }
+  }
+
+  /// Phone feed: [cardId]'s player failed to open or broke mid-play.
+  void clipFailed(String cardId) {
+    if (externalClips && cardId == _cardShown) _cardFailed = true;
+  }
+
+  /// Records how the card was left, timed from its first frame: a quick
+  /// skip (<2 s) adds fatigue; 8 s or more is a sample; scrolling past in
+  /// between records nothing. Left before the first frame, or after the
+  /// clip failed, is a neutral [ReelAction.unplayed].
   Future<void> _leaveCard() async {
-    final id = _cardShown, since = _cardSince;
+    final id = _cardShown, since = _cardSince, failed = _cardFailed;
     _cardShown = null;
     _cardSince = null;
-    if (id == null || since == null) return;
-    final secs = _clock().difference(since).inMilliseconds / 1000;
+    _cardFailed = false;
+    _cardClip = null;
+    _feedStarted = null;
+    if (id == null) return;
     final deckId = deck.id;
+    if (since == null || failed) {
+      await store.record(id, ReelAction.unplayed, deck: deckId);
+      return;
+    }
+    final secs = _clock().difference(since).inMilliseconds / 1000;
     if (clips.phase.value == ClipPhase.held || _clipEnded) {
       await store.record(id, ReelAction.toEnd, deck: deckId, seconds: secs.round());
     } else if (secs < 2) {
@@ -365,16 +534,33 @@ class ReelController extends ChangeNotifier {
       _firstClip = true;
     }
     final ok = await onWatch(item, onTv: onTv);
-    if (!ok && onTv) {
-      await save(silent: true);
-      _say('Saved for the TV.');
-    }
+    // The TV couldn't be reached: keep the pick instead, and say where it
+    // went (or that it couldn't be kept).
+    if (!ok && onTv) await save();
     return ok;
+  }
+
+  /// Confirmations that say where a Save went.
+  static const String savedOnTv = 'On the TV tonight';
+  static const String savedForLater = 'Saved, on the TV next time you connect';
+  static const String notConnected = "Couldn't save: not connected to the TV";
+
+  /// Runs a card action that writes the synced Reel data. A phone mirroring
+  /// a TV it has lost can't write ([MirrorReadOnlyException]): say so and
+  /// leave the card as it was, rather than fail silently. Only the action's
+  /// name is logged, never the title.
+  Future<void> _act(String name, Future<void> Function() fn) async {
+    try {
+      await fn();
+    } on MirrorReadOnlyException {
+      appLogger.w('Reel: $name not kept, not connected to the TV');
+      _say(notConnected);
+    }
   }
 
   /// One Save: waits on the TV's Home for 3 days and goes to the Plex
   /// watchlist so it's never lost.
-  Future<void> save({bool silent = false}) async {
+  Future<void> save() => _act('save', () async {
     final s = current;
     final c = s.card;
     if (c == null) return;
@@ -390,15 +576,25 @@ class ReelController extends ChangeNotifier {
       ),
     );
     await store.record(c.id, ReelAction.save, deck: deck.id);
-    final item = s.item;
-    if (item != null) unawaited(addToWatchlist(item).catchError((Object _) => false));
+    unawaited(_mirrorToWatchlist(s.item, c));
     final seat = onSaved;
     if (seat != null) unawaited(seat().catchError((Object _) {}));
-    if (!silent) _say('On the TV tonight');
+    _say((reachesTvNow?.call() ?? true) ? savedOnTv : savedForLater);
+  });
+
+  /// Save's watchlist mirror. A card saved before its metadata landed
+  /// resolves the item first, as [watch] does, so the mirror isn't skipped.
+  Future<void> _mirrorToWatchlist(MediaItem? known, ReelCardData c) async {
+    try {
+      final item = known ?? await media.item(c.best.serverId, c.best.ratingKey);
+      if (item != null) await addToWatchlist(item);
+    } catch (_) {
+      // The pick is kept either way; the mirror is best effort.
+    }
   }
 
   /// Not for me: the title rests 90 days (never a ban) and the feed moves on.
-  Future<void> notForMe() async {
+  Future<void> notForMe() => _act('notForMe', () async {
     final c = current.card;
     if (c == null) return;
     await store.notForMe(c.id);
@@ -406,10 +602,10 @@ class ReelController extends ChangeNotifier {
     _cardShown = null;
     _drop(c);
     await _show();
-  }
+  });
 
   /// Spoiled me: bans this asset for good and drops to the next rung.
-  Future<void> spoiledMe() async {
+  Future<void> spoiledMe() => _act('spoiledMe', () async {
     final s = current;
     final c = s.card, clip = s.clip;
     if (c == null || clip == null) return;
@@ -421,10 +617,10 @@ class ReelController extends ChangeNotifier {
     _clip.remove(c.id);
     _cardShown = null;
     await _show();
-  }
+  });
 
   /// Seen it: a fact, so permanent (and the title leaves unseen-only decks).
-  Future<void> seenIt() async {
+  Future<void> seenIt() => _act('seenIt', () async {
     final c = current.card;
     if (c == null) return;
     await store.markFact(c.id, 'seen');
@@ -434,7 +630,7 @@ class ReelController extends ChangeNotifier {
       _drop(c);
       await _show();
     }
-  }
+  });
 
   void _drop(ReelCardData c) {
     for (final e in _cards.entries) {
@@ -471,25 +667,53 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The On TV state the TV broadcasts on every card change.
-  /// How hard the system has asked for memory back this session (the
-  /// degrade ladder): 1 drops the preload, 2 releases the clip core and
-  /// shows stills.
+  /// How hard the system has asked for memory back (the degrade ladder):
+  /// 1 keeps only the card on screen (TV: the preload is dropped; phone: the
+  /// feed shrinks to the on-screen player), 2 releases every clip player
+  /// and shows stills. It holds across visits until the memory policy
+  /// restores ([memoryRestored]).
   int memoryLevel = 0;
 
-  Future<void> trimMemory({bool severe = false}) async {
-    memoryLevel = severe ? 2 : (memoryLevel + 1).clamp(0, 2);
+  /// The system's memory-pressure callback: one step down the ladder.
+  Future<void> trimMemory() => _trimTo(memoryLevel + 1);
+
+  /// One RSS watchdog tick ([MemoryTrimPolicy.onWatchdogTick]). From API 34
+  /// a foreground app gets no RUNNING_* trim levels, so on the phone this is
+  /// the ladder's main way down: a halved image cache is level 1, a cleared
+  /// one level 2.
+  Future<void> trimForWatchdog(WatchdogTrim trim) => switch (trim) {
+    WatchdogTrim.none => Future<void>.value(),
+    WatchdogTrim.halved => _trimTo(1),
+    WatchdogTrim.cleared => _trimTo(2),
+  };
+
+  /// Steps down to [level]; the ladder never climbs back here.
+  Future<void> _trimTo(int level) async {
+    final to = level.clamp(0, 2);
+    if (to <= memoryLevel) return;
+    memoryLevel = to;
     appLogger.w('Reel: memory pressure, level $memoryLevel');
-    if (memoryLevel == 1) {
-      await clips.dropPreload();
+    if (to == 1) {
+      if (!externalClips) await clips.dropPreload();
     } else {
       await clips.release();
       _firstClip = true;
-      notifyListeners();
     }
+    // The phone feed re-syncs its players to the new level.
+    notifyListeners();
   }
 
-  /// What the Fold's On TV mode shows (`reelState`). Image paths only: the
+  /// The policy is back at the device tier: clips and the preload come back
+  /// from the next card on (the card on screen keeps its still).
+  void _onMemoryRestored() {
+    if (memoryLevel == 0 || _disposed) return;
+    appLogger.i('Reel: memory restored, ladder back to 0 from $memoryLevel');
+    memoryLevel = 0;
+    notifyListeners();
+  }
+
+  /// The On TV state the TV broadcasts on every card change: what the
+  /// Fold's On TV mode shows (`reelState`). Image paths only: the
   /// phone loads them through its own server connection.
   Map<String, Object?> remoteState() {
     final s = current;
@@ -534,6 +758,12 @@ class ReelController extends ChangeNotifier {
     _disposed = true;
     _active = false;
     _generation++;
+    clips.phase.removeListener(_onPhase);
+    memoryRestored?.removeListener(_onMemoryRestored);
+    for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
+      d.rebuilt?.removeListener(l);
+    }
+    _rebuiltListeners.clear();
     _stripTimer?.cancel();
     _toastTimer?.cancel();
     deckStrip.dispose();

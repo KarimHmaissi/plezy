@@ -15,8 +15,10 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
 
   @override
   bool get ready => _ready;
+  bool broken = false;
+
   @override
-  bool get failed => false;
+  bool get failed => broken;
   @override
   double get aspectRatio => 16 / 9;
   @override
@@ -79,14 +81,20 @@ Future<void> _settle() async {
 void main() {
   late Map<String, _FakeVideo> made;
   late List<String> looped;
+  late List<String> started;
+  late List<String> failed;
   late ReelFeedPlayers players;
 
   setUp(() {
     made = {};
     looped = [];
+    started = [];
+    failed = [];
     players = ReelFeedPlayers(
       create: (uri) => made[uri.pathSegments.last.split('.').first] = _FakeVideo(uri),
       onLooped: looped.add,
+      onStarted: started.add,
+      onFailed: failed.add,
     );
   });
 
@@ -162,5 +170,37 @@ void main() {
     await players.releaseAll();
     expect(made.values.every((v) => v.disposed), isTrue);
     expect(players.held, isEmpty);
+  });
+
+  test('the card on screen reports playing once its position moves, again after a revisit', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    await _settle();
+    expect(started, isEmpty, reason: 'play() alone is not a picture');
+    made['a']!.tick(const Duration(milliseconds: 100));
+    made['a']!.tick(const Duration(milliseconds: 200));
+    made['b']!.tick(const Duration(milliseconds: 100));
+    expect(started, ['a'], reason: 'once, and never for a parked card');
+
+    players.sync(current: 'b', window: [_clip('b'), _clip('a')]);
+    await _settle();
+    made['b']!.tick(const Duration(milliseconds: 100));
+    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    await _settle();
+    made['a']!.tick(const Duration(milliseconds: 100));
+    expect(started, ['a', 'b', 'a']);
+  });
+
+  test('a player that breaks on screen is reported once', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    await _settle();
+    made['b']!
+      ..broken = true
+      ..tick(Duration.zero);
+    made['a']!
+      ..broken = true
+      ..tick(Duration.zero)
+      ..tick(Duration.zero);
+    expect(failed, ['a']);
+    expect(started, isEmpty);
   });
 }

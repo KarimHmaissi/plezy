@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../../media/catalog_item_ref.dart';
 import '../../media/media_item.dart';
 import '../../media/media_kind.dart';
@@ -26,6 +28,14 @@ abstract class ReelDeck {
 
   /// Raw decks (charts) are never re-ordered by code.
   bool get raw => false;
+
+  /// The deck is built for the day: a controller that loaded it on an
+  /// earlier day loads it again on its next start.
+  bool get daily => false;
+
+  /// Fires when a fresh build of the deck lands after [load] returned, so a
+  /// session already showing it can take the new list.
+  Listenable? get rebuilt => null;
 
   Future<List<ReelCardData>> load();
 }
@@ -75,7 +85,8 @@ class EntriesDeck extends ReelDeck {
 }
 
 /// For You: today's pool (or yesterday's remainder while today's builds),
-/// else the taste pool in code order.
+/// else the taste pool in code order. When today's build lands, [rebuilt]
+/// fires and the session takes it.
 class ForYouDeck extends ReelDeck {
   ForYouDeck({required this.pool, required this.library, required this.candidates, required this.facts});
 
@@ -84,6 +95,7 @@ class ForYouDeck extends ReelDeck {
   final Future<List<PoolCandidate>> Function() candidates;
   final Future<String> Function() facts;
   Future<void>? _building;
+  ({String day, Future<List<PoolCandidate>> list})? _candidates;
 
   @override
   String get id => 'for-you';
@@ -91,13 +103,38 @@ class ForYouDeck extends ReelDeck {
   String get name => 'For You';
   @override
   bool get keepsSeen => false;
+  @override
+  bool get daily => true;
+
+  /// Bumped when today's build has been cached.
+  @override
+  final ValueNotifier<int> rebuilt = ValueNotifier(0);
 
   @override
   Future<List<ReelCardData>> load() async {
     final cached = await pool.cachedPool();
     if (!await pool.hasToday()) _building ??= _buildToday();
     if (cached != null && cached.isNotEmpty) return library.cards(cached);
-    return worthShowing(await library.cards(await pool.codeOrder(await candidates())));
+    return worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
+  }
+
+  /// [candidates], gathered once a day: code order and the build share it.
+  /// A failed gather isn't kept.
+  Future<List<PoolCandidate>> _todaysCandidates() {
+    final day = pool.today();
+    final have = _candidates;
+    if (have != null && have.day == day) return have.list;
+    final list = candidates();
+    _candidates = (day: day, list: list);
+    unawaited(
+      list.then<void>(
+        (_) {},
+        onError: (Object _) {
+          if (identical(_candidates?.list, list)) _candidates = null;
+        },
+      ),
+    );
+    return list;
   }
 
   /// The public's verdict, 0-10: IMDb, else TMDB, RT audience or the Plex
@@ -128,7 +165,8 @@ class ForYouDeck extends ReelDeck {
   /// The first Reel open of the day starts the build; nothing schedules it.
   Future<void> _buildToday() async {
     try {
-      await pool.build(await candidates(), facts: await facts());
+      final built = await pool.build(await _todaysCandidates(), facts: await facts());
+      if (built != null) rebuilt.value++;
     } catch (e) {
       appLogger.w('Reel: For You build failed', error: e);
     } finally {
@@ -318,7 +356,11 @@ Future<String> forYouFacts({required ReelStore store, HistoryBrain? brain, DateT
   } catch (e) {
     appLogger.d('Reel: brain facts unavailable', error: e);
   }
-  final events = await store.events(since: at.subtract(const Duration(days: 30)));
+  // Cards left before their clip played are neutral, not a Reel habit.
+  final events = [
+    for (final e in await store.events(since: at.subtract(const Duration(days: 30))))
+      if (e.action != ReelAction.unplayed.name) e,
+  ];
   if (events.isNotEmpty) {
     int n(ReelAction a) => events.where((e) => e.action == a.name).length;
     lines.add(

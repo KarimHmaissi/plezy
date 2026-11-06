@@ -28,8 +28,10 @@ import 'catalog/home_pins.dart';
 import 'catalog/home_rows.dart';
 import 'catalog/library_watchlist_candidates.dart';
 import 'catalog/trakt_lists_catalog_source.dart';
+import 'companion_remote/phone_mode.dart';
 import 'customisation/customisation_store.dart';
 import 'library_index/library_index.dart';
+import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
 import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
@@ -136,9 +138,15 @@ abstract final class ReelApp {
         return mutateWatchlistMembership(item.kind, plex, add: true);
       },
       onSaved: _seatHomeRow,
+      // A phone on its own data reaches the TV by catching up while
+      // connected; a mirroring phone writes to the TV (or can't write).
+      reachesTvNow: () =>
+          !PhoneMode.isHandheld || Customisation.isMirror || (remote != null && remote.isRemote && remote.isConnected),
       // The phone's feed plays each card in its own page; the TV keeps the
       // native clip core.
       externalClips: !PlatformDetector.isTV(),
+      // The degrade ladder resets only when the app's caches are restored.
+      memoryRestored: MemoryTrimPolicy.instance.restores,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
