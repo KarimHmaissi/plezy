@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// The controller's cursor and its last stop (the pool end card).
+import '../../services/reel/reel_controller.dart';
+
+/// The controller's cursor and its last stop (the pool end card), as pages:
+/// what [ReelController.step] moves and [ReelController.slotAt] reads.
 typedef ReelCursor = ({int index, int last});
 
 /// TV: ↑ / ↓ on the remote, with a held key's repeats coalesced (V2-66).
@@ -20,6 +23,14 @@ class ReelHeldStep {
   /// Longer than a held key's repeat interval (50 ms on Android), so it
   /// fires only when the repeats have stopped without a key up.
   static const Duration defaultSettle = Duration(milliseconds: 300);
+
+  /// [c]'s cursor in pages, null while its deck loads. Tonight's picks
+  /// (V2-38) is a page of its own between two cards, so a card's index in
+  /// the deck is not its page once the decision card is before it.
+  static ReelCursor? cursorOf(ReelController? c) {
+    if (c == null || c.cards == null) return null;
+    return (index: c.page, last: c.slotCount - 1);
+  }
 
   /// The controller's cursor, or null while the deck loads.
   final ReelCursor? Function() cursor;

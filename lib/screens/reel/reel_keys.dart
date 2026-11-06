@@ -7,11 +7,15 @@ import '../../services/settings_service.dart';
 
 /// What a remote's media key does on a Reel card (V2-50).
 enum ReelMediaKeyAction {
-  /// FF / RW and the skip keys: move within the clip.
+  /// RW and the skip keys (and FF where More like this isn't offered):
+  /// move within the clip.
   seek,
 
   /// Next / previous track: the next or previous card, like ↓ / ↑.
   step,
+
+  /// FF: More like this (V2-39), on a card that offers it.
+  moreLike,
 }
 
 /// How far a seek key moves within the clip.
@@ -22,7 +26,10 @@ const Duration reelSeekStep = Duration(seconds: 10);
 /// either family for the same button, so both are taken: the skip keys
 /// ([classifyMediaSeekKey]) seek within the clip, the track keys
 /// ([classifyMediaTrackKey]) move a card, the way a track key moves a song.
-({ReelMediaKeyAction action, int dir})? reelMediaKey(LogicalKeyboardKey key) {
+/// FF itself asks for More like this when the card offers it ([moreLike],
+/// V2-39); RW and the skip keys always seek.
+({ReelMediaKeyAction action, int dir})? reelMediaKey(LogicalKeyboardKey key, {bool moreLike = false}) {
+  if (moreLike && key == LogicalKeyboardKey.mediaFastForward) return (action: ReelMediaKeyAction.moreLike, dir: 1);
   final seek = classifyMediaSeekKey(key);
   if (seek != null) return (action: ReelMediaKeyAction.seek, dir: _sign(seek));
   final track = classifyMediaTrackKey(key);
@@ -36,9 +43,11 @@ int _sign(MediaSeekDirection d) => d == MediaSeekDirection.forward ? 1 : -1;
 enum ReelOkTarget { replay, nextDeck, retry, watch, details }
 
 /// A held clip replays, the pool end moves on a deck and a failed deck
-/// loads again; otherwise OK follows the viewer's choice (D12): Watch, the
-/// default, or Details.
+/// loads again. Tonight's picks (V2-38) always watches the chosen pick: it
+/// is a decision card, and its Details live on the pick. Otherwise OK
+/// follows the viewer's choice (D12): Watch, the default, or Details.
 ReelOkTarget reelOkTarget({required ClipPhase phase, required ReelSlotKind kind, required ReelOkAction okAction}) {
+  if (kind == ReelSlotKind.decide) return ReelOkTarget.watch;
   if (phase == ClipPhase.held) return ReelOkTarget.replay;
   if (kind == ReelSlotKind.poolEnd) return ReelOkTarget.nextDeck;
   if (kind == ReelSlotKind.failed) return ReelOkTarget.retry;

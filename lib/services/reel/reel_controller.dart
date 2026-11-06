@@ -76,6 +76,7 @@ class ReelSlot {
     this.clip,
     this.next,
     this.resolved = false,
+    this.itemMissed = false,
     this.picks = const [],
     this.pick = 0,
   });
@@ -106,6 +107,12 @@ class ReelSlot {
 
   /// The clip ladder ran (a null [clip] then means an AI card).
   final bool resolved;
+
+  /// The last metadata read came back empty or failed, and none is in
+  /// flight: [item] is not on its way (the TV drops its skeleton). The clip
+  /// no longer waits on the metadata (V2-03), so [resolved] says nothing
+  /// about [item].
+  final bool itemMissed;
 
   bool get isAiCard => resolved && clip == null;
 
@@ -291,6 +298,10 @@ class ReelController extends ChangeNotifier {
   /// or empty read is asked again the next time the card is needed.
   final Map<String, Future<void>> _itemLoading = {};
 
+  /// Cards whose last metadata read came back empty or failed, until the
+  /// next read starts ([ReelSlot.itemMissed]).
+  final Set<String> _itemMissed = {};
+
   /// Cards whose clip answer was unknown (a server offline, a failed read):
   /// looked up again when the Reel comes back, never cached as a miss.
   final Set<String> _unknown = {};
@@ -473,6 +484,7 @@ class ReelController extends ChangeNotifier {
       clip: _clip[c.id],
       next: _next[c.id],
       resolved: _resolved.contains(c.id),
+      itemMissed: _itemMissed.contains(c.id),
     );
   }
 
@@ -841,6 +853,8 @@ class ReelController extends ChangeNotifier {
     if (_item.containsKey(c.id)) return Future<void>.value();
     final pending = _itemLoading[c.id];
     if (pending != null) return pending;
+    // Asked again: the item may be on its way after all.
+    if (_itemMissed.remove(c.id) && !_disposed) notifyListeners();
     final read = _readItem(c);
     _itemLoading[c.id] = read;
     unawaited(
@@ -852,14 +866,19 @@ class ReelController extends ChangeNotifier {
   }
 
   Future<void> _readItem(ReelCardData c) async {
+    MediaItem? item;
     try {
-      final item = await _metadata(c);
-      if (item == null || _disposed) return;
-      _item[c.id] = item;
-      notifyListeners();
+      item = await _metadata(c);
     } catch (e) {
       appLogger.d('Reel: card metadata read failed (${e.runtimeType})');
     }
+    if (_disposed) return;
+    if (item == null) {
+      _itemMissed.add(c.id);
+    } else {
+      _item[c.id] = item;
+    }
+    notifyListeners();
   }
 
   /// A card's metadata; a resume card's next episode comes with it.

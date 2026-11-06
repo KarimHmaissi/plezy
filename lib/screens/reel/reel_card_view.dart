@@ -243,7 +243,9 @@ class ReelCardView extends StatelessWidget {
           // block's own logo slot over a skeleton, and the item's info
           // cross-fades in over it in place.
           pendingTitle: slot.card!.title.title,
-          pendingSkeleton: !slot.resolved,
+          // The skeleton stays until the item lands or its read comes back
+          // empty; the clip's answer no longer waits on it (V2-03).
+          pendingSkeleton: !slot.itemMissed,
           quiet: quiet,
           quietFade: quietFade,
         ),

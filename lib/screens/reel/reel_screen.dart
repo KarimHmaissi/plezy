@@ -114,13 +114,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _sheetOpen = false;
 
   /// TV: ↑ / ↓ with a held key's repeats coalesced into one landing (V2-66).
-  late final ReelHeldStep _held = ReelHeldStep(
-    cursor: () {
-      final c = _controller, list = c?.cards;
-      return c == null || list == null ? null : (index: c.index, last: list.length);
-    },
-    step: _stepBy,
-  );
+  late final ReelHeldStep _held = ReelHeldStep(cursor: () => ReelHeldStep.cursorOf(_controller), step: _stepBy);
 
   /// TV: quiet mode, the hint rule and the pause feedback (V2-28).
   final ReelLeanBack _leanBack = ReelLeanBack();
@@ -576,19 +570,17 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       unawaited(_transport(c, transport));
       return KeyEventResult.handled;
     }
-    // FF = More like this (V2-39) where it is offered; a held key asks once.
-    if (key == LogicalKeyboardKey.mediaFastForward && c.canMoreLike) {
-      if (event is KeyDownEvent) unawaited(c.moreLikeThis());
-      return KeyEventResult.handled;
-    }
     // V2-50: every skip key seeks within the clip, every track key moves a
-    // card. A held track key moves one card, not one per repeat.
-    if (reelMediaKey(key) case (:final action, :final dir)) {
+    // card; FF asks for More like this where it is offered (V2-39). A held
+    // track key moves one card, and a held FF asks once.
+    if (reelMediaKey(key, moreLike: c.canMoreLike) case (:final action, :final dir)) {
       switch (action) {
         case ReelMediaKeyAction.seek:
           unawaited(c.clips.seekBy(reelSeekStep * dir));
         case ReelMediaKeyAction.step:
           if (event is KeyDownEvent) _stepBy(dir, 1);
+        case ReelMediaKeyAction.moreLike:
+          if (event is KeyDownEvent) unawaited(c.moreLikeThis());
       }
       return KeyEventResult.handled;
     }

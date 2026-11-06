@@ -1091,6 +1091,27 @@ void main() {
       c.dispose();
     });
 
+    test("a held ↓ on the TV (V2-66) counts in pages: the decision card is one, and the end is the last", () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+      );
+      expect(ReelHeldStep.cursorOf(c), isNull, reason: 'no deck yet');
+      await c.start();
+      await c.save();
+      await c.step(1);
+      await c.save();
+      expect(pages(c), ['t1', 't2', 'decide', 't3', 't4', 'poolEnd']);
+      await c.step(1);
+      await c.step(1);
+      expect(c.current.card?.id, 't3');
+      final at = ReelHeldStep.cursorOf(c)!;
+      expect(c.slotAt(at.index).card?.id, 't3', reason: 'the preview starts on the card that shows');
+      expect(c.slotAt(at.last).kind, ReelSlotKind.poolEnd);
+      c.dispose();
+    });
+
     test('at most once a session: a third Save after it was seen places nothing new', () async {
       final c = make(
         decks: [

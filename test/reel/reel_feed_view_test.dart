@@ -35,17 +35,23 @@ class _Servers implements ReelServers {
   /// Titles with no extras: they end as AI cards.
   final Set<String> bare = {};
 
+  /// When set, the clip lookups wait for it (V2-26: a clip found late).
+  Completer<void>? gate;
+
   @override
-  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async => [
-    if (!bare.contains(ratingKey))
-      PlexExtraClip(
-        ratingKey: 'x$ratingKey',
-        title: 'Trailer',
-        partKey: '/iva/$ratingKey.mp4',
-        subtype: 'trailer',
-        index: 0,
-      ),
-  ];
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
+    await gate?.future;
+    return [
+      if (!bare.contains(ratingKey))
+        PlexExtraClip(
+          ratingKey: 'x$ratingKey',
+          title: 'Trailer',
+          partKey: '/iva/$ratingKey.mp4',
+          subtype: 'trailer',
+          index: 0,
+        ),
+    ];
+  }
 
   @override
   String? clipUrl(String serverId, String partKey) => 'https://cdn.example$partKey';
@@ -560,9 +566,12 @@ void main() {
   });
 
   group('metadata landing late (V2-26)', () {
-    /// The feed with every item held back until the gate opens.
-    Future<void> pumpGated(WidgetTester tester, {bool reduceMotion = false}) async {
+    /// The feed with every item held back until the gate opens; with
+    /// [clipLate], the clip lookups too (the clip no longer waits on the
+    /// metadata, V2-03, so each can land on its own).
+    Future<void> pumpGated(WidgetTester tester, {bool reduceMotion = false, bool clipLate = false}) async {
       media.gate = Completer<void>();
+      if (clipLate) servers.gate = Completer<void>();
       tester.view.physicalSize = const Size(420, 860);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -596,19 +605,34 @@ void main() {
 
     Future<void> land(WidgetTester tester) async {
       media.gate!.complete();
+      servers.gate?.complete();
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       expect(c.current.item, isNotNull);
       await tester.pump();
     }
 
     Finder line() => find.byType(ReelMetadataLine).first;
+    Finder block() => find.ancestor(of: find.text('Title 1'), matching: find.byType(AnimatedSize)).first;
 
-    testWidgets('the title stays put: the facts line keeps its height and the block grows by gliding', (tester) async {
+    testWidgets('the title stays put: the facts line keeps its height when the metadata lands', (tester) async {
       await pumpGated(tester);
-      Finder block() => find.ancestor(of: find.text('Title 1'), matching: find.byType(AnimatedSize)).first;
       final lineHeight = tester.getSize(line()).height;
       expect(lineHeight, greaterThan(0), reason: 'the line is reserved before anything is known');
       expect(find.text('PG'), findsNothing);
+      final title = tester.getRect(find.text('Title 1'));
+      final blockTop = tester.getRect(block()).top;
+
+      await land(tester);
+      expect(find.text('PG'), findsOneWidget);
+      expect(tester.getRect(find.text('Title 1')).topLeft, title.topLeft);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.text('Title 1')).topLeft, title.topLeft);
+      expect(tester.getRect(block()).top, closeTo(blockTop, 0.5), reason: 'nothing above the title changed');
+      expect(tester.getSize(line()).height, closeTo(lineHeight, 0.5));
+    });
+
+    testWidgets('a clip found late grows the block by gliding, and the title stays put', (tester) async {
+      await pumpGated(tester, clipLate: true);
       final title = tester.getRect(find.text('Title 1'));
       final blockTop = tester.getRect(block()).top;
 
@@ -618,7 +642,6 @@ void main() {
       expect(grow.curve, MonoMotion.standard);
 
       await land(tester);
-      expect(find.text('PG'), findsOneWidget);
       expect(tester.getRect(find.text('Title 1')).topLeft, title.topLeft);
       // The clip chip arrives above the title: the block's top glides up.
       await tester.pump(const Duration(milliseconds: 80));
@@ -630,11 +653,10 @@ void main() {
       expect(mid, lessThan(blockTop));
       expect(mid, greaterThan(settled), reason: 'part of the way, not a jump');
       expect(tester.getRect(find.text('Title 1')).topLeft, title.topLeft);
-      expect(tester.getSize(line()).height, closeTo(lineHeight, 0.5));
     });
 
     testWidgets('with animations off the block changes at once', (tester) async {
-      await pumpGated(tester, reduceMotion: true);
+      await pumpGated(tester, reduceMotion: true, clipLate: true);
       expect(find.ancestor(of: find.text('Title 1'), matching: find.byType(AnimatedSize)), findsNothing);
       await land(tester);
       await tester.pump();

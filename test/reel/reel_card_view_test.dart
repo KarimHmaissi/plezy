@@ -187,7 +187,13 @@ Future<Map<int, Map<String, dynamic>>> _animeThemes(List<int> ids) async => {
           {
             'episodes': '1-12',
             'videos': [
-              {'id': 9, 'link': 'https://v.animethemes.moe/Show-OP1.webm', 'nc': true, 'resolution': 1080},
+              {
+                'id': 9,
+                'link': 'https://v.animethemes.moe/Show-OP1.webm',
+                'nc': true,
+                'resolution': 1080,
+                'overlap': 'NONE',
+              },
             ],
           },
         ],
