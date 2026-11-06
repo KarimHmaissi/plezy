@@ -89,8 +89,9 @@ class ExoClipEngine implements ClipEngine {
   final PlayerAndroid _p;
   final ValueListenable<int> _volume;
 
-  /// The level last asked for, before [ReelVolume.scale].
-  double _asked = 100;
+  /// The level last asked for, before [ReelVolume.scale]: silence until the
+  /// first ask, so a Reel volume change before it sends nothing audible.
+  double _asked = 0;
 
   void _onVolume() => unawaited(_p.setVolume(ReelVolume.scale(_asked, _volume.value)));
 
