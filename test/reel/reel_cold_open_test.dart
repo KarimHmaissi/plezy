@@ -23,6 +23,7 @@ import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart' show ReelCellular;
 import 'package:plezy/utils/app_logger.dart';
 
+import '../test_helpers/reel_link.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 /// The Reel's cold open (plan V2-04): the clip core warmed alongside the
@@ -211,6 +212,8 @@ void main() {
       store: store,
       aniList: (_) async => null,
       animeThemes: (_) async => const {},
+      // The link is the playback profile's, the one the data budget reads.
+      profile: metered == null ? null : FakeLinkProfile(metered),
     ),
     clips: ClipPlayer(
       engine: () {
@@ -229,7 +232,6 @@ void main() {
     moreDecks: moreDecks,
     clock: clock,
     cellular: cellular,
-    metered: metered,
     deckFor: deckFor,
     keepCursor: keepCursor,
   );
@@ -292,6 +294,17 @@ void main() {
           d,
         ),
         0,
+      );
+      // The link is the playback profile's, the one the data budget reads:
+      // the same pref on Wi-Fi warms.
+      d = gated();
+      expect(
+        await enginesAtStart(
+          make(decks: [d], warm: true, cellular: () => ReelCellular.stillsOnly, metered: () => false),
+          d,
+        ),
+        1,
+        reason: 'Stills only applies on mobile data only',
       );
     });
 
