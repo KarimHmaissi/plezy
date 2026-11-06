@@ -227,8 +227,9 @@ void main() {
     ], budget: budget);
     expect(perf.frames, 3);
     expect(perf.framesOver, 2);
-    // 20 ms misses one vsync, 40 ms misses two.
-    expect(perf.framesDropped, 3);
+    // Pipelined: 9 + 9 ms over a 20 ms span misses nothing; a 30 ms build
+    // misses one vsync.
+    expect(perf.framesDropped, 1);
     expect(perf.frameP95, 36);
 
     perf.markResolved();

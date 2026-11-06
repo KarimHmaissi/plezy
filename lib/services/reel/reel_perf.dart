@@ -366,7 +366,12 @@ class ReelPerf extends ChangeNotifier {
   }
 
   /// Frames over budget: build + raster past one vsync (the §6 figure).
-  /// Dropped: vsyncs missed, estimated from each frame's total span.
+  /// Dropped: vsyncs missed, estimated from the slower of the UI and raster
+  /// threads. They run pipelined, so a long total span is latency, not a
+  /// missed vsync (see [SchedulerBinding.addTimingsCallback]).
+  ///
+  /// The overlay reads these on its own 1 s tick: notifying here would
+  /// rebuild it per batch, and each rebuild is a frame of its own.
   @visibleForTesting
   void onFrames(List<FrameTiming> timings, {Duration? budget}) {
     final b = (budget ?? _budget).inMicroseconds;
@@ -376,7 +381,8 @@ class ReelPerf extends ChangeNotifier {
       final over = cost > b;
       frames++;
       if (over) framesOver++;
-      framesDropped += math.max(0, (t.totalSpan.inMicroseconds / b).ceil() - 1);
+      final slowest = math.max(t.buildDuration.inMicroseconds, t.rasterDuration.inMicroseconds);
+      framesDropped += math.max(0, (slowest / b).ceil() - 1);
       _frameMs.add(costMs);
       if (_frameMs.length > keepFrames) _frameMs.removeAt(0);
       final p = _pending;
@@ -386,7 +392,6 @@ class ReelPerf extends ChangeNotifier {
         if (costMs > p.worst) p.worst = costMs;
       }
     }
-    if (overlay.value) notifyListeners();
   }
 
   /// The 95th percentile build + raster time of the recent frames.

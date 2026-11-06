@@ -36,7 +36,7 @@ class ReelDebugOverlay extends StatefulWidget {
 }
 
 class _ReelDebugOverlayState extends State<ReelDebugOverlay> {
-  /// RSS and the image cache move without a card change.
+  /// RSS, the image cache and the frame counts move without a card change.
   Timer? _tick;
 
   @override
