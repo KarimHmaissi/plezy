@@ -12,6 +12,7 @@ import '../../mixins/refreshable.dart';
 import '../../navigation/navigation_tabs.dart';
 import '../../mixins/tab_visibility_aware.dart';
 import '../../providers/companion_remote_provider.dart';
+import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_perf.dart';
@@ -53,10 +54,17 @@ class ReelScreen extends StatefulWidget {
   /// The showing Reel's session (the measure-day probe reads its card).
   static ReelController? get liveController => _live?._controller;
 
-  /// Memory pressure (main.dart): the showing Reel steps down its ladder.
-  static void trimMemory({bool severe = false}) {
+  /// The system's memory pressure (main.dart): the showing Reel steps down
+  /// its ladder.
+  static void trimMemory() {
     final c = _live?._controller;
-    if (c != null && c.active) unawaited(c.trimMemory(severe: severe));
+    if (c != null && c.active) unawaited(c.trimMemory());
+  }
+
+  /// One RSS watchdog tier (main.dart): halved is level 1, cleared level 2.
+  static void trimForWatchdog(WatchdogTrim trim) {
+    final c = _live?._controller;
+    if (c != null && c.active) unawaited(c.trimForWatchdog(trim));
   }
 
   /// On TV mode (host side): `reelStep` from the phone.

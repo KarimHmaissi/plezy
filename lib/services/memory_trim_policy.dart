@@ -91,6 +91,11 @@ class MemoryTrimPolicy {
   int _overThresholdTicks = 0;
   Timer? _restoreTimer;
   Timer? _stepDownTimer;
+  final ValueNotifier<int> _restores = ValueNotifier(0);
+
+  /// Ticks each time both caches go back to the tier sizes (resume, or a
+  /// settled cooldown): the all-clear the Reel's degrade ladder waits for.
+  ValueListenable<int> get restores => _restores;
 
   /// Listens for PlezyActivity's trim levels. Only Android sends them.
   void attachChannel() => channel.setMethodCallHandler(handleChannelCall);
@@ -198,6 +203,7 @@ class MemoryTrimPolicy {
     if (restoredImage || restoredSkia) {
       appLogger.i('$_tag $reason: restored tier sizes (image ${tier >> 20}MB${restoredSkia ? ', skia' : ''})');
     }
+    _restores.value++;
   }
 
   void dispose() {

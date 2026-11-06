@@ -114,6 +114,21 @@ void main() {
       });
     });
 
+    test('signals a restore only once RSS has settled, for the Reel ladder', () {
+      fakeAsync((async) {
+        final policy = newPolicy();
+        policy.onWatchdogTick(overThreshold: true);
+        policy.onWatchdogTick(overThreshold: true);
+        async.elapse(MemoryTrimPolicy.restoreCooldown * 2);
+        expect(policy.restores.value, 0, reason: 'still over the threshold');
+
+        policy.onWatchdogTick(overThreshold: false);
+        async.elapse(MemoryTrimPolicy.restoreCooldown);
+        expect(policy.restores.value, 1);
+        policy.dispose();
+      });
+    });
+
     test('leaves an already small cache alone', () {
       fakeAsync((async) {
         final policy = newPolicy();
@@ -223,6 +238,18 @@ void main() {
         expect(cache.maximumSizeBytes, imageTier ~/ 2);
         async.elapse(MemoryTrimPolicy.restoreCooldown);
         expect(cache.maximumSizeBytes, imageTier);
+        policy.dispose();
+      });
+    });
+
+    test('a resume after a pause signals a restore', () {
+      fakeAsync((async) {
+        final policy = newPolicy()..onBackgrounded();
+        policy.onMemoryPressure();
+        async.elapse(MemoryTrimPolicy.restoreCooldown * 2);
+        expect(policy.restores.value, 0, reason: 'the cooldown restore waits for resume');
+        policy.onResumed();
+        expect(policy.restores.value, 1);
         policy.dispose();
       });
     });

@@ -7,6 +7,7 @@ import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/screens/reel/reel_feed_view.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
+import 'package:plezy/services/memory_trim_policy.dart';
 import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
@@ -37,8 +38,13 @@ class _Servers implements ReelServers {
 
 class _Media implements ReelMedia {
   @override
-  Future<MediaItem?> item(String serverId, String ratingKey) async =>
-      MediaItem(id: ratingKey, backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Title $ratingKey', year: 2020);
+  Future<MediaItem?> item(String serverId, String ratingKey) async => MediaItem(
+    id: ratingKey,
+    backend: MediaBackend.plex,
+    kind: MediaKind.movie,
+    title: 'Title $ratingKey',
+    year: 2020,
+  );
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
@@ -131,6 +137,7 @@ void main() {
   late ReelFeedPlayers players;
   late List<MediaItem> opened;
   late int decksOpened, watched, sheets;
+  late ValueNotifier<int> restored;
 
   setUp(() {
     db = ForkDatabase.memory();
@@ -138,6 +145,7 @@ void main() {
     final store = ReelStore(database: () async => db, settings: () async => settings);
     opened = [];
     decksOpened = watched = sheets = 0;
+    restored = ValueNotifier(0);
     c = ReelController(
       decks: [
         _Deck('a', ['1', '2', '3', '4']),
@@ -155,6 +163,7 @@ void main() {
       onWatch: (_, {required onTv}) async => true,
       addToWatchlist: (_) async => true,
       externalClips: true,
+      memoryRestored: restored,
       onOpen: (item) async => opened.add(item),
     );
     players = ReelFeedPlayers(create: (_) => _Video());
@@ -163,6 +172,7 @@ void main() {
   tearDown(() async {
     c.dispose();
     players.dispose();
+    restored.dispose();
     await db.close();
   });
 
@@ -207,6 +217,28 @@ void main() {
     await pump(tester);
     expect(players.current, 't1');
     expect(players.held, containsAll(['t1', 't2']));
+  });
+
+  testWidgets('a halved watchdog tick shrinks the feed to the card on screen until restore', (tester) async {
+    await pump(tester);
+    expect(players.held, containsAll(['t1', 't2']));
+    await tester.runAsync(() => c.trimForWatchdog(WatchdogTrim.halved));
+    await tester.pump();
+    expect(players.held, ['t1']);
+    expect(players.current, 't1');
+
+    restored.value++;
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(players.held, containsAll(['t1', 't2']));
+  });
+
+  testWidgets('a cleared watchdog tick leaves the feed on stills', (tester) async {
+    await pump(tester);
+    await tester.runAsync(() => c.trimForWatchdog(WatchdogTrim.cleared));
+    await tester.pump();
+    expect(players.held, isEmpty);
+    expect(find.text('Title 1'), findsOneWidget);
   });
 
   testWidgets('swiping up moves to the next card and its parked player', (tester) async {

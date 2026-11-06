@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
 import '../customisation/mirror_store.dart';
+import '../memory_trim_policy.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
 import 'reel_decks.dart';
@@ -66,9 +67,11 @@ class ReelController extends ChangeNotifier {
     this.deckFor,
     this.onOpen,
     this.externalClips = false,
+    this.memoryRestored,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
+    memoryRestored?.addListener(_onMemoryRestored);
   }
 
   final List<ReelDeck> decks;
@@ -97,6 +100,11 @@ class ReelController extends ChangeNotifier {
   /// you swipe through, a card that jumps away under your thumb is worse
   /// than a still.
   final bool externalClips;
+
+  /// Fires when the app's memory policy puts its caches back to the device
+  /// tier (`MemoryTrimPolicy.restores`): the only thing that brings the
+  /// degrade ladder back to 0.
+  final Listenable? memoryRestored;
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -185,10 +193,8 @@ class ReelController extends ChangeNotifier {
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
     _active = true;
-    // Each visit starts at the top of the degrade ladder: pressure from an
-    // earlier visit (or while the Reel was hidden) has usually passed, and a
-    // fresh callback steps it down again.
-    memoryLevel = 0;
+    // The degrade ladder carries over: coming back from Watch or another tab
+    // says nothing about memory. Only the policy's restore resets it.
     if (deckId != null) {
       final i = await _deckIndex(deckId);
       if (i >= 0) _deck = i;
@@ -578,25 +584,53 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The On TV state the TV broadcasts on every card change.
-  /// How hard the system has asked for memory back this session (the
-  /// degrade ladder): 1 drops the preload, 2 releases the clip core and
-  /// shows stills.
+  /// How hard the system has asked for memory back (the degrade ladder):
+  /// 1 keeps only the card on screen (TV: the preload is dropped; phone: the
+  /// feed shrinks to the on-screen player), 2 releases every clip player
+  /// and shows stills. It holds across visits until the memory policy
+  /// restores ([memoryRestored]).
   int memoryLevel = 0;
 
-  Future<void> trimMemory({bool severe = false}) async {
-    memoryLevel = severe ? 2 : (memoryLevel + 1).clamp(0, 2);
+  /// The system's memory-pressure callback: one step down the ladder.
+  Future<void> trimMemory() => _trimTo(memoryLevel + 1);
+
+  /// One RSS watchdog tick ([MemoryTrimPolicy.onWatchdogTick]). From API 34
+  /// a foreground app gets no RUNNING_* trim levels, so on the phone this is
+  /// the ladder's main way down: a halved image cache is level 1, a cleared
+  /// one level 2.
+  Future<void> trimForWatchdog(WatchdogTrim trim) => switch (trim) {
+    WatchdogTrim.none => Future<void>.value(),
+    WatchdogTrim.halved => _trimTo(1),
+    WatchdogTrim.cleared => _trimTo(2),
+  };
+
+  /// Steps down to [level]; the ladder never climbs back here.
+  Future<void> _trimTo(int level) async {
+    final to = level.clamp(0, 2);
+    if (to <= memoryLevel) return;
+    memoryLevel = to;
     appLogger.w('Reel: memory pressure, level $memoryLevel');
-    if (memoryLevel == 1) {
-      await clips.dropPreload();
+    if (to == 1) {
+      if (!externalClips) await clips.dropPreload();
     } else {
       await clips.release();
       _firstClip = true;
-      notifyListeners();
     }
+    // The phone feed re-syncs its players to the new level.
+    notifyListeners();
   }
 
-  /// What the Fold's On TV mode shows (`reelState`). Image paths only: the
+  /// The policy is back at the device tier: clips and the preload come back
+  /// from the next card on (the card on screen keeps its still).
+  void _onMemoryRestored() {
+    if (memoryLevel == 0 || _disposed) return;
+    appLogger.i('Reel: memory restored, ladder back to 0 from $memoryLevel');
+    memoryLevel = 0;
+    notifyListeners();
+  }
+
+  /// The On TV state the TV broadcasts on every card change: what the
+  /// Fold's On TV mode shows (`reelState`). Image paths only: the
   /// phone loads them through its own server connection.
   Map<String, Object?> remoteState() {
     final s = current;
@@ -642,6 +676,7 @@ class ReelController extends ChangeNotifier {
     _active = false;
     _generation++;
     clips.phase.removeListener(_onPhase);
+    memoryRestored?.removeListener(_onMemoryRestored);
     _stripTimer?.cancel();
     _toastTimer?.cancel();
     deckStrip.dispose();

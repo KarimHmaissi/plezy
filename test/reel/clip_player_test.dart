@@ -19,11 +19,17 @@ class FakeClipEngine implements ClipEngine {
   bool disposed = false;
   Completer<void>? disposeGate;
 
+  /// Holds every open until completed (a slow, or never-finishing, open).
+  Completer<void>? openGate;
+
   @override
   Player get player => throw UnimplementedError();
 
   @override
-  Future<void> open(String uri) async => calls.add('open $uri');
+  Future<void> open(String uri) async {
+    calls.add('open $uri');
+    await openGate?.future;
+  }
 
   @override
   Future<void> preload(String uri) async => calls.add('preload $uri');

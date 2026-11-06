@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/mpv/models.dart';
@@ -13,6 +14,7 @@ import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/customisation/mirror_store.dart';
+import 'package:plezy/services/memory_trim_policy.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
@@ -151,6 +153,7 @@ void main() {
     ReelWatch? onWatch,
     ReelWatchlist? addToWatchlist,
     bool Function()? reachesTvNow,
+    Listenable? memoryRestored,
   }) => ReelController(
     decks:
         decks ??
@@ -176,6 +179,7 @@ void main() {
     onSaved: () async => seated++,
     reachesTvNow: reachesTvNow,
     externalClips: externalClips,
+    memoryRestored: memoryRestored,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -332,18 +336,97 @@ void main() {
     c.dispose();
   });
 
-  test('a new visit starts with clips again after memory pressure', () async {
-    final c = make();
+  test('the ladder holds across visits until the memory policy restores', () async {
+    final restored = ValueNotifier(0);
+    final c = make(memoryRestored: restored);
     await c.start();
-    await c.trimMemory(severe: true);
+    await c.trimMemory();
+    await c.trimMemory();
     expect(c.memoryLevel, 2);
     await c.suspend();
     final made = engines;
     await c.start();
     await Future<void>.delayed(Duration.zero);
+    expect(c.memoryLevel, 2, reason: 'coming back says nothing about memory');
+    expect(engines, made, reason: 'still stills only');
+
+    var told = 0;
+    c.addListener(() => told++);
+    restored.value++;
     expect(c.memoryLevel, 0);
+    expect(told, 1);
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
     expect(engines, greaterThan(made), reason: 'the clip core is rebuilt');
     expect(engine.calls.where((x) => x.startsWith('open ')), isNotEmpty);
+    expect(engine.calls.where((x) => x.startsWith('preload ')), isNotEmpty);
+    c.dispose();
+    restored.value++;
+    restored.dispose();
+  });
+
+  test('the watchdog tiers map to the ladder: halved is 1, cleared is 2', () async {
+    final c = make();
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final first = engine;
+    await c.trimForWatchdog(WatchdogTrim.none);
+    expect(c.memoryLevel, 0);
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 1);
+    expect(first.calls.last, 'clearPreloads');
+    expect(first.disposed, isFalse, reason: 'level 1 keeps the card on screen playing');
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 1, reason: 'a second halving tick is not a second step');
+    await c.trimMemory();
+    expect(c.memoryLevel, 2);
+    expect(first.disposed, isTrue);
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 2, reason: 'the ladder never climbs back on a trim');
+    c.dispose();
+  });
+
+  test('a cleared watchdog tick goes straight to stills', () async {
+    final c = make();
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    await c.trimForWatchdog(WatchdogTrim.cleared);
+    expect(c.memoryLevel, 2);
+    expect(engine.disposed, isTrue);
+    c.dispose();
+  });
+
+  test('level 1 tells the views, so the phone feed can shrink', () async {
+    final c = make(externalClips: true);
+    await c.start();
+    var told = 0;
+    c.addListener(() => told++);
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(c.memoryLevel, 1);
+    expect(told, 1);
+    expect(engines, 0, reason: 'the phone has no clip core to trim');
+    await c.trimForWatchdog(WatchdogTrim.halved);
+    expect(told, 1, reason: 'nothing changed, nothing to redraw');
+    c.dispose();
+  });
+
+  test('trims and suspend do not wait for an open that never finishes', () async {
+    final c = make();
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    // The next card's open hangs (a stalled server), so its step never returns.
+    final core = engine..openGate = Completer<void>();
+    unawaited(c.step(1));
+    bool opening() => core.calls.any((x) => x.startsWith('open ') && x.endsWith('/2/video.mp4'));
+    // The outgoing clip fades out first.
+    for (var i = 0; i < 50 && !opening(); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(opening(), isTrue);
+    await c.trimForWatchdog(WatchdogTrim.cleared).timeout(const Duration(seconds: 1));
+    expect(core.disposed, isTrue);
+    await c.suspend().timeout(const Duration(seconds: 1));
+    expect(c.active, isFalse);
     c.dispose();
   });
 
