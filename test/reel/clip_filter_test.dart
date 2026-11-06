@@ -2,13 +2,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/reel_playback_profile.dart';
 
-PlexExtraClip _x(String title, {int i = 0, String subtype = 'trailer'}) => PlexExtraClip(
+PlexExtraClip _x(String title, {int i = 0, String subtype = 'trailer', int? seconds}) => PlexExtraClip(
   ratingKey: 'k$i',
   title: title,
   partKey: '/services/iva/assets/$i/video.mp4',
   subtype: subtype,
+  durationMs: seconds == null ? null : seconds * 1000,
   index: i,
 );
+
+Map<String, dynamic> _tmdb(
+  String name, {
+  String type = 'Trailer',
+  bool official = true,
+  String lang = 'en',
+  int size = 1080,
+  String published = '2024-03-01T10:00:00.000Z',
+  String site = 'YouTube',
+  String? key,
+}) => {
+  'iso_639_1': lang,
+  'iso_3166_1': 'US',
+  'name': name,
+  'key': key ?? 'yt-${name.hashCode.abs()}',
+  'site': site,
+  'size': size,
+  'type': type,
+  'official': official,
+  'published_at': published,
+  'id': 'v${name.hashCode.abs()}',
+};
 
 void main() {
   group('films', () {
@@ -78,6 +101,152 @@ void main() {
 
     test('a show-named trailer with a suffix still passes', () {
       expect(ClipFilter.showTrailer([_x('The Show: Official Trailer')], showTitle: 'The Show')?.title, isNotNull);
+    });
+  });
+
+  group('length tie-break', () {
+    test('among equal trailers, the one closest to 60-180 s wins over the earlier one', () {
+      final pick = ClipFilter.filmTrailer([
+        _x('Official Trailer', i: 0, seconds: 25),
+        _x('Trailer', i: 1, seconds: 140),
+        _x('Trailer', i: 2, seconds: 300),
+      ]);
+      expect(pick?.ratingKey, 'k1');
+    });
+
+    test('it only orders: a teaser still beats a trailer of a better length', () {
+      final pick = ClipFilter.filmTrailer([
+        _x('Official Trailer', i: 0, seconds: 120),
+        _x('Teaser', i: 1, seconds: 20),
+      ]);
+      expect(pick?.title, 'Teaser');
+    });
+
+    test('nothing is dropped for its length', () {
+      expect(ClipFilter.filmTrailer([_x('Official Trailer', seconds: 900)])?.title, 'Official Trailer');
+      expect(ClipFilter.showTrailer([_x('Teaser', seconds: 8)], showTitle: 'Harbor Lights')?.title, 'Teaser');
+    });
+
+    test('outside the window, the shorter gap wins', () {
+      final pick = ClipFilter.filmTrailer([_x('Trailer', i: 0, seconds: 200), _x('Trailer', i: 1, seconds: 45)]);
+      expect(pick?.ratingKey, 'k1', reason: '15 s short of the window beats 20 s over it');
+    });
+
+    test('a known length in the window beats an unknown one, which beats one outside it', () {
+      expect(ClipFilter.filmTrailer([_x('Trailer', i: 0), _x('Trailer', i: 1, seconds: 90)])?.ratingKey, 'k1');
+      expect(ClipFilter.filmTrailer([_x('Trailer', i: 0, seconds: 400), _x('Trailer', i: 1)])?.ratingKey, 'k1');
+      expect(
+        ClipFilter.filmTrailer([_x('Trailer', i: 0, seconds: 70), _x('Trailer', i: 1, seconds: 170)])?.ratingKey,
+        'k0',
+      );
+    });
+
+    test('show teasers are ordered by length too', () {
+      final pick = ClipFilter.showTrailer([
+        _x('Teaser', i: 0, seconds: 15),
+        _x('Harbor Lights Teaser', i: 1, seconds: 75),
+        _x('Official Trailer', i: 2, seconds: 120),
+      ], showTitle: 'Harbor Lights');
+      expect(pick?.ratingKey, 'k1');
+    });
+
+    test('the gap is measured to the nearer edge of the window', () {
+      expect(ClipFilter.durationGapMs(null), 0);
+      expect(ClipFilter.durationGapMs(60000), 0);
+      expect(ClipFilter.durationGapMs(180000), 0);
+      expect(ClipFilter.durationGapMs(45000), 15000);
+      expect(ClipFilter.durationGapMs(200000), 20000);
+    });
+  });
+
+  group('TMDB rung rules', () {
+    test('official YouTube trailers only; clips, featurettes and other sites are never picked', () {
+      expect(
+        ClipFilter.tmdbTrailer([
+          _tmdb('Fan Trailer', official: false),
+          _tmdb('Opening Clip', type: 'Clip'),
+          _tmdb('Making Of', type: 'Featurette'),
+          _tmdb('Official Trailer', site: 'Vimeo'),
+        ], language: 'en'),
+        isNull,
+      );
+    });
+
+    test('a Trailer beats a Teaser', () {
+      final pick = ClipFilter.tmdbTrailer([
+        _tmdb('Teaser', type: 'Teaser', published: '2023-01-01T00:00:00.000Z'),
+        _tmdb('Official Trailer'),
+      ], language: 'en');
+      expect(pick?.name, 'Official Trailer');
+      expect(pick?.type, 'Trailer');
+    });
+
+    test('a Teaser is played when there is no Trailer', () {
+      expect(ClipFilter.tmdbTrailer([_tmdb('Teaser', type: 'Teaser')], language: 'en')?.type, 'Teaser');
+    });
+
+    test("the locale's language first, then any other", () {
+      final rows = [
+        _tmdb('Trailer (Japanese)', lang: 'ja', published: '2023-01-01T00:00:00.000Z'),
+        _tmdb('Official Trailer', lang: 'en'),
+      ];
+      expect(ClipFilter.tmdbTrailer(rows, language: 'en')?.language, 'en');
+      expect(ClipFilter.tmdbTrailer(rows, language: 'EN')?.language, 'en');
+      expect(ClipFilter.tmdbTrailer(rows, language: 'fr')?.language, 'ja', reason: 'earliest when none match');
+    });
+
+    test('the earliest published_at wins among equals', () {
+      final pick = ClipFilter.tmdbTrailer([
+        _tmdb('Official Trailer', key: 'late', published: '2024-06-01T00:00:00.000Z'),
+        _tmdb('Official Trailer', key: 'early', published: '2024-02-01T00:00:00.000Z'),
+        _tmdb('Official Trailer', key: 'undated', published: ''),
+      ], language: 'en');
+      expect(pick?.key, 'early');
+    });
+
+    test('a minimum size drops smaller uploads only when asked', () {
+      final rows = [
+        _tmdb('Official Trailer', key: 'small', size: 720, published: '2023-01-01T00:00:00.000Z'),
+        _tmdb('Official Trailer', key: 'full', size: 1080),
+      ];
+      expect(ClipFilter.tmdbTrailer(rows, language: 'en')?.key, 'small');
+      expect(ClipFilter.tmdbTrailer(rows, language: 'en', minSize: 1080)?.key, 'full');
+      expect(ClipFilter.tmdbTrailer([rows.first], language: 'en', minSize: 1080), isNull);
+    });
+
+    test('later seasons, final trailers and spots are never picked for a show', () {
+      final pick = ClipFilter.tmdbTrailer(
+        [
+          _tmdb('Season 2 Official Trailer', published: '2020-01-01T00:00:00.000Z'),
+          _tmdb('Final Season Trailer', published: '2020-01-02T00:00:00.000Z'),
+          _tmdb('TV Spot', published: '2020-01-03T00:00:00.000Z'),
+          _tmdb('Harbor Lights | Official Trailer'),
+        ],
+        language: 'en',
+        show: true,
+      );
+      expect(pick?.name, 'Harbor Lights | Official Trailer');
+    });
+
+    test('rows without a key, a type or a map shape are skipped', () {
+      expect(
+        ClipFilter.tmdbTrailer([
+          'not a row',
+          {'site': 'YouTube', 'type': 'Trailer', 'official': true},
+          {'site': 'YouTube', 'key': 'abc', 'official': true},
+        ], language: 'en'),
+        isNull,
+      );
+    });
+
+    test('reads the documented row shape', () {
+      final v = TmdbVideo.fromJson(_tmdb('Official Trailer', key: 'abc123', lang: 'EN', size: 2160), 4);
+      expect(v?.key, 'abc123');
+      expect(v?.language, 'en');
+      expect(v?.size, 2160);
+      expect(v?.official, isTrue);
+      expect(v?.publishedAt, DateTime.utc(2024, 3, 1, 10));
+      expect(v?.index, 4);
     });
   });
 

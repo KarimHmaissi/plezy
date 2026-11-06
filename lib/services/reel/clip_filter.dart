@@ -93,13 +93,14 @@ class ClipFilter {
   static final RegExp _teaser = RegExp(r'\bteaser\b', caseSensitive: false);
   static final RegExp _plainTrailer = RegExp(r'^(official\s+)?(main\s+)?trailer(\s*(#?1|one))?$', caseSensitive: false);
 
-  /// A film's trailer: a Teaser first, then the earliest plain trailer,
-  /// then the earliest trailer that passes the filter.
+  /// A film's trailer: a Teaser first, then a plain trailer, then any
+  /// trailer that passes the filter. Within each, the one whose length is
+  /// closest to [idealMinMs]..[idealMaxMs] wins, then the earliest.
   static PlexExtraClip? filmTrailer(List<PlexExtraClip> extras) {
     final ok = [
       for (final e in extras)
         if (e.isTrailer && !_filmExcluded.hasMatch(e.title) && !_laterSeason.hasMatch(e.title)) e,
-    ]..sort((a, b) => a.index.compareTo(b.index));
+    ]..sort(_byLengthThenIndex);
     return ok.where((e) => _teaser.hasMatch(e.title)).firstOrNull ??
         ok.where((e) => _plainTrailer.hasMatch(e.title.trim())).firstOrNull ??
         ok.firstOrNull;
@@ -107,6 +108,8 @@ class ClipFilter {
 
   /// A show's trailer: only when its title is the show's plain name, a
   /// Teaser, an Official Trailer or season 1, and never a later season.
+  /// A Teaser first; within that, the length closest to
+  /// [idealMinMs]..[idealMaxMs], then the earliest.
   static PlexExtraClip? showTrailer(List<PlexExtraClip> extras, {required String showTitle}) {
     final name = _norm(showTitle);
     bool plain(PlexExtraClip e) {
@@ -123,8 +126,70 @@ class ClipFilter {
     final ok = [
       for (final e in extras)
         if (e.isTrailer && !_showExcluded.hasMatch(e.title) && !_laterSeason.hasMatch(e.title) && plain(e)) e,
-    ]..sort((a, b) => a.index.compareTo(b.index));
+    ]..sort(_byLengthThenIndex);
     return ok.where((e) => _teaser.hasMatch(e.title)).firstOrNull ?? ok.firstOrNull;
+  }
+
+  /// The trailer length the tie-break aims for (plan V2-21): 60 to 180 s.
+  static const int idealMinMs = 60 * 1000;
+  static const int idealMaxMs = 180 * 1000;
+
+  /// How far [durationMs] falls outside [idealMinMs]..[idealMaxMs]; 0 inside
+  /// it, and 0 when the length is unknown.
+  static int durationGapMs(int? durationMs) {
+    if (durationMs == null) return 0;
+    if (durationMs < idealMinMs) return idealMinMs - durationMs;
+    if (durationMs > idealMaxMs) return durationMs - idealMaxMs;
+    return 0;
+  }
+
+  /// Orders extras that otherwise rank equally: the length closest to the
+  /// ideal window first, a known length in the window before an unknown one,
+  /// then the server's order. It only orders; nothing is dropped.
+  static int _byLengthThenIndex(PlexExtraClip a, PlexExtraClip b) {
+    final gap = durationGapMs(a.durationMs).compareTo(durationGapMs(b.durationMs));
+    if (gap != 0) return gap;
+    final known = (a.durationMs == null ? 1 : 0).compareTo(b.durationMs == null ? 1 : 0);
+    if (known != 0) return known;
+    return a.index.compareTo(b.index);
+  }
+
+  /// The trailer the TMDB rung would play (plan V2-21 rules, for V2-63) from
+  /// a `/movie/{id}/videos` or `/tv/{id}/videos` `results` list: YouTube and
+  /// official only, a Trailer before a Teaser, then one in [language] (an
+  /// ISO 639-1 code such as `en`) before others, then the earliest
+  /// `published_at`. [minSize] (such as 1080), when the caller needs it,
+  /// drops anything smaller. The same title rules as the Plex extras apply,
+  /// so a later season, a final trailer or a spot is never picked.
+  static TmdbVideo? tmdbTrailer(List<dynamic> results, {required String language, bool show = false, int? minSize}) {
+    final excluded = show ? _showExcluded : _filmExcluded;
+    final lang = language.toLowerCase();
+    final ok = <TmdbVideo>[];
+    for (var i = 0; i < results.length; i++) {
+      final r = results[i];
+      if (r is! Map) continue;
+      final v = TmdbVideo.fromJson(r.cast<String, dynamic>(), i);
+      if (v == null || !v.official || v.typeRank == null) continue;
+      if (minSize != null && (v.size ?? 0) < minSize) continue;
+      if (excluded.hasMatch(v.name) || _laterSeason.hasMatch(v.name)) continue;
+      ok.add(v);
+    }
+    int byDate(TmdbVideo a, TmdbVideo b) {
+      final x = a.publishedAt, y = b.publishedAt;
+      if (x == null || y == null) return (x == null ? 1 : 0).compareTo(y == null ? 1 : 0);
+      return x.compareTo(y);
+    }
+
+    ok.sort((a, b) {
+      final type = a.typeRank!.compareTo(b.typeRank!);
+      if (type != 0) return type;
+      final inLang = (a.language == lang ? 0 : 1).compareTo(b.language == lang ? 0 : 1);
+      if (inLang != 0) return inLang;
+      final date = byDate(a, b);
+      if (date != 0) return date;
+      return a.index.compareTo(b.index);
+    });
+    return ok.firstOrNull;
   }
 
   static String _norm(String s) =>
@@ -267,4 +332,66 @@ class AnimeOpening implements ReelRendition {
     source: source,
     captions: profile.captions,
   );
+}
+
+/// One row of TMDB's videos `results`, as the TMDB rung reads it.
+class TmdbVideo {
+  const TmdbVideo({
+    required this.key,
+    required this.name,
+    required this.type,
+    this.official = false,
+    this.language,
+    this.size,
+    this.publishedAt,
+    this.index = 0,
+  });
+
+  /// The YouTube video id.
+  final String key;
+  final String name;
+
+  /// `Trailer`, `Teaser`, `Clip`, `Featurette`, …
+  final String type;
+  final bool official;
+
+  /// `iso_639_1`, lower-cased; null when blank.
+  final String? language;
+
+  /// The tallest upload in lines (360, 720, 1080, …).
+  final int? size;
+  final DateTime? publishedAt;
+
+  /// Its place in the response.
+  final int index;
+
+  /// 0 for a Trailer, 1 for a Teaser, null for any other type.
+  int? get typeRank => switch (type) {
+    'Trailer' => 0,
+    'Teaser' => 1,
+    _ => null,
+  };
+
+  /// A row from the response, or null when it is not a YouTube video with a
+  /// key and a type.
+  static TmdbVideo? fromJson(Map<String, dynamic> m, int index) {
+    final key = m['key'];
+    final type = m['type'];
+    if (m['site'] != 'YouTube' || key is! String || key.trim().isEmpty || type is! String) return null;
+    final lang = (m['iso_639_1'] as String?)?.trim().toLowerCase();
+    final published = m['published_at'];
+    return TmdbVideo(
+      key: key.trim(),
+      name: (m['name'] as String?)?.trim() ?? '',
+      type: type,
+      official: m['official'] == true,
+      language: lang == null || lang.isEmpty ? null : lang,
+      size: (m['size'] as num?)?.toInt(),
+      publishedAt: published is String ? DateTime.tryParse(published) : null,
+      index: index,
+    );
+  }
+
+  @override
+  String toString() => 'TmdbVideo($key, "$name", $type)';
 }
