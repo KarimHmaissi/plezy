@@ -103,6 +103,28 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-06
+
+### Straight Facts: honest per-title facts and one trustworthy seen state (recommender v2 §3)
+- New `lib/services/ai/facts/`: the frozen interfaces the Reel and the
+  recommender read. `TitleFacts` (scores with their real source, certificate,
+  Kids-library facts over every copy, length, seen state), `TitleFactsSource`,
+  `TitleMediaSource` / `TitleVideo` (clips and trailers, per title), and the
+  `PickLedger` types the ledger will fill in later.
+- `SeenState` merges the library row with the history brain into one honest
+  state: "watched Oct 2026", "logged as seen (Trakt)", "marked watched
+  (Plex)", "38/62 eps, watching", "1/59 eps, sampled". A title Trakt logged
+  is never called unseen, and "Seen" badges come only from real or logged
+  watches.
+- The brain now keeps where undated plays were logged (`bulkVia`: Trakt
+  import or Plex count with no date). Existing profiles pick it up on the
+  next brain update; until then they read "logged as seen". No re-embedding.
+- Cards built on it never call a score IMDb unless it came from IMDb: an
+  index score whose source isn't known shows as a bare `★`.
+- `IndexTitleFactsSource` builds facts from the index and the brain in one
+  query per batch, with no Plex requests. Nothing uses it yet (the Reel
+  does next).
+
 ## 2026-11-05
 
 ### Watch Next row on the Shield's home works again (A1)
