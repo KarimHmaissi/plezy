@@ -940,6 +940,35 @@ void main() {
       c.dispose();
     });
 
+    test("the old deck's card still opening when the deck changes never starts the hold", () async {
+      final media = _GatedMedia('2');
+      final slow = _SlowDeck('b', [_card('5')])..gate = Completer<void>();
+      final c = make(
+        media: media,
+        decks: [
+          _Deck('a', [_card('1'), _card('2')]),
+          slow,
+        ],
+      )..stripHold = const Duration(milliseconds: 60);
+      await c.start();
+      // ↓ onto a card whose metadata is slow, then → before it shows.
+      final stepping = c.step(1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final switching = c.switchDeck(1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      media.gate.complete();
+      await stepping;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(c.deckStrip.value?.current.id, 'b', reason: 'deck b has not shown yet');
+      slow.gate!.complete();
+      await switching;
+      expect(c.current.card?.id, 't5');
+      expect(c.deckStrip.value?.current.id, 'b');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(c.deckStrip.value, isNull);
+      c.dispose();
+    });
+
     test('the strip names the decks either side', () async {
       final c = make(
         decks: [

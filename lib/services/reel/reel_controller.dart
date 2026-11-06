@@ -202,6 +202,11 @@ class ReelController extends ChangeNotifier {
   /// A strip is up and its deck hasn't shown yet: the hold starts then.
   bool _stripPending = false;
 
+  /// [_generation] when the strip went up: only a [_show] started after it
+  /// is the new deck's, so a card from the deck before that was still
+  /// opening when the deck changed never starts the hold.
+  int _stripSince = 0;
+
   /// How long the strip stays once the deck is on screen.
   static const Duration defaultStripHold = Duration(milliseconds: 1500);
 
@@ -418,6 +423,7 @@ class ReelController extends ChangeNotifier {
     _stripTimer?.cancel();
     _stripTimer = null;
     _stripPending = true;
+    _stripSince = _generation;
     final n = decks.length;
     deckStrip.value = ReelDeckStripState(
       previous: n > 2 ? decks[(_deck - 1 + n) % n] : null,
@@ -427,10 +433,12 @@ class ReelController extends ChangeNotifier {
   }
 
   /// The deck is on screen (its first card, an end or a failure): the strip
-  /// goes [stripHold] from now. Only the latest [_show] counts, so a slow
-  /// deck overtaken by another switch doesn't start the earlier one's hold.
+  /// goes [stripHold] from now. Only the latest [_show] counts, and only
+  /// one started after the deck change, so a slow deck overtaken by another
+  /// switch doesn't start the earlier one's hold, and neither does the old
+  /// deck's card that was still opening when the deck changed.
   void _settleStrip(int gen) {
-    if (_disposed || !_stripPending || gen != _generation) return;
+    if (_disposed || !_stripPending || gen != _generation || gen <= _stripSince) return;
     _stripPending = false;
     _stripTimer?.cancel();
     _stripTimer = Timer(stripHold, () {
