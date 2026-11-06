@@ -92,6 +92,7 @@ abstract final class ReelApp {
     );
     final decks = <ReelDeck>[
       forYou,
+      FitsTonightDeck(forYou: forYou),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.

@@ -18,42 +18,52 @@ import 'package:plezy/services/reel/reel_store.dart';
 
 import '../test_helpers/media_items.dart';
 
-ReelCardData _card(String id, {double? imdb, double? tmdb, double? audience, String? tagline, String? summary}) =>
-    ReelCardData(
-      title: ReelTitle(
-        titleId: id,
-        groupKey: 'g$id',
-        title: 'Title $id',
-        isShow: false,
-        copies: [ReelCopy(serverId: 's1', ratingKey: id)],
-      ),
-      facts: TitleFacts(
-        ref: TitleRef(id: id, groupKey: 'g$id'),
-        seen: SeenState.unseen,
-        imdb: imdb,
-        tmdb: tmdb,
-        audience: audience,
-      ),
-      best: IndexedTitle(
-        id: 's1:$id',
-        serverId: 's1',
-        serverName: 'S',
-        libraryKey: '1',
-        libraryTitle: 'Films',
-        ratingKey: id,
-        type: 'movie',
-        title: 'Title $id',
-        genres: '',
-        countries: '',
-        directors: '',
-        writers: '',
-        cast: '',
-        collections: '',
-        groupKey: 'g$id',
-        summary: summary ?? '',
-        tagline: tagline,
-      ),
-    );
+ReelCardData _card(
+  String id, {
+  double? imdb,
+  double? tmdb,
+  double? audience,
+  String? tagline,
+  String? summary,
+  int? runtime,
+  bool show = false,
+}) => ReelCardData(
+  title: ReelTitle(
+    titleId: id,
+    groupKey: 'g$id',
+    title: 'Title $id',
+    isShow: show,
+    copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+  ),
+  facts: TitleFacts(
+    // A brain show id starts with "s:".
+    ref: TitleRef(id: show ? 's:$id' : id, groupKey: 'g$id'),
+    seen: SeenState.unseen,
+    imdb: imdb,
+    tmdb: tmdb,
+    audience: audience,
+    runtimeMinutes: runtime,
+  ),
+  best: IndexedTitle(
+    id: 's1:$id',
+    serverId: 's1',
+    serverName: 'S',
+    libraryKey: '1',
+    libraryTitle: 'Films',
+    ratingKey: id,
+    type: 'movie',
+    title: 'Title $id',
+    genres: '',
+    countries: '',
+    directors: '',
+    writers: '',
+    cast: '',
+    collections: '',
+    groupKey: 'g$id',
+    summary: summary ?? '',
+    tagline: tagline,
+  ),
+);
 
 class _NoFacts implements TitleFactsSource {
   @override
@@ -65,14 +75,25 @@ class _NoFacts implements TitleFactsSource {
 /// Maps entries straight onto invented cards (card id = rating key), each
 /// with its own words from [texts] when given.
 class _Library extends ReelLibrary {
-  _Library({this.texts = const {}}) : super(database: () => throw UnimplementedError(), facts: _NoFacts());
+  _Library({this.texts = const {}, this.lengths = const {}})
+    : super(database: () => throw UnimplementedError(), facts: _NoFacts());
 
   final Map<String, ({String? tagline, String? summary})> texts;
+
+  /// A title's length in minutes (an episode's for a show).
+  final Map<String, ({int? minutes, bool show})> lengths;
 
   @override
   Future<List<ReelCardData>> cards(List<DeckEntry> entries) async => [
     for (final e in entries)
-      _card(e.ratingKey!, imdb: 7.5, tagline: texts[e.ratingKey]?.tagline, summary: texts[e.ratingKey]?.summary),
+      _card(
+        e.ratingKey!,
+        imdb: 7.5,
+        tagline: texts[e.ratingKey]?.tagline,
+        summary: texts[e.ratingKey]?.summary,
+        runtime: lengths[e.ratingKey]?.minutes,
+        show: lengths[e.ratingKey]?.show ?? false,
+      ),
   ];
 }
 
@@ -311,6 +332,75 @@ void main() {
       expect(fired, 1, reason: 'no second build once today is cached');
     });
 
+    test("Fits tonight keeps today's For You order to short films and short episodes, each chip its length", () async {
+      final library = _Library(
+        lengths: {
+          'long': (minutes: 142, show: false),
+          'film': (minutes: 110, show: false),
+          'tense': (minutes: 50, show: true),
+          'short': (minutes: 38, show: true),
+          'unknown': (minutes: null, show: false),
+          'brief': (minutes: 92, show: false),
+          'half': (minutes: 45, show: true),
+        },
+      );
+      final forYou = ForYouDeck(
+        pool: pool(library: library),
+        library: library,
+        candidates: () async => const [],
+        facts: () async => '',
+      );
+      await cachePool(now, ['long', 'film', 'tense', 'short', 'unknown', 'brief', 'half']);
+      final deck = FitsTonightDeck(forYou: forYou);
+      final cards = await deck.load();
+      expect(cards.map((c) => c.id), ['film', 'short', 'brief', 'half']);
+      expect(cards.map((c) => c.chip), ['1h 50m', '38m episodes', '1h 32m', '45m episodes']);
+      expect(deck.daily, isTrue);
+      expect(deck.keepsSeen, isFalse);
+      expect(deck.id, isNot(forYou.id));
+    });
+
+    test("Fits tonight takes For You's fresh build when it lands", () async {
+      final library = _Library(lengths: {'p': (minutes: 95, show: false), 'q': (minutes: 30, show: true)});
+      final forYou = ForYouDeck(
+        pool: pool(
+          library: library,
+          model: (_, _, _) async => {
+            'cards': [
+              {'id': 'c2', 'cluster': 'a'},
+              {'id': 'c1', 'cluster': 'b'},
+            ],
+          },
+        ),
+        library: library,
+        candidates: () async => [_candidate('p'), _candidate('q'), _candidate('r')],
+        facts: () async => '',
+      );
+      final deck = FitsTonightDeck(forYou: forYou);
+      var fired = 0;
+      deck.rebuilt.addListener(() => fired++);
+      expect((await deck.load()).map((c) => c.id), ['p', 'q'], reason: 'r has no known length');
+      await forYou.building;
+      expect(fired, 1);
+      expect((await deck.load()).map((c) => c.id), ['q', 'p']);
+    });
+
+    test('the Fits tonight limits: a film to the minute, an episode to the minute', () {
+      TitleFacts facts(int? minutes, {bool show = false}) => TitleFacts(
+        ref: TitleRef(id: show ? 's:x' : 'm:x', groupKey: 'gx'),
+        seen: SeenState.unseen,
+        runtimeMinutes: minutes,
+        episodes: show ? 24 : null,
+      );
+      expect(FitsTonightDeck.fitLine(facts(fitsTonightFilmMinutes)), '1h 50m');
+      expect(FitsTonightDeck.fitLine(facts(fitsTonightFilmMinutes + 1)), isNull);
+      expect(FitsTonightDeck.fitLine(facts(48)), '48m');
+      expect(FitsTonightDeck.fitLine(facts(fitsTonightEpisodeMinutes, show: true)), '45m episodes');
+      expect(FitsTonightDeck.fitLine(facts(fitsTonightEpisodeMinutes + 1, show: true)), isNull);
+      expect(FitsTonightDeck.fitLine(facts(null)), isNull);
+      expect(FitsTonightDeck.fitLine(facts(0, show: true)), isNull);
+    });
+
     test('the gather is kept for the day only, and a failed gather is not kept', () async {
       var gathered = 0;
       var fail = true;
@@ -473,6 +563,7 @@ void main() {
         now: now,
         nameOf: (id) async => names[id],
       );
+      expect(facts, contains('the local time is 20:00.'));
       expect(
         facts,
         contains('In the Reel, last 30 days, both devices together: 1 sampled, 1 watched to the end, 1 Not for me.'),

@@ -231,6 +231,61 @@ class ForYouDeck extends ReelDeck {
   Future<void> get building => _building ?? Future.value();
 }
 
+/// Fits tonight keeps films this long or shorter, in minutes (D8).
+const int fitsTonightFilmMinutes = 110;
+
+/// Fits tonight keeps shows whose episodes run this long or shorter, in
+/// minutes (D8).
+const int fitsTonightEpisodeMinutes = 45;
+
+/// Fits tonight: today's For You order, kept to films of at most
+/// [fitsTonightFilmMinutes] and shows whose episodes run at most
+/// [fitsTonightEpisodeMinutes]. A title of unknown length is left out
+/// (nothing says it fits). Each card's chip shows its length. It follows
+/// For You's day and takes its fresh builds through For You's [rebuilt].
+class FitsTonightDeck extends ReelDeck {
+  FitsTonightDeck({required this.forYou});
+
+  final ForYouDeck forYou;
+
+  @override
+  String get id => 'fits-tonight';
+  @override
+  String get name => 'Fits tonight';
+  @override
+  bool get keepsSeen => false;
+  @override
+  bool get daily => true;
+  @override
+  Listenable get rebuilt => forYou.rebuilt;
+
+  @override
+  Future<List<ReelCardData>> load() async => [
+    for (final c in await forYou.load())
+      if (fitLine(c.facts) case final chip?)
+        ReelCardData(
+          title: c.title,
+          facts: c.facts,
+          best: c.best,
+          chip: chip,
+          why: c.why,
+          cluster: c.cluster,
+          hook: c.hook,
+        ),
+  ];
+
+  /// The card's length when it fits tonight, else null: a film's
+  /// [TitleFacts.lengthLine] ("1h 42m"), or a show's episode length
+  /// ("40m episodes"). [TitleFacts.runtimeMinutes] is a film's length or a
+  /// show's episode length.
+  static String? fitLine(TitleFacts f) {
+    final m = f.runtimeMinutes;
+    if (m == null || m <= 0) return null;
+    if (f.isShow) return m <= fitsTonightEpisodeMinutes ? '${m}m episodes' : null;
+    return m <= fitsTonightFilmMinutes ? f.lengthLine() : null;
+  }
+}
+
 /// [ForYouDeck.rebuilt]: its own bumps, plus [source] (the synced data
 /// changing) while it has listeners, so a deck the controller has let go
 /// of holds no listener on the app-wide notifier.
@@ -571,7 +626,7 @@ Future<List<({DeckEntry entry, DateTime added})>> _addedSince(ReelLibrary librar
 }
 
 /// The facts block the daily build reads first: how they watch lately, the
-/// day, and what the Reel saw them do on this device and the other one:
+/// day and the local time it was built, and what the Reel saw them do on this device and the other one:
 /// counts, counts per kind of title (the pool's clusters, from [pool]) and
 /// the titles they passed on lately. [nameOf] names a title id (the brain's
 /// profile by default).
@@ -586,7 +641,8 @@ Future<String> forYouFacts({
   final at = now ?? DateTime.now();
   final lines = <String>[];
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  lines.add('Today is ${days[at.weekday - 1]}.');
+  String two(int n) => n.toString().padLeft(2, '0');
+  lines.add('Today is ${days[at.weekday - 1]}; the local time is ${two(at.hour)}:${two(at.minute)}.');
   try {
     lines.add('Their taste:\n${await b.taste()}');
     final watched = await b.watchedProfiles();
