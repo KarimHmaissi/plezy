@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../../focus/focus_theme.dart';
 import '../../media/ids.dart';
 import '../../models/companion_remote/remote_command.dart';
 import '../../providers/companion_remote_provider.dart';
@@ -100,6 +101,8 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
   Widget _body(BuildContext context, Map<String, dynamic> state) {
     final theme = Theme.of(context);
     final card = (state['card'] as Map?)?.cast<String, dynamic>();
+    // Tonight's picks (V2-38) on the TV: its posters, tap one to choose it.
+    final decide = (state['decide'] as Map?)?.cast<String, dynamic>();
     final next = [
       for (final n in (state['next'] as List? ?? const []).whereType<Map>()) n.cast<String, dynamic>(),
     ].take(3).toList();
@@ -155,12 +158,14 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                       child: child,
                     ),
                   ),
-                  child: _NowCard(
-                    key: ValueKey(card?['id'] ?? state['poolEnd']),
-                    card: card,
-                    playing: playing,
-                    poolEnd: state['poolEnd'] == true,
-                  ),
+                  child: decide != null
+                      ? _DecideCard(key: const ValueKey('decide'), decide: decide, onPick: (i) => _act('pick:$i'))
+                      : _NowCard(
+                          key: ValueKey(card?['id'] ?? state['poolEnd']),
+                          card: card,
+                          playing: playing,
+                          poolEnd: state['poolEnd'] == true,
+                        ),
                 ),
               ),
               if (next.isNotEmpty) ...[
@@ -188,7 +193,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: card == null ? null : () => _act('watch'),
+                    onPressed: card == null && decide == null ? null : () => _act('watch'),
                     icon: const Icon(Symbols.play_arrow_rounded),
                     label: const Text('Watch on TV'),
                   ),
@@ -293,6 +298,78 @@ class _NowCard extends StatelessWidget {
   }
 }
 
+/// Tonight's picks as the TV shows it: the posters, the chosen one ringed.
+class _DecideCard extends StatelessWidget {
+  const _DecideCard({super.key, required this.decide, required this.onPick});
+
+  final Map<String, dynamic> decide;
+  final ValueChanged<int> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final picks = [for (final p in (decide['picks'] as List? ?? const []).whereType<Map>()) p.cast<String, dynamic>()];
+    final chosen = decide['pick'] is int ? decide['pick'] as int : 0;
+    final title = chosen >= 0 && chosen < picks.length ? picks[chosen]['title'] as String? : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const StatChip(icon: Symbols.bookmarks_rounded, label: "Tonight's picks"),
+        const SizedBox(height: 8),
+        Text('One for tonight?', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            for (final (i, p) in picks.indexed) ...[
+              if (i > 0) const SizedBox(width: 10),
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  selected: i == chosen,
+                  label: p['title'] as String? ?? '',
+                  child: GestureDetector(
+                    onTap: () => onPick(i),
+                    child: Container(
+                      foregroundDecoration: FocusTheme.focusDecoration(
+                        context,
+                        isFocused: i == chosen,
+                        borderStrokeAlign: BorderSide.strokeAlignOutside,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(FocusTheme.defaultBorderRadius),
+                        child: AspectRatio(
+                          aspectRatio: 2 / 3,
+                          child: _Art(
+                            server: p['server'] as String?,
+                            path: (p['thumb'] ?? p['art']) as String?,
+                            width: 240,
+                            imageType: ImageType.poster,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            // Fewer than three keep their size.
+            for (var i = picks.length; i < 3; i++) ...[const SizedBox(width: 10), const Expanded(child: SizedBox())],
+          ],
+        ),
+        if (title != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _NextRow extends StatelessWidget {
   const _NextRow({required this.card});
 
@@ -326,11 +403,12 @@ class _NextRow extends StatelessWidget {
 }
 
 class _Art extends StatelessWidget {
-  const _Art({required this.server, required this.path, required this.width});
+  const _Art({required this.server, required this.path, required this.width, this.imageType = ImageType.art});
 
   final String? server;
   final String? path;
   final double width;
+  final ImageType imageType;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -339,9 +417,9 @@ class _Art extends StatelessWidget {
       client: context.tryGetMediaClientWithFallback(serverIdOrNull(server)),
       imagePath: path,
       width: width,
-      height: width * 9 / 16,
+      height: imageType == ImageType.poster ? width * 3 / 2 : width * 9 / 16,
       fit: BoxFit.cover,
-      imageType: ImageType.art,
+      imageType: imageType,
     ),
   );
 }

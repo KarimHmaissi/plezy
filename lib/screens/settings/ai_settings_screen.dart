@@ -17,6 +17,7 @@ import '../../services/ai/claude_client.dart';
 import '../../services/catalog/trakt_catalog_source.dart';
 import '../../services/library_index/library_index.dart';
 import 'ai_try_screen.dart';
+import 'reel_for_you_tiles.dart';
 import '../../services/ai/ai_key_store.dart';
 import '../../services/tmdb/tmdb_key_store.dart';
 import '../../utils/dialogs.dart';
@@ -26,8 +27,9 @@ import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 
 /// Settings ▸ AI: the Anthropic API key and the TMDB key (each pasted in or
-/// sent from another device, checked, stored encrypted on this device) and
-/// which models the helper uses.
+/// sent from another device, checked, stored encrypted on this device),
+/// which models the helper uses, and For You's note and rebuild
+/// ([ReelForYouTiles]).
 class AiSettingsScreen extends StatefulWidget {
   const AiSettingsScreen({super.key});
 
@@ -330,6 +332,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                       },
               ),
             if (!mirrorsTv) ..._ownAiTiles(hint),
+            // Synced: the same note and rebuild whether or not this phone
+            // uses the TV's AI.
+            const ReelForYouTiles(),
           ],
         ),
       ],

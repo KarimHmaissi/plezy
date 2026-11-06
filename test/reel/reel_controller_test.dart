@@ -215,6 +215,14 @@ class _Deck extends ReelDeck {
   Future<List<ReelCardData>> load() async => cards;
 }
 
+/// A deck code arranges (the 1-in-6 AI-card spacing applies).
+class _ArrangedDeck extends _Deck {
+  _ArrangedDeck(super.id, super.cards);
+
+  @override
+  bool get raw => false;
+}
+
 class _CountingDeck extends _Deck {
   _CountingDeck(super.id, super.cards, this.onLoad);
 
@@ -308,6 +316,21 @@ ReelCardData _card(String id) => ReelCardData(
   best: _copy(id),
 );
 
+/// A Give it another go card: Watch resumes the show.
+ReelCardData _resumeCard(String id) {
+  final c = _card(id);
+  return ReelCardData(title: c.title, facts: c.facts, best: c.best, resume: true);
+}
+
+/// The next episode the server has on deck for a show.
+MediaItem _episode(String show, {required int season, required int number}) => MediaItem.plex(
+  id: 'e$show',
+  kind: MediaKind.episode,
+  title: 'Harbor Lights $number',
+  parentIndex: season,
+  index: number,
+);
+
 void main() {
   late ForkDatabase db;
   late ReelStore store;
@@ -331,6 +354,8 @@ void main() {
     AniListLookup? aniList,
     AnimeThemesFetch? animeThemes,
     ValueListenable<ReelPlaybackProfile>? profile,
+    ReelItemWithNext? itemWithNext,
+    ReelMoreLike? moreLike,
   }) => ReelController(
     decks:
         decks ??
@@ -359,6 +384,8 @@ void main() {
     externalClips: externalClips,
     memoryRestored: memoryRestored,
     onActive: onActive,
+    itemWithNext: itemWithNext,
+    moreLike: moreLike,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -400,6 +427,56 @@ void main() {
     await c.suspend();
     c.dispose();
     expect(heard, [true, false]);
+  });
+
+  group('Give it another go', () {
+    test("a resume card's one metadata read brings its next episode, and Watch names it", () async {
+      final asked = <String>[];
+      final c = make(
+        decks: [
+          _Deck('a', [_resumeCard('1'), _card('2'), _resumeCard('3')]),
+        ],
+        itemWithNext: (serverId, ratingKey) async {
+          asked.add(ratingKey);
+          return (
+            item: await _Media().item(serverId, ratingKey),
+            next: ratingKey == '1' ? _episode('1', season: 1, number: 4) : _episode('3', season: 2, number: 3),
+          );
+        },
+      );
+      await c.start();
+      expect(c.current.item?.id, '1');
+      expect(c.current.resumeEpisode, 'E4');
+      await c.step(1);
+      expect(c.current.resumeEpisode, isNull, reason: 'not a resume card: Watch reads as usual');
+      await c.step(1);
+      expect(c.current.resumeEpisode, 'S2 E3');
+      expect(asked.toSet(), {'1', '3'}, reason: 'other cards read their metadata as before');
+      c.dispose();
+    });
+
+    test('with no next-episode read, or none on deck, a resume card reads Watch', () async {
+      final plain = make(
+        decks: [
+          _Deck('a', [_resumeCard('1')]),
+        ],
+      );
+      await plain.start();
+      expect(plain.current.item?.id, '1');
+      expect(plain.current.resumeEpisode, isNull);
+      plain.dispose();
+
+      final noneOnDeck = make(
+        decks: [
+          _Deck('a', [_resumeCard('1')]),
+        ],
+        itemWithNext: (serverId, ratingKey) async => (item: await _Media().item(serverId, ratingKey), next: null),
+      );
+      await noneOnDeck.start();
+      expect(noneOnDeck.current.item?.id, '1');
+      expect(noneOnDeck.current.resumeEpisode, isNull);
+      noneOnDeck.dispose();
+    });
   });
 
   test('the first card plays its trailer and the next one is preloaded after its first frame', () async {
@@ -930,6 +1007,414 @@ void main() {
     await c.suspend();
     expect(c.remoteState()['active'], isFalse);
     c.dispose();
+  });
+
+  group("Tonight's picks", () {
+    Future<void> saved(String id, {Duration ago = Duration.zero}) => store.savePick(
+      ReelPick(
+        titleId: 't$id',
+        groupKey: 'g$id',
+        serverId: 's1',
+        ratingKey: id,
+        title: 'Title $id',
+        at: DateTime.now().toUtc().subtract(ago),
+      ),
+    );
+
+    List<String> pages(ReelController c) => [
+      for (var i = 0; i < c.slotCount; i++)
+        switch (c.slotAt(i)) {
+          ReelSlot(kind: ReelSlotKind.card, :final card?) => card.id,
+          ReelSlot(:final kind) => kind.name,
+        },
+    ];
+
+    test('after the second Save it comes up next; the page on screen stays put', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+      );
+      await c.start();
+      expect(pages(c), ['t1', 't2', 't3', 't4', 'poolEnd'], reason: 'no fresh picks: the end as before');
+      await c.save();
+      expect(pages(c), [
+        't1',
+        't2',
+        't3',
+        't4',
+        'decide',
+        'poolEnd',
+      ], reason: 'one Save: it waits at the end of the deck');
+      await c.step(1);
+      await c.save();
+      expect(pages(c), ['t1', 't2', 'decide', 't3', 't4', 'poolEnd']);
+      expect(c.page, 1);
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't2');
+
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      expect(c.current.picks.map((p) => p.pick.titleId), ['t2', 't1'], reason: 'newest first');
+      expect(c.current.chosen?.pick.titleId, 't2');
+      await pumpEventQueue();
+      expect(c.current.picks.map((p) => p.item?.id), ['2', '1'], reason: "the picks' metadata is read");
+      expect(c.upNext.first.card?.id, 't3');
+
+      await c.step(1);
+      expect(c.current.card?.id, 't3', reason: 'swiping on goes to the next card');
+      expect(c.page, 3);
+      await c.step(-1);
+      expect(c.current.kind, ReelSlotKind.decide, reason: 'it stays where it was, so the pages hold');
+      c.dispose();
+    });
+
+    test('at most once a session: a third Save after it was seen places nothing new', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4'), _card('5')]),
+        ],
+      );
+      await c.start();
+      await c.save();
+      await c.step(1);
+      await c.save();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      await c.step(1);
+      await c.save();
+      await c.step(1);
+      await c.save();
+      expect(pages(c).where((p) => p == 'decide'), hasLength(1));
+      expect(pages(c).indexOf('decide'), 2);
+      c.dispose();
+    });
+
+    test('a warm controller starts a new session on a new day: it can come up again', () async {
+      // Saves are kept by this clock and read back fresh by the store's.
+      var now = DateTime.now();
+      final c = make(
+        clock: () => now,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4'), _card('5'), _card('6')]),
+        ],
+      );
+      await c.start();
+      await c.save();
+      await c.step(1);
+      await c.save();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      await c.step(1);
+      await c.suspend();
+
+      await c.start();
+      expect(pages(c).where((p) => p == 'decide'), hasLength(1), reason: 'same day: spent');
+      await c.suspend();
+
+      now = DateTime(now.year, now.month, now.day + 1, 12);
+      await c.start();
+      expect(c.current.card?.id, 't3', reason: 'the deck keeps its place');
+      expect(pages(c), ['t1', 't2', 't3', 't4', 't5', 't6', 'decide', 'poolEnd'], reason: 'unplaced again');
+      await c.save();
+      await c.step(1);
+      await c.save();
+      expect(pages(c).indexOf('decide'), 4, reason: 'after the day\'s second Save it comes up next');
+      c.dispose();
+    });
+
+    test('at the end of a deck it comes before the end card when there are fresh picks', () async {
+      await saved('8');
+      await saved('9', ago: const Duration(days: 4));
+      final c = make();
+      await c.start();
+      expect(pages(c), ['t1', 't2', 't3', 'decide', 'poolEnd']);
+      await c.step(1);
+      await c.step(1);
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      expect(c.current.picks.map((p) => p.pick.titleId), ['t8'], reason: 'only fresh Saves');
+      expect(engine.calls.last, 'pause', reason: 'nothing plays under it');
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      c.dispose();
+    });
+
+    test('once seen in one deck, the end of the others is as before', () async {
+      await saved('8');
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+        ],
+      );
+      await c.start();
+      expect(pages(c), ['t1', 'decide', 'poolEnd']);
+      await c.step(1);
+      await c.switchDeck(1);
+      expect(pages(c), ['t2', 'poolEnd']);
+      await c.switchDeck(1);
+      expect(pages(c), ['t1', 'decide', 'poolEnd']);
+      expect(c.current.kind, ReelSlotKind.decide, reason: "the deck's own cursor stays on it");
+      c.dispose();
+    });
+
+    test('left and right choose a pick, stopping at either end; Watch hands the chosen one over', () async {
+      await saved('7', ago: const Duration(hours: 2));
+      await saved('8', ago: const Duration(hours: 1));
+      await saved('9');
+      final handed = <String>[];
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+        ],
+        onWatch: (item, {required onTv}) async {
+          handed.add('${item.id}${onTv ? ' on TV' : ''}');
+          return true;
+        },
+      );
+      await c.start();
+      await c.step(1);
+      expect(c.current.pick, 0);
+      c.movePick(-1);
+      expect(c.current.pick, 0);
+      c.movePick(1);
+      c.movePick(1);
+      c.movePick(1);
+      expect(c.current.pick, 2);
+      expect(c.remoteState()['decide'], {
+        'pick': 2,
+        'picks': [
+          for (final id in ['9', '8', '7'])
+            {'id': 't$id', 'title': 'Title $id', 'year': null, 'server': 's1', 'art': null, 'thumb': null},
+        ],
+      });
+      expect(c.remoteState()['card'], isNull);
+      c.selectPick(1);
+      expect(await c.watch(), isTrue);
+      expect(await c.watch(onTv: true), isTrue);
+      expect(handed, ['8', '8 on TV']);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.where((e) => e.action == ReelAction.watch.name).map((e) => e.titleId), ['t8']);
+      c.dispose();
+    });
+
+    test('card actions do nothing on it', () async {
+      await saved('8');
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')])..keeps = false,
+        ],
+        moreLike: (seed, {required skip}) async => [_card('7')],
+      );
+      await c.start();
+      await c.step(1);
+      expect(c.canMoreLike, isFalse);
+      await c.notForMe();
+      await c.seenIt();
+      expect(pages(c), ['t1', 'decide', 'poolEnd']);
+      expect(c.current.kind, ReelSlotKind.decide);
+      c.dispose();
+    });
+
+    test('Not for me on the card before it: it slides in, on the same page', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await c.save();
+      await c.save();
+      expect(pages(c), ['t1', 'decide', 't2', 't3', 'poolEnd']);
+      await c.notForMe();
+      expect(pages(c), ['decide', 't2', 't3', 'poolEnd']);
+      expect(c.page, 0);
+      expect(c.current.kind, ReelSlotKind.decide);
+      c.dispose();
+    });
+
+    test('More like this pressed before it: the new cards come first, then it', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+        moreLike: (seed, {required skip}) async => [_card('2'), _card('7')],
+      );
+      await c.start();
+      await c.save();
+      await c.save();
+      expect(pages(c), ['t1', 'decide', 't2', 't3', 'poolEnd']);
+      await c.moreLikeThis();
+      expect(pages(c), ['t1', 't2', 't7', 'decide', 't3', 'poolEnd']);
+      expect(c.page, 0);
+      c.dispose();
+    });
+
+    test("today's build landing while it waits ahead keeps it next", () async {
+      final fy = _DailyDeck('fy', [_card('1'), _card('2'), _card('3')]);
+      final c = make(decks: [fy]);
+      await c.start();
+      await c.save();
+      await c.save();
+      expect(pages(c), ['t1', 'decide', 't2', 't3', 'poolEnd']);
+      fy.land([_card('5'), _card('6')]);
+      await pumpEventQueue();
+      expect(pages(c), ['t1', 'decide', 't5', 't6', 'poolEnd']);
+      expect(c.page, 0);
+      c.dispose();
+    });
+
+    test("today's build landing on it at the end of the deck: it stays put and the new cards follow", () async {
+      await saved('8');
+      final fy = _DailyDeck('fy', [_card('1')]);
+      final c = make(decks: [fy]);
+      await c.start();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      fy.land([_card('5')]);
+      await pumpEventQueue();
+      expect(pages(c), ['t1', 'decide', 't5', 'poolEnd']);
+      expect(c.current.kind, ReelSlotKind.decide);
+      c.dispose();
+    });
+  });
+
+  group('More like this', () {
+    test('the chosen cards come straight after the card on screen, and the cursor stays', () async {
+      ReelCardData? seedAsked;
+      Set<String>? skipped;
+      final said = <String>[];
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+        moreLike: (seed, {required skip}) async {
+          seedAsked = seed;
+          skipped = skip;
+          return [_card('7'), _card('8')];
+        },
+      );
+      c.toast.addListener(() => said.add(c.toast.value ?? ''));
+      await c.start();
+      await c.step(1);
+      expect(c.canMoreLike, isTrue);
+      await c.moreLikeThis();
+      expect(seedAsked?.id, 't2');
+      expect(skipped, {'t1', 't2'}, reason: 'cards already shown stay out');
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't2');
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't7', 't8', 't3', 't4']);
+      expect(said, [ReelController.findingMoreLike, ReelController.moreLikeUpNext]);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.where((e) => e.action == ReelAction.moreLikeThis.name).map((e) => e.titleId), [
+        't2',
+      ], reason: 'the ask is a fact about the seed');
+      await c.step(1);
+      expect(c.current.card?.id, 't7');
+      c.dispose();
+    });
+
+    test('a card further down the deck moves up; one already shown, or the seed, never comes back', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+        moreLike: (seed, {required skip}) async => [_card('1'), _card('2'), _card('4'), _card('9'), _card('9')],
+      );
+      await c.start();
+      await c.step(1);
+      await c.moreLikeThis();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't4', 't9', 't3']);
+      c.dispose();
+    });
+
+    test('at most eight cards go in', () async {
+      final c = make(moreLike: (seed, {required skip}) async => [for (var i = 10; i < 20; i++) _card('$i')]);
+      await c.start();
+      await c.moreLikeThis();
+      expect(c.cards?.length, 3 + 8);
+      c.dispose();
+    });
+
+    test('nothing found leaves the deck as it was and says so', () async {
+      final said = <String>[];
+      final c = make(moreLike: (seed, {required skip}) async => null);
+      c.toast.addListener(() => said.add(c.toast.value ?? ''));
+      await c.start();
+      await c.moreLikeThis();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      expect(said.last, ReelController.noMoreLike);
+
+      final failing = make(moreLike: (seed, {required skip}) async => throw StateError('offline'));
+      await failing.start();
+      await failing.moreLikeThis();
+      expect(failing.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      failing.dispose();
+      c.dispose();
+    });
+
+    test('a second press while the call runs joins it: one call, one insert', () async {
+      var calls = 0;
+      final gate = Completer<List<ReelCardData>?>();
+      final c = make(
+        moreLike: (seed, {required skip}) {
+          calls++;
+          return gate.future;
+        },
+      );
+      await c.start();
+      final first = c.moreLikeThis();
+      final second = c.moreLikeThis();
+      gate.complete([_card('7')]);
+      await (first, second).wait;
+      expect(calls, 1);
+      expect(c.cards?.map((x) => x.id), ['t1', 't7', 't2', 't3']);
+      c.dispose();
+    });
+
+    test('cards land after the card on screen when the call lands, even if the feed moved on', () async {
+      final gate = Completer<List<ReelCardData>?>();
+      final c = make(moreLike: (seed, {required skip}) => gate.future);
+      await c.start();
+      final press = c.moreLikeThis();
+      await c.step(1);
+      await c.step(1);
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      gate.complete([_card('7'), _card('8')]);
+      await press;
+      expect(c.index, 3);
+      expect(c.current.card?.id, 't7', reason: 'at the end of the deck the first new card comes on screen');
+      c.dispose();
+    });
+
+    test('not offered without a finder, or on the end-of-deck card', () async {
+      final none = make();
+      await none.start();
+      expect(none.canMoreLike, isFalse);
+      none.dispose();
+
+      final c = make(moreLike: (seed, {required skip}) async => [_card('7')]);
+      await c.start();
+      for (var i = 0; i < 3; i++) {
+        await c.step(1);
+      }
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      expect(c.canMoreLike, isFalse);
+      c.dispose();
+    });
+
+    test('in the phone feed the new next card is resolved ahead', () async {
+      final c = make(externalClips: true, moreLike: (seed, {required skip}) async => [_card('7')]);
+      await c.start();
+      await c.moreLikeThis();
+      await pumpEventQueue();
+      expect(c.slotAt(1).card?.id, 't7');
+      expect(c.slotAt(1).resolved, isTrue);
+      expect(c.slotAt(1).clip, isNotNull);
+      c.dispose();
+    });
   });
 
   group('fatigue is timed from the first frame', () {
@@ -1593,6 +2078,76 @@ void main() {
       await c.start();
       await pumpEventQueue();
       expect(warmed.map((w) => w.$1), ['t2', 't3']);
+      c.dispose();
+    });
+  });
+
+  group('the 1-in-6 AI-card cap', () {
+    Future<void> miss(List<String> ids) async {
+      for (final id in ids) {
+        await store.cache('src:g$id', ClipResolver.missRow);
+      }
+    }
+
+    test('cached misses are AI cards when the deck is built; titles not resolved yet count as clips', () async {
+      await miss(['1', '2']);
+      final c = make(
+        externalClips: true,
+        decks: [
+          _ArrangedDeck('a', [for (var i = 1; i <= 8; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      expect(c.cards?.map((x) => x.id), ['t1', 't3', 't4', 't5', 't6', 't7', 't2', 't8']);
+      await pumpEventQueue();
+      c.dispose();
+    });
+
+    test('a raw deck keeps its own order whatever the cache says', () async {
+      await miss(['1', '2']);
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+        externalClips: true,
+      );
+      await c.start();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      await pumpEventQueue();
+      c.dispose();
+    });
+
+    test('the phone holds back an AI card ahead with no room, before it comes on screen', () async {
+      await miss(['1', '2', '4']);
+      final c = make(
+        externalClips: true,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 5; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.card?.id, 't1');
+      expect(c.current.isAiCard, isTrue);
+      expect(c.cards?.map((x) => x.id), ['t1', 't3', 't5']);
+      expect(c.index, 0);
+      c.dispose();
+    });
+
+    test('an AI card ahead with room stays in the phone feed', () async {
+      await miss(['2']);
+      final c = make(
+        externalClips: true,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      await c.step(1);
+      expect(c.current.card?.id, 't2');
+      expect(c.current.isAiCard, isTrue);
       c.dispose();
     });
   });

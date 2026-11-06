@@ -8,6 +8,7 @@ import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
+import 'reel_decay.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
 import 'reel_playback_profile.dart';
@@ -42,25 +43,79 @@ typedef ReelWatchlist = Future<bool> Function(MediaItem item);
 /// knows its own frame; completes when the art has decoded or failed.
 typedef ReelArtPrecache = Future<void> Function(ReelCardData card, MediaItem item, {required bool clip});
 
-enum ReelSlotKind { card, poolEnd, empty, loading }
+/// A show's metadata and its next episode (the server's on-deck episode,
+/// the one Watch plays) from the card's one metadata read.
+typedef ReelItemWithNext = Future<({MediaItem? item, MediaItem? next})> Function(String serverId, String ratingKey);
+
+/// More like this (V2-39): the cards chosen for titles like [seed], or null
+/// when none could be found. [skip] are the cards already shown in this
+/// deck this session.
+typedef ReelMoreLike = Future<List<ReelCardData>?> Function(ReelCardData seed, {required Set<String> skip});
+
+/// What a slot in a deck is: a title's card, the "Tonight's picks" decision
+/// card (V2-38), the end of the deck, an empty deck, or a deck still loading.
+enum ReelSlotKind { card, decide, poolEnd, empty, loading }
+
+/// One of Tonight's picks: a fresh Save and its metadata once read (null
+/// until then, or when it couldn't be read).
+class ReelDecidePick {
+  const ReelDecidePick(this.pick, this.item);
+
+  final ReelPick pick;
+  final MediaItem? item;
+}
 
 /// A card as the views draw it.
 class ReelSlot {
-  const ReelSlot._(this.kind, {this.card, this.item, this.clip, this.resolved = false});
+  const ReelSlot._(
+    this.kind, {
+    this.card,
+    this.item,
+    this.clip,
+    this.next,
+    this.resolved = false,
+    this.picks = const [],
+    this.pick = 0,
+  });
 
   const ReelSlot.loading() : this._(ReelSlotKind.loading);
   const ReelSlot.poolEnd() : this._(ReelSlotKind.poolEnd);
   const ReelSlot.empty() : this._(ReelSlotKind.empty);
 
+  /// The decision card: [picks] newest first, [pick] the one OK watches.
+  const ReelSlot.decide(List<ReelDecidePick> picks, int pick) : this._(ReelSlotKind.decide, picks: picks, pick: pick);
+
   final ReelSlotKind kind;
+
+  /// The decision card's picks, and which one is chosen.
+  final List<ReelDecidePick> picks;
+  final int pick;
+
+  /// The decision card's chosen pick; null on any other slot.
+  ReelDecidePick? get chosen => kind == ReelSlotKind.decide && pick >= 0 && pick < picks.length ? picks[pick] : null;
+
   final ReelCardData? card;
   final MediaItem? item;
   final ResolvedClip? clip;
+
+  /// A [ReelCardData.resume] card's next episode, once its metadata landed.
+  final MediaItem? next;
 
   /// The clip ladder ran (a null [clip] then means an AI card).
   final bool resolved;
 
   bool get isAiCard => resolved && clip == null;
+
+  /// The episode Watch resumes, for its label: "E4", or "S2 E3" past
+  /// season 1. Null when the card isn't a resume card or the episode isn't
+  /// known (Watch then reads as usual).
+  String? get resumeEpisode {
+    final e = next;
+    final n = e?.index;
+    if (card?.resume != true || e == null || n == null) return null;
+    final season = e.parentIndex;
+    return season == null || season <= 1 ? 'E$n' : 'S$season E$n';
+  }
 }
 
 /// The Reel's session: decks, the card cursor, the prefetch window around the
@@ -83,6 +138,8 @@ class ReelController extends ChangeNotifier {
     this.externalClips = false,
     this.memoryRestored,
     this.onActive,
+    this.itemWithNext,
+    this.moreLike,
     DateTime Function()? clock,
     ReelPrefetcher? prefetcher,
   }) : _clock = clock ?? DateTime.now,
@@ -129,6 +186,14 @@ class ReelController extends ChangeNotifier {
   /// and once more on [dispose] while it was still active, so whatever
   /// stepped aside for it (the brain's indexer) is always given back.
   final void Function(bool active)? onActive;
+
+  /// A [ReelCardData.resume] card's metadata read: the item and its next
+  /// episode in one request. Null: such cards read [ReelMedia.item].
+  final ReelItemWithNext? itemWithNext;
+
+  /// More like this (V2-39): finds the cards to insert after the current
+  /// one. Null: the action isn't offered.
+  final ReelMoreLike? moreLike;
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -195,6 +260,7 @@ class ReelController extends ChangeNotifier {
   final Map<String, ResolvedClip?> _clip = {};
   final Set<String> _resolved = {};
   final Map<String, MediaItem> _item = {};
+  final Map<String, MediaItem?> _next = {};
   final Map<String, Future<void>> _resolving = {};
 
   /// Metadata reads in flight. Only an item that landed is kept: a failed
@@ -247,6 +313,9 @@ class ReelController extends ChangeNotifier {
   ReelDeck get deck => decks[_deck];
   int get deckIndex => _deck;
   List<ReelCardData>? get cards => _cards[deck.id];
+
+  /// The cursor as a card index into [cards] ([cards].length: the end of
+  /// the deck). On the decision card it is the card after it.
   int get index => _cursor[deck.id] ?? 0;
   bool get active => _active;
 
@@ -260,10 +329,102 @@ class ReelController extends ChangeNotifier {
     }
   }
 
-  ReelSlot slotAt(int i) {
+  // ---- Tonight's picks (V2-38) ----
+
+  /// Saves in a session before the decision card comes up next.
+  static const int decideAfterSaves = 2;
+
+  /// The fresh Saves (newest first, at most [ReelPick.maxShown]) as last
+  /// read: at start, after each Save and when the decision card shows.
+  List<ReelPick> _picks = const [];
+  final Map<String, MediaItem?> _pickItem = {};
+  final Map<String, Future<void>> _pickReading = {};
+  int _saves = 0;
+  int _pickAt = 0;
+
+  /// Where the decision card sits once placed: in [deck], before the card
+  /// [before] (null: after the last card). Unplaced, it waits at the end of
+  /// every deck while there are fresh picks. It comes up at most once a
+  /// session: once seen it stays where it was (so the phone's pages hold)
+  /// and is never placed again.
+  ({String deck, String? before})? _decide;
+  bool _decideSeen = false;
+
+  /// The day the decision card's session began: a warm controller (the TV
+  /// keeps one for days) starts a new one on its first start of a new day,
+  /// so the card isn't spent for good after its first showing.
+  String? _decideDay;
+
+  /// Decks whose cursor is on the decision card.
+  final Set<String> _onDecide = {};
+
+  /// Where the decision card sits in [list] (deck [deckId]) as a page:
+  /// before the card at that index. Null when it isn't in that deck.
+  int? _decideAt(String deckId, List<ReelCardData> list) {
+    if (list.isEmpty) return null;
+    final d = _decide;
+    if (d == null) return _decideSeen || _picks.isEmpty ? null : list.length;
+    if (d.deck != deckId || (!_decideSeen && _picks.isEmpty)) return null;
+    final before = d.before;
+    if (before == null) return list.length;
+    final j = list.indexWhere((c) => c.id == before);
+    return j < 0 ? null : j;
+  }
+
+  bool get _onDecideNow {
+    final list = cards;
+    return list != null && _onDecide.contains(deck.id) && _decideAt(deck.id, list) == index;
+  }
+
+  /// The cursor as a page: the card index, counting the decision card when
+  /// it sits at or before the cursor. The phone's PageView index.
+  int get page {
+    final list = cards;
+    if (list == null) return 0;
+    final at = _decideAt(deck.id, list);
+    final i = index;
+    if (at == null || i < at) return i;
+    return _onDecideNow ? at : i + 1;
+  }
+
+  /// How many pages the deck has: its cards, the decision card when it is
+  /// in this deck, and the end of the deck.
+  int get slotCount {
+    final list = cards;
+    if (list == null || list.isEmpty) return 1;
+    return list.length + 1 + (_decideAt(deck.id, list) == null ? 0 : 1);
+  }
+
+  /// Moves the cursor to page [p].
+  void _seek(int p) {
+    final list = cards;
+    if (list == null) return;
+    final at = _decideAt(deck.id, list);
+    if (at != null && p == at) {
+      _cursor[deck.id] = at;
+      _onDecide.add(deck.id);
+      return;
+    }
+    _onDecide.remove(deck.id);
+    _cursor[deck.id] = at != null && p > at ? p - 1 : p;
+  }
+
+  ReelSlot _decideSlot() {
+    final picks = [for (final p in _picks) ReelDecidePick(p, _pickItem[p.titleId])];
+    return ReelSlot.decide(picks, picks.isEmpty ? 0 : _pickAt.clamp(0, picks.length - 1));
+  }
+
+  /// The slot on page [p] (see [page]).
+  ReelSlot slotAt(int p) {
     final list = cards;
     if (list == null) return const ReelSlot.loading();
     if (list.isEmpty) return const ReelSlot.empty();
+    var i = p;
+    final at = _decideAt(deck.id, list);
+    if (at != null) {
+      if (p == at) return _decideSlot();
+      if (p > at) i = p - 1;
+    }
     if (i >= list.length) return const ReelSlot.poolEnd();
     final c = list[i];
     return ReelSlot._(
@@ -271,14 +432,18 @@ class ReelController extends ChangeNotifier {
       card: c,
       item: _item[c.id],
       clip: _clip[c.id],
+      next: _next[c.id],
       resolved: _resolved.contains(c.id),
     );
   }
 
-  ReelSlot get current => slotAt(index);
+  ReelSlot get current => slotAt(page);
 
-  /// The next three cards, for the Fold remote.
-  List<ReelSlot> get upNext => [for (var i = index + 1; i <= index + 3; i++) slotAt(i)];
+  /// The next three slots, for the Fold remote.
+  List<ReelSlot> get upNext {
+    final p = page;
+    return [for (var i = p + 1; i <= p + 3; i++) slotAt(i)];
+  }
 
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
@@ -298,9 +463,18 @@ class ReelController extends ChangeNotifier {
       if (d.daily && _cards.containsKey(d.id) && _loadedOn[d.id] != today) {
         _cards.remove(d.id);
         _cursor.remove(d.id);
+        _onDecide.remove(d.id);
       }
     }
-    await _ensureDeck(deck);
+    if (_decideDay != today) {
+      _decideDay = today;
+      _decide = null;
+      _decideSeen = false;
+      _saves = 0;
+      _pickAt = 0;
+      _onDecide.clear();
+    }
+    await (_ensureDeck(deck), _refreshPicks()).wait;
     if (!_active) return;
     await _show();
   }
@@ -316,6 +490,33 @@ class ReelController extends ChangeNotifier {
       _clip.remove(id);
     }
     _unknown.clear();
+  }
+
+  /// Reads the fresh Saves again (the other device may have saved too).
+  Future<void> _refreshPicks() async {
+    try {
+      _picks = await store.freshPicks();
+    } catch (e) {
+      appLogger.d('Reel: picks unavailable', error: e);
+    }
+  }
+
+  /// The picks' metadata (at most [ReelPick.maxShown] reads, each once),
+  /// read as the decision card comes near; the views redraw as each lands.
+  void _readPicks() {
+    for (final p in _picks) {
+      if (_pickItem.containsKey(p.titleId)) continue;
+      _pickReading[p.titleId] ??= () async {
+        MediaItem? item;
+        try {
+          item = await media.item(p.serverId, p.ratingKey);
+        } catch (e) {
+          appLogger.d('Reel: pick metadata unavailable', error: e);
+        }
+        _pickItem[p.titleId] = item;
+        notifyListeners();
+      }();
+    }
   }
 
   /// Tab hidden, Home pressed or the app paused: stop and release the
@@ -342,7 +543,7 @@ class ReelController extends ChangeNotifier {
         final sw = Stopwatch()..start();
         final raw = await d.load();
         final loadMs = sw.elapsedMilliseconds;
-        final loaded = await finishDeck(d, raw, store: store, hasClip: (_) => true);
+        final loaded = await _finish(d, raw);
         appLogger.i(
           '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
         );
@@ -365,6 +566,22 @@ class ReelController extends ChangeNotifier {
 
   String _today() => ReelPool.dayKey(_clock());
 
+  /// [finishDeck] with what is known of each card's clip: a cached miss is
+  /// an AI card, so the 1-in-6 spacing applies to it; a card not resolved
+  /// yet is assumed to have a clip (it resolves on demand, two cards ahead,
+  /// never the whole deck at once).
+  Future<List<ReelCardData>> _finish(ReelDeck d, List<ReelCardData> raw) async {
+    var misses = const <String>{};
+    if (!d.raw) {
+      try {
+        misses = await resolver.knownMisses([for (final c in raw) c.title]);
+      } catch (e) {
+        appLogger.d('Reel: cached clip answers unavailable', error: e);
+      }
+    }
+    return finishDeck(d, raw, store: store, hasClip: (c) => !misses.contains(c.title.groupKey));
+  }
+
   /// A fresh build of [d] landed after its list was loaded. On screen, the
   /// cards up to and including the one showing stay put and the new list
   /// follows them (titles already there are left out), so the cursor and
@@ -378,7 +595,7 @@ class ReelController extends ChangeNotifier {
     if (_disposed || !_cards.containsKey(d.id)) return;
     final List<ReelCardData> fresh;
     try {
-      fresh = await finishDeck(d, await d.load(), store: store, hasClip: (_) => true);
+      fresh = await _finish(d, await d.load());
     } catch (e) {
       appLogger.w('Reel: deck ${d.id} rebuild failed to load', error: e);
       return;
@@ -392,6 +609,8 @@ class ReelController extends ChangeNotifier {
     if (!identical(deck, d)) {
       _cards[d.id] = fresh;
       _cursor.remove(d.id);
+      _onDecide.remove(d.id);
+      _anchorDecide(d.id, fresh, orBefore: null);
       appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${fresh.length} cards');
       notifyListeners();
       return;
@@ -405,6 +624,14 @@ class ReelController extends ChangeNotifier {
         if (!kept.contains(c.id)) c,
     ];
     _cards[d.id] = list;
+    final dc = _decide;
+    if (dc != null && dc.deck == d.id && dc.before == null && _decideSeen && keep.length == old.length) {
+      // The decision card was the end of the deck: it stays after the cards
+      // it followed, and the new ones come after it.
+      if (list.length > old.length) _decide = (deck: d.id, before: list[old.length].id);
+    } else {
+      _anchorDecide(d.id, list, orBefore: at + 1 < list.length ? list[at + 1].id : null);
+    }
     appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${list.length} cards (new after card ${keep.length})');
     if (at >= old.length) {
       // It was at the end of the deck (or the deck was empty): the first new
@@ -420,6 +647,25 @@ class ReelController extends ChangeNotifier {
     }
   }
 
+  /// The decision card placed in [deckId] before a card no longer in
+  /// [list] moves before [orBefore] (null: the end of the deck).
+  void _anchorDecide(String deckId, List<ReelCardData> list, {required String? orBefore}) {
+    final d = _decide;
+    if (d == null || d.deck != deckId) return;
+    final before = d.before;
+    if (before == null || list.any((c) => c.id == before)) return;
+    _decide = (deck: deckId, before: orBefore);
+  }
+
+  /// [c] leaves [deckId]'s [list]: a decision card placed before it moves
+  /// before the card after it.
+  void _unanchor(String deckId, List<ReelCardData> list, String id) {
+    final d = _decide;
+    if (d == null || d.deck != deckId || d.before != id) return;
+    final j = list.indexWhere((c) => c.id == id);
+    _decide = (deck: deckId, before: j >= 0 && j + 1 < list.length ? list[j + 1].id : null);
+  }
+
   /// Next / previous card.
   ///
   /// The target is computed and committed before any await, under the
@@ -428,11 +674,11 @@ class ReelController extends ChangeNotifier {
   /// cursor lands on is resolved and opened. Cards passed over were never on
   /// screen, so they record nothing.
   Future<void> step(int dir) async {
-    final list = cards;
-    if (list == null) return;
-    final to = (index + dir).clamp(0, list.length);
-    if (to == index) return;
-    _cursor[deck.id] = to;
+    if (cards == null) return;
+    final from = page;
+    final to = (from + dir).clamp(0, slotCount - 1);
+    if (to == from) return;
+    _seek(to);
     final gen = ++_generation;
     await _leaveCard();
     // A later step moved the cursor on while this one was leaving: that
@@ -522,13 +768,22 @@ class ReelController extends ChangeNotifier {
 
   Future<void> _readItem(ReelCardData c) async {
     try {
-      final item = await media.item(c.best.serverId, c.best.ratingKey);
+      final item = await _metadata(c);
       if (item == null || _disposed) return;
       _item[c.id] = item;
       notifyListeners();
     } catch (e) {
       appLogger.d('Reel: card metadata read failed (${e.runtimeType})');
     }
+  }
+
+  /// A card's metadata; a resume card's next episode comes with it.
+  Future<MediaItem?> _metadata(ReelCardData c) async {
+    final withNext = itemWithNext;
+    if (!c.resume || withNext == null) return media.item(c.best.serverId, c.best.ratingKey);
+    final r = await withNext(c.best.serverId, c.best.ratingKey);
+    _next[c.id] = r.next;
+    return r.item;
   }
 
   Future<void> _show({int direction = 1}) async {
@@ -538,6 +793,7 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
     cardChanged.value++;
     final list = cards;
+    if (list != null && _onDecideNow) return _showDecide(list, gen);
     if (list == null || index >= list.length) {
       _prefetch.release();
       if (list != null) _plan(list, gen);
@@ -552,13 +808,15 @@ class ReelController extends ChangeNotifier {
     await _resolve(c);
     if (gen != _generation || !_active) return;
     // An AI card only with room (at most 1 in 6); otherwise the title waits
-    // for another day and the feed moves on.
+    // for another day and the feed moves on. The phone holds them back
+    // before they come on screen instead ([_holdBackAhead]).
+    final skipTo = page + (direction == 0 ? 1 : direction);
     if (!externalClips &&
         _clip[c.id] == null &&
-        _sinceAiCard < 6 &&
-        index + direction >= 0 &&
-        index + direction <= list.length) {
-      _cursor[deck.id] = index + (direction == 0 ? 1 : direction);
+        _sinceAiCard < ReelDecay.aiCardEvery &&
+        skipTo >= 0 &&
+        skipTo < slotCount) {
+      _seek(skipTo);
       return _show(direction: direction == 0 ? 1 : direction);
     }
     final clip = _clip[c.id];
@@ -572,6 +830,7 @@ class ReelController extends ChangeNotifier {
       final started = _feedStarted;
       _feedStarted = null;
       if (clip != null && started?.id == c.id) _cardSince = started!.at;
+      _sinceAiCard = clip == null ? 0 : _sinceAiCard + 1;
     } else if (clip == null) {
       _sinceAiCard = 0;
       await clips.pause();
@@ -588,16 +847,44 @@ class ReelController extends ChangeNotifier {
     _preloadNext(list, gen);
   }
 
+  /// The decision card is on screen: nothing plays (the TV's clip pauses,
+  /// as at the end of a deck), the picks' metadata is read, and it is
+  /// seen: it stays where it is and never comes up again this session.
+  Future<void> _showDecide(List<ReelCardData> list, int gen) async {
+    _cardShown = null;
+    if (!_decideSeen) {
+      _decideSeen = true;
+      _decide = (deck: deck.id, before: index < list.length ? list[index].id : null);
+      appLogger.i('[ReelDecide] ${deck.id}: Tonight\'s picks shown');
+    }
+    await _refreshPicks();
+    // Moved on while the picks were read: that step shows its own card.
+    if (gen != _generation || !_active) return;
+    _readPicks();
+    notifyListeners();
+    // The window around the card after it ([index]) is fetched as usual.
+    _prefetch.release();
+    _plan(list, gen);
+    if (!externalClips) await clips.pause();
+  }
+
   /// Hands the prefetcher the window around the card on screen, nearest
   /// first (0, +1, -1, +2 in the direction of travel), each card's clip
   /// before its art and text, and for +1 and +2 their art decoded last
   /// (plan V2-13). On a metered or offline link, or under memory pressure,
   /// only the card on screen and the next; under memory pressure no art is
   /// decoded ahead.
+  ///
+  /// The decision card a page or two ahead has its picks' metadata read, and
+  /// on the phone a card ahead that turns out to be an AI card with no room
+  /// is held back once its clip answer is in ([_holdBackAhead]).
   void _plan(List<ReelCardData> list, int gen) {
     if (_disposed || gen != _generation) return;
+    final at = _decideAt(deck.id, list);
+    if (at != null && at > index && at - index <= 2) _readPicks();
     final lean = memoryLevel >= 1 || resolver.playback.link != ReelLink.unmetered;
     final tasks = <ReelPrefetchTask>[];
+    final answered = <ReelCardData>[];
     for (final offset in lean ? ReelPrefetcher.leanOffsets : ReelPrefetcher.offsets) {
       final j = index + offset * _direction;
       if (j < 0 || j >= list.length) continue;
@@ -609,9 +896,11 @@ class ReelController extends ChangeNotifier {
             offset: offset,
             stage: ReelPrefetchStage.resolve,
             lane: ReelPrefetcher.laneFor(c.title),
-            run: () => _resolve(c),
+            run: offset > 0 ? () => _resolve(c).then((_) => _holdBackAhead(c)) : () => _resolve(c),
           ),
         );
+      } else if (offset > 0) {
+        answered.add(c);
       }
       if (!_item.containsKey(c.id)) {
         tasks.add(
@@ -637,6 +926,8 @@ class ReelController extends ChangeNotifier {
       }
     }
     _prefetch.schedule(gen, tasks);
+    // Cards ahead already answered: checked once this step has settled.
+    if (externalClips && answered.isNotEmpty) scheduleMicrotask(() => answered.forEach(_holdBackAhead));
   }
 
   /// Whether [c]'s art is warm for the clip answer it has now (an unresolved
@@ -700,6 +991,38 @@ class ReelController extends ChangeNotifier {
         _cardSince == null &&
         !_cardFailed;
     if (!opening) _prefetch.release();
+  }
+
+  /// Phone: the TV's 1-in-6 AI-card cap. The feed never skips the card
+  /// under your thumb, so an AI card ahead (resolved two cards early) with
+  /// no room is taken out of this session's list before it comes on screen;
+  /// the title waits for another day, as on the TV.
+  void _holdBackAhead(ReelCardData c) {
+    if (!externalClips || _disposed || !_active) return;
+    final list = _cards[deck.id];
+    if (list == null) return;
+    final j = list.indexOf(c);
+    if (j <= index || !_resolved.contains(c.id) || _clip[c.id] != null) return;
+    if (_aiCardFits(list, j)) return;
+    _unanchor(deck.id, list, c.id);
+    final left = [...list]..removeAt(j);
+    _cards[deck.id] = left;
+    appLogger.d('[ReelDeck] ${deck.id}: AI card held back (at most 1 in ${ReelDecay.aiCardEvery})');
+    notifyListeners();
+    _plan(left, _generation);
+  }
+
+  /// Whether an AI card at [j] (ahead of the cursor) keeps the 1-in-6 cap:
+  /// the clip cards since the last AI card shown, plus those between here
+  /// and [j] (a card not resolved yet counts as a clip card).
+  bool _aiCardFits(List<ReelCardData> list, int j) {
+    var since = _sinceAiCard;
+    for (var i = index + 1; i < j; i++) {
+      final x = list[i];
+      if (_resolved.contains(x.id) && _clip[x.id] == null) return false;
+      since++;
+    }
+    return since >= ReelDecay.aiCardEvery;
   }
 
   /// TV: the clock starts on this card's first frame (the core moves from
@@ -800,6 +1123,7 @@ class ReelController extends ChangeNotifier {
   /// dispose, then hand over to real playback (which reports normally).
   Future<bool> watch({bool onTv = false}) async {
     final s = current;
+    if (s.kind == ReelSlotKind.decide) return _watchPick(s, onTv: onTv);
     final c = s.card;
     if (c == null) return false;
     // No Reel prefetch competes with the hand-over, or follows it.
@@ -834,6 +1158,38 @@ class ReelController extends ChangeNotifier {
     // went (or that it couldn't be kept).
     if (!ok && onTv) await save();
     return ok;
+  }
+
+  /// The decision card's Watch: the chosen pick, handed over like a card.
+  Future<bool> _watchPick(ReelSlot s, {required bool onTv}) async {
+    final p = s.chosen;
+    if (p == null) return false;
+    final item = p.item ?? await media.item(p.pick.serverId, p.pick.ratingKey).catchError((Object _) => null);
+    if (item == null) return false;
+    await store.record(p.pick.titleId, onTv ? ReelAction.watchOnTv : ReelAction.watch, deck: deck.id);
+    if (!onTv) {
+      await clips.release();
+      _firstClip = true;
+    }
+    return onWatch(item, onTv: onTv);
+  }
+
+  /// The decision card: moves the choice [dir] picks along (D-pad left and
+  /// right); it stops at either end.
+  void movePick(int dir) {
+    final s = current;
+    if (s.kind != ReelSlotKind.decide || s.picks.isEmpty) return;
+    selectPick(s.pick + dir);
+  }
+
+  /// The decision card: chooses pick [i] (a tap, or the Fold's On TV mode).
+  void selectPick(int i) {
+    final s = current;
+    if (s.kind != ReelSlotKind.decide || s.picks.isEmpty) return;
+    final to = i.clamp(0, s.picks.length - 1);
+    if (to == s.pick) return;
+    _pickAt = to;
+    notifyListeners();
   }
 
   /// Confirmations that say where a Save went.
@@ -876,7 +1232,23 @@ class ReelController extends ChangeNotifier {
     final seat = onSaved;
     if (seat != null) unawaited(seat().catchError((Object _) {}));
     _say((reachesTvNow?.call() ?? true) ? savedOnTv : savedForLater);
+    _saves++;
+    await _refreshPicks();
+    _placeDecideNext(c);
   });
+
+  /// After the [decideAfterSaves]th Save of the session, the decision card
+  /// comes up next: straight after the card just saved, [saved]. Once seen
+  /// it never moves again.
+  void _placeDecideNext(ReelCardData saved) {
+    if (_decideSeen || _saves < decideAfterSaves || _picks.isEmpty || _disposed) return;
+    final list = cards;
+    if (list == null || current.card?.id != saved.id) return;
+    _decide = (deck: deck.id, before: index + 1 < list.length ? list[index + 1].id : null);
+    appLogger.d('[ReelDecide] ${deck.id}: Tonight\'s picks up next');
+    notifyListeners();
+    if (_active) _readPicks();
+  }
 
   /// Save's watchlist mirror. A card saved before its metadata landed
   /// resolves the item first, as [watch] does, so the mirror isn't skipped.
@@ -928,14 +1300,98 @@ class ReelController extends ChangeNotifier {
     }
   });
 
+  /// Takes [c] out of every deck. The deck on screen keeps its page, so the
+  /// slot after it (a card, the decision card or the end) slides in.
   void _drop(ReelCardData c) {
+    final p = page;
     for (final e in _cards.entries) {
-      if (e.value.any((x) => x.id == c.id)) _cards[e.key] = [...e.value]..removeWhere((x) => x.id == c.id);
+      if (e.value.any((x) => x.id == c.id)) {
+        _unanchor(e.key, e.value, c.id);
+        _cards[e.key] = [...e.value]..removeWhere((x) => x.id == c.id);
+      }
     }
+    _seek(p.clamp(0, slotCount - 1));
   }
 
   /// Phone feed: the current card's clip played through once.
   void clipEnded() => _clipEnded = true;
+
+  /// What More like this says: while the call runs, when its cards are in,
+  /// and when it found none.
+  static const String findingMoreLike = 'Finding more like this…';
+  static const String moreLikeUpNext = 'More like this, up next';
+  static const String noMoreLike = "Couldn't find more like this right now";
+
+  /// Whether the current card offers More like this.
+  bool get canMoreLike => moreLike != null && current.card != null;
+
+  /// The press in flight; a second press while it runs joins it.
+  Future<void>? _moreLiking;
+
+  /// More like this (V2-39): records the ask as a fact, then inserts the
+  /// cards the call chose straight after the card on screen once it lands
+  /// (never the raw similar titles), so they come next; the cursor, and so
+  /// the phone's page, stays where it is. Cards already shown in the deck
+  /// stay out; one further down the deck moves up instead of showing twice.
+  Future<void> moreLikeThis() => _moreLiking ??= _moreLikeThis().whenComplete(() => _moreLiking = null);
+
+  Future<void> _moreLikeThis() async {
+    final find = moreLike;
+    final seed = current.card;
+    if (find == null || seed == null) return;
+    final shown = {for (final c in (cards ?? const <ReelCardData>[]).take(index + 1)) c.id};
+    await store.record(seed.id, ReelAction.moreLikeThis, deck: deck.id);
+    _say(findingMoreLike);
+    List<ReelCardData>? found;
+    try {
+      found = await find(seed, skip: shown);
+    } catch (e) {
+      appLogger.w('Reel: More like this failed', error: e);
+    }
+    if (_disposed) return;
+    // Inserted after the card on screen when the call lands, in the deck on
+    // screen then: the press asked for them next.
+    final list = _cards[deck.id];
+    final at = index;
+    final before = {for (final c in (list ?? const <ReelCardData>[]).take(at + 1)) c.id, seed.id};
+    final fresh = <ReelCardData>[];
+    for (final c in found ?? const <ReelCardData>[]) {
+      if (fresh.length >= ReelPool.moreLikeMax) break;
+      if (before.add(c.id)) fresh.add(c);
+    }
+    if (list == null || fresh.isEmpty) {
+      _say(noMoreLike);
+      return;
+    }
+    final freshIds = {for (final c in fresh) c.id};
+    final next = [
+      ...list.take(at + 1),
+      ...fresh,
+      for (final c in list.skip(at + 1))
+        if (!freshIds.contains(c.id)) c,
+    ];
+    _cards[deck.id] = next;
+    // The decision card waiting before a card that moved up into the new
+    // ones comes after them instead.
+    final dc = _decide;
+    if (dc != null && dc.deck == deck.id && freshIds.contains(dc.before)) {
+      final after = at + 1 + fresh.length;
+      _decide = (deck: deck.id, before: after < next.length ? next[after].id : null);
+    }
+    appLogger.i('[ReelMore] ${deck.id}: ${fresh.length} cards after card ${at + 1}');
+    _say(moreLikeUpNext);
+    if (at >= list.length) {
+      // At the end of the deck: the first new card comes on screen.
+      if (_active) return _show();
+      notifyListeners();
+      return;
+    }
+    notifyListeners();
+    if (_active) {
+      _plan(next, _generation);
+      _preloadNext(next, _generation);
+    }
+  }
 
   /// The title's own page.
   Future<void> openDetails() async {
@@ -1063,6 +1519,21 @@ class ReelController extends ChangeNotifier {
       'next': [for (final n in upNext) ?card(n)],
       'playing': clips.phase.value == ClipPhase.playing,
       'poolEnd': s.kind == ReelSlotKind.poolEnd,
+      if (s.kind == ReelSlotKind.decide)
+        'decide': {
+          'pick': s.pick,
+          'picks': [
+            for (final p in s.picks)
+              {
+                'id': p.pick.titleId,
+                'title': p.pick.title,
+                'year': p.item?.year,
+                'server': p.pick.serverId,
+                'art': p.item?.artPath,
+                'thumb': p.item?.thumbPath,
+              },
+          ],
+        },
     };
   }
 

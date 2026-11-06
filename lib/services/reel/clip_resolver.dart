@@ -506,6 +506,20 @@ class ClipResolver {
     _ => const [],
   };
 
+  /// The group keys of [titles] whose cached answer is a miss (an AI card):
+  /// cached `src:` rows in the current [sourceFormat] only, so nothing is
+  /// resolved and no server is asked. A title with no row, or an older
+  /// format's row, is left out (assumed to have a clip until it is resolved
+  /// on demand).
+  Future<Set<String>> knownMisses(Iterable<ReelTitle> titles) async {
+    final keys = {for (final t in titles) 'src:${t.groupKey}'};
+    final rows = await store.cachedMany(keys, ttl: ReelStore.sourceTtl);
+    return {
+      for (final MapEntry(:key, :value) in rows.entries)
+        if (_entry(value)?['miss'] == true) key.substring(4),
+    };
+  }
+
   ResolvedClip? _fromCache(Map<String, dynamic> j) {
     try {
       return switch (j['k']) {

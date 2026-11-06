@@ -67,6 +67,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$accountPreferences$en accountPreferences = Translations$accountPreferences$en.internal(_root);
 	late final Translations$aiTab$en aiTab = Translations$aiTab$en.internal(_root);
 	late final Translations$ai$en ai = Translations$ai$en.internal(_root);
+	late final Translations$reelForYou$en reelForYou = Translations$reelForYou$en.internal(_root);
 	late final Translations$backupTransfer$en backupTransfer = Translations$backupTransfer$en.internal(_root);
 	late final Translations$homeRows$en homeRows = Translations$homeRows$en.internal(_root);
 	late final Translations$discover$en discover = Translations$discover$en.internal(_root);
@@ -3749,6 +3750,57 @@ class Translations$ai$en {
 
 	/// en: 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.'
 	String get modelsDescription => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.';
+}
+
+// Path: reelForYou
+class Translations$reelForYou$en {
+	Translations$reelForYou$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'For You in the Reel'
+	String get title => 'For You in the Reel';
+
+	/// en: 'The AI builds the Reel's For You feed once a day from what you watch. Your note goes into that build, on the TV and the phone.'
+	String get explainer => 'The AI builds the Reel\'s For You feed once a day from what you watch. Your note goes into that build, on the TV and the phone.';
+
+	/// en: 'Tell For You in your own words'
+	String get note => 'Tell For You in your own words';
+
+	/// en: 'No note yet: For You goes by what you watch'
+	String get noteEmpty => 'No note yet: For You goes by what you watch';
+
+	/// en: 'Your note to For You'
+	String get noteLabel => 'Your note to For You';
+
+	/// en: 'For example: more anime at weekends, nothing over two hours on weeknights'
+	String get noteHint => 'For example: more anime at weekends, nothing over two hours on weeknights';
+
+	/// en: 'Saved. Tomorrow's For You reads it, or rebuild today's now.'
+	String get noteSaved => 'Saved. Tomorrow\'s For You reads it, or rebuild today\'s now.';
+
+	/// en: 'Note removed'
+	String get noteRemoved => 'Note removed';
+
+	/// en: 'Couldn't save the note. On a phone that uses the TV's data, connect to the TV first'
+	String get noteFailed => 'Couldn\'t save the note. On a phone that uses the TV\'s data, connect to the TV first';
+
+	/// en: 'Rebuild today's For You'
+	String get rebuild => 'Rebuild today\'s For You';
+
+	/// en: 'One new AI build for today, with your note as it is now'
+	String get rebuildSubtitle => 'One new AI build for today, with your note as it is now';
+
+	/// en: 'Today's For You is cleared; the Reel builds a new one with your note'
+	String get rebuildHere => 'Today\'s For You is cleared; the Reel builds a new one with your note';
+
+	/// en: 'The TV rebuilds today's For You when its Reel next opens; this phone then takes it'
+	String get rebuildOnTv => 'The TV rebuilds today\'s For You when its Reel next opens; this phone then takes it';
+
+	/// en: 'Couldn't clear today's For You'
+	String get rebuildFailed => 'Couldn\'t clear today\'s For You';
 }
 
 // Path: backupTransfer
@@ -10770,6 +10822,20 @@ extension on Translations {
 			'ai.autoRefreshSubtitle' => 'Twice a day while Plezy is open, with Haiku (about a tenth of a cent each). Up to 10 AI rows on Home.',
 			'ai.modelsTitle' => 'Models',
 			'ai.modelsDescription' => 'Claude Sonnet 5.5 answers requests; Claude Haiku 5.5 handles background jobs.',
+			'reelForYou.title' => 'For You in the Reel',
+			'reelForYou.explainer' => 'The AI builds the Reel\'s For You feed once a day from what you watch. Your note goes into that build, on the TV and the phone.',
+			'reelForYou.note' => 'Tell For You in your own words',
+			'reelForYou.noteEmpty' => 'No note yet: For You goes by what you watch',
+			'reelForYou.noteLabel' => 'Your note to For You',
+			'reelForYou.noteHint' => 'For example: more anime at weekends, nothing over two hours on weeknights',
+			'reelForYou.noteSaved' => 'Saved. Tomorrow\'s For You reads it, or rebuild today\'s now.',
+			'reelForYou.noteRemoved' => 'Note removed',
+			'reelForYou.noteFailed' => 'Couldn\'t save the note. On a phone that uses the TV\'s data, connect to the TV first',
+			'reelForYou.rebuild' => 'Rebuild today\'s For You',
+			'reelForYou.rebuildSubtitle' => 'One new AI build for today, with your note as it is now',
+			'reelForYou.rebuildHere' => 'Today\'s For You is cleared; the Reel builds a new one with your note',
+			'reelForYou.rebuildOnTv' => 'The TV rebuilds today\'s For You when its Reel next opens; this phone then takes it',
+			'reelForYou.rebuildFailed' => 'Couldn\'t clear today\'s For You',
 			'backupTransfer.title' => 'Backup & transfer',
 			'backupTransfer.settingsSubtitle' => 'Move your Home rows and Comfort settings to another device',
 			'backupTransfer.description' => 'Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).',
@@ -11046,6 +11112,8 @@ extension on Translations {
 			'navigation.libraries' => 'Libraries',
 			'navigation.downloads' => 'Downloads',
 			'navigation.liveTv' => 'Live TV',
+			_ => null,
+		} ?? switch (path) {
 			'navigation.explore' => 'Explore',
 			'navigation.watchlist' => 'Watchlist',
 			'navigation.comfort' => 'Comfort',
@@ -11060,8 +11128,6 @@ extension on Translations {
 			'history.streak' => 'Day streak',
 			'history.bestStreak' => ({required Object n}) => 'Best ${n}',
 			'history.byMonth' => 'Month by month',
-			_ => null,
-		} ?? switch (path) {
 			'history.timeline' => 'Timeline',
 			'history.topGenres' => 'Top genres',
 			'history.directors' => 'Directors',
@@ -11560,6 +11626,8 @@ extension on Translations {
 			'watchTogether.letEveryoneControl' => 'Let Everyone Control Playback',
 			'watchTogether.lockRoom' => 'Lock Room',
 			'watchTogether.lockRoomDescription' => 'Nobody new can join',
+			_ => null,
+		} ?? switch (path) {
 			'watchTogether.leaveRoom' => 'Leave Room',
 			'watchTogether.leaveRoomQuestion' => 'Leave Room?',
 			'watchTogether.leaveRoomConfirm' => 'You can join again with the room code.',
@@ -11574,8 +11642,6 @@ extension on Translations {
 			'watchTogether.notices.playbackStarted' => 'Playback started',
 			'watchTogether.notices.paused' => ({required Object name}) => '${name} paused',
 			'watchTogether.notices.playbackPaused' => 'Playback paused',
-			_ => null,
-		} ?? switch (path) {
 			'watchTogether.notices.jumpedTo' => ({required Object name, required Object position}) => '${name} jumped to ${position}',
 			'watchTogether.notices.roomJumpedTo' => ({required Object position}) => 'Jumped to ${position}',
 			'watchTogether.notices.changedSpeed' => ({required Object name, required Object speed}) => '${name} set the speed to ${speed}',
@@ -12074,6 +12140,8 @@ extension on Translations {
 			'seerr.permissionRevoked' => 'You no longer have permission to request this',
 			'services.title' => 'Services',
 			'services.hubSubtitle' => 'Sync watch progress and request new titles.',
+			_ => null,
+		} ?? switch (path) {
 			'services.integrations' => 'Integrations',
 			'services.notConnected' => 'Not connected',
 			'services.connectedAs' => ({required Object username}) => 'Connected as @${username}',
@@ -12088,8 +12156,6 @@ extension on Translations {
 			'services.names.seerr' => 'Seerr',
 			'services.names.mdblist' => 'MDBList',
 			'services.simklReconnect.title' => 'Reconnect Simkl',
-			_ => null,
-		} ?? switch (path) {
 			'services.simklReconnect.subtitle' => 'Simkl is retiring the sign-in method this connection uses. Reconnecting opens simkl.com to approve Plezy — Plezy never sees your password. Your watch history stays on Simkl.',
 			'services.deviceCode.title' => ({required Object service}) => 'Activate Plezy on ${service}',
 			'services.deviceCode.instructions' => 'Scan the QR code, or visit the address below and enter this code:',

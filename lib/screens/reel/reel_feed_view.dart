@@ -6,16 +6,21 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
+import '../../media/media_item_types.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_library.dart';
+import '../../services/reel/reel_premise.dart';
+import '../../services/settings_service.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
+import '../../widgets/fork_motion_widgets.dart';
 import '../../widgets/optimized_media_image.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
+import 'reel_decide_view.dart';
 
 /// The phone Reel, a feed you thumb through: each card plays in its own
 /// page (the clip is drawn into the page, so it slides with your thumb), and
@@ -51,7 +56,7 @@ class ReelFeedView extends StatefulWidget {
 }
 
 class _ReelFeedViewState extends State<ReelFeedView> {
-  late final PageController _pages = PageController(initialPage: widget.controller.index);
+  late final PageController _pages = PageController(initialPage: widget.controller.page);
   String? _deck;
   bool _immersive = false;
   bool _burst = false;
@@ -116,20 +121,21 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     // a step from the TV moves the page to match.
     if (_deck != _c.deck.id) {
       _deck = _c.deck.id;
-      if (_pages.hasClients) _pages.jumpToPage(_c.index);
+      if (_pages.hasClients) _pages.jumpToPage(_c.page);
     } else if (_pages.hasClients && !_pages.position.isScrollingNotifier.value) {
       final page = _pages.page?.round();
-      if (page != null && page != _c.index) _pages.jumpToPage(_c.index);
+      if (page != null && page != _c.page) _pages.jumpToPage(_c.page);
     }
     _sync();
     setState(() {});
   }
 
-  /// The card on screen, the next two, then the one behind.
+  /// The card on screen, the next two, then the one behind (by page, so
+  /// the decision card holds a place and plays nothing).
   void _sync() {
     // Hidden, paused or handing over to real playback: nothing plays.
     if (!_c.active) return;
-    final i = _c.index;
+    final i = _c.page;
     final window = <FeedClip>[
       for (final j in [i, i + 1, i + 2, i - 1])
         if (j >= 0)
@@ -150,8 +156,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   @override
   Widget build(BuildContext context) {
-    final list = _c.cards;
-    final count = list == null ? 1 : list.length + 1;
+    final count = _c.slotCount;
     return ColoredBox(
       color: Colors.black,
       child: Stack(
@@ -161,7 +166,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             controller: _pages,
             scrollDirection: Axis.vertical,
             itemCount: count,
-            onPageChanged: (i) => unawaited(_c.step(i - _c.index)),
+            onPageChanged: (i) => unawaited(_c.step(i - _c.page)),
             itemBuilder: (context, i) => _page(_c.slotAt(i)),
           ),
           _TopBar(
@@ -221,6 +226,14 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             icon: const Icon(Symbols.video_library_rounded),
             label: const Text('Decks'),
           ),
+        );
+      case ReelSlotKind.decide:
+        return ReelDecideView(
+          controller: _c,
+          slot: slot,
+          tv: false,
+          onWatch: widget.onWatch,
+          watchOnTv: widget.watchOnTv,
         );
       case ReelSlotKind.card:
         break;
@@ -517,6 +530,7 @@ class _Info extends StatelessWidget {
     final theme = Theme.of(context);
     final card = slot.card!;
     final clip = slot.clip;
+    final badge = controller.deck.keepsSeen ? card.facts.seen.badge : null;
     return Align(
       alignment: Alignment.bottomCenter,
       child: DecoratedBox(
@@ -534,7 +548,7 @@ class _Info extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (clip != null || card.chip != null)
+              if (clip != null || card.chip != null || badge != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Wrap(
@@ -549,6 +563,7 @@ class _Info extends StatelessWidget {
                           label: clip.label,
                         ),
                       if (card.chip case final chip?) StatChip(label: chip),
+                      if (badge != null) StatChip(icon: Symbols.check_rounded, label: badge),
                     ],
                   ),
                 ),
@@ -560,6 +575,7 @@ class _Info extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
+              _Premise(slot: slot),
               if (card.why case final why?) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -585,7 +601,12 @@ class _Info extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: onWatch,
                       icon: Icon(watchOnTv ? Symbols.tv_rounded : Symbols.play_arrow_rounded, fill: 1),
-                      label: Text(watchOnTv ? 'Watch on TV' : 'Watch', maxLines: 1),
+                      label: Text(
+                        watchOnTv
+                            ? 'Watch on TV'
+                            : (slot.resumeEpisode == null ? 'Watch' : 'Resume ${slot.resumeEpisode}'),
+                        maxLines: 1,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -603,6 +624,56 @@ class _Info extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the title is about, in two lines at most, on a card with no clip
+/// to tell you (an AI card) and on an anime opening, which is a song
+/// (plan D19); never on a trailer. The daily build's hook first, else the
+/// tagline, else the summary's first sentence ([ReelPremise.line]), under
+/// the app's spoiler setting. It fades in once the card has resolved.
+class _Premise extends StatelessWidget {
+  const _Premise({required this.slot});
+
+  final ReelSlot slot;
+
+  bool get _shows => slot.isAiCard || slot.clip?.source.origin == ClipOrigin.animeTheme;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_shows) return const SizedBox.shrink();
+    final hide = SettingsService.instanceOrNull?.listenable(SettingsService.hideSpoilers);
+    if (hide == null) return _line(context, hideSpoilers: false);
+    return ValueListenableBuilder<bool>(
+      valueListenable: hide,
+      builder: (context, hideSpoilers, _) => _line(context, hideSpoilers: hideSpoilers),
+    );
+  }
+
+  Widget _line(BuildContext context, {required bool hideSpoilers}) {
+    final card = slot.card!;
+    final item = slot.item;
+    final text = ReelPremise.line(
+      hook: card.hook,
+      tagline: item?.tagline ?? card.best.tagline,
+      summary: item?.summary ?? card.best.summary,
+      hideSpoilers: hideSpoilers,
+      unwatchedEpisode: item?.shouldHideSpoiler ?? false,
+    );
+    if (text == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return ForkEntrance(
+      key: ValueKey('premise:${card.id}'),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          text,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurface),
         ),
       ),
     );

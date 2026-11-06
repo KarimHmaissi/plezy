@@ -27,6 +27,9 @@ enum ReelAction {
   /// Opened the title's own page from its card.
   details,
 
+  /// Asked for more like this title from its card (V2-39).
+  moreLikeThis,
+
   /// Left before its clip showed a first frame, or after the clip failed.
   /// Neutral: it adds no fatigue and is not a sample.
   unplayed,
@@ -90,7 +93,9 @@ class ReelPick {
 /// Facts the Reel keeps. Picks and vetoes are small synced settings, one per
 /// title (`reel.pick.<titleId>`, `reel.veto.<titleId>`), so catch-up merges
 /// them title by title and the newest edit of each title wins between the TV
-/// and the phone. Events and caches stay in this device's own fork database.
+/// and the phone. The TV's day's pool, the For You note and each device's
+/// signals are synced settings too (newest edit wins). Events and caches stay
+/// in this device's own fork database.
 class ReelStore {
   ReelStore({
     Future<ForkDatabase> Function()? database,
@@ -127,6 +132,13 @@ class ReelStore {
   /// isn't brought back from it.
   static const String picksMigratedKey = 'reel.migrated.picks';
   static const String vetoesMigratedKey = 'reel.migrated.vetoes';
+
+  /// The TV's For You pool for the day, shared with the phone (about 11 KB).
+  static const String poolKey = 'reel.pool';
+
+  /// The household's own words to For You's daily build (free text; either
+  /// device writes it).
+  static const String forYouNoteKey = 'reel.forYouNote';
 
   /// How long a clip asset identity (or a miss) is trusted.
   static const Duration sourceTtl = Duration(days: 30);
@@ -210,6 +222,37 @@ class ReelStore {
     if (row == null) return null;
     if (ttl != null && _clock().millisecondsSinceEpoch - row.updatedAt > ttl.inMilliseconds) return null;
     return row.value;
+  }
+
+  /// [cached] for many keys in a few reads: key → value for the keys
+  /// that have a row (within [ttl]).
+  Future<Map<String, String>> cachedMany(Iterable<String> keys, {Duration? ttl}) async {
+    final list = keys.toSet().toList();
+    if (list.isEmpty) return const {};
+    final db = await _database();
+    final now = _clock().millisecondsSinceEpoch;
+    final out = <String, String>{};
+    for (var i = 0; i < list.length; i += 400) {
+      final chunk = list.sublist(i, i + 400 > list.length ? list.length : i + 400);
+      for (final row in await (db.select(db.reelCache)..where((c) => c.key.isIn(chunk))).get()) {
+        if (ttl != null && now - row.updatedAt > ttl.inMilliseconds) continue;
+        out[row.key] = row.value;
+      }
+    }
+    return out;
+  }
+
+  /// When [key]'s cache row was last written, or null when there is none.
+  Future<DateTime?> cachedAt(String key) async {
+    final db = await _database();
+    final row = await (db.select(db.reelCache)..where((c) => c.key.equals(key))).getSingleOrNull();
+    return row == null ? null : DateTime.fromMillisecondsSinceEpoch(row.updatedAt);
+  }
+
+  /// Drops [key]'s cache row.
+  Future<void> uncache(String key) async {
+    final db = await _database();
+    await (db.delete(db.reelCache)..where((c) => c.key.equals(key))).go();
   }
 
   Future<void> cache(String key, String value) async {
@@ -386,6 +429,35 @@ class ReelStore {
 
   static Iterable<String> _assets(Object? s) => ((s as List?) ?? const []).map((e) => '$e');
 
+  // ---- the day's pool (synced) ----
+
+  /// The shared pool as the host wrote it (`{day, entries}`), or null.
+  Future<String?> sharedPool() async => (await _settings()).readSetting(poolKey);
+
+  /// The host shares its day's pool. Newest write wins, like picks.
+  Future<void> sharePool(String value) async => (await _settings()).writeSetting(poolKey, value);
+
+  // ---- For You in their own words (synced) ----
+
+  /// Their note to For You, trimmed; null when there is none.
+  Future<String?> forYouNote() async {
+    final note = (await (await _settings()).readSetting(forYouNoteKey))?.trim();
+    return note == null || note.isEmpty ? null : note;
+  }
+
+  /// Keeps [note] (trimmed) as their note to For You; empty or null removes
+  /// it. Newest edit wins between the TV and the phone.
+  Future<void> setForYouNote(String? note) async {
+    final n = note?.trim();
+    await (await _settings()).writeSetting(forYouNoteKey, n == null || n.isEmpty ? null : n);
+  }
+
+  // ---- per-device Reel signals (synced; see ReelSignals) ----
+
+  Future<String?> readSignals(String key) async => (await _settings()).readSetting(key);
+
+  Future<void> writeSignals(String key, String value) async => (await _settings()).writeSetting(key, value);
+
   // ---- picks (synced) ----
 
   static ReelPick? _decodePick(String? raw) {
@@ -502,6 +574,13 @@ class ReelStore {
           key,
     };
   }
+
+  /// Titles passed on with Not for me (on either device), and when: the
+  /// daily build's "passed on lately" facts.
+  Future<Map<String, DateTime>> passedOn() async => {
+    for (final MapEntry(:key, :value) in (await _vetoes()).entries)
+      if (value['n'] case final int ms) key: DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true),
+  };
 
   Future<Set<String>> spoiledAssets(String titleId) async => {..._assets((await _veto(titleId))['s'])};
 }

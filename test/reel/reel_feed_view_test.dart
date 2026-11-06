@@ -82,11 +82,15 @@ class _Deck extends ReelDeck {
   bool get keepsSeen => true;
   @override
   bool get raw => true;
+
+  /// Cards built with a hook or a seen state of their own.
+  final Map<String, ReelCardData> special = {};
+
   @override
-  Future<List<ReelCardData>> load() async => [for (final i in ids) _card(i)];
+  Future<List<ReelCardData>> load() async => [for (final i in ids) special[i] ?? _card(i)];
 }
 
-ReelCardData _card(String id) => ReelCardData(
+ReelCardData _card(String id, {String? hook, SeenState seen = SeenState.unseen, bool resume = false}) => ReelCardData(
   title: ReelTitle(
     titleId: 't$id',
     groupKey: 'g$id',
@@ -96,7 +100,7 @@ ReelCardData _card(String id) => ReelCardData(
   ),
   facts: TitleFacts(
     ref: TitleRef(id: 't$id', groupKey: 'g$id'),
-    seen: SeenState.unseen,
+    seen: seen,
   ),
   best: IndexedTitle(
     id: 's1:$id',
@@ -114,9 +118,11 @@ ReelCardData _card(String id) => ReelCardData(
     cast: '',
     collections: '',
     groupKey: 'g$id',
-    summary: '',
+    summary: 'A keeper relights the harbor lamp. The town learns why it went dark.',
   ),
   why: 'Like the films you finish.',
+  hook: hook,
+  resume: resume,
 );
 
 /// A player that is ready as soon as it opens.
@@ -159,12 +165,13 @@ void main() {
   late ValueNotifier<int> restored;
   late _Deck first;
   late _Servers servers;
+  late ReelStore store;
 
   setUp(() {
     ReelArt.resetForTesting();
     db = ForkDatabase.memory();
     final settings = LocalCustomisationStore(db);
-    final store = ReelStore(database: () async => db, settings: () async => settings);
+    store = ReelStore(database: () async => db, settings: () async => settings);
     opened = [];
     decksOpened = watched = sheets = 0;
     restored = ValueNotifier(0);
@@ -187,6 +194,18 @@ void main() {
       externalClips: true,
       memoryRestored: restored,
       onOpen: (item) async => opened.add(item),
+      moreLike: (seed, {required skip}) async => [_card('5'), _card('6')],
+      // A resume card's show has its fourth episode on deck.
+      itemWithNext: (serverId, ratingKey) async => (
+        item: await _Media().item(serverId, ratingKey),
+        next: MediaItem.plex(
+          id: 'e$ratingKey',
+          kind: MediaKind.episode,
+          title: 'Harbor Lights 4',
+          parentIndex: 1,
+          index: 4,
+        ),
+      ),
     );
     players = ReelFeedPlayers(create: (_) => _Video());
   });
@@ -296,6 +315,76 @@ void main() {
     expect(players.current, 't7');
   });
 
+  testWidgets('More like this inserts after the page on screen: the page stays, the new next card is parked', (
+    tester,
+  ) async {
+    await pump(tester);
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.current.card?.id, 't2');
+
+    final press = c.moreLikeThis();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => press);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.index, 1);
+    expect(c.current.card?.id, 't2');
+    expect(find.text('Title 2'), findsOneWidget);
+    expect(players.current, 't2');
+    expect(players.held, contains('t5'), reason: 'the first new card is parked next');
+
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.current.card?.id, 't5');
+    expect(players.current, 't5');
+    // The confirmation's own timer runs out.
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets("Tonight's picks after the second Save: the page stays, then a swipe brings it up", (tester) async {
+    Future<void> fling() async {
+      await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+    }
+
+    await pump(tester);
+    await tester.runAsync(c.save);
+    await fling();
+    expect(c.current.card?.id, 't2');
+    await tester.runAsync(c.save);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.page, 1, reason: 'placing it ahead never moves the page on screen');
+    expect(find.text('Title 2'), findsWidgets);
+    expect(players.current, 't2');
+
+    await fling();
+    expect(c.current.kind, ReelSlotKind.decide);
+    expect(find.text("Tonight's picks"), findsOneWidget);
+    expect(find.text('One for tonight?'), findsOneWidget);
+    expect(players.current, isNull, reason: 'nothing plays under it');
+    final chosen = find.byKey(const ValueKey('decide:chosen'));
+    expect(tester.widget<Text>(chosen).data, 'Title 2', reason: 'the newest Save is chosen first');
+
+    await tester.tap(find.byKey(const ValueKey('decide:t1')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(chosen).data, 'Title 1');
+    expect(c.current.chosen?.pick.titleId, 't1');
+    await tester.tap(find.widgetWithText(FilledButton, 'Watch'));
+    expect(watched, 1);
+
+    await fling();
+    expect(c.current.card?.id, 't3');
+    expect(players.current, 't3');
+    // The confirmations' own timers run out.
+    await tester.pump(const Duration(seconds: 4));
+  });
+
   testWidgets('swipe right hides the controls to watch; swipe left brings them back', (tester) async {
     await pump(tester);
     expect(hidden(tester, 'Details'), isFalse);
@@ -392,6 +481,48 @@ void main() {
       expect(c.current.isAiCard, isTrue);
       expect(spotlight(tester).lightArt, isFalse);
       expect(tester.widget<CyclingMediaBackdrop>(find.byType(CyclingMediaBackdrop)).imageType, ImageType.art);
+    });
+  });
+
+  group('what a card is about', () {
+    const premise = 'A keeper relights the harbor lamp.';
+
+    testWidgets('a card with no clip shows the first sentence of its summary', (tester) async {
+      await tester.runAsync(() => store.cache('src:g1', ClipResolver.missRow));
+      await pump(tester);
+      await tester.pumpAndSettle();
+      expect(c.current.isAiCard, isTrue);
+      expect(find.text(premise), findsOneWidget);
+      expect(find.textContaining('learns why'), findsNothing, reason: 'the first sentence only');
+    });
+
+    testWidgets("a trailer card doesn't: the trailer tells you", (tester) async {
+      await pump(tester);
+      await tester.pumpAndSettle();
+      expect(c.current.clip, isNotNull);
+      expect(find.text(premise), findsNothing);
+    });
+
+    testWidgets("the daily build's hook comes before the summary", (tester) async {
+      first.special['1'] = _card('1', hook: 'A lamp, a harbor and one long night');
+      await tester.runAsync(() => store.cache('src:g1', ClipResolver.missRow));
+      await pump(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('A lamp, a harbor and one long night'), findsOneWidget);
+      expect(find.text(premise), findsNothing);
+    });
+
+    testWidgets('a Give it another go card reads Resume with its next episode', (tester) async {
+      first.special['1'] = _card('1', seen: const SeenState(kind: SeenKind.paused, eps: 3, total: 10), resume: true);
+      await pump(tester);
+      expect(find.text('Resume E4'), findsOneWidget);
+      expect(find.text('Started'), findsOneWidget);
+    });
+
+    testWidgets('a deck that keeps seen titles shows the seen badge', (tester) async {
+      first.special['1'] = _card('1', seen: const SeenState(kind: SeenKind.finished, eps: 10, total: 10));
+      await pump(tester);
+      expect(find.text('Seen'), findsOneWidget);
     });
   });
 }

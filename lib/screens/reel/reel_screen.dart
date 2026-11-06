@@ -298,6 +298,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       unawaited(c.step(dir.sign));
     }
     if (deckDir is int && deckDir != 0) {
+      // On Tonight's picks, sideways chooses a pick, as the D-pad does.
+      if (c.current.kind == ReelSlotKind.decide) {
+        c.movePick(deckDir.sign);
+        return;
+      }
       _perf.begin(ReelPerfTrigger.deck);
       unawaited(c.switchDeck(deckDir.sign));
     }
@@ -306,6 +311,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void _remoteAction(String action) {
     final c = _controller;
     if (c == null || !_shown || widget.offline) return;
+    // Tonight's picks: a poster tapped on the Fold.
+    if (action.startsWith('pick:')) {
+      final i = int.tryParse(action.substring(5));
+      if (i != null) c.selectPick(i);
+      return;
+    }
     unawaited(switch (action) {
       'watch' => _watch(),
       'save' => c.save(),
@@ -400,7 +411,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   Future<void> _openSheet() async {
     final c = _controller;
-    if (c == null || _sheetOpen) return;
+    // Tonight's picks has no card to act on.
+    if (c == null || _sheetOpen || c.current.kind == ReelSlotKind.decide) return;
     _sheetOpen = true;
     final action = await showReelSheet(context, c, isTv: _isTv);
     _sheetOpen = false;
@@ -408,6 +420,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     switch (action) {
       case ReelSheetAction.save:
         await c.save();
+      case ReelSheetAction.moreLike:
+        // The call takes a while; the snackbar says so and the sheet's focus
+        // comes back at once.
+        unawaited(c.moreLikeThis());
       case ReelSheetAction.notForMe:
         await c.notForMe();
       case ReelSheetAction.spoiled:
@@ -466,6 +482,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     } else if (key == LogicalKeyboardKey.arrowUp) {
       _perf.begin(ReelPerfTrigger.key);
       unawaited(c.step(-1));
+    } else if ((key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.arrowLeft) &&
+        c.current.kind == ReelSlotKind.decide) {
+      // Tonight's picks: left and right choose; ↓ goes on, then → decks.
+      c.movePick(key == LogicalKeyboardKey.arrowRight ? 1 : -1);
     } else if (key == LogicalKeyboardKey.arrowRight) {
       _perf.begin(ReelPerfTrigger.deck);
       unawaited(c.switchDeck(1));
@@ -473,7 +493,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       _perf.begin(ReelPerfTrigger.deck);
       unawaited(c.switchDeck(-1));
     } else if (key == LogicalKeyboardKey.mediaFastForward) {
-      unawaited(c.clips.seekBy(const Duration(seconds: 10)));
+      // FF = More like this (V2-39); a held key asks once.
+      if (event is KeyDownEvent) unawaited(c.moreLikeThis());
     } else if (key == LogicalKeyboardKey.mediaRewind) {
       unawaited(c.clips.seekBy(const Duration(seconds: -10)));
     } else if (key.isContextMenuKey) {
@@ -541,7 +562,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   Widget _tv(ReelController c) => Stack(
     fit: StackFit.expand,
     children: [
-      ReelCardView(controller: c, slot: c.current, tv: true, onReplay: c.replay),
+      ReelCardView(controller: c, slot: c.current, tv: true, onReplay: c.replay, onWatch: () => unawaited(_watch())),
       ReelDeckStrip(controller: c),
     ],
   );

@@ -4,7 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../widgets/app_menu.dart';
 
-enum ReelSheetAction { save, details, notForMe, spoiled, seenIt, deck }
+enum ReelSheetAction { save, moreLike, details, notForMe, spoiled, seenIt, deck }
 
 /// Long-press OK (or the menu key) on the TV, long-press on the Fold: the
 /// app's own menu sheet, Save first and focused, then the rarer choices and
@@ -20,6 +20,8 @@ Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {
     anchorAlignment: AppMenuAnchorAlignment.center,
     entries: [
       const AppMenuItem(value: 'save', icon: Symbols.bookmark_add_rounded, label: 'Save for the TV'),
+      if (c.canMoreLike)
+        const AppMenuItem(value: 'moreLike', icon: Symbols.auto_awesome_motion_rounded, label: 'More like this'),
       // The phone has Details on the card itself.
       if (isTv) const AppMenuItem(value: 'details', icon: Symbols.info_rounded, label: 'Details'),
       const AppMenuItem(value: 'notForMe', icon: Symbols.do_not_disturb_on_rounded, label: 'Not for me'),
@@ -61,6 +63,8 @@ Future<void> showReelDeckPicker(BuildContext context, ReelController c) async {
 
 IconData _deckIcon(String id) => switch (id) {
   'for-you' => Symbols.auto_awesome_rounded,
+  'fits-tonight' => Symbols.bedtime_rounded,
+  'another-go' => Symbols.replay_rounded,
   'anime-openings' => Symbols.music_note_rounded,
   'most-watched' => Symbols.trending_up_rounded,
   _ => Symbols.chat_bubble_rounded,

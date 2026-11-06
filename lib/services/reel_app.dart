@@ -66,7 +66,8 @@ abstract final class ReelApp {
     final facts = IndexTitleFactsSource.app();
     final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
     final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
-    final pool = ReelPool(store: store, library: library, model: _sonnet);
+    // The TV builds the day's pool and shares it; a phone reads that copy.
+    final pool = ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
     final media = _AppReelMedia(servers, store);
     final resolverRows = catalog == null
         ? null
@@ -88,13 +89,19 @@ abstract final class ReelApp {
       }
     }
 
+    final forYou = ForYouDeck(
+      pool: pool,
+      library: library,
+      candidates: () => forYouCandidates(library: library, store: store),
+      facts: () => forYouFacts(store: store, pool: pool),
+      again: () => anotherGoCandidates(library: library, store: store),
+      sharedChanges: Customisation.changed,
+      clears: ReelPool.clears,
+    );
     final decks = <ReelDeck>[
-      ForYouDeck(
-        pool: pool,
-        library: library,
-        candidates: () => forYouCandidates(library: library, store: store),
-        facts: () => forYouFacts(store: store),
-      ),
+      forYou,
+      FitsTonightDeck(forYou: forYou),
+      AnotherGoDeck(forYou: forYou, library: library),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.
@@ -110,6 +117,8 @@ abstract final class ReelApp {
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;
 
+    // Whether the Reel is playing, as its onActive hook last said.
+    var active = false;
     final controller = ReelController(
       decks: decks,
       resolver: resolver,
@@ -156,14 +165,38 @@ abstract final class ReelApp {
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
       // While the Reel plays, the brain's indexer rests and its ONNX session
-      // (about 66 MB) is released; it reopens on the next embed. The hook
-      // also fires when the Reel is disposed while playing (V2-60), so the
-      // indexer never stays parked.
-      onActive: (on) => unawaited(HistoryBrain.instance.yieldTo(on)),
+      // (about 66 MB) is released; it reopens on the next embed. On a day
+      // For You gathers its candidates, the brain's similarity reads run
+      // first, then it yields. The hook also fires when the Reel is disposed
+      // while playing (V2-60), so the indexer never stays parked. When a
+      // session ends, this device shares its Reel signals so the other
+      // device's daily build hears them.
+      onActive: (on) {
+        active = on;
+        if (on) {
+          unawaited(_yieldAfter(forYou, stillActive: () => active));
+        } else {
+          unawaited(HistoryBrain.instance.yieldTo(false));
+          unawaited(pool.signals.publish());
+        }
+      },
+      // Give it another go: the card's one metadata read brings the show's
+      // next episode, so Watch can say which.
+      itemWithNext: media.itemWithNext,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
       },
+      // More like this (V2-39): the build's prompt over titles like the
+      // card, one call per press, its spend logged per press.
+      moreLike: (seed, {required skip}) => moreLikeCards(
+        seed,
+        pool: pool,
+        library: library,
+        facts: () => forYouFacts(store: store, pool: pool),
+        call: _moreLikeSonnet,
+        skip: skip,
+      ),
       deckFor: (id) async {
         if (!id.startsWith('ai:')) return null;
         final entry = await AiHistory.get(id.substring(3));
@@ -193,6 +226,29 @@ abstract final class ReelApp {
       appLogger.w('[ReelCache] daily sweep failed', error: e);
     }
   });
+
+  /// Settings' "Rebuild today's For You" ([ReelPool.clearToday]), with the
+  /// same host rule as the Reel's own pool. Returns whether this device does
+  /// the rebuild; false on a phone whose TV builds For You.
+  static Future<bool> rebuildForYouToday() => ReelPool(
+    store: ReelStore.instance,
+    library: ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app()),
+    host: !PhoneMode.isHandheld,
+  ).clearToday();
+
+  /// The longest the brain's yield waits for For You's gather.
+  static const Duration gatherBeforeYield = Duration(seconds: 8);
+
+  /// Yields the brain to the Reel once For You's gather (when one is due
+  /// today) is done, unless the Reel has closed meanwhile.
+  static Future<void> _yieldAfter(ForYouDeck forYou, {required bool Function() stillActive}) async {
+    try {
+      await forYou.prepare().timeout(gatherBeforeYield);
+    } catch (_) {
+      // Too slow: the gather carries on; the Reel yields now.
+    }
+    if (stillActive()) await HistoryBrain.instance.yieldTo(true);
+  }
 
   /// Sends the current card to a connected phone at once (it just opened
   /// On TV mode).
@@ -293,8 +349,33 @@ abstract final class ReelApp {
     return s1?.anilistId;
   }
 
+  /// The daily build's output ceiling: about 90 cards, each with an id, a
+  /// cluster and optional why, anchor and hook lines (about 7k tokens).
+  /// Only the tokens written are billed. It stays well under the size the
+  /// API docs say needs streaming (about 21k) and inside the client's
+  /// 3-minute timeout. A call cut short ends with `stop_reason` max_tokens
+  /// and a truncated tool input
+  /// (https://platform.claude.com/docs/en/api/handling-stop-reasons).
+  static const int poolMaxTokens = 12000;
+
   /// The daily build's one Sonnet call (spend recorded like every AI call).
-  static Future<Map<String, dynamic>?> _sonnet(String system, String user, Map<String, Object?> tool) async {
+  /// Its `stop_reason` is logged, so a build cut short by the ceiling never
+  /// falls back to code order silently.
+  static Future<Map<String, dynamic>?> _sonnet(String system, String user, Map<String, Object?> tool) =>
+      _claude(system, user, tool, what: '[ReelPool] build');
+
+  /// One More like this press (V2-39): the build's prompt and ceiling over
+  /// 40 candidates. No cost figure is assumed; each press logs its tokens
+  /// and its cost (AiSpend), so the first runs say what a press costs.
+  static Future<Map<String, dynamic>?> _moreLikeSonnet(String system, String user, Map<String, Object?> tool) =>
+      _claude(system, user, tool, what: '[ReelMore] press');
+
+  static Future<Map<String, dynamic>?> _claude(
+    String system,
+    String user,
+    Map<String, Object?> tool, {
+    required String what,
+  }) async {
     final key = await AiKeyStore.read();
     if (key == null) return null;
     const model = ClaudeModel.sonnet;
@@ -302,7 +383,7 @@ abstract final class ReelApp {
     try {
       final response = await client.createMessage({
         'model': model.id,
-        'max_tokens': 6000,
+        'max_tokens': poolMaxTokens,
         'thinking': model.noThinking,
         'system': system,
         'tools': [tool],
@@ -311,7 +392,16 @@ abstract final class ReelApp {
           {'role': 'user', 'content': user},
         ],
       });
-      await AiSpend.record(model, (response['usage'] as Map?)?.cast<String, dynamic>() ?? const {});
+      final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+      final cost = await AiSpend.record(model, usage);
+      final stop = response['stop_reason'] as String?;
+      final out = usage['output_tokens'];
+      final spent = 'input ${usage['input_tokens']} tokens, cost \$${cost.toStringAsFixed(4)}';
+      if (stop == 'max_tokens') {
+        appLogger.w('$what cut short: stop_reason=max_tokens, output $out of $poolMaxTokens tokens, $spent');
+      } else {
+        appLogger.i('$what stop_reason=$stop, output $out tokens, $spent');
+      }
       return [
         for (final b in (response['content'] as List? ?? const []).whereType<Map>())
           if (b['type'] == 'tool_use') (b['input'] as Map).cast<String, dynamic>(),
@@ -346,6 +436,15 @@ class _AppReelMedia implements ReelMedia {
     final c = _client(serverId);
     if (c == null) return null;
     return c.fetchItem(ratingKey).timeout(const Duration(seconds: 15));
+  }
+
+  /// The same single metadata read with the on-deck episode included (the
+  /// episode [ReelApp._playable] plays).
+  Future<({MediaItem? item, MediaItem? next})> itemWithNext(String serverId, String ratingKey) async {
+    final c = _client(serverId);
+    if (c == null) return (item: null, next: null);
+    final r = await c.fetchItemWithOnDeck(ratingKey).timeout(const Duration(seconds: 15));
+    return (item: r.item, next: r.onDeckEpisode);
   }
 
   @override
