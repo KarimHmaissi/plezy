@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +21,7 @@ import '../../services/reel/reel_store.dart';
 import '../../services/settings_service.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
+import '../settings/reel_settings_screen.dart';
 import '../../services/reel/feed_players.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
@@ -46,8 +48,6 @@ class ReelScreen extends StatefulWidget {
   /// taken by the screen when it next shows.
   static final ValueNotifier<String?> requestedDeck = ValueNotifier(null);
 
-  /// Opens the Reel tab, on [deck] when given: closes pages above the shell
-  /// first so the tab is what shows.
   /// The Reel screen that is showing, for On TV mode's commands.
   static ReelScreenState? _live;
 
@@ -73,7 +73,18 @@ class ReelScreen extends StatefulWidget {
   /// On TV mode (host side): `reelAction` from the phone.
   static void remoteAction(String action) => _live?._remoteAction(action);
 
+  /// Whether the Reel is offered at all: Android only (its clip core is
+  /// ExoPlayer), and not turned off with Show the Reel tab on its settings
+  /// page. Off hides it everywhere, like Explore's own toggle: the tab, the
+  /// rail item and Reel it.
+  static bool get enabled =>
+      Platform.isAndroid && (SettingsService.instanceOrNull?.read(SettingsService.showReelTab) ?? true);
+
+  /// Opens the Reel tab, on [deck] when given: closes pages above the shell
+  /// first so the tab is what shows. Does nothing while the Reel is turned
+  /// off ([enabled]).
   static void open(BuildContext context, {String? deck}) {
+    if (!enabled) return;
     requestedDeck.value = deck ?? requestedDeck.value ?? '';
     Navigator.of(context).popUntil((r) => r.isFirst);
     MainTabSwitcher.select?.call(NavigationTabId.reel);
@@ -315,6 +326,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         await c.seenIt();
       case ReelSheetAction.details:
         await c.openDetails();
+      case ReelSheetAction.settings:
+        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ReelSettingsScreen()));
       case ReelSheetAction.deck:
         break;
       case null:

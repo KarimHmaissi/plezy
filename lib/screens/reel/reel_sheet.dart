@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../widgets/app_menu.dart';
 
-enum ReelSheetAction { save, details, notForMe, spoiled, seenIt, deck }
+enum ReelSheetAction { save, details, notForMe, spoiled, seenIt, settings, deck }
 
 /// Long-press OK (or the menu key) on the TV, long-press on the Fold: the
-/// app's own menu sheet, Save first and focused, then the rarer choices and
-/// every deck. Never prompted after a skip; swiping past is the normal "no".
+/// app's own menu sheet, Save first and focused, then the rarer choices, the
+/// Reel's settings and every deck. Never prompted after a skip; swiping past
+/// is the normal "no".
 Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {required bool isTv}) async {
   final card = c.current.card;
   final picked = await showAdaptiveAppMenu<String>(
@@ -26,6 +28,7 @@ Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {
       if (c.current.clip != null)
         const AppMenuItem(value: 'spoiled', icon: Symbols.visibility_off_rounded, label: 'Spoiled me'),
       const AppMenuItem(value: 'seenIt', icon: Symbols.check_rounded, label: 'Seen it'),
+      AppMenuItem(value: 'settings', icon: Symbols.tune_rounded, label: t.reel.settings.sheetEntry),
       // The phone picks decks from its own button at the top.
       if (isTv) ...[
         const AppMenuDivider(),

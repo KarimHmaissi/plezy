@@ -79,6 +79,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$startup$en startup = Translations$startup$en.internal(_root);
 	late final Translations$licenses$en licenses = Translations$licenses$en.internal(_root);
 	late final Translations$navigation$en navigation = Translations$navigation$en.internal(_root);
+	late final Translations$reel$en reel = Translations$reel$en.internal(_root);
 	late final Translations$history$en history = Translations$history$en.internal(_root);
 	late final Translations$comfort$en comfort = Translations$comfort$en.internal(_root);
 	late final Translations$watchlist$en watchlist = Translations$watchlist$en.internal(_root);
@@ -4482,6 +4483,16 @@ class Translations$navigation$en {
 	String get history => 'History';
 }
 
+// Path: reel
+class Translations$reel$en {
+	Translations$reel$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+	late final Translations$reel$settings$en settings = Translations$reel$settings$en.internal(_root);
+}
+
 // Path: history
 class Translations$history$en {
 	Translations$history$en.internal(this._root);
@@ -8255,6 +8266,99 @@ class Translations$libraries$advancedFilters$en {
 	String get dateOlderThanYear => 'Older than a year';
 }
 
+// Path: reel.settings
+class Translations$reel$settings$en {
+	Translations$reel$settings$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Reel'
+	String get title => 'Reel';
+
+	/// en: 'Sound, clip ends and the Reel tab'
+	String get subtitle => 'Sound, clip ends and the Reel tab';
+
+	/// en: 'Reel settings'
+	String get sheetEntry => 'Reel settings';
+
+	/// en: 'Playing'
+	String get playing => 'Playing';
+
+	/// en: 'Sound when a card starts'
+	String get startSound => 'Sound when a card starts';
+
+	/// en: 'With sound'
+	String get startSoundOn => 'With sound';
+
+	/// en: 'Muted if other audio is playing'
+	String get startSoundMutedIfOtherAudio => 'Muted if other audio is playing';
+
+	/// en: 'Starts muted while music or another app is playing'
+	String get startSoundMutedIfOtherAudioDescription => 'Starts muted while music or another app is playing';
+
+	/// en: 'When a clip ends'
+	String get clipEnd => 'When a clip ends';
+
+	/// en: 'Loop'
+	String get clipEndLoop => 'Loop';
+
+	/// en: 'Play twice, then hold'
+	String get clipEndTwiceThenHold => 'Play twice, then hold';
+
+	/// en: 'Stops on the last frame, with Replay'
+	String get clipEndTwiceThenHoldDescription => 'Stops on the last frame, with Replay';
+
+	/// en: 'Next card'
+	String get clipEndNextCard => 'Next card';
+
+	/// en: 'Moves on to the next card by itself'
+	String get clipEndNextCardDescription => 'Moves on to the next card by itself';
+
+	/// en: 'OK button'
+	String get okAction => 'OK button';
+
+	/// en: 'Watch'
+	String get okActionWatch => 'Watch';
+
+	/// en: 'Details'
+	String get okActionDetails => 'Details';
+
+	/// en: 'On mobile data'
+	String get cellular => 'On mobile data';
+
+	/// en: 'Normal'
+	String get cellularNormal => 'Normal';
+
+	/// en: 'Clips play as they do on Wi-Fi'
+	String get cellularNormalDescription => 'Clips play as they do on Wi-Fi';
+
+	/// en: 'Data saver'
+	String get cellularDataSaver => 'Data saver';
+
+	/// en: 'Smaller clips and fewer ready ahead; a fast swipe may show a still first'
+	String get cellularDataSaverDescription => 'Smaller clips and fewer ready ahead; a fast swipe may show a still first';
+
+	/// en: 'Stills only'
+	String get cellularStillsOnly => 'Stills only';
+
+	/// en: 'No clips on mobile data, only each card's art'
+	String get cellularStillsOnlyDescription => 'No clips on mobile data, only each card\'s art';
+
+	/// en: 'Openings with lyrics first'
+	String get captions => 'Openings with lyrics first';
+
+	/// en: 'Where an anime has one, pick the opening with on-screen lyrics or subtitles'
+	String get captionsDescription => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles';
+
+	/// en: 'Show the Reel tab'
+	String get showTab => 'Show the Reel tab';
+
+	/// en: 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place'
+	String get showTabDescription => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place';
+}
+
 // Path: history.copy
 class Translations$history$copy$en {
 	Translations$history$copy$en.internal(this._root);
@@ -11051,6 +11155,36 @@ extension on Translations {
 			'navigation.comfort' => 'Comfort',
 			'navigation.reel' => 'Reel',
 			'navigation.history' => 'History',
+			'reel.settings.title' => 'Reel',
+			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
+			'reel.settings.sheetEntry' => 'Reel settings',
+			'reel.settings.playing' => 'Playing',
+			'reel.settings.startSound' => 'Sound when a card starts',
+			'reel.settings.startSoundOn' => 'With sound',
+			'reel.settings.startSoundMutedIfOtherAudio' => 'Muted if other audio is playing',
+			'reel.settings.startSoundMutedIfOtherAudioDescription' => 'Starts muted while music or another app is playing',
+			'reel.settings.clipEnd' => 'When a clip ends',
+			_ => null,
+		} ?? switch (path) {
+			'reel.settings.clipEndLoop' => 'Loop',
+			'reel.settings.clipEndTwiceThenHold' => 'Play twice, then hold',
+			'reel.settings.clipEndTwiceThenHoldDescription' => 'Stops on the last frame, with Replay',
+			'reel.settings.clipEndNextCard' => 'Next card',
+			'reel.settings.clipEndNextCardDescription' => 'Moves on to the next card by itself',
+			'reel.settings.okAction' => 'OK button',
+			'reel.settings.okActionWatch' => 'Watch',
+			'reel.settings.okActionDetails' => 'Details',
+			'reel.settings.cellular' => 'On mobile data',
+			'reel.settings.cellularNormal' => 'Normal',
+			'reel.settings.cellularNormalDescription' => 'Clips play as they do on Wi-Fi',
+			'reel.settings.cellularDataSaver' => 'Data saver',
+			'reel.settings.cellularDataSaverDescription' => 'Smaller clips and fewer ready ahead; a fast swipe may show a still first',
+			'reel.settings.cellularStillsOnly' => 'Stills only',
+			'reel.settings.cellularStillsOnlyDescription' => 'No clips on mobile data, only each card\'s art',
+			'reel.settings.captions' => 'Openings with lyrics first',
+			'reel.settings.captionsDescription' => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles',
+			'reel.settings.showTab' => 'Show the Reel tab',
+			'reel.settings.showTabDescription' => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place',
 			'history.title' => 'History',
 			'history.allTime' => 'All time',
 			'history.hours' => 'Hours',
@@ -11060,8 +11194,6 @@ extension on Translations {
 			'history.streak' => 'Day streak',
 			'history.bestStreak' => ({required Object n}) => 'Best ${n}',
 			'history.byMonth' => 'Month by month',
-			_ => null,
-		} ?? switch (path) {
 			'history.timeline' => 'Timeline',
 			'history.topGenres' => 'Top genres',
 			'history.directors' => 'Directors',
@@ -11546,6 +11678,8 @@ extension on Translations {
 			'watchTogether.matchSearching' => 'Searching',
 			'watchTogether.matchMatched' => 'Has the video',
 			'watchTogether.matchMismatched' => 'Different length',
+			_ => null,
+		} ?? switch (path) {
 			'watchTogether.matchUnavailable' => 'Doesn\'t have the video',
 			'watchTogether.participantOffset' => ({required Object offset}) => 'Offset ${offset}',
 			'watchTogether.makeHost' => 'Make host',
@@ -11574,8 +11708,6 @@ extension on Translations {
 			'watchTogether.notices.playbackStarted' => 'Playback started',
 			'watchTogether.notices.paused' => ({required Object name}) => '${name} paused',
 			'watchTogether.notices.playbackPaused' => 'Playback paused',
-			_ => null,
-		} ?? switch (path) {
 			'watchTogether.notices.jumpedTo' => ({required Object name, required Object position}) => '${name} jumped to ${position}',
 			'watchTogether.notices.roomJumpedTo' => ({required Object position}) => 'Jumped to ${position}',
 			'watchTogether.notices.changedSpeed' => ({required Object name, required Object speed}) => '${name} set the speed to ${speed}',
@@ -12060,6 +12192,8 @@ extension on Translations {
 			'seerr.couldNotReach' => ({required Object url, required Object error}) => 'Could not reach ${url}: ${error}',
 			'seerr.noInstanceAtUrl' => ({required Object url, required Object status}) => 'No Seerr instance at ${url} (HTTP ${status})',
 			'seerr.behindAuthProxy' => 'An authenticating reverse proxy (SSO or HTTP auth) answered instead of Seerr. Plezy cannot sign in through it: let Seerr\'s /api/v1 path bypass the proxy for this app, or use an address that reaches Seerr directly.',
+			_ => null,
+		} ?? switch (path) {
 			'seerr.invalidUrl' => 'Enter a server address like https://seerr.example.com',
 			'seerr.quickConnectUnsupported' => 'This Seerr instance does not support Quick Connect. It needs Seerr 3.4 or newer.',
 			'seerr.notInitialized' => 'This Seerr instance has not completed first-run setup',
@@ -12088,8 +12222,6 @@ extension on Translations {
 			'services.names.seerr' => 'Seerr',
 			'services.names.mdblist' => 'MDBList',
 			'services.simklReconnect.title' => 'Reconnect Simkl',
-			_ => null,
-		} ?? switch (path) {
 			'services.simklReconnect.subtitle' => 'Simkl is retiring the sign-in method this connection uses. Reconnecting opens simkl.com to approve Plezy — Plezy never sees your password. Your watch history stays on Simkl.',
 			'services.deviceCode.title' => ({required Object service}) => 'Activate Plezy on ${service}',
 			'services.deviceCode.instructions' => 'Scan the QR code, or visit the address below and enter this code:',

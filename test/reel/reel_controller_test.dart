@@ -200,6 +200,7 @@ void main() {
     ReelWatchlist? addToWatchlist,
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
+    Listenable? settingsChanged,
   }) => ReelController(
     decks:
         decks ??
@@ -226,6 +227,7 @@ void main() {
     reachesTvNow: reachesTvNow,
     externalClips: externalClips,
     memoryRestored: memoryRestored,
+    settingsChanged: settingsChanged,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -409,6 +411,27 @@ void main() {
     c.dispose();
     restored.value++;
     restored.dispose();
+  });
+
+  test('a settings change reaches the views of a playing Reel, and stops at dispose', () async {
+    final changed = ValueNotifier(0);
+    final c = make(settingsChanged: changed);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final card = c.current.card?.id;
+    final made = engines;
+
+    var told = 0;
+    c.addListener(() => told++);
+    changed.value++;
+    expect(told, 1, reason: 'the views rebuild and read the new choice');
+    expect(c.current.card?.id, card, reason: 'no restart: the same card stays');
+    expect(engines, made, reason: 'and the clip core is not rebuilt');
+
+    c.dispose();
+    expect(() => changed.value++, returnsNormally, reason: 'the listener left with the controller');
+    expect(told, 1);
+    changed.dispose();
   });
 
   test('the watchdog tiers map to the ladder: halved is 1, cleared is 2', () async {

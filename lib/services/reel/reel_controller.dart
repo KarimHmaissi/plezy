@@ -69,10 +69,12 @@ class ReelController extends ChangeNotifier {
     this.onOpen,
     this.externalClips = false,
     this.memoryRestored,
+    this.settingsChanged,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
+    settingsChanged?.addListener(_onSettingsChanged);
     decks.forEach(_watchDeck);
   }
 
@@ -107,6 +109,19 @@ class ReelController extends ChangeNotifier {
   /// tier (`MemoryTrimPolicy.restores`): the only thing that brings the
   /// degrade ladder back to 0.
   final Listenable? memoryRestored;
+
+  /// Fires when one of the Reel's settings changes (its settings page,
+  /// V2-46). The Reel reads its prefs where it uses them, so a change only
+  /// has to reach the views: the controller tells its listeners, and the
+  /// next card, clip end or key press follows the new choice without a
+  /// restart.
+  final Listenable? settingsChanged;
+
+  void _onSettingsChanged() {
+    if (_disposed) return;
+    appLogger.d('Reel: a setting changed; the views take it up now');
+    notifyListeners();
+  }
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -760,6 +775,7 @@ class ReelController extends ChangeNotifier {
     _generation++;
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);
+    settingsChanged?.removeListener(_onSettingsChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);
     }

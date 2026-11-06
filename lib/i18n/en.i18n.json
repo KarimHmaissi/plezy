@@ -1669,6 +1669,38 @@
     "reel": "Reel",
     "history": "History"
   },
+  "reel": {
+    "settings": {
+      "title": "Reel",
+      "subtitle": "Sound, clip ends and the Reel tab",
+      "sheetEntry": "Reel settings",
+      "playing": "Playing",
+      "startSound": "Sound when a card starts",
+      "startSoundOn": "With sound",
+      "startSoundMutedIfOtherAudio": "Muted if other audio is playing",
+      "startSoundMutedIfOtherAudioDescription": "Starts muted while music or another app is playing",
+      "clipEnd": "When a clip ends",
+      "clipEndLoop": "Loop",
+      "clipEndTwiceThenHold": "Play twice, then hold",
+      "clipEndTwiceThenHoldDescription": "Stops on the last frame, with Replay",
+      "clipEndNextCard": "Next card",
+      "clipEndNextCardDescription": "Moves on to the next card by itself",
+      "okAction": "OK button",
+      "okActionWatch": "Watch",
+      "okActionDetails": "Details",
+      "cellular": "On mobile data",
+      "cellularNormal": "Normal",
+      "cellularNormalDescription": "Clips play as they do on Wi-Fi",
+      "cellularDataSaver": "Data saver",
+      "cellularDataSaverDescription": "Smaller clips and fewer ready ahead; a fast swipe may show a still first",
+      "cellularStillsOnly": "Stills only",
+      "cellularStillsOnlyDescription": "No clips on mobile data, only each card's art",
+      "captions": "Openings with lyrics first",
+      "captionsDescription": "Where an anime has one, pick the opening with on-screen lyrics or subtitles",
+      "showTab": "Show the Reel tab",
+      "showTabDescription": "Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place"
+    }
+  },
   "history": {
     "title": "History",
     "allTime": "All time",

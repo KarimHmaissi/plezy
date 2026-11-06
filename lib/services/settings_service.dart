@@ -777,8 +777,8 @@ class SettingsService extends BaseSharedPreferencesService {
   // (deck order, start deck, sources) live in CustomisationStore instead.
   // Each default is what the Reel does today; an item that builds a new
   // behaviour moves its default to the approved one when it lands (V2-53:
-  // Data saver). Nothing reads these until the Reel's lanes wire them up, and
-  // the settings page (V2-46) shows them.
+  // Data saver). The settings page (V2-46) shows them; each lane wires up
+  // its own reader.
 
   /// How a card's sound starts (D5). Today: with sound.
   static const reelStartSound = EnumPref<ReelStartSound>(
@@ -823,6 +823,16 @@ class SettingsService extends BaseSharedPreferencesService {
   /// Show the Reel tab, which takes Explore's slot (D14). Works like
   /// [showExploreTab]. Today: shown.
   static const showReelTab = BoolPref('show_reel_tab', defaultValue: true);
+
+  /// The Reel's choices on its settings page (V2-46) that a playing Reel
+  /// takes up without a restart: its controller listens to this group.
+  static const List<Pref<Object?>> reelChoicePrefs = [
+    reelStartSound,
+    reelClipEnd,
+    reelCellular,
+    reelOkAction,
+    reelCaptions,
+  ];
   static const enableDiscordRPC = BoolPref('enable_discord_rpc');
   static const enableTraktWatchedSync = BoolPref('enable_trakt_watched_sync', defaultValue: true);
 

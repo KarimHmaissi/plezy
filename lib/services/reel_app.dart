@@ -41,6 +41,7 @@ import 'reel/reel_library.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
 import 'reel_servers_plex.dart';
+import 'settings_service.dart';
 import 'trackers/fribb_mapping_store.dart';
 
 /// Fork: builds the Reel's session from the app's real services. Lives
@@ -147,6 +148,8 @@ abstract final class ReelApp {
       externalClips: !PlatformDetector.isTV(),
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
+      // The Reel's settings page applies to the Reel that is playing.
+      settingsChanged: SettingsService.instanceOrNull?.listenableOfAll(SettingsService.reelChoicePrefs),
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
