@@ -92,7 +92,10 @@ class EntriesDeck extends ReelDeck {
 /// else the taste pool in code order. The pool is this device's own build
 /// or the one the TV shares (see [ReelPool]). When today's build lands here,
 /// or the TV's shared pool for today arrives through [sharedChanges], [rebuilt]
-/// fires and the session takes it.
+/// fires and the session takes it. "Rebuild today's For You"
+/// ([ReelPool.clearToday]) on this device (through [clears], the app's
+/// [ReelPool.clears]) or on the other one (through [sharedChanges]) starts
+/// today's build again here when this device is the one that builds.
 class ForYouDeck extends ReelDeck {
   ForYouDeck({
     required this.pool,
@@ -101,8 +104,12 @@ class ForYouDeck extends ReelDeck {
     required this.facts,
     this.again,
     Listenable? sharedChanges,
+    Listenable? clears,
   }) {
-    _rebuilt = _PoolRebuilt(sharedChanges, () => unawaited(_onSharedChange()));
+    _rebuilt = _PoolRebuilt([
+      if (sharedChanges != null) (sharedChanges, () => unawaited(_onSharedChange())),
+      if (clears != null) (clears, () => unawaited(_onCleared())),
+    ]);
   }
 
   final ReelPool pool;
@@ -117,8 +124,11 @@ class ForYouDeck extends ReelDeck {
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
   ({String day, Future<List<PoolCandidate>> list})? _again;
 
-  /// The shared pool's day as last seen, so only a new one fires [rebuilt].
-  String? _sharedDay;
+  /// The shared pool as last seen (its day, build and clear), so only a new
+  /// one fires [rebuilt].
+  String? _sharedSeen;
+
+  static String? _seen(SharedPool? share) => share == null ? null : '${share.day}|${share.at}|${share.cleared}';
 
   @override
   String get id => 'for-you';
@@ -137,7 +147,7 @@ class ForYouDeck extends ReelDeck {
 
   @override
   Future<List<ReelCardData>> load() async {
-    _sharedDay = (await pool.shared())?.day;
+    _sharedSeen = _seen(await pool.shared());
     final cached = await pool.cachedPool();
     await buildIfDue();
     if (cached != null && cached.isNotEmpty) return library.cards(cached);
@@ -146,17 +156,32 @@ class ForYouDeck extends ReelDeck {
 
   /// The synced data changed (a sync or a TV snapshot): when it brought the
   /// shared pool for today, and this device has no pool of its own for
-  /// today (its own comes first), the session takes it.
+  /// today (its own comes first), the session takes it. When it brought a
+  /// clear of today's build from the other device, today's build starts
+  /// again here if this device builds.
   Future<void> _onSharedChange() async {
     try {
-      final day = (await pool.shared())?.day;
-      if (day == null || day == _sharedDay) return;
-      _sharedDay = day;
-      if (day != ReelPool.dateOf(pool.now()) || await pool.hasOwnToday()) return;
-      appLogger.i('[ReelDeck] for-you: shared pool for $day arrived');
+      final share = await pool.shared();
+      final seen = _seen(share);
+      if (share == null || seen == _sharedSeen) return;
+      _sharedSeen = seen;
+      if (share.day != ReelPool.dateOf(pool.now())) return;
+      if (share.cleared != null) return await buildIfDue();
+      if (await pool.hasOwnToday()) return;
+      appLogger.i('[ReelDeck] for-you: shared pool for ${share.day} arrived');
       _rebuilt.bump();
     } catch (e) {
       appLogger.d('Reel: shared pool check failed', error: e);
+    }
+  }
+
+  /// Today's build was cleared on this device: it starts again here when
+  /// this device builds (a phone whose TV builds waits for the TV's).
+  Future<void> _onCleared() async {
+    try {
+      await buildIfDue();
+    } catch (e) {
+      appLogger.d('Reel: For You rebuild check failed', error: e);
     }
   }
 
@@ -417,10 +442,10 @@ Future<List<PoolCandidate>> anotherGoCandidates({
 /// changing) while it has listeners, so a deck the controller has let go
 /// of holds no listener on the app-wide notifier.
 class _PoolRebuilt extends ChangeNotifier {
-  _PoolRebuilt(this.source, this.onSource);
+  _PoolRebuilt(this.sources);
 
-  final Listenable? source;
-  final VoidCallback onSource;
+  /// What it listens to while listened to, each with its handler.
+  final List<(Listenable, VoidCallback)> sources;
 
   void bump() => notifyListeners();
 
@@ -428,18 +453,28 @@ class _PoolRebuilt extends ChangeNotifier {
   void addListener(VoidCallback listener) {
     final first = !hasListeners;
     super.addListener(listener);
-    if (first) source?.addListener(onSource);
+    if (first) {
+      for (final (source, on) in sources) {
+        source.addListener(on);
+      }
+    }
   }
 
   @override
   void removeListener(VoidCallback listener) {
     super.removeListener(listener);
-    if (!hasListeners) source?.removeListener(onSource);
+    if (!hasListeners) _detach();
+  }
+
+  void _detach() {
+    for (final (source, on) in sources) {
+      source.removeListener(on);
+    }
   }
 
   @override
   void dispose() {
-    source?.removeListener(onSource);
+    _detach();
     super.dispose();
   }
 }
@@ -752,8 +787,10 @@ Future<List<({DeckEntry entry, DateTime added})>> _addedSince(ReelLibrary librar
   return out;
 }
 
-/// The facts block the daily build reads first: how they watch lately, the
-/// day and the local time it was built, and what the Reel saw them do on this device and the other one:
+/// The facts block the daily build reads first: their own words to For You
+/// (the synced note, which the build's prompt ranks above its defaults), how
+/// they watch lately, the day and the local time it was built, and what the
+/// Reel saw them do on this device and the other one:
 /// counts, counts per kind of title (the pool's clusters, from [pool]) and
 /// the titles they passed on lately. [nameOf] names a title id (the brain's
 /// profile by default).
@@ -770,6 +807,12 @@ Future<String> forYouFacts({
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   String two(int n) => n.toString().padLeft(2, '0');
   lines.add('Today is ${days[at.weekday - 1]}; the local time is ${two(at.hour)}:${two(at.minute)}.');
+  try {
+    final note = await store.forYouNote();
+    if (note != null) lines.add('In their own words: $note');
+  } catch (e) {
+    appLogger.d('Reel: For You note unavailable', error: e);
+  }
   try {
     lines.add('Their taste:\n${await b.taste()}');
     final watched = await b.watchedProfiles();

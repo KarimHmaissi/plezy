@@ -90,6 +90,7 @@ abstract final class ReelApp {
       facts: () => forYouFacts(store: store, pool: pool),
       again: () => anotherGoCandidates(library: library, store: store),
       sharedChanges: Customisation.changed,
+      clears: ReelPool.clears,
     );
     final decks = <ReelDeck>[
       forYou,
@@ -186,6 +187,15 @@ abstract final class ReelApp {
     });
     return controller;
   }
+
+  /// Settings' "Rebuild today's For You" ([ReelPool.clearToday]), with the
+  /// same host rule as the Reel's own pool. Returns whether this device does
+  /// the rebuild; false on a phone whose TV builds For You.
+  static Future<bool> rebuildForYouToday() => ReelPool(
+    store: ReelStore.instance,
+    library: ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app()),
+    host: !PhoneMode.isHandheld,
+  ).clearToday();
 
   /// The longest the brain's yield waits for For You's gather.
   static const Duration gatherBeforeYield = Duration(seconds: 8);

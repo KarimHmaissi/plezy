@@ -105,6 +105,10 @@ class ReelStore {
   /// The TV's For You pool for the day, shared with the phone (about 11 KB).
   static const String poolKey = 'reel.pool';
 
+  /// The household's own words to For You's daily build (free text; either
+  /// device writes it).
+  static const String forYouNoteKey = 'reel.forYouNote';
+
   /// How long a clip asset identity (or a miss) is trusted.
   static const Duration sourceTtl = Duration(days: 30);
 
@@ -190,6 +194,19 @@ class ReelStore {
     return out;
   }
 
+  /// When [key]'s cache row was last written, or null when there is none.
+  Future<DateTime?> cachedAt(String key) async {
+    final db = await _database();
+    final row = await (db.select(db.reelCache)..where((c) => c.key.equals(key))).getSingleOrNull();
+    return row == null ? null : DateTime.fromMillisecondsSinceEpoch(row.updatedAt);
+  }
+
+  /// Drops [key]'s cache row.
+  Future<void> uncache(String key) async {
+    final db = await _database();
+    await (db.delete(db.reelCache)..where((c) => c.key.equals(key))).go();
+  }
+
   Future<void> cache(String key, String value) async {
     final db = await _database();
     await db
@@ -206,6 +223,21 @@ class ReelStore {
 
   /// The host shares its day's pool. Newest write wins, like picks.
   Future<void> sharePool(String value) async => (await _settings()).writeSetting(poolKey, value);
+
+  // ---- For You in their own words (synced) ----
+
+  /// Their note to For You, trimmed; null when there is none.
+  Future<String?> forYouNote() async {
+    final note = (await (await _settings()).readSetting(forYouNoteKey))?.trim();
+    return note == null || note.isEmpty ? null : note;
+  }
+
+  /// Keeps [note] (trimmed) as their note to For You; empty or null removes
+  /// it. Newest edit wins between the TV and the phone.
+  Future<void> setForYouNote(String? note) async {
+    final n = note?.trim();
+    await (await _settings()).writeSetting(forYouNoteKey, n == null || n.isEmpty ? null : n);
+  }
 
   // ---- per-device Reel signals (synced; see ReelSignals) ----
 

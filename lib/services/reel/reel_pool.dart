@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import '../../utils/app_logger.dart';
 import '../ai/facts/seen_state.dart';
 import 'reel_decay.dart';
@@ -90,6 +92,12 @@ class PoolCandidate {
       b.isEmpty ? a : [...a, ...b.where((x) => !a.contains(x))];
 }
 
+/// The pool the host shares: its day (`YYYY-MM-DD`), rows, "Give it
+/// another go" rows (empty when the build gave none), when it was built
+/// (null on a pool shared before builds were stamped) and, when today's
+/// build was cleared since ([ReelPool.clearToday]), when.
+typedef SharedPool = ({String day, List<Object?> rows, List<Object?> again, int? at, int? cleared});
+
 /// The model call the daily build makes: system + user text and the tool it
 /// must answer with; returns the tool input, or null.
 typedef PoolModel = Future<Map<String, dynamic>?> Function(String system, String user, Map<String, Object?> tool);
@@ -148,10 +156,8 @@ class ReelPool {
   /// Now, by this pool's clock.
   DateTime now() => _clock();
 
-  /// The shared pool: its day (`YYYY-MM-DD`), rows and "Give it another
-  /// go" rows (empty when the build gave none), or null when there is none
-  /// or it can't be read.
-  Future<({String day, List<Object?> rows, List<Object?> again})?> shared() async {
+  /// The shared pool, or null when there is none or it can't be read.
+  Future<SharedPool?> shared() async {
     final String? raw;
     try {
       raw = await store.sharedPool();
@@ -167,6 +173,8 @@ class ReelPool {
           day: j['day'] as String,
           rows: j['entries'] as List<Object?>,
           again: j['again'] is List ? j['again'] as List<Object?> : const <Object?>[],
+          at: j['at'] is int ? j['at'] as int : null,
+          cleared: j['cleared'] is int ? j['cleared'] as int : null,
         );
       }
     } catch (_) {}
@@ -190,10 +198,11 @@ class ReelPool {
 
   Future<List<DeckEntry>?> _remainder(
     String Function(DateTime day) key,
-    List<Object?>? Function(({String day, List<Object?> rows, List<Object?> again}) share) sharedRows,
+    List<Object?>? Function(SharedPool share) sharedRows,
   ) async {
     final now = _clock();
     final share = await shared();
+    await _honourClear(share);
     for (var back = 0; back < lookback; back++) {
       final day = now.subtract(Duration(days: back));
       final rows =
@@ -267,11 +276,64 @@ class ReelPool {
       if (e.action != ReelAction.unplayed.name) e.titleId,
   };
 
-  /// Whether this device has its own pool for today.
-  Future<bool> hasOwnToday() async => await store.cached(dayKey(_clock())) != null;
+  /// Whether this device has its own pool for today (one built before a
+  /// clear on the other device doesn't count; see [clearToday]).
+  Future<bool> hasOwnToday() async {
+    await _honourClear(await shared());
+    return await store.cached(dayKey(_clock())) != null;
+  }
 
-  /// Whether today's pool is here: this device's own, or the shared one.
-  Future<bool> hasToday() async => await hasOwnToday() || (await shared())?.day == dateOf(_clock());
+  /// Whether today's pool is here: this device's own, or the shared one
+  /// (unless today's build was cleared since it was shared).
+  Future<bool> hasToday() async {
+    if (await hasOwnToday()) return true;
+    final share = await shared();
+    return share != null && share.day == dateOf(_clock()) && share.cleared == null;
+  }
+
+  /// Bumped when [clearToday] runs on this device, so a live For You builds
+  /// again (a clear on the other device arrives as a synced change).
+  static final ValueNotifier<int> clears = ValueNotifier(0);
+
+  /// "Rebuild today's For You": today's build is dropped, so the next build
+  /// reads the facts (their note among them) as they are now. This device's
+  /// own pool and "Give it another go" order for today go. A shared pool for
+  /// today stays as the stopgap but is marked cleared: the TV drops its own
+  /// copy of today and builds again, and a phone waits for that build
+  /// rather than spending a call of its own. Until the new build lands,
+  /// For You reads the newest earlier pool's remainder. Returns whether
+  /// this device does the rebuild ([shouldBuild]); false on a phone whose
+  /// TV builds.
+  Future<bool> clearToday() async {
+    final now = _clock();
+    await store.uncache(dayKey(now));
+    await store.uncache(againKey(now));
+    try {
+      final raw = await store.sharedPool();
+      final j = raw == null ? null : jsonDecode(raw);
+      if (j is Map && j['day'] == dateOf(now)) {
+        await store.sharePool(jsonEncode({...j, 'cleared': now.millisecondsSinceEpoch}));
+      }
+    } catch (e) {
+      appLogger.w('Reel: clearing the shared pool failed', error: e);
+    }
+    appLogger.i("[ReelDeck] for-you: today's build cleared");
+    clears.value++;
+    return shouldBuild();
+  }
+
+  /// A clear on the other device reaches this one through [share]: this
+  /// device's own pool and order for today, when built before that clear,
+  /// are dropped.
+  Future<void> _honourClear(SharedPool? share) async {
+    final cleared = share?.cleared;
+    final now = _clock();
+    if (share == null || cleared == null || share.day != dateOf(now)) return;
+    for (final key in [dayKey(now), againKey(now)]) {
+      final at = await store.cachedAt(key);
+      if (at != null && at.millisecondsSinceEpoch <= cleared) await store.uncache(key);
+    }
+  }
 
   /// Whether this device should run today's build: nothing for today yet,
   /// and either it is the [host], or the shared pool is [fallbackAfter]
@@ -412,7 +474,9 @@ class ReelPool {
       if (host) {
         try {
           final againRows = await _againRows(now);
-          await store.sharePool(jsonEncode({'day': dateOf(now), 'entries': rows, 'again': ?againRows}));
+          await store.sharePool(
+            jsonEncode({'day': dateOf(now), 'at': now.millisecondsSinceEpoch, 'entries': rows, 'again': ?againRows}),
+          );
         } catch (e) {
           appLogger.w('Reel: sharing the pool failed', error: e);
         }
@@ -505,6 +569,7 @@ Choose about $target candidates and put them in the order you think they would m
 - "skipped quickly in the Reel lately" is a fact, not a ban: show such titles sparingly when an equally good fresh one exists.
 - Passes (Not for me, "Passed on in the Reel lately") are facts about the kind of title, not bans: a pass on one title never rules out its kind.
 - Kids' and family titles only when their own history shows they watch them.
+- "In their own words", when the facts have it, is the household's own note to you about this feed. Where it disagrees with the defaults above (the rating bar, the mix, kids' titles, how often a skipped or passed-on kind comes back), follow their note. It never changes the rules for why, anchor, cluster, hook and another_go below.
 - why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence (a "similar to …" title, "similar to recent plays …" or "similar to Reel Saves …" title, "from their ask …" or "from the suggested list …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
 - anchor: the exact evidence title, ask or list your why line names.
 - cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.

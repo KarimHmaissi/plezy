@@ -57,6 +57,19 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets("For You's own words and today's rebuild sit on the AI page", (tester) async {
+    await pumpScreen(tester);
+
+    await tester.scrollUntilVisible(
+      find.text("Rebuild today's For You"),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Tell For You in your own words'), findsOneWidget);
+    expect(find.text('No note yet: For You goes by what you watch'), findsOneWidget);
+    await unmount(tester);
+  });
+
   testWidgets('with a TMDB key: masked, replace, test and remove', (tester) async {
     await tester.runAsync(() => TmdbKeyStore.write(_fakeApiKey));
     await pumpScreen(tester);

@@ -586,6 +586,175 @@ void main() {
       );
     });
 
+    test("their own words lead the facts, and the prompt ranks them above its defaults", () async {
+      Future<String> facts() =>
+          forYouFacts(store: store, pool: pool(), brain: _Brain(), now: now, nameOf: (_) async => null);
+      expect(await facts(), isNot(contains('In their own words')));
+
+      await store.setForYouNote('  More harbor dramas on weeknights; no horror at all.  ');
+      expect(SyncUnits.syncsSetting(ReelStore.forYouNoteKey), isTrue);
+      final lines = (await facts()).split('\n');
+      expect(lines[1], 'In their own words: More harbor dramas on weeknights; no horror at all.');
+
+      String? system;
+      String? user;
+      await pool(
+        model: (s, u, _) async {
+          system = s;
+          user = u;
+          return null;
+        },
+      ).build([_candidate('m')], facts: await facts());
+      expect(user, contains('In their own words: More harbor dramas'));
+      expect(system, contains('"In their own words"'));
+      expect(system, contains('follow their note'));
+
+      await store.setForYouNote('   ');
+      expect(await settings.readSetting(ReelStore.forYouNoteKey), isNull, reason: 'an empty note is removed');
+      expect(await facts(), isNot(contains('In their own words')));
+    });
+
+    test("rebuilding today on the TV drops today's build; it builds again and the phone waits for it", () async {
+      Future<void> shareBuilt(List<String> ids, {int? cleared}) => settings.writeSetting(
+        ReelStore.poolKey,
+        jsonEncode({
+          'day': ReelPool.dateOf(now),
+          'at': now.millisecondsSinceEpoch,
+          'cleared': ?cleared,
+          'entries': [
+            for (final id in ids) {'id': id, 'sv': 's1', 'rk': id},
+          ],
+        }),
+      );
+      await cachePool(DateTime(2026, 3, 9), ['old']);
+      await cachePool(now, ['a', 'b']);
+      await store.cache(
+        ReelPool.againKey(now),
+        jsonEncode([
+          {'id': 'g', 'sv': 's1', 'rk': 'g'},
+        ]),
+      );
+      await shareBuilt(['a', 'b']);
+      final tv = pool();
+      expect(await tv.shouldBuild(), isFalse);
+
+      final before = ReelPool.clears.value;
+      expect(await tv.clearToday(), isTrue, reason: 'the TV does its own rebuild');
+      expect(ReelPool.clears.value, before + 1);
+      expect(await store.cached(ReelPool.dayKey(now)), isNull);
+      expect(await store.cached(ReelPool.againKey(now)), isNull);
+      expect(await store.cached(ReelPool.dayKey(DateTime(2026, 3, 9))), isNotNull, reason: 'only today goes');
+      final shared = jsonDecode((await settings.readSetting(ReelStore.poolKey))!) as Map;
+      expect(shared['cleared'], now.millisecondsSinceEpoch);
+      // Until the new build lands, today's shared copy is the stopgap.
+      expect((await tv.cachedPool())?.map((e) => e.ratingKey), ['a', 'b']);
+      expect(await tv.hasToday(), isFalse);
+
+      // The phone keeps reading that copy and waits for the TV's build.
+      final phone = pool(host: false);
+      expect(await phone.shouldBuild(), isFalse);
+      expect((await phone.cachedPool())?.map((e) => e.ratingKey), ['a', 'b']);
+
+      // The TV's new build is shared without the clear: today is here again.
+      now = now.add(const Duration(minutes: 5));
+      await pool(model: picks(['c1'])).build([_candidate('n')], facts: '');
+      expect(jsonDecode((await settings.readSetting(ReelStore.poolKey))!) as Map, isNot(contains('cleared')));
+      expect(await phone.hasToday(), isTrue);
+      expect(await tv.shouldBuild(), isFalse);
+    });
+
+    test("a rebuild asked for on the phone reaches the TV through the shared pool", () async {
+      // The TV built today (its own copy and the shared one) an hour ago.
+      final built = now.subtract(const Duration(hours: 1));
+      final tvDb = ForkDatabase.memory();
+      addTearDown(tvDb.close);
+      var tvNow = built;
+      final tvStore = ReelStore(database: () async => tvDb, settings: () async => settings, clock: () => tvNow);
+      final tv = ReelPool(store: tvStore, library: _Library(), model: picks(['c1']), clock: () => tvNow);
+      await tv.build([_candidate('a')], facts: '');
+      tvNow = now;
+      expect(await tv.shouldBuild(), isFalse);
+
+      // The phone (its own database, the same synced settings) asks.
+      final phone = pool(host: false);
+      expect(await phone.clearToday(), isFalse, reason: 'the TV builds For You');
+      expect(await phone.shouldBuild(), isFalse);
+
+      // The TV's own copy predates the clear, so it goes, and the TV builds.
+      expect(await tv.hasOwnToday(), isFalse);
+      expect(await tvStore.cached(ReelPool.dayKey(now)), isNull);
+      expect(await tv.shouldBuild(), isTrue);
+      tvNow = now.add(const Duration(minutes: 1));
+      await tv.build([_candidate('b')], facts: '');
+      expect(await tv.hasOwnToday(), isTrue);
+      expect(await phone.hasToday(), isTrue);
+    });
+
+    test("a phone building on its own (no TV pool for days) rebuilds itself", () async {
+      await sharePool(DateTime(2026, 3, 7), ['a']);
+      await cachePool(now, ['own']);
+      final phone = pool(host: false);
+      expect(await phone.shouldBuild(), isFalse);
+      expect(await phone.clearToday(), isTrue);
+      expect(await store.cached(ReelPool.dayKey(now)), isNull);
+      final shared = jsonDecode((await settings.readSetting(ReelStore.poolKey))!) as Map;
+      expect(shared, isNot(contains('cleared')), reason: "an older day's shared pool is left alone");
+    });
+
+    test("a live For You builds again after a rebuild, here or from the other device", () async {
+      var calls = 0;
+      final synced = _Synced();
+      final deck = ForYouDeck(
+        pool: pool(
+          model: (_, _, _) async {
+            calls++;
+            return {
+              'cards': [
+                {'id': calls == 1 ? 'c1' : 'c2', 'cluster': 'harbor drama'},
+              ],
+            };
+          },
+        ),
+        library: _Library(),
+        candidates: () async => [_candidate('p'), _candidate('q')],
+        facts: () async => '',
+        sharedChanges: synced,
+        clears: ReelPool.clears,
+      );
+      var fired = 0;
+      void listener() => fired++;
+      deck.rebuilt.addListener(listener);
+      await deck.load();
+      await deck.building;
+      expect((calls, fired), (1, 1));
+      expect((await deck.load()).map((c) => c.id), ['p']);
+
+      // Rebuild on this device.
+      now = now.add(const Duration(minutes: 5));
+      await pool().clearToday();
+      await Future<void>.delayed(Duration.zero);
+      await deck.building;
+      expect((calls, fired), (2, 2));
+      expect((await deck.load()).map((c) => c.id), ['q']);
+
+      // Rebuild asked for on the phone: the shared pool comes back cleared.
+      now = now.add(const Duration(minutes: 5));
+      final share = jsonDecode((await settings.readSetting(ReelStore.poolKey))!) as Map;
+      await settings.writeSetting(ReelStore.poolKey, jsonEncode({...share, 'cleared': now.millisecondsSinceEpoch}));
+      synced.bump();
+      for (var i = 0; i < 6; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      await deck.building;
+      expect((calls, fired), (3, 3));
+
+      deck.rebuilt.removeListener(listener);
+      now = now.add(const Duration(minutes: 5));
+      await pool().clearToday();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, 3, reason: 'no one listens: the next open builds instead');
+    });
+
     test("today's shared pool arriving fires rebuilt once, and only while something listens", () async {
       final synced = _Synced();
       final deck = ForYouDeck(
