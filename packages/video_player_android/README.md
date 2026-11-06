@@ -46,6 +46,13 @@ Not vendored:
 - `example/` (the published example app).
 - `AUTHORS` (upstream's contributor list; `LICENSE` is kept unchanged).
 
+Added next to upstream's files:
+- `provenance.json` (where the copy came from and how to refresh it).
+- `pubspec.lock`, so CI's `flutter pub get --enforce-lockfile` here resolves
+  the same dev dependencies (mockito, pigeon) every time; CI runs it before
+  the root analysis too, since that analysis covers `packages/`.
+- `.gitignore` (`build/`, `.dart_tool/`).
+
 Changed:
 - `pigeons/messages.dart`: `CreationOptions` gains four nullable ints after
   `backBufferDurationMs`: `minBufferMs`, `maxBufferMs`, `bufferForPlaybackMs`,
