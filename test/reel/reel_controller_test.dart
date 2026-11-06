@@ -1329,6 +1329,30 @@ void main() {
       });
     }
 
+    test('Watch on TV clears the queue for the hand-over, then the phone\'s window comes back', () async {
+      final servers = _RecordingServers(gated: '2');
+      final handedOver = <String>[];
+      final c = make(
+        servers: servers,
+        decks: deckOf(4),
+        externalClips: true,
+        onWatch: (item, {required onTv}) async {
+          handedOver.add(servers.reads.join(','));
+          return true;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2'], reason: "card 2's read is in flight");
+
+      expect(await c.watch(onTv: true), isTrue);
+      expect(handedOver, ['1,2'], reason: 'nothing new starts before the hand-over');
+      servers.gate.complete();
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2', '3'], reason: 'the lookahead goes on after Watch on TV');
+      c.dispose();
+    });
+
     test('on mobile data only the card on screen and the next are fetched', () async {
       final profile = ValueNotifier(
         const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),

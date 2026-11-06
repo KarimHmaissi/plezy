@@ -803,6 +803,12 @@ class ReelController extends ChangeNotifier {
       _firstClip = true;
     }
     final ok = await onWatch(item, onTv: onTv);
+    // Watch on TV hands over and the phone's Reel stays: its window comes
+    // back, so the next card is still resolved before the swipe.
+    if (onTv && _active && !_disposed) {
+      final list = cards;
+      if (list != null) _plan(list, _generation);
+    }
     // The TV couldn't be reached: keep the pick instead, and say where it
     // went (or that it couldn't be kept).
     if (!ok && onTv) await save();
