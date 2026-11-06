@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -16,9 +18,10 @@ import '../../widgets/tv_spotlight_background.dart';
 
 /// One card, in the app's own look. On the TV it is Home's spotlight (logo or
 /// title, the metadata line with rating badges, the summary, the same scrims)
-/// with the clip playing where the artwork would be: the artwork shows until
-/// the clip's first frame, and stays for AI cards. The Reel adds only its
-/// labels, the why line and the key hints underneath.
+/// with the clip playing where the artwork would be: the artwork covers a
+/// clip that is slow to start (held back briefly, so a quick one never shows
+/// it) and stays for AI cards. The Reel adds only its labels, the why line
+/// and the key hints underneath.
 class ReelCardView extends StatelessWidget {
   const ReelCardView({
     super.key,
@@ -61,20 +64,53 @@ class ReelCardView extends StatelessWidget {
     }
     final card = slot.card!;
     final isCurrent = identical(controller.current.card, card);
-    return ValueListenableBuilder<ClipPhase>(
-      valueListenable: controller.clips.phase,
-      builder: (context, phase, _) {
-        final showingClip =
-            isCurrent &&
-            slot.clip != null &&
-            (phase == ClipPhase.playing || phase == ClipPhase.paused || phase == ClipPhase.held);
-        final held = isCurrent && phase == ClipPhase.held;
-        return _tv(context, showingClip: showingClip, held: held);
+    final clips = controller.clips;
+    return ListenableBuilder(
+      listenable: Listenable.merge([clips.phase, clips.onScreen]),
+      builder: (context, _) {
+        final state = ReelCardView.clipState(
+          clip: slot.clip?.source,
+          onScreen: clips.onScreen.value,
+          phase: clips.phase.value,
+          isCurrent: isCurrent,
+        );
+        return ReelArtCover(
+          cover: !state.showingClip,
+          delay: state.artDelay,
+          builder: (context, showArtwork) =>
+              _tv(context, showArtwork: showArtwork, showInfo: !state.behind, held: state.held),
+        );
       },
     );
   }
 
-  Widget _tv(BuildContext context, {required bool showingClip, required bool held}) {
+  /// What the TV card shows for its clip (V2-01).
+  ///
+  /// - [showingClip]: only this card's own clip, once its first frame is up
+  ///   ([ClipPlayer.onScreen]), takes the artwork away; never the clip of
+  ///   the card before it.
+  /// - [behind]: the card before's clip is still on screen while this one
+  ///   opens, so this card's text waits rather than drawing over it.
+  /// - [artDelay]: a card with a clip holds its artwork back by
+  ///   [ReelArtCover.clipGrace], so a preloaded start (about 170 ms) never
+  ///   shows it; AI cards and failures show it at once.
+  static ({bool showingClip, bool behind, bool held, Duration artDelay}) clipState({
+    required ClipSource? clip,
+    required ClipSource? onScreen,
+    required ClipPhase phase,
+    required bool isCurrent,
+  }) {
+    final failed = phase == ClipPhase.failed;
+    final hasClip = isCurrent && clip != null && !failed;
+    return (
+      showingClip: hasClip && onScreen == clip,
+      behind: hasClip && onScreen != null && onScreen != clip,
+      held: isCurrent && phase == ClipPhase.held,
+      artDelay: hasClip ? ReelArtCover.clipGrace : Duration.zero,
+    );
+  }
+
+  Widget _tv(BuildContext context, {required bool showArtwork, required bool showInfo, required bool held}) {
     final scale = TvLayoutConstants.scaleOf(context);
     final client = context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId));
     final extrasHeight = 150 * scale;
@@ -84,21 +120,25 @@ class ReelCardView extends StatelessWidget {
         TvSpotlightBackground(
           item: slot.item,
           client: client,
-          showArtwork: !showingClip,
+          showArtwork: showArtwork,
+          showInfo: showInfo,
+          artworkCurve: Easing.emphasizedDecelerate,
           contentBottom: extrasHeight + 44 * scale,
           contentTop: 120 * scale,
         ),
-        if (slot.item == null) _titleOnly(context, scale, bottom: extrasHeight + 24 * scale),
-        Positioned(
-          left: TvLayoutConstants.horizontalInset,
-          right: MediaQuery.sizeOf(context).width * 0.43,
-          bottom: 24 * scale,
-          height: extrasHeight,
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: _Extras(controller: controller, slot: slot, held: held, tv: true, onReplay: onReplay),
+        if (showInfo) ...[
+          if (slot.item == null) _titleOnly(context, scale, bottom: extrasHeight + 24 * scale),
+          Positioned(
+            left: TvLayoutConstants.horizontalInset,
+            right: MediaQuery.sizeOf(context).width * 0.43,
+            bottom: 24 * scale,
+            height: extrasHeight,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: _Extras(controller: controller, slot: slot, held: held, tv: true, onReplay: onReplay),
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -127,6 +167,68 @@ class ReelCardView extends StatelessWidget {
     final d = controller.decks;
     return d.length < 2 ? 'another deck' : d[(controller.deckIndex + 1) % d.length].name;
   }
+}
+
+/// Holds the spotlight's artwork back for [delay] after [cover] turns on, so
+/// a clip whose first frame lands inside it never shows the art at all (the
+/// art blink between cards). Turning [cover] off takes effect at once; the
+/// spotlight itself runs the 320 ms reveal and the fade out.
+class ReelArtCover extends StatefulWidget {
+  const ReelArtCover({super.key, required this.cover, required this.delay, required this.builder});
+
+  /// About a preloaded TV start (169 ms measured) plus a frame or two.
+  static const Duration clipGrace = Duration(milliseconds: 200);
+
+  final bool cover;
+  final Duration delay;
+  final Widget Function(BuildContext context, bool showArtwork) builder;
+
+  @override
+  State<ReelArtCover> createState() => _ReelArtCoverState();
+}
+
+class _ReelArtCoverState extends State<ReelArtCover> {
+  late bool _show;
+  Timer? _wait;
+
+  @override
+  void initState() {
+    super.initState();
+    _show = widget.cover && widget.delay <= Duration.zero;
+    if (widget.cover && !_show) _hold();
+  }
+
+  @override
+  void didUpdateWidget(ReelArtCover old) {
+    super.didUpdateWidget(old);
+    if (!widget.cover) {
+      _wait?.cancel();
+      _wait = null;
+      _show = false;
+    } else if (!_show && widget.delay <= Duration.zero) {
+      _wait?.cancel();
+      _wait = null;
+      _show = true;
+    } else if (!_show && _wait == null) {
+      _hold();
+    }
+  }
+
+  void _hold() {
+    _wait = Timer(widget.delay, () {
+      _wait = null;
+      if (mounted && widget.cover) setState(() => _show = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _wait?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _show);
 }
 
 /// The spotlight's metadata line (ratings with their badges, certificate,

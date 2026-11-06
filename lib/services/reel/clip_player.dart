@@ -109,13 +109,28 @@ class ExoClipEngine implements ClipEngine {
 enum ClipPhase { idle, loading, playing, paused, held, failed }
 
 /// The Reel's clip player: plays one card's clip, preloads the next, loops a
-/// clip twice and then holds on its last frame, and dips the sound between
+/// clip twice and then holds on its last frame, and ramps the sound between
 /// cards. It never reports a timeline, a scrobble or a media session: it
 /// imports none of that code (test/reel/no_reporting_guard_test.dart).
 class ClipPlayer {
   ClipPlayer({ClipEngine Function()? engine, this.loops = 2, ReelPerf? perf})
     : _create = engine ?? ExoClipEngine.new,
       _perf = perf ?? ReelPerf.instance;
+
+  /// The outgoing clip's ramp to silence. It runs alongside the next open
+  /// rather than before it (V2-01), so a card change never waits on it. One
+  /// constant, judged by ear on the soundbar (the item's device check).
+  static const Duration outgoingFade = Duration(milliseconds: 120);
+
+  /// A session's first clip rises from silence over this (for the soundbar).
+  static const Duration firstFadeIn = Duration(milliseconds: 600);
+
+  /// Later cards rise from at most [dipLevel] over this.
+  static const Duration fadeIn = Duration(milliseconds: 300);
+  static const double dipLevel = 30;
+
+  /// A key press older than this when a clip opens is from another visit.
+  static const Duration staleKey = Duration(seconds: 30);
 
   final ClipEngine Function() _create;
 
@@ -130,13 +145,30 @@ class ClipPlayer {
   ClipSource? _current;
   int _played = 0;
   bool _muted = false;
+
+  /// The volume last sent to the core (0–100): every ramp starts here.
+  double _level = 0;
   Timer? _fade;
+  Completer<void>? _fadeDone;
+
+  /// Bumped by every [play], so a slow open never ramps a later card.
+  int _opens = 0;
   Stopwatch? _ttff;
+  bool _openPreloaded = false;
+
+  /// The press that asked for the next card ([markKey]), until a clip
+  /// opens for it; then the open's, until its first frame.
+  ({Stopwatch watch, String trigger})? _key;
+  ({Stopwatch watch, String trigger})? _openKey;
 
   /// The clip last handed to the core's preload, until it is used or cleared.
   String? _preloaded;
 
   final ValueNotifier<ClipPhase> phase = ValueNotifier(ClipPhase.idle);
+
+  /// The clip whose picture is on screen: null from the top of [play] until
+  /// that clip's first frame, so a card never draws over the clip before it.
+  final ValueNotifier<ClipSource?> onScreen = ValueNotifier(null);
 
   /// Time to first frame of the last clip, for the measure-day stopwatch.
   final ValueNotifier<Duration?> lastTtff = ValueNotifier(null);
@@ -144,6 +176,9 @@ class ClipPlayer {
   ClipEngine? get engine => _engine;
   ClipSource? get current => _current;
   bool get muted => _muted;
+
+  @visibleForTesting
+  double get level => _level;
 
   ClipEngine _ensure() {
     final existing = _engine;
@@ -163,22 +198,47 @@ class ClipPlayer {
     return e;
   }
 
-  /// Plays [source]. [first] fades in from silence over 600 ms (a session's
-  /// first clip on the TV, for the soundbar); later cards dip from 30% over
-  /// 300 ms after the outgoing clip fades out over 250 ms.
+  /// TV: a D-pad press that asks for another card ([trigger] `step` or
+  /// `deck`), timed from the key handler. The next [play] takes it, and that
+  /// clip's first frame logs `[ReelTTFF] key=… open=… preloaded=…`. A held
+  /// key's repeats each replace it, so `key=` runs from the press that
+  /// picked the card the cursor landed on.
+  void markKey(Stopwatch since, {String trigger = 'step'}) => _key = (watch: since, trigger: trigger);
+
+  /// Plays [source], opening it at once: the phase moves to loading and
+  /// [onScreen] clears before any await, and the outgoing clip ramps to
+  /// silence over [outgoingFade] alongside the open instead of before it.
+  /// [first] rises from silence over [firstFadeIn] (a session's first clip
+  /// on the TV, for the soundbar); later cards rise from [dipLevel] at most
+  /// over [fadeIn].
   Future<void> play(ClipSource source, {bool first = false}) async {
     final e = _ensure();
-    _perf.markResolved(preloaded: _preloaded == source.uri, origin: source.origin.name);
+    final open = ++_opens;
+    _openPreloaded = _preloaded == source.uri;
+    _perf.markResolved(preloaded: _openPreloaded, origin: source.origin.name);
     _preloaded = null;
-    if (_current != null && !first) await _fadeTo(0, const Duration(milliseconds: 250));
+    final key = _key;
+    _key = null;
+    _openKey = key != null && key.watch.elapsed < staleKey ? key : null;
+    final outgoing = _current != null && !first;
     _current = source;
     _played = 0;
+    onScreen.value = null;
     phase.value = ClipPhase.loading;
     _ttff = Stopwatch()..start();
-    await e.setVolume(_muted ? 0 : (first ? 0 : 30));
+    if (_muted || first || !outgoing) {
+      _cancelFade();
+      _setLevel(0);
+    } else {
+      unawaited(_fadeTo(0, outgoingFade));
+    }
     await e.open(source.uri);
+    if (open != _opens || !identical(_engine, e)) return;
     _perf.markOpened();
-    if (!_muted) unawaited(_fadeTo(100, Duration(milliseconds: first ? 600 : 300)));
+    if (_muted) return;
+    _cancelFade();
+    if (_level > dipLevel) _setLevel(dipLevel);
+    unawaited(_fadeTo(100, first ? firstFadeIn : fadeIn));
   }
 
   /// Buffers the next card's opening seconds on the same core.
@@ -200,6 +260,9 @@ class ClipPlayer {
   }
 
   Future<void> pause() async {
+    // A press that led to no clip (an AI card, the end of a deck) times
+    // nothing.
+    _key = null;
     await _engine?.pause();
     if (phase.value == ClipPhase.playing || phase.value == ClipPhase.loading) phase.value = ClipPhase.paused;
   }
@@ -231,8 +294,8 @@ class ClipPlayer {
 
   Future<void> setMuted(bool muted) async {
     _muted = muted;
-    _fade?.cancel();
-    await _engine?.setVolume(muted ? 0 : 100);
+    _cancelFade();
+    _setLevel(muted ? 0 : 100);
   }
 
   /// Hide the native surface while a card is dragged (it can't slide).
@@ -241,16 +304,21 @@ class ClipPlayer {
   /// Releases the core and awaits its dispose, so the real player can open
   /// right after (two decoders never run at once on the 3 GB Shield).
   Future<void> release() async {
-    _fade?.cancel();
+    _cancelFade();
     final e = _engine;
     _engine = null;
     _current = null;
     _preloaded = null;
+    _key = null;
+    _openKey = null;
+    _ttff = null;
+    _level = 0;
     _perf.cancel();
     for (final s in _subs) {
       await s.cancel();
     }
     _subs.clear();
+    onScreen.value = null;
     phase.value = ClipPhase.idle;
     if (e != null) await e.dispose();
   }
@@ -260,10 +328,17 @@ class ClipPlayer {
     if (sw != null) {
       sw.stop();
       lastTtff.value = sw.elapsed;
-      appLogger.i('[ReelTTFF] ${_current?.origin.name} ${sw.elapsedMilliseconds}ms');
+      final key = _openKey;
+      final keyMs = key == null ? 'none' : '${key.watch.elapsedMilliseconds}ms';
+      appLogger.i(
+        '[ReelTTFF] key=$keyMs open=${sw.elapsedMilliseconds}ms preloaded=$_openPreloaded'
+        '${key == null ? '' : ' trigger=${key.trigger}'} origin=${_current?.origin.name}',
+      );
       _ttff = null;
+      _openKey = null;
       _perf.markFirstFrame();
     }
+    onScreen.value = _current;
     if (phase.value == ClipPhase.loading) phase.value = ClipPhase.playing;
   }
 
@@ -290,20 +365,42 @@ class ClipPlayer {
     }
   }
 
-  Future<void> _fadeTo(double target, Duration over) async {
+  void _setLevel(double v) {
+    _level = v;
+    unawaited(_engine?.setVolume(v));
+  }
+
+  /// Stops a ramp where it is. Its future completes, so nothing waiting on
+  /// it ever hangs.
+  void _cancelFade() {
     _fade?.cancel();
-    final e = _engine;
-    if (e == null) return;
+    _fade = null;
+    final done = _fadeDone;
+    _fadeDone = null;
+    if (done != null && !done.isCompleted) done.complete();
+  }
+
+  /// Ramps from the current [_level] to [target] in six steps.
+  Future<void> _fadeTo(double target, Duration over) {
+    _cancelFade();
+    if (_engine == null) return Future.value();
+    final start = _level;
+    if (start == target || over <= Duration.zero) {
+      _setLevel(target);
+      return Future.value();
+    }
     const steps = 6;
-    final done = Completer<void>();
+    final done = _fadeDone = Completer<void>();
     var i = 0;
-    final start = target == 0 ? 100.0 : (target == 100 ? 30.0 : 50.0);
     _fade = Timer.periodic(over ~/ steps, (t) {
       i++;
-      final v = start + (target - start) * (i / steps);
-      unawaited(e.setVolume(v));
+      _setLevel(start + (target - start) * (i / steps));
       if (i >= steps) {
         t.cancel();
+        if (identical(_fadeDone, done)) {
+          _fade = null;
+          _fadeDone = null;
+        }
         if (!done.isCompleted) done.complete();
       }
     });

@@ -50,6 +50,9 @@ class TvSpotlightBackground extends StatelessWidget {
   /// Flutter shows through; the scrims lighten and the info block stays.
   final bool showArtwork;
 
+  /// Fork (The Reel): the curve of the [showArtwork] fade (linear for Home).
+  final Curve artworkCurve;
+
   const TvSpotlightBackground({
     super.key,
     required this.item,
@@ -65,6 +68,7 @@ class TvSpotlightBackground extends StatelessWidget {
     this.condensed = false,
     this.metadataTrailing,
     this.showArtwork = true,
+    this.artworkCurve = Curves.linear,
   });
 
   double _scale(BuildContext context) => TvLayoutConstants.scaleOf(context);
@@ -106,6 +110,7 @@ class TvSpotlightBackground extends StatelessWidget {
             AnimatedOpacity(
               opacity: showArtwork ? 1 : 0,
               duration: DevicePerformance.reducedDuration(const Duration(milliseconds: 320)),
+              curve: artworkCurve,
               child: Stack(
                 fit: StackFit.expand,
                 children: [

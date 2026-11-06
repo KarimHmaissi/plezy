@@ -8,6 +8,7 @@ import 'package:plezy/mpv/models.dart';
 import 'package:plezy/mpv/player/player.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/reel_perf.dart';
+import 'package:plezy/utils/app_logger.dart';
 
 class FakeClipEngine implements ClipEngine {
   final calls = <String>[];
@@ -118,22 +119,165 @@ void main() {
     expect(clips.phase.value, ClipPhase.playing);
   });
 
-  test('the first clip fades in from silence; later cards dip from 30%', () {
+  test('the first clip rises from silence without a jump; later cards dip from 30%', () {
     fakeAsync((async) {
       clips.play(_a, first: true);
       async.flushMicrotasks();
       expect(engine.volumes.first, 0);
-      async.elapse(const Duration(milliseconds: 700));
+      async.elapse(const Duration(milliseconds: 100));
+      // One step of six, from 0: no jump to 30 % or more on the first tick.
+      expect(engine.volumes.last, closeTo(100 / 6, 0.01));
+      async.elapse(const Duration(milliseconds: 600));
       expect(engine.volumes.last, closeTo(100, 0.01));
 
       engine.volumes.clear();
       clips.play(_b);
-      async.elapse(const Duration(milliseconds: 300));
-      expect(engine.volumes.any((v) => v.abs() < 0.01), isTrue, reason: 'the outgoing clip fades out to silence');
       async.flushMicrotasks();
+      expect(engine.volumes, contains(ClipPlayer.dipLevel));
       async.elapse(const Duration(milliseconds: 400));
-      expect(engine.volumes, contains(30));
       expect(engine.volumes.last, closeTo(100, 0.01));
+    });
+  });
+
+  group('V2-01: a card change opens at once', () {
+    test('the next clip opens before any fade has run, in loading, with nothing on screen', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.elapse(const Duration(milliseconds: 700));
+        engine.firstFrameCtl.add(null);
+        expect(clips.onScreen.value, _a);
+
+        clips.play(_b);
+        // Synchronous: the phase and the picture move before any await.
+        expect(clips.phase.value, ClipPhase.loading);
+        expect(clips.onScreen.value, isNull);
+        expect(clips.current, _b);
+        async.flushMicrotasks();
+        expect(engine.calls.last, 'open ${_b.uri}');
+        engine.firstFrameCtl.add(null);
+        expect(clips.onScreen.value, _b);
+        expect(clips.phase.value, ClipPhase.playing);
+      });
+    });
+
+    test('the outgoing clip ramps to silence alongside a slow open, within the one constant', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.elapse(const Duration(milliseconds: 700));
+        engine.openGate = Completer<void>();
+        engine.volumes.clear();
+        var done = false;
+        clips.play(_b).then((_) => done = true);
+        async.flushMicrotasks();
+        expect(engine.calls.last, 'open ${_b.uri}');
+        async.elapse(ClipPlayer.outgoingFade);
+        expect(clips.level, closeTo(0, 0.01));
+        expect(engine.volumes, everyElement(lessThan(100)));
+        engine.openGate!.complete();
+        async.flushMicrotasks();
+        expect(done, isTrue);
+        async.elapse(ClipPlayer.fadeIn);
+        expect(clips.level, closeTo(100, 0.01));
+      });
+    });
+
+    test('an interrupted ramp carries on from where it was, not from 100', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.elapse(const Duration(milliseconds: 300));
+        final mid = clips.level;
+        expect(mid, inExclusiveRange(0, 100));
+        engine.openGate = Completer<void>();
+        engine.volumes.clear();
+        clips.play(_b);
+        async.elapse(const Duration(milliseconds: 20));
+        expect(engine.volumes, isNotEmpty);
+        expect(engine.volumes, everyElement(lessThan(mid)));
+        engine.openGate!.complete();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('muting during a card change never stalls the next clip', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.elapse(const Duration(milliseconds: 700));
+        engine.openGate = Completer<void>();
+        var done = false;
+        clips.play(_b).then((_) => done = true);
+        async.elapse(const Duration(milliseconds: 40));
+        clips.setMuted(true);
+        engine.openGate!.complete();
+        async.flushMicrotasks();
+        async.elapse(const Duration(seconds: 1));
+        expect(done, isTrue);
+        expect(engine.calls, contains('open ${_b.uri}'));
+        expect(clips.level, 0);
+        expect(engine.volumes.last, 0);
+      });
+    });
+
+    test('a slow open that a later card overtakes never ramps the later card', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.elapse(const Duration(milliseconds: 700));
+        final slow = engine.openGate = Completer<void>();
+        clips.play(_b);
+        async.flushMicrotasks();
+        engine.openGate = null;
+        clips.play(_a);
+        async.flushMicrotasks();
+        async.elapse(ClipPlayer.fadeIn);
+        expect(clips.level, closeTo(100, 0.01));
+        engine.volumes.clear();
+        slow.complete();
+        async.flushMicrotasks();
+        async.elapse(const Duration(milliseconds: 400));
+        expect(engine.volumes, isEmpty, reason: 'the overtaken open returns without touching the sound');
+      });
+    });
+
+    test('release clears the picture', () async {
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      await clips.release();
+      expect(clips.onScreen.value, isNull);
+    });
+
+    test('[ReelTTFF] times the key press to the first frame, with the open and the preload', () async {
+      MemoryLogOutput.clearLogs();
+      await clips.preload(_b);
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      clips.markKey(Stopwatch()..start());
+      await clips.play(_b);
+      engine.firstFrameCtl.add(null);
+      final lines = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).toList();
+      // Newest first.
+      expect(lines, hasLength(2));
+      expect(
+        lines.first,
+        matches(RegExp(r'^\[ReelTTFF\] key=\d+ms open=\d+ms preloaded=false trigger=step origin=animeTheme$')),
+      );
+      expect(lines.last, matches(RegExp(r'^\[ReelTTFF\] key=none open=\d+ms preloaded=false origin=plexExtra$')));
+    });
+
+    test('a preloaded card says so; a press that led to no clip times nothing', () async {
+      MemoryLogOutput.clearLogs();
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      await clips.preload(_b);
+      clips.markKey(Stopwatch()..start(), trigger: 'deck');
+      await clips.play(_b);
+      engine.firstFrameCtl.add(null);
+      // An AI card: the controller pauses the core instead of opening.
+      clips.markKey(Stopwatch()..start());
+      await clips.pause();
+      await clips.play(_a);
+      engine.firstFrameCtl.add(null);
+      final lines = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).toList();
+      expect(lines[1], contains('preloaded=true trigger=deck'));
+      expect(lines[0], startsWith('[ReelTTFF] key=none'));
     });
   });
 

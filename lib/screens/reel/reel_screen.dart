@@ -352,17 +352,24 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       });
       return KeyEventResult.handled;
     }
+    // `[ReelTTFF] key=`: from this press to the landed card's first frame
+    // (V2-01). A held key's repeats restart it, so it times the press that
+    // picked the card the cursor lands on.
     if (key == LogicalKeyboardKey.arrowDown) {
       _perf.begin(ReelPerfTrigger.key);
+      c.clips.markKey(Stopwatch()..start());
       unawaited(c.step(1));
     } else if (key == LogicalKeyboardKey.arrowUp) {
       _perf.begin(ReelPerfTrigger.key);
+      c.clips.markKey(Stopwatch()..start());
       unawaited(c.step(-1));
     } else if (key == LogicalKeyboardKey.arrowRight) {
       _perf.begin(ReelPerfTrigger.deck);
+      c.clips.markKey(Stopwatch()..start(), trigger: 'deck');
       unawaited(c.switchDeck(1));
     } else if (key == LogicalKeyboardKey.arrowLeft) {
       _perf.begin(ReelPerfTrigger.deck);
+      c.clips.markKey(Stopwatch()..start(), trigger: 'deck');
       unawaited(c.switchDeck(-1));
     } else if (key == LogicalKeyboardKey.mediaFastForward) {
       unawaited(c.clips.seekBy(const Duration(seconds: 10)));
