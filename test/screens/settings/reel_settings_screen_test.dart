@@ -42,7 +42,7 @@ void main() {
     expect(find.text(s.clipEnd), findsOneWidget);
     expect(find.text(s.clipEndTwiceThenHold), findsOneWidget);
     expect(find.text(s.cellular), findsOneWidget);
-    expect(find.text(s.cellularNormal), findsOneWidget);
+    expect(find.text(s.cellularDataSaverSubtitle), findsOneWidget, reason: 'Data saver by default, with its trade');
     expect(find.text(s.captions), findsOneWidget);
     expect(find.text(s.showTab), findsOneWidget);
     expect(find.text(s.okAction), findsNothing, reason: 'the OK button is the TV remote');
@@ -88,6 +88,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(settings.read(SettingsService.reelCellular), ReelCellular.stillsOnly);
+    expect(find.text(s.cellularStillsOnly), findsOneWidget, reason: 'the row\'s subtitle follows the pick');
+    expect(find.text(s.cellularDataSaverSubtitle), findsNothing);
   });
 
   testWidgets('TV: OK can open Details', (tester) async {
@@ -118,5 +120,6 @@ void main() {
     expect(ReelStartSound.values.map(ReelSettingsScreen.startSoundLabel).toSet(), hasLength(2));
     expect(ReelClipEnd.values.map(ReelSettingsScreen.clipEndLabel).toSet(), hasLength(3));
     expect(ReelCellular.values.map(ReelSettingsScreen.cellularLabel).toSet(), hasLength(3));
+    expect(ReelCellular.values.map(ReelSettingsScreen.cellularSubtitle).toSet(), hasLength(3));
   });
 }

@@ -8341,6 +8341,9 @@ class Translations$reel$settings$en {
 	/// en: 'Smaller clips and fewer ready ahead; a fast swipe may show a still first'
 	String get cellularDataSaverDescription => 'Smaller clips and fewer ready ahead; a fast swipe may show a still first';
 
+	/// en: 'Data saver · a fast swipe may show a still first'
+	String get cellularDataSaverSubtitle => 'Data saver · a fast swipe may show a still first';
+
 	/// en: 'Stills only'
 	String get cellularStillsOnly => 'Stills only';
 
@@ -11246,6 +11249,7 @@ extension on Translations {
 			'reel.settings.cellularNormalDescription' => 'Clips play as they do on Wi-Fi',
 			'reel.settings.cellularDataSaver' => 'Data saver',
 			'reel.settings.cellularDataSaverDescription' => 'Smaller clips and fewer ready ahead; a fast swipe may show a still first',
+			'reel.settings.cellularDataSaverSubtitle' => 'Data saver · a fast swipe may show a still first',
 			'reel.settings.cellularStillsOnly' => 'Stills only',
 			'reel.settings.cellularStillsOnlyDescription' => 'No clips on mobile data, only each card\'s art',
 			'reel.settings.captions' => 'Openings with lyrics first',
@@ -11744,9 +11748,9 @@ extension on Translations {
 			'watchTogether.lengthUnknown' => 'Length unknown',
 			'watchTogether.joinCurrentPlayback' => 'Join Current Playback',
 			'watchTogether.joinCurrentPlaybackDescription' => 'Jump back into what the host is currently watching',
-			'watchTogether.stopMedia' => 'Stop Video for Everyone',
 			_ => null,
 		} ?? switch (path) {
+			'watchTogether.stopMedia' => 'Stop Video for Everyone',
 			'watchTogether.syncOffset' => 'Sync Offset',
 			'watchTogether.syncOffsetDescription' => 'Shift your video if it runs ahead of or behind the room.',
 			'watchTogether.offsetHint' => ({required Object difference}) => 'Your copy is ${difference} than the room\'s video.',
@@ -12258,9 +12262,9 @@ extension on Translations {
 			'seerr.seasons' => 'Seasons',
 			'seerr.allSeasons' => 'All seasons',
 			'seerr.advancedOptions' => 'Advanced',
-			'seerr.destinationServer' => 'Destination server',
 			_ => null,
 		} ?? switch (path) {
+			'seerr.destinationServer' => 'Destination server',
 			'seerr.qualityProfile' => 'Quality profile',
 			'seerr.rootFolder' => 'Root folder',
 			'seerr.languageProfile' => 'Language profile',

@@ -1693,6 +1693,7 @@
       "cellularNormalDescription": "Clips play as they do on Wi-Fi",
       "cellularDataSaver": "Data saver",
       "cellularDataSaverDescription": "Smaller clips and fewer ready ahead; a fast swipe may show a still first",
+      "cellularDataSaverSubtitle": "Data saver · a fast swipe may show a still first",
       "cellularStillsOnly": "Stills only",
       "cellularStillsOnlyDescription": "No clips on mobile data, only each card's art",
       "captions": "Openings with lyrics first",

@@ -14,9 +14,11 @@ import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/feed_players.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
+import 'package:plezy/services/reel/reel_data_budget.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/settings_service.dart' show ReelCellular;
 
 import 'clip_player_test.dart' show FakeClipEngine;
 
@@ -142,6 +144,9 @@ void main() {
   late List<MediaItem> opened;
   late int decksOpened, watched, sheets;
   late ValueNotifier<int> restored;
+  late ValueNotifier<int> link, settingsChanged;
+  late bool onCellular;
+  late ReelCellular cellular;
   late _Deck first;
 
   setUp(() {
@@ -151,6 +156,10 @@ void main() {
     opened = [];
     decksOpened = watched = sheets = 0;
     restored = ValueNotifier(0);
+    link = ValueNotifier(0);
+    settingsChanged = ValueNotifier(0);
+    onCellular = false;
+    cellular = ReelCellular.dataSaver;
     c = ReelController(
       decks: [
         first = _Deck('a', ['1', '2', '3', '4']),
@@ -169,6 +178,10 @@ void main() {
       addToWatchlist: (_) async => true,
       externalClips: true,
       memoryRestored: restored,
+      settingsChanged: settingsChanged,
+      cellular: () => cellular,
+      metered: () => onCellular,
+      linkChanged: link,
       onOpen: (item) async => opened.add(item),
     );
     players = ReelFeedPlayers(create: (_) => _Video());
@@ -178,6 +191,8 @@ void main() {
     c.dispose();
     players.dispose();
     restored.dispose();
+    link.dispose();
+    settingsChanged.dispose();
     await db.close();
   });
 
@@ -244,6 +259,67 @@ void main() {
     await tester.pump();
     expect(players.held, isEmpty);
     expect(find.text('Title 1'), findsOneWidget);
+  });
+
+  Future<void> settle(WidgetTester tester) async {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+  }
+
+  testWidgets('on Wi-Fi the next two and the one behind are parked', (tester) async {
+    await pump(tester);
+    expect(players.held.toSet(), {'t1', 't2', 't3'});
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    expect(players.held.toSet(), {'t2', 't3', 't4', 't1'});
+  });
+
+  testWidgets('Data saver on mobile data keeps the card on screen and the next one only', (tester) async {
+    onCellular = true;
+    await pump(tester);
+    expect(c.dataBudget, ReelDataBudget.saver);
+    expect(players.held.toSet(), {'t1', 't2'});
+    expect(players.current, 't1');
+
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    expect(players.current, 't2');
+    expect(players.held.toSet(), {'t2', 't3'}, reason: 'the card behind lets its player go');
+  });
+
+  testWidgets('Stills only on mobile data opens no player; back on Wi-Fi the clips come back', (tester) async {
+    onCellular = true;
+    cellular = ReelCellular.stillsOnly;
+    await pump(tester);
+    expect(players.held, isEmpty);
+    expect(find.text('Title 1'), findsOneWidget, reason: 'the card shows its art and title');
+
+    onCellular = false;
+    link.value++;
+    await settle(tester);
+    expect(players.held.toSet(), {'t1', 't2', 't3'});
+    expect(players.current, 't1');
+  });
+
+  testWidgets('a mobile-data choice made while the Reel plays is taken up at once', (tester) async {
+    onCellular = true;
+    cellular = ReelCellular.normal;
+    await pump(tester);
+    expect(players.held.toSet(), {'t1', 't2', 't3'}, reason: 'Normal plays as on Wi-Fi');
+
+    cellular = ReelCellular.stillsOnly;
+    settingsChanged.value++;
+    await settle(tester);
+    expect(players.held, isEmpty);
+
+    cellular = ReelCellular.dataSaver;
+    settingsChanged.value++;
+    await settle(tester);
+    expect(players.held.toSet(), {'t1', 't2'});
   });
 
   testWidgets('swiping up moves to the next card and its parked player', (tester) async {

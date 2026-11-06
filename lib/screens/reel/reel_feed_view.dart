@@ -94,18 +94,21 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     setState(() {});
   }
 
-  /// The card on screen, the next two, then the one behind.
+  /// The card on screen, the next two, then the one behind; on mobile
+  /// data the Reel's data budget (V2-53) narrows that to the card on screen
+  /// and the next (Data saver), or to stills (Stills only, the memory
+  /// ladder's level-2 path).
   void _sync() {
     // Hidden, paused or handing over to real playback: nothing plays.
     if (!_c.active) return;
-    final i = _c.index;
+    final budget = _c.dataBudget;
     final window = <FeedClip>[
-      for (final j in [i, i + 1, i + 2, i - 1])
+      for (final j in budget.window(_c.index))
         if (j >= 0)
           if (_c.slotAt(j) case ReelSlot(card: final card?, clip: final clip?))
             if (Uri.tryParse(clip.source.uri) case final uri?) (id: card.id, uri: uri),
     ];
-    widget.players.sync(current: _c.current.card?.id, window: window, memoryLevel: _c.memoryLevel);
+    widget.players.sync(current: _c.current.card?.id, window: window, memoryLevel: budget.clips ? _c.memoryLevel : 2);
   }
 
   void _save() {

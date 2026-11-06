@@ -88,6 +88,10 @@ class ReelSettingsScreen extends StatelessWidget {
     ReelCellular.stillsOnly => t.reel.settings.cellularStillsOnly,
   };
 
+  /// The mobile-data row's subtitle: Data saver states its trade (V2-53).
+  static String cellularSubtitle(ReelCellular v) =>
+      v == ReelCellular.dataSaver ? t.reel.settings.cellularDataSaverSubtitle : cellularLabel(v);
+
   Widget _startSound() {
     final s = t.reel.settings;
     return SettingSelectionTile<ReelStartSound>(
@@ -147,7 +151,7 @@ class ReelSettingsScreen extends StatelessWidget {
       pref: SettingsService.reelCellular,
       icon: Symbols.signal_cellular_alt_rounded,
       title: s.cellular,
-      subtitleBuilder: cellularLabel,
+      subtitleBuilder: cellularSubtitle,
       options: [
         DialogOption(value: ReelCellular.normal, title: s.cellularNormal, subtitle: s.cellularNormalDescription),
         DialogOption(

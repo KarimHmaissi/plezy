@@ -129,7 +129,8 @@ enum ReelCellular {
   /// Play clips as on Wi-Fi.
   normal,
 
-  /// Smaller clips and fewer preloads; a fast swipe may show a still.
+  /// Smaller clips and fewer preloads; a fast swipe may show a still. The
+  /// default.
   dataSaver,
 
   /// No clips on mobile data, only the card's art.
@@ -795,11 +796,12 @@ class SettingsService extends BaseSharedPreferencesService {
     defaultValue: ReelClipEnd.twiceThenHold,
   );
 
-  /// The Reel on mobile data (V2-53). Today: [ReelCellular.normal].
+  /// The Reel on mobile data (V2-53): Data saver unless changed. Only a
+  /// cellular-only link reads it (`ReelDataBudget`).
   static const reelCellular = EnumPref<ReelCellular>(
     'reel_cellular',
     values: ReelCellular.values,
-    defaultValue: ReelCellular.normal,
+    defaultValue: ReelCellular.dataSaver,
   );
 
   /// What OK does on a TV card (D12). Today: Watch.

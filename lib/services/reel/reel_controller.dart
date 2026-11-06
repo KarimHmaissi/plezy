@@ -7,8 +7,10 @@ import '../../utils/app_logger.dart';
 import '../customisation/customisation_store.dart';
 import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
+import '../settings_service.dart' show ReelCellular, SettingsService;
 import 'clip_player.dart';
 import 'clip_resolver.dart';
+import 'reel_data_budget.dart';
 import 'reel_deck_prefs.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
@@ -72,6 +74,9 @@ class ReelController extends ChangeNotifier {
     this.externalClips = false,
     this.memoryRestored,
     this.settingsChanged,
+    this.cellular,
+    this.metered,
+    this.linkChanged,
     Listenable? deckPrefsChanged,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now,
@@ -79,6 +84,8 @@ class ReelController extends ChangeNotifier {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
     settingsChanged?.addListener(_onSettingsChanged);
+    _wasMetered = metered?.call() ?? false;
+    linkChanged?.addListener(_onLinkChanged);
     this.deckPrefsChanged.addListener(_onDeckPrefsChanged);
     decks.forEach(_watchDeck);
   }
@@ -125,6 +132,37 @@ class ReelController extends ChangeNotifier {
   void _onSettingsChanged() {
     if (_disposed) return;
     appLogger.d('Reel: a setting changed; the views take it up now');
+    notifyListeners();
+  }
+
+  /// The Reel on mobile data (V2-53, `reel_cellular`). Null reads the
+  /// pref's default.
+  final ReelCellular Function()? cellular;
+
+  /// Whether the link is cellular only (`OfflineModeProvider.isCellularOnly`).
+  /// Null reads as Wi-Fi.
+  final bool Function()? metered;
+
+  /// Fires when the link may have changed (the app's connectivity
+  /// provider). The views re-sync only when [metered] really moved.
+  final Listenable? linkChanged;
+  bool _wasMetered = false;
+
+  /// What the Reel may spend on this link now ([ReelDataBudget]): the phone
+  /// feed's player window, the clip/still choice and the preload follow it.
+  /// Reading it also notes the link the views last acted on, so a change
+  /// the link listener missed is still caught at its next tick.
+  ReelDataBudget get dataBudget {
+    final onCellular = _wasMetered = metered?.call() ?? false;
+    return ReelDataBudget.of(cellular?.call() ?? SettingsService.reelCellular.resolvedDefault, metered: onCellular);
+  }
+
+  void _onLinkChanged() {
+    if (_disposed) return;
+    final now = metered?.call() ?? false;
+    if (now == _wasMetered) return;
+    _wasMetered = now;
+    appLogger.i('Reel: ${now ? 'mobile data' : 'off mobile data'}, $dataBudget');
     notifyListeners();
   }
 
@@ -579,8 +617,9 @@ class ReelController extends ChangeNotifier {
     } else if (clip == null) {
       _sinceAiCard = 0;
       await clips.pause();
-    } else if (memoryLevel >= 2) {
-      // Low memory: the backdrop as a still, no clip core (and no clock).
+    } else if (memoryLevel >= 2 || !dataBudget.clips) {
+      // Low memory, or Stills only on mobile data: the backdrop as a still,
+      // no clip core (and no clock).
       _sinceAiCard++;
     } else {
       _sinceAiCard++;
@@ -598,7 +637,7 @@ class ReelController extends ChangeNotifier {
       if (j >= 0 && j < list.length) unawaited(_resolve(list[j]));
     }
     final ahead = index + (direction < 0 ? -1 : 1);
-    if (!externalClips && memoryLevel == 0 && ahead >= 0 && ahead < list.length) {
+    if (!externalClips && memoryLevel == 0 && dataBudget.clips && ahead >= 0 && ahead < list.length) {
       final next = list[ahead];
       unawaited(
         _resolve(next).then((_) {
@@ -908,6 +947,7 @@ class ReelController extends ChangeNotifier {
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);
     settingsChanged?.removeListener(_onSettingsChanged);
+    linkChanged?.removeListener(_onLinkChanged);
     deckPrefsChanged.removeListener(_onDeckPrefsChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);

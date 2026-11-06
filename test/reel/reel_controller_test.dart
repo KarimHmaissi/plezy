@@ -19,10 +19,12 @@ import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
+import 'package:plezy/services/reel/reel_data_budget.dart';
 import 'package:plezy/services/reel/reel_deck_prefs.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/settings_service.dart' show ReelCellular;
 
 import 'clip_player_test.dart' show FakeClipEngine;
 
@@ -203,6 +205,9 @@ void main() {
     Listenable? memoryRestored,
     Listenable? settingsChanged,
     Listenable? deckPrefsChanged,
+    ReelCellular Function()? cellular,
+    bool Function()? metered,
+    Listenable? linkChanged,
   }) => ReelController(
     decks:
         decks ??
@@ -231,6 +236,9 @@ void main() {
     memoryRestored: memoryRestored,
     settingsChanged: settingsChanged,
     deckPrefsChanged: deckPrefsChanged,
+    cellular: cellular,
+    metered: metered,
+    linkChanged: linkChanged,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -385,6 +393,60 @@ void main() {
     expect(engines, made, reason: 'no new clip core while stills only');
     expect(c.current.card?.id, 't3');
     c.dispose();
+  });
+
+  test('Stills only on mobile data opens no clip core; off mobile data it plays again', () async {
+    var onCellular = true;
+    final link = ValueNotifier(0);
+    final c = make(cellular: () => ReelCellular.stillsOnly, metered: () => onCellular, linkChanged: link);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.dataBudget, ReelDataBudget.stills);
+    expect(engines, 0, reason: 'no clip core and no preload on stills');
+    expect(c.current.card?.id, 't1');
+
+    onCellular = false;
+    link.value++;
+    expect(c.dataBudget, ReelDataBudget.full);
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(engine.calls, contains('open https://s1.example/services/iva/assets/2/video.mp4'));
+    expect(engine.calls, contains('preload https://s1.example/services/iva/assets/3/video.mp4'));
+    c.dispose();
+    link.dispose();
+  });
+
+  test('Data saver on mobile data still plays the card and preloads the next', () async {
+    final c = make(cellular: () => ReelCellular.dataSaver, metered: () => true);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.dataBudget, ReelDataBudget.saver);
+    expect(engine.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+    expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
+    c.dispose();
+  });
+
+  test('the views hear about the link only when mobile data comes or goes', () async {
+    var onCellular = false;
+    final link = ValueNotifier(0);
+    final c = make(metered: () => onCellular, linkChanged: link);
+    var told = 0;
+    c.addListener(() => told++);
+
+    link.value++;
+    expect(told, 0, reason: 'still on Wi-Fi');
+    onCellular = true;
+    link.value++;
+    expect(told, 1);
+    expect(c.dataBudget, ReelDataBudget.saver, reason: 'Data saver is the default');
+    link.value++;
+    expect(told, 1);
+
+    c.dispose();
+    onCellular = false;
+    link.value++;
+    expect(told, 1, reason: 'a disposed Reel stops listening');
+    link.dispose();
   });
 
   test('the ladder holds across visits until the memory policy restores', () async {
