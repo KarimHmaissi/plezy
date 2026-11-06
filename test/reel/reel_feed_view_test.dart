@@ -120,12 +120,15 @@ class _Video extends ChangeNotifier implements FeedVideo {
   bool _ready = false, _playing = false;
   Duration at = Duration.zero;
   int seeks = 0;
+
+  /// The clip's own shape.
+  double ratio = 16 / 9;
   @override
   bool get ready => _ready;
   @override
   bool get failed => false;
   @override
-  double get aspectRatio => 16 / 9;
+  double get aspectRatio => ratio;
   @override
   Duration get position => at;
   @override
@@ -165,6 +168,9 @@ void main() {
   late ReelController c;
   late ReelFeedPlayers players;
   late Map<String, _Video> videos;
+
+  /// Clip shapes by card, for clips that aren't 16:9.
+  late Map<String, double> ratios;
   late ReelStore store;
   late List<MediaItem> opened;
   late int decksOpened, watched, sheets, resized;
@@ -201,7 +207,13 @@ void main() {
       onOpen: (item) async => opened.add(item),
     );
     videos = {};
-    players = ReelFeedPlayers(create: (uri) => videos[uri.pathSegments.last.split('.').first] = _Video());
+    ratios = {};
+    players = ReelFeedPlayers(
+      create: (uri) {
+        final id = uri.pathSegments.last.split('.').first;
+        return videos[id] = _Video()..ratio = ratios[id] ?? 16 / 9;
+      },
+    );
   });
 
   tearDown(() async {
@@ -230,8 +242,9 @@ void main() {
     bool themed = false,
     bool watchOnTv = false,
     Widget Function(Widget feed)? wrap,
+    Size size = const Size(420, 860),
   }) async {
-    tester.view.physicalSize = const Size(420, 860);
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.runAsync(c.start);
@@ -1104,6 +1117,185 @@ void main() {
       reduceMotion(tester);
       await tester.pumpWidget(host());
       expect(strip(), Duration.zero);
+    });
+  });
+
+  group('V2-30: layouts for the Fold, and the frame glides', () {
+    // The cover screen upright and on its side; the inner screen upright and
+    // on its side.
+    const cover = Size(420, 860);
+    const coverSideways = Size(860, 400);
+    const innerUpright = Size(700, 860);
+    const innerSideways = Size(880, 700);
+
+    tearDown(ImmersiveModeGuard.resetForTesting);
+
+    Future<void> resize(WidgetTester tester, Size to) async {
+      tester.view.physicalSize = to;
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pumpAndSettle();
+    }
+
+    /// The clip's picture on screen (the fake player draws teal).
+    final video = find.byWidgetPredicate((w) => w is ColoredBox && w.color == Colors.teal);
+
+    bool scrimOver(WidgetTester tester, Finder of) => tester
+        .widgetList<DecoratedBox>(find.ancestor(of: of, matching: find.byType(DecoratedBox)))
+        .any((w) => w.decoration is BoxDecoration && (w.decoration as BoxDecoration).gradient != null);
+
+    test('the layout follows the space: the app\'s 600 dp line and the two-pane rule', () {
+      expect(ReelFeedLayout.of(cover), ReelFeedLayout.phone);
+      expect(ReelFeedLayout.of(coverSideways), ReelFeedLayout.fullBleed);
+      expect(ReelFeedLayout.of(innerUpright), ReelFeedLayout.stacked);
+      expect(ReelFeedLayout.of(innerSideways), ReelFeedLayout.twoPane);
+      // On its side but under 800 wide: the info stays below the picture.
+      expect(ReelFeedLayout.of(const Size(780, 650)), ReelFeedLayout.stacked);
+      // 800 wide and taller than wide is not two-pane.
+      expect(ReelFeedLayout.of(const Size(820, 1000)), ReelFeedLayout.stacked);
+      expect(ReelFeedLayout.of(const Size(599, 900)), ReelFeedLayout.phone);
+    });
+
+    testWidgets('phone: as before, the info over the foot of the picture, at the phone inset', (tester) async {
+      await pump(tester);
+      expect(scrimOver(tester, find.text('Details')), isTrue);
+      expect(tester.getTopLeft(find.text('Title 1')).dx, 20, reason: 'ForkSpacing.phone.edgeInset');
+      expect(find.text('Up next'), findsNothing);
+    });
+
+    testWidgets('inner screen upright: the picture at the top and the info below it, nothing over the picture', (
+      tester,
+    ) async {
+      await pump(tester, size: innerUpright);
+      final picture = tester.getRect(video);
+      expect(picture.top, greaterThanOrEqualTo(56), reason: 'below the top bar');
+      expect(tester.getTopLeft(find.text('Title 1')).dy, greaterThanOrEqualTo(picture.bottom));
+      expect(tester.getTopLeft(find.text('Details')).dy, greaterThanOrEqualTo(picture.bottom));
+      expect(scrimOver(tester, find.text('Details')), isFalse);
+      expect(tester.getTopLeft(find.text('Title 1')).dx, 28, reason: 'ForkSpacing.tablet.edgeInset');
+      expect(find.text('Up next'), findsNothing);
+    });
+
+    testWidgets('inner screen on its side: picture 62, info 38 with Up next, and no scrim over the video', (
+      tester,
+    ) async {
+      await pump(tester, size: innerSideways);
+      final split = innerSideways.width * ReelFeedLayout.pictureShare;
+      expect(tester.getRect(video).right, lessThanOrEqualTo(split + 0.5));
+      expect(tester.getTopLeft(find.text('Details')).dx, greaterThanOrEqualTo(split));
+      expect(tester.getTopLeft(find.text('Title 1')).dx, closeTo(split + 28, 0.5));
+      expect(scrimOver(tester, find.text('Details')), isFalse);
+      expect(find.text('Up next'), findsOneWidget);
+      for (final t in ['Title 2', 'Title 3', 'Title 4']) {
+        expect(find.text(t), findsOneWidget, reason: '$t is up next');
+      }
+      expect(tester.takeException(), isNull, reason: 'nothing overflows the pane');
+    });
+
+    testWidgets('an Up next row takes the feed to that card, committed on the settle', (tester) async {
+      await pump(tester, size: innerSideways);
+      await tester.tap(find.text('Title 2'));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(c.index, 1);
+      expect(players.current, 't2');
+      expect(find.text('Title 3'), findsOneWidget);
+
+      // Two ahead: a jump, so the card between opens nothing on the way.
+      await tester.tap(find.text('Title 4'));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(c.index, 3);
+      expect(players.current, 't4');
+    });
+
+    testWidgets('immersive on the inner screen folds the info away and the picture takes the page', (tester) async {
+      await pump(tester, size: innerSideways);
+      final before = tester.getRect(video);
+      await tester.fling(find.text('Title 1'), const Offset(300, 0), 1500);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Details'), isTrue);
+      expect(tester.getRect(video).width, greaterThan(before.width));
+      expect(tester.getRect(video).center.dx, closeTo(innerSideways.width / 2, 0.5));
+      await tester.fling(find.byType(PageView), const Offset(-300, 0), 1500);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(video), before);
+    });
+
+    testWidgets('the cover screen on its side goes full-bleed by itself, and upright again comes back out', (
+      tester,
+    ) async {
+      await pump(tester);
+      await resize(tester, coverSideways);
+      expect(hidden(tester, 'Details'), isTrue);
+      expect(hidden(tester, 'Deck a'), isTrue);
+      expect(immersiveReports, [true]);
+      expect(tester.getRect(video).height, closeTo(coverSideways.height, 0.5), reason: 'the picture fills the height');
+
+      await resize(tester, cover);
+      expect(hidden(tester, 'Details'), isFalse);
+      expect(immersiveReports, [true, false]);
+    });
+
+    testWidgets('on its side, controls asked back stay until the next turn', (tester) async {
+      await pump(tester, size: coverSideways);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Details'), isTrue, reason: 'opened on its side');
+      await tester.fling(find.byType(PageView), const Offset(-300, 0), 1500);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Details'), isFalse);
+
+      await resize(tester, const Size(860, 390));
+      expect(hidden(tester, 'Details'), isFalse, reason: 'a size change on its side leaves the controls');
+      await resize(tester, cover);
+      expect(hidden(tester, 'Details'), isFalse);
+      await resize(tester, coverSideways);
+      expect(hidden(tester, 'Details'), isTrue, reason: 'a new turn goes full-bleed again');
+    });
+
+    testWidgets('immersive chosen upright stays when turned and turned back', (tester) async {
+      await pump(tester);
+      await tester.fling(find.text('Title 1'), const Offset(300, 0), 1500);
+      await tester.pumpAndSettle();
+      await resize(tester, coverSideways);
+      await resize(tester, cover);
+      expect(hidden(tester, 'Details'), isTrue);
+      expect(immersiveReports, [true]);
+    });
+
+    testWidgets('the frame glides from 16:9 to the clip\'s own shape', (tester) async {
+      ratios['1'] = 4 / 3;
+      await pump(tester);
+      double shape() =>
+          tester.widget<AspectRatio>(find.ancestor(of: video, matching: find.byType(AspectRatio)).first).aspectRatio;
+      expect(shape(), closeTo(16 / 9, 0.001), reason: 'the glide has only begun');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(shape(), allOf(lessThan(16 / 9), greaterThan(4 / 3)));
+      await tester.pumpAndSettle();
+      expect(shape(), closeTo(4 / 3, 0.001));
+    });
+
+    testWidgets('with reduce motion on the frame takes the clip\'s shape at once', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+        disableAnimations: true,
+      );
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      ratios['1'] = 4 / 3;
+      await pump(tester);
+      await tester.pump();
+      expect(
+        tester.widget<AspectRatio>(find.ancestor(of: video, matching: find.byType(AspectRatio)).first).aspectRatio,
+        closeTo(4 / 3, 0.001),
+      );
+    });
+
+    testWidgets('the progress track is the theme\'s foreground, not white', (tester) async {
+      await pump(tester, themed: true, palette: MonoPalette.oled);
+      final bar = tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
+      final context = tester.element(find.byType(LinearProgressIndicator));
+      expect(bar.backgroundColor, Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12));
     });
   });
 }

@@ -12,6 +12,8 @@ import '../../services/device_performance.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/settings_service.dart';
 import '../../theme/fork_motion.dart';
+import '../../theme/fork_spacing.dart';
+import '../../theme/mono_motion.dart';
 import '../../theme/mono_theme.dart';
 import '../../theme/mono_tokens.dart';
 import '../../utils/app_logger.dart';
@@ -45,6 +47,44 @@ class ReelFeedTheme extends StatelessWidget {
   );
 }
 
+/// How the phone feed lays a card out for the space it has (V2-30). The
+/// splits are the app's own: [ForkSpacing]'s 600 dp phone/tablet line and
+/// the music player's two-pane rule (now_playing_screen.dart).
+enum ReelFeedLayout {
+  /// A phone held upright: the picture above the middle, the info over its
+  /// foot on a scrim.
+  phone,
+
+  /// A phone on its side (the Fold's cover screen turned): the picture fills
+  /// the screen and the controls go, the way the immersive view hides them.
+  /// Swiping left or Back brings them back over the picture.
+  fullBleed,
+
+  /// 600 dp wide or more and not two-pane (the Fold's inner screen held
+  /// upright): the picture at the top, the info below it, so nothing covers
+  /// the foot of the picture where captions and lyrics sit.
+  stacked,
+
+  /// 800 dp wide and wider than tall (the inner screen on its side): the
+  /// picture on the left ([pictureShare]), the info and Up next beside it,
+  /// with no scrim over the video.
+  twoPane;
+
+  /// The picture's share of the width in [twoPane]; the info takes the rest.
+  static const pictureShare = 0.62;
+
+  static ReelFeedLayout of(Size size) {
+    final wide = size.width > size.height;
+    if (wide && size.shortestSide < 600) return fullBleed;
+    if (size.width >= 800 && wide) return twoPane;
+    if (size.width >= 600) return stacked;
+    return phone;
+  }
+
+  /// The info sits over the picture on a scrim (rather than beside or below).
+  bool get overlays => this == phone || this == fullBleed;
+}
+
 /// The phone Reel, a feed you thumb through: each card plays in its own
 /// page (the clip is drawn into the page, so it slides with your thumb), and
 /// the cards around it are already open and parked on their first frame
@@ -75,6 +115,13 @@ class ReelFeedTheme extends StatelessWidget {
 /// rest the page is put back on the controller's cursor if it slid. The
 /// cursor is the page's one source: the [PageController] keeps nothing in
 /// page storage, so a rebuilt feed always opens where the controller is.
+///
+/// Layouts (V2-30): the card is laid out by [ReelFeedLayout] for the space
+/// the feed has, so a screen switch or a turn moves the picture and the info
+/// to suit; on the cover screen on its side the feed goes immersive by
+/// itself and comes back out when it is turned upright again (unless the
+/// controls were asked back in between). The picture glides between its
+/// placeholder shape and the clip's own instead of snapping.
 class ReelFeedView extends StatefulWidget {
   const ReelFeedView({
     super.key,
@@ -136,6 +183,17 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   /// The feed asked for the system bars to hide and has not given them back.
   bool _ownsBars = false;
+
+  /// The layout the feed last laid out in (V2-30).
+  ReelFeedLayout? _layout;
+
+  /// The feed went immersive by itself because it was turned on its side
+  /// ([ReelFeedLayout.fullBleed]), so turning it upright brings it back.
+  bool _sideways = false;
+
+  /// On its side, the controls were asked back: the feed stays out of
+  /// immersive until it is turned upright and on its side again.
+  bool _controlsAsked = false;
   bool _burst = false;
 
   /// Counts bursts, so each one grows in afresh.
@@ -204,7 +262,10 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     if (!mounted) return;
     // Put away (another tab, a page over it, the background): the bars come
     // back for whatever shows next, and the feed returns with its controls.
-    if (!_c.active && _immersive) _setImmersive(false);
+    if (!_c.active && _immersive) {
+      _setImmersive(false);
+      _sideways = false;
+    }
     // A new deck starts at its own cursor; a card dropped (Not for me) or
     // a step from the TV moves the page to match.
     if (_deck != _c.deck.id) {
@@ -220,6 +281,46 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     }
     _sync();
     setState(() {});
+    // Back on screen while on its side: full-bleed again.
+    _followLayout();
+  }
+
+  /// The feed on its side goes immersive by itself; upright again, it comes
+  /// back out if it went in by itself (V2-30). Swiping left or Back while on
+  /// its side keeps the controls until the next turn.
+  void _followLayout() {
+    if (!mounted) return;
+    if (_layout != ReelFeedLayout.fullBleed) {
+      _controlsAsked = false;
+      if (_sideways) {
+        _sideways = false;
+        _setImmersive(false);
+      }
+      return;
+    }
+    if (!_c.active || _immersive || _controlsAsked) return;
+    _setImmersive(true);
+    _sideways = true;
+  }
+
+  /// A swipe or Back into or out of immersive.
+  void _immersiveByUser(bool on) {
+    _setImmersive(on);
+    _sideways = false;
+    if (!on && _layout == ReelFeedLayout.fullBleed) _controlsAsked = true;
+  }
+
+  /// An Up next row (V2-30): the next card slides in as a swipe would; one
+  /// further on is jumped to, so the cards between open no players. The
+  /// step commits when the page settles, as for a swipe.
+  void _goTo(int page) {
+    if (!_pages.hasClients) return;
+    final by = _motion(context, Theme.of(context).extension<MonoTokens>()?.slow ?? const Duration(milliseconds: 300));
+    if ((page - _page).abs() == 1 && by > Duration.zero) {
+      unawaited(_pages.animateToPage(page, duration: by, curve: MonoMotion.emphasized));
+    } else {
+      _pages.jumpToPage(page);
+    }
   }
 
   /// Past the middle of a swipe: the incoming card plays and the window
@@ -312,7 +413,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   void _onPop(bool didPop, Object? _) {
     if (didPop || !_immersive) return;
     if (OverlaySheetController.maybeOf(context)?.isOpen ?? false) return;
-    _setImmersive(false);
+    _immersiveByUser(false);
   }
 
   /// Save from the button or a double-tap (V2-29). The filled bookmark and
@@ -343,40 +444,58 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       onPopInvokedWithResult: _onPop,
       child: ColoredBox(
         color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            NotificationListener<ScrollEndNotification>(
-              onNotification: _onScrollEnd,
-              child: PageView.builder(
-                controller: _pages,
-                scrollDirection: Axis.vertical,
-                // The page either side is built before the drag reaches it.
-                allowImplicitScrolling: true,
-                itemCount: count,
-                onPageChanged: _onPageChanged,
-                itemBuilder: (context, i) => _pageFor(_c.slotAt(i)),
-              ),
-            ),
-            ListenableBuilder(
-              listenable: widget.players,
-              builder: (context, _) => _TopBar(
-                hidden: _immersive,
-                deckName: _c.deck.name,
-                muted: widget.players.muted,
-                onDecks: widget.onDecks,
-                onMute: () => unawaited(widget.players.setMuted(!widget.players.muted)),
-                onRemote: widget.onRemote,
-              ),
-            ),
-            _SaveBurst(shown: _burst, count: _bursts),
-          ],
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final layout = ReelFeedLayout.of(box.biggest);
+            if (layout != _layout) {
+              _layout = layout;
+              // After this frame: going immersive tells the shell.
+              WidgetsBinding.instance.addPostFrameCallback((_) => _followLayout());
+            }
+            return _stack(count);
+          },
         ),
       ),
     );
   }
 
-  Widget _pageFor(ReelSlot slot) {
+  Widget _stack(int count) => Stack(
+    fit: StackFit.expand,
+    children: [
+      NotificationListener<ScrollEndNotification>(
+        onNotification: _onScrollEnd,
+        child: PageView.builder(
+          controller: _pages,
+          scrollDirection: Axis.vertical,
+          // The page either side is built before the drag reaches it.
+          allowImplicitScrolling: true,
+          itemCount: count,
+          onPageChanged: _onPageChanged,
+          itemBuilder: (context, i) => _pageFor(i, _c.slotAt(i)),
+        ),
+      ),
+      ListenableBuilder(
+        listenable: widget.players,
+        builder: (context, _) => _TopBar(
+          hidden: _immersive,
+          deckName: _c.deck.name,
+          muted: widget.players.muted,
+          onDecks: widget.onDecks,
+          onMute: () => unawaited(widget.players.setMuted(!widget.players.muted)),
+          onRemote: widget.onRemote,
+        ),
+      ),
+      _SaveBurst(shown: _burst, count: _bursts),
+    ],
+  );
+
+  /// The cards after page [i] for the two-pane Up next (V2-30).
+  List<(int, ReelSlot)> _upNext(int i) => [
+    for (var k = 1; k <= _UpNext.rows; k++)
+      if (_c.slotAt(i + k) case final s when s.kind == ReelSlotKind.card) (i + k, s),
+  ];
+
+  Widget _pageFor(int i, ReelSlot slot) {
     switch (slot.kind) {
       case ReelSlotKind.loading:
         return const ReelCurtain();
@@ -406,6 +525,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         break;
     }
     final card = slot.card!;
+    final layout = _layout ?? ReelFeedLayout.phone;
     // Built once per page build and handed through, so a player change
     // redraws the picture and not the title and buttons.
     final info = AnimatedOpacity(
@@ -417,6 +537,9 @@ class _ReelFeedViewState extends State<ReelFeedView> {
           child: _Info(
             controller: _c,
             slot: slot,
+            layout: layout,
+            upNext: layout == ReelFeedLayout.twoPane ? _upNext(i) : const [],
+            onUpNext: _goTo,
             watchOnTv: widget.watchOnTv,
             onWatch: widget.onWatch,
             saved: _c.isSaved(card.id),
@@ -436,7 +559,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         final v = d.primaryVelocity ?? 0;
         if (v.abs() < 250 || (v > 0) == _immersive) return;
         ForkMotion.selection();
-        _setImmersive(v > 0);
+        _immersiveByUser(v > 0);
       },
       child: ValueListenableBuilder<FeedCardState>(
         valueListenable: widget.players.card(card.id),
@@ -444,35 +567,130 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         builder: (context, state, info) {
           final video = state.video;
           final isCurrent = state.current;
+          final glide = _motion(context, const Duration(milliseconds: 280));
+          final backdrop = _Backdrop(slot: slot, dim: _immersive ? _immersiveDim(context) : 0.55);
+          final picture = RepaintBoundary(
+            child: _Picture(slot: slot, video: video, paused: state.paused),
+          );
+          Widget tappable(Widget child) => GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: isCurrent ? () => unawaited(widget.players.togglePause()) : null,
+            onDoubleTap: isCurrent ? _save : null,
+            onLongPress: isCurrent ? widget.onSheet : null,
+            child: child,
+          );
           return Stack(
             fit: StackFit.expand,
             children: [
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: isCurrent ? () => unawaited(widget.players.togglePause()) : null,
-                onDoubleTap: isCurrent ? _save : null,
-                onLongPress: isCurrent ? widget.onSheet : null,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _Backdrop(slot: slot, dim: _immersive ? _immersiveDim(context) : 0.55),
-                    AnimatedAlign(
-                      duration: _motion(context, const Duration(milliseconds: 280)),
+              if (layout.overlays) ...[
+                tappable(
+                  Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      backdrop,
+                      AnimatedAlign(
+                        duration: glide,
+                        curve: Curves.easeOutCubic,
+                        alignment: _immersive || layout == ReelFeedLayout.fullBleed
+                            ? Alignment.center
+                            : const Alignment(0, -0.16),
+                        child: picture,
+                      ),
+                    ],
+                  ),
+                ),
+                info!,
+              ] else ...[
+                backdrop,
+                _Split(
+                  layout: layout,
+                  immersive: _immersive,
+                  duration: glide,
+                  picture: (alignment) => tappable(
+                    AnimatedPadding(
+                      duration: glide,
                       curve: Curves.easeOutCubic,
-                      alignment: _immersive ? Alignment.center : const Alignment(0, -0.16),
-                      child: RepaintBoundary(
-                        child: _Picture(slot: slot, video: video, paused: state.paused),
+                      // Clear of the top bar while it shows.
+                      padding: EdgeInsets.only(top: _immersive ? 0 : _barSpace(context)),
+                      child: AnimatedAlign(
+                        duration: glide,
+                        curve: Curves.easeOutCubic,
+                        alignment: alignment,
+                        child: picture,
                       ),
                     ),
-                  ],
+                  ),
+                  info: info!,
                 ),
-              ),
-              info!,
+              ],
               if (video != null && isCurrent) _Progress(video: video),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+/// The height the top bar takes: the status bar, then one row of buttons.
+double _barSpace(BuildContext context) => MediaQuery.paddingOf(context).top + 56;
+
+/// The picture and the info side by side or one above the other, for the
+/// layouts where the info doesn't sit over the picture (V2-30). In the
+/// immersive view the info's share folds away, so the picture glides out to
+/// fill the page.
+class _Split extends StatelessWidget {
+  const _Split({
+    required this.layout,
+    required this.immersive,
+    required this.duration,
+    required this.picture,
+    required this.info,
+  });
+
+  final ReelFeedLayout layout;
+  final bool immersive;
+  final Duration duration;
+
+  /// The picture's area, with the picture placed at the alignment given.
+  final Widget Function(Alignment alignment) picture;
+  final Widget info;
+
+  @override
+  Widget build(BuildContext context) {
+    if (layout == ReelFeedLayout.twoPane) {
+      return LayoutBuilder(
+        builder: (context, box) => Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: picture(Alignment.center)),
+            ClipRect(
+              child: AnimatedAlign(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.centerLeft,
+                widthFactor: immersive ? 0 : 1,
+                child: SizedBox(width: box.maxWidth * (1 - ReelFeedLayout.pictureShare), child: info),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: picture(immersive ? Alignment.center : Alignment.topCenter)),
+        ClipRect(
+          child: AnimatedAlign(
+            duration: duration,
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            heightFactor: immersive ? 0 : 1,
+            child: info,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -567,6 +785,9 @@ class _Backdrop extends StatelessWidget {
 
 /// The clip, at its own shape, over the card's art in the same frame: the
 /// art is the still until the first frame, and stays for a card with no clip.
+/// The frame starts 16:9 and glides to the clip's own shape once it opens
+/// (V2-30), on the app's slow token and emphasized curve; with reduce motion
+/// on, or on the reduced effects tier, it takes the new shape at once.
 class _Picture extends StatelessWidget {
   const _Picture({required this.slot, required this.video, required this.paused});
 
@@ -579,8 +800,13 @@ class _Picture extends StatelessWidget {
     final v = video;
     final aspect = v?.aspectRatio ?? 16 / 9;
     final item = slot.item;
-    return AspectRatio(
-      aspectRatio: aspect,
+    final slow = Theme.of(context).extension<MonoTokens>()?.slow ?? const Duration(milliseconds: 300);
+    return TweenAnimationBuilder<double>(
+      // No begin: the first build takes the shape as it is, later ones glide.
+      tween: Tween<double>(end: aspect),
+      duration: _motion(context, slow),
+      curve: MonoMotion.emphasized,
+      builder: (context, aspect, child) => AspectRatio(aspectRatio: aspect, child: child),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -712,10 +938,19 @@ class _TopBar extends StatelessWidget {
 /// Title, facts, why, and the controls (V2-29, D7): Details is the primary
 /// control, and the title block opens it too; Watch is tonal here, filled
 /// as Watch on TV while connected. Save fills once the card is saved.
+///
+/// Where it sits follows the [layout] (V2-30): over the picture's foot on a
+/// scrim on a phone, below the picture when stacked, and in its own pane
+/// with Up next in two-pane, where neither has a scrim. Its side insets are
+/// the app's own ([ForkSpacing.edgeInset]); the icon buttons at the end
+/// carry 8 of their own.
 class _Info extends StatelessWidget {
   const _Info({
     required this.controller,
     required this.slot,
+    required this.layout,
+    required this.upNext,
+    required this.onUpNext,
     required this.watchOnTv,
     required this.saved,
     required this.onWatch,
@@ -726,6 +961,11 @@ class _Info extends StatelessWidget {
 
   final ReelController controller;
   final ReelSlot slot;
+  final ReelFeedLayout layout;
+
+  /// The cards after this one, with their pages, for two-pane.
+  final List<(int, ReelSlot)> upNext;
+  final ValueChanged<int> onUpNext;
   final bool watchOnTv;
   final bool saved;
   final VoidCallback onWatch;
@@ -736,123 +976,317 @@ class _Info extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final spacing = ForkSpacing.of(context);
+    final inset = spacing.edgeInset;
     final card = slot.card!;
     final clip = slot.clip;
     final radius = BorderRadius.circular(theme.extension<MonoTokens>()?.radiusSm ?? 8);
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.transparent, Colors.black.withValues(alpha: 0.6), Colors.black.withValues(alpha: 0.85)],
-            stops: const [0, 0.35, 1],
+    final pane = layout == ReelFeedLayout.twoPane;
+    final body = <Widget>[
+      if (clip != null || card.chip != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              if (clip != null)
+                StatChip(
+                  icon: clip.source.origin == ClipOrigin.animeTheme
+                      ? Symbols.music_note_rounded
+                      : Symbols.movie_rounded,
+                  label: clip.label,
+                ),
+              if (card.chip case final chip?) StatChip(label: chip),
+            ],
           ),
         ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 48, 12, 14),
+      Pressable(
+        longPress: false,
+        borderRadius: radius,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            borderRadius: radius,
+            onTap: onDetails,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  card.title.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700, height: 1.15),
+                ),
+                const SizedBox(height: 6),
+                ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
+                if (card.why case final why?) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    why,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      if (clip?.source.origin == ClipOrigin.animeTheme) ...[
+        const SizedBox(height: 4),
+        Text(
+          'Theme via AnimeThemes',
+          style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ],
+      const SizedBox(height: 14),
+      _Controls(
+        pane: pane,
+        watchOnTv: watchOnTv,
+        saved: saved,
+        onWatch: onWatch,
+        onDetails: onDetails,
+        onSave: onSave,
+        onMore: onMore,
+      ),
+    ];
+    switch (layout) {
+      case ReelFeedLayout.phone || ReelFeedLayout.fullBleed:
+        return Align(
+          alignment: Alignment.bottomCenter,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, Colors.black.withValues(alpha: 0.6), Colors.black.withValues(alpha: 0.85)],
+                stops: const [0, 0.35, 1],
+              ),
+            ),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(inset, 48, inset - 8, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: body,
+              ),
+            ),
+          ),
+        );
+      case ReelFeedLayout.stacked:
+        return Padding(
+          padding: EdgeInsets.fromLTRB(inset, 16, inset - 8, 14),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: body),
+        );
+      case ReelFeedLayout.twoPane:
+        return Padding(
+          padding: EdgeInsets.fromLTRB(inset, _barSpace(context), inset - 8, 14),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (clip != null || card.chip != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
+              ...body,
+              if (upNext.isNotEmpty)
+                Flexible(
+                  child: _UpNext(cards: upNext, onTap: onUpNext),
+                ),
+            ],
+          ),
+        );
+    }
+  }
+}
+
+/// Details, Watch, Save and More, on one row. In a two-pane info pane
+/// ([pane]) under 360 dp wide, Save and More drop to a second row so the two
+/// labels keep their room; the phone keeps its one row.
+class _Controls extends StatelessWidget {
+  const _Controls({
+    required this.pane,
+    required this.watchOnTv,
+    required this.saved,
+    required this.onWatch,
+    required this.onDetails,
+    required this.onSave,
+    required this.onMore,
+  });
+
+  final bool pane;
+  final bool watchOnTv;
+  final bool saved;
+  final VoidCallback onWatch;
+  final VoidCallback onDetails;
+  final VoidCallback onSave;
+  final VoidCallback onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final details = FilledButton.icon(
+      onPressed: onDetails,
+      icon: const Icon(Symbols.info_rounded),
+      label: const Text('Details', maxLines: 1),
+    );
+    final watch = watchOnTv
+        ? FilledButton.icon(
+            onPressed: onWatch,
+            icon: const Icon(Symbols.tv_rounded, fill: 1),
+            label: const Text('Watch on TV', maxLines: 1),
+          )
+        : FilledButton.tonalIcon(
+            onPressed: onWatch,
+            icon: const Icon(Symbols.play_arrow_rounded, fill: 1),
+            label: const Text('Watch', maxLines: 1),
+          );
+    final save = IconButton(
+      tooltip: saved ? 'Saved' : 'Save',
+      isSelected: saved,
+      onPressed: onSave,
+      icon: const Icon(Symbols.bookmark_add_rounded),
+      selectedIcon: const Icon(Symbols.bookmark_added_rounded, fill: 1),
+    );
+    final more = IconButton(tooltip: 'More', onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded));
+    Widget oneRow() => Row(
+      children: [
+        Expanded(child: details),
+        const SizedBox(width: 8),
+        Expanded(child: watch),
+        const SizedBox(width: 4),
+        save,
+        more,
+      ],
+    );
+    if (!pane) return oneRow();
+    return LayoutBuilder(
+      builder: (context, box) {
+        if (box.maxWidth >= 360) return oneRow();
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: details),
+                const SizedBox(width: 8),
+                Expanded(child: watch),
+              ],
+            ),
+            const SizedBox(height: 4),
+            // The icons' own padding lines them up with the buttons' edge.
+            Transform.translate(
+              offset: const Offset(-8, 0),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [save, more]),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Up next in the two-pane layout (V2-30): the next few cards of the deck,
+/// each a row that takes the feed to it. The list doesn't scroll (a drag on
+/// it pages the feed); rows that don't fit are clipped.
+class _UpNext extends StatelessWidget {
+  const _UpNext({required this.cards, required this.onTap});
+
+  /// How many cards ahead are shown.
+  static const rows = 3;
+
+  final List<(int, ReelSlot)> cards;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = ForkSpacing.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(height: spacing.titleGap * 2),
+        Text('Up next', style: spacing.titleStyle(context)),
+        SizedBox(height: spacing.titleGap),
+        Flexible(
+          child: ListView(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              for (final (page, slot) in cards)
+                _UpNextRow(key: ValueKey(slot.card!.id), slot: slot, onTap: () => onTap(page)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _UpNextRow extends StatelessWidget {
+  const _UpNextRow({super.key, required this.slot, required this.onTap});
+
+  final ReelSlot slot;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final card = slot.card!;
+    final item = slot.item;
+    final radius = BorderRadius.circular(theme.extension<MonoTokens>()?.radiusSm ?? 8);
+    final blank = ColoredBox(color: theme.colorScheme.surfaceContainerHighest);
+    return Pressable(
+      longPress: false,
+      borderRadius: radius,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: radius,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: radius,
+                  child: SizedBox(
+                    width: 96,
+                    height: 54,
+                    child: item == null
+                        ? blank
+                        : OptimizedMediaImage(
+                            client: context.tryGetMediaClientWithFallback(serverIdOrNull(card.best.serverId)),
+                            imagePath: item.artPath ?? item.thumbPath,
+                            width: 192,
+                            height: 108,
+                            fit: BoxFit.cover,
+                            imageType: ImageType.art,
+                            placeholder: (_, _) => blank,
+                            errorWidget: (_, _, _) => blank,
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (clip != null)
-                        StatChip(
-                          icon: clip.source.origin == ClipOrigin.animeTheme
-                              ? Symbols.music_note_rounded
-                              : Symbols.movie_rounded,
-                          label: clip.label,
-                        ),
-                      if (card.chip case final chip?) StatChip(label: chip),
+                      Text(
+                        card.title.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      ReelMetadataLine(item: item, year: card.best.year, fontSize: 12),
                     ],
                   ),
                 ),
-              Pressable(
-                longPress: false,
-                borderRadius: radius,
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: InkWell(
-                    borderRadius: radius,
-                    onTap: onDetails,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          card.title.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700, height: 1.15),
-                        ),
-                        const SizedBox(height: 6),
-                        ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
-                        if (card.why case final why?) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            why,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              if (clip?.source.origin == ClipOrigin.animeTheme) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Theme via AnimeThemes',
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
               ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: onDetails,
-                      icon: const Icon(Symbols.info_rounded),
-                      label: const Text('Details', maxLines: 1),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: watchOnTv
-                        ? FilledButton.icon(
-                            onPressed: onWatch,
-                            icon: const Icon(Symbols.tv_rounded, fill: 1),
-                            label: const Text('Watch on TV', maxLines: 1),
-                          )
-                        : FilledButton.tonalIcon(
-                            onPressed: onWatch,
-                            icon: const Icon(Symbols.play_arrow_rounded, fill: 1),
-                            label: const Text('Watch', maxLines: 1),
-                          ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    tooltip: saved ? 'Saved' : 'Save',
-                    isSelected: saved,
-                    onPressed: onSave,
-                    icon: const Icon(Symbols.bookmark_add_rounded),
-                    selectedIcon: const Icon(Symbols.bookmark_added_rounded, fill: 1),
-                  ),
-                  IconButton(tooltip: 'More', onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded)),
-                ],
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -937,7 +1371,7 @@ class _ProgressState extends State<_Progress> with SingleTickerProviderStateMixi
         builder: (context, _) => LinearProgressIndicator(
           value: _bar.value,
           minHeight: 2,
-          backgroundColor: Colors.white.withValues(alpha: 0.12),
+          backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12),
           color: Theme.of(context).colorScheme.primary,
         ),
       ),
