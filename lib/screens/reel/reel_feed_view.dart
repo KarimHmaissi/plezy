@@ -7,6 +7,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../media/ids.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
+import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
@@ -281,6 +282,7 @@ class _Backdrop extends StatelessWidget {
             height: 64,
             fit: BoxFit.cover,
             imageType: ImageType.art,
+            onImageProvider: ReelArt.track,
             placeholder: (_, _) => const SizedBox.shrink(),
             errorWidget: (_, _, _) => const SizedBox.shrink(),
           ),
@@ -316,10 +318,11 @@ class _Picture extends StatelessWidget {
             OptimizedMediaImage(
               client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
               imagePath: item.artPath ?? item.thumbPath,
-              width: 960,
-              height: 540,
+              // No explicit size: it sizes from the card's own frame, so the
+              // decode matches what is shown (plan V2-05).
               fit: BoxFit.cover,
               imageType: ImageType.art,
+              onImageProvider: ReelArt.track,
               placeholder: (_, _) => const ColoredBox(color: Colors.black26),
               errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
             ),

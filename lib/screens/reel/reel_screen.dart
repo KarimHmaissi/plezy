@@ -14,6 +14,7 @@ import '../../mixins/tab_visibility_aware.dart';
 import '../../providers/companion_remote_provider.dart';
 import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
+import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_perf.dart';
 import '../../services/reel/reel_store.dart';
@@ -256,8 +257,15 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _shown = false;
     ReelScreen.showing.value = false;
     _perf.detachFrames();
+    _suspend();
+  }
+
+  /// Stops the clips and lets go of the Reel's art (plan V2-05), so its
+  /// cards don't stay in the image cache that Home's artwork shares.
+  void _suspend() {
     unawaited(_controller?.suspend());
     unawaited(_players.releaseAll());
+    ReelArt.evict();
   }
 
   @override
@@ -269,8 +277,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_shown) return;
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      unawaited(_controller?.suspend());
-      unawaited(_players.releaseAll());
+      _suspend();
     } else if (state == AppLifecycleState.resumed) {
       unawaited(_start());
     }

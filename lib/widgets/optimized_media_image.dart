@@ -82,6 +82,11 @@ class OptimizedMediaImage extends StatelessWidget {
   /// the default and remap mixed marks too.
   final bool logoToneRemapMixed;
 
+  /// Called with the provider this widget paints on each build, for callers
+  /// that manage their own art's lifetime in the image cache (the Reel's
+  /// eviction on suspend). Not called for the fallback or error widgets.
+  final ValueChanged<ImageProvider>? onImageProvider;
+
   const OptimizedMediaImage._({
     super.key,
     this.client,
@@ -100,6 +105,7 @@ class OptimizedMediaImage extends StatelessWidget {
     this.logoToneTarget,
     this.logoToneRemapMixed = true,
     this.cacheMissingLocalFile = false,
+    this.onImageProvider,
   });
 
   /// Generic constructor for optimized images.
@@ -121,6 +127,7 @@ class OptimizedMediaImage extends StatelessWidget {
     Color? logoToneTarget,
     bool logoToneRemapMixed,
     bool cacheMissingLocalFile,
+    ValueChanged<ImageProvider>? onImageProvider,
   }) = OptimizedMediaImage._;
 
   /// Named constructor for poster images with default fallback icon.
@@ -258,6 +265,7 @@ class OptimizedMediaImage extends StatelessWidget {
     final provider = logoToneTarget == null
         ? bounded
         : ToneMappedLogoImage(bounded, target: logoToneTarget!, remapMixed: logoToneRemapMixed);
+    onImageProvider?.call(provider);
 
     return _withArtworkDim(
       artworkDim,
@@ -334,6 +342,7 @@ class OptimizedMediaImage extends StatelessWidget {
       logoToneTarget: logoToneTarget,
       logoToneRemapMixed: logoToneRemapMixed,
     );
+    onImageProvider?.call(resizedProvider);
 
     // Reduced tier: swap in directly, no fade machinery at all.
     if (DevicePerformance.isReduced) {

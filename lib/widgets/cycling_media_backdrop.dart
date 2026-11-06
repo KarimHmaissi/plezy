@@ -34,6 +34,8 @@ class CyclingMediaBackdrop extends StatefulWidget {
     this.alignment = Alignment.center,
     this.rotationInterval = const Duration(seconds: 10),
     this.fadeDuration = const Duration(milliseconds: 280),
+    this.imageType = ImageType.art,
+    this.onImageProvider,
   });
 
   final Object? mediaKey;
@@ -58,6 +60,16 @@ class CyclingMediaBackdrop extends StatefulWidget {
   final Color fallbackColor;
   final Duration rotationInterval;
   final Duration fadeDuration;
+
+  /// The size class to fetch and decode at. Backdrops are [ImageType.art];
+  /// a backdrop shown only briefly (the Reel's clip cards, under a clip that
+  /// starts within a few hundred ms) passes [ImageType.thumb] for the much
+  /// smaller decode cap.
+  final ImageType imageType;
+
+  /// Called with each provider this backdrop builds, for callers that manage
+  /// their art's lifetime in the image cache.
+  final ValueChanged<ImageProvider>? onImageProvider;
 
   @override
   State<CyclingMediaBackdrop> createState() => _CyclingMediaBackdropState();
@@ -218,17 +230,24 @@ class _CyclingMediaBackdropState extends State<CyclingMediaBackdrop> with Widget
   }
 
   ImageProvider? _providerFor(BuildContext context, String path, File? localFile) {
+    final provider = _buildProvider(context, path, localFile);
+    if (provider != null) widget.onImageProvider?.call(provider);
+    return provider;
+  }
+
+  ImageProvider? _buildProvider(BuildContext context, String path, File? localFile) {
     final providerOverride = widget.imageProviderResolver;
     if (providerOverride != null) return providerOverride(path);
 
     final size = MediaQuery.sizeOf(context);
     final width = widget.width.isFinite && widget.width > 0 ? widget.width : size.width;
     final height = widget.height.isFinite && widget.height > 0 ? widget.height : size.height;
-    final pixelRatio = MediaImageHelper.artworkPixelRatio(context, imageType: ImageType.art);
+    final imageType = widget.imageType;
+    final pixelRatio = MediaImageHelper.artworkPixelRatio(context, imageType: imageType);
     final (memWidth, memHeight) = MediaImageHelper.getMemCacheDimensions(
       displayWidth: (width * pixelRatio).round(),
       displayHeight: (height * pixelRatio).round(),
-      imageType: ImageType.art,
+      imageType: imageType,
     );
 
     if (localFile != null) {
@@ -242,7 +261,7 @@ class _CyclingMediaBackdropState extends State<CyclingMediaBackdrop> with Widget
       maxWidth: width,
       maxHeight: height,
       pixelRatio: pixelRatio,
-      imageType: ImageType.art,
+      imageType: imageType,
     );
     if (imageUrl.isEmpty) return null;
     return MediaImageHelper.serverArtworkProvider(imageUrl: imageUrl, memWidth: memWidth, memHeight: memHeight);

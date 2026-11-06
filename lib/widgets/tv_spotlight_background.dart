@@ -50,6 +50,15 @@ class TvSpotlightBackground extends StatelessWidget {
   /// Flutter shows through; the scrims lighten and the info block stays.
   final bool showArtwork;
 
+  /// Fork (The Reel): decode the artwork at the thumbnail cap instead of the
+  /// full-screen backdrop's. For a card whose clip covers the artwork within
+  /// a few hundred ms, where a 4K-budget backdrop would churn the image cache
+  /// that Home's artwork shares.
+  final bool lightArt;
+
+  /// Fork (The Reel): called with each artwork provider the backdrop builds.
+  final ValueChanged<ImageProvider>? onArtProvider;
+
   const TvSpotlightBackground({
     super.key,
     required this.item,
@@ -65,6 +74,8 @@ class TvSpotlightBackground extends StatelessWidget {
     this.condensed = false,
     this.metadataTrailing,
     this.showArtwork = true,
+    this.lightArt = false,
+    this.onArtProvider,
   });
 
   double _scale(BuildContext context) => TvLayoutConstants.scaleOf(context);
@@ -99,6 +110,8 @@ class TvSpotlightBackground extends StatelessWidget {
           width: size.width,
           height: size.height,
           fallbackColor: media == null ? bgColor : Theme.of(context).colorScheme.surfaceContainerHighest,
+          imageType: lightArt ? ImageType.thumb : ImageType.art,
+          onImageProvider: onArtProvider,
         );
         return Stack(
           fit: StackFit.expand,

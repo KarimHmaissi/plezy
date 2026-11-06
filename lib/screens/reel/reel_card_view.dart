@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
 import '../../services/reel/clip_player.dart';
+import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../utils/content_utils.dart';
 import '../../utils/formatters.dart';
@@ -85,6 +86,11 @@ class ReelCardView extends StatelessWidget {
           item: slot.item,
           client: client,
           showArtwork: !showingClip,
+          // A clip card's art shows for a few hundred ms before the clip
+          // covers it, so it decodes at the thumbnail cap (plan V2-05). AI
+          // cards and cards still resolving keep the full backdrop.
+          lightArt: slot.clip != null,
+          onArtProvider: ReelArt.track,
           contentBottom: extrasHeight + 44 * scale,
           contentTop: 120 * scale,
         ),

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/models/companion_remote/remote_command.dart';
 import 'package:plezy/providers/companion_remote_provider.dart';
 import 'package:plezy/screens/reel/reel_remote_view.dart';
+import 'package:plezy/widgets/optimized_media_image.dart';
 import 'package:provider/provider.dart';
 
 import '../test_helpers/prefs.dart';
@@ -90,5 +91,17 @@ void main() {
     await tester.pump();
     expect(remote.sent.single.$1, RemoteCommandType.reelAction);
     expect(remote.sent.single.$2, {'action': 'save'});
+  });
+
+  testWidgets('up-next tiles decode their art at the 96 px they are shown at', (tester) async {
+    await pump(tester);
+    final arts = tester.widgetList<OptimizedMediaImage>(find.byType(OptimizedMediaImage));
+    // The card on screen, at the phone's width, and the up-next tiles.
+    final tiles = arts.where((a) => a.width != 720).toList();
+    expect(tiles, isNotEmpty);
+    for (final tile in tiles) {
+      expect((tile.width, tile.height), (96, 54));
+      expect(tester.getSize(find.byWidget(tile)).width, 96);
+    }
   });
 }
