@@ -196,12 +196,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// TV: quiet mode, the hint rule and the pause feedback (V2-28).
   final ReelLeanBack _leanBack = ReelLeanBack();
 
-  /// Watch handed over to the player: coming back is the same session.
+  /// Watch handed over to the player: coming back is the same session
+  /// (unless the app went away meanwhile: [didChangeAppLifecycleState]).
   bool _toWatch = false;
 
   /// A page the Reel opened itself (Watch, Details, its settings, Arrange
   /// decks) is covering it: coming back is the same visit, so the TV's sound
-  /// stays as the viewer left it instead of starting muted again.
+  /// stays as the viewer left it instead of starting muted again (unless
+  /// the app went away meanwhile).
   bool _ownPage = false;
 
   /// How the next visit's sound starts, settled in [_visit] and taken by
@@ -751,7 +753,20 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     } else {
       _awaySince ??= ReelScreen.clock();
     }
-    if (!_shown) return;
+    if (!_shown) {
+      // A page the Reel opened covers it (Watch, Details), and the app goes
+      // away (Home, standby) or comes back after a long time: Back to the
+      // Reel is then a new visit, which the TV starts muted, not the one the
+      // viewer left with its sound on.
+      if (state == AppLifecycleState.paused ||
+          state == AppLifecycleState.hidden ||
+          state == AppLifecycleState.detached ||
+          (away != null && away >= ReelScreen.longAway)) {
+        _toWatch = false;
+        _ownPage = false;
+      }
+      return;
+    }
     if (away != null && away >= ReelScreen.longAway) {
       _restart('back after ${away.inMinutes} min');
       return;
