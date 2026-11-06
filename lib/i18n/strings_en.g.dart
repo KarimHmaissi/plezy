@@ -8371,6 +8371,12 @@ class Translations$reel$card$en {
 
 	/// en: 'Mute'
 	String get mute => 'Mute';
+
+	/// en: 'Hide controls'
+	String get hideControls => 'Hide controls';
+
+	/// en: 'Show controls'
+	String get showControls => 'Show controls';
 }
 
 // Path: reel.sheet
@@ -11485,6 +11491,8 @@ extension on Translations {
 			'reel.card.onTv' => 'On TV',
 			'reel.card.soundOn' => 'Sound on',
 			'reel.card.mute' => 'Mute',
+			'reel.card.hideControls' => 'Hide controls',
+			'reel.card.showControls' => 'Show controls',
 			'reel.sheet.saveForTv' => 'Save for the TV',
 			'reel.sheet.details' => 'Details',
 			'reel.sheet.notForMe' => 'Not for me',
@@ -11978,10 +11986,10 @@ extension on Translations {
 			'music.noAudioUrl' => ({required Object track}) => 'No audio URL is available for ${track}',
 			'music.discography.singlesAndEps' => 'Singles & EPs',
 			'music.discography.live' => 'Live',
-			'music.discography.compilations' => 'Compilations',
-			'watchTogether.title' => 'Watch Together',
 			_ => null,
 		} ?? switch (path) {
+			'music.discography.compilations' => 'Compilations',
+			'watchTogether.title' => 'Watch Together',
 			'watchTogether.description' => 'Watch content in sync with friends and family',
 			'watchTogether.createRoom' => 'Create Room',
 			'watchTogether.creatingRoom' => 'Creating room...',
@@ -12492,10 +12500,10 @@ extension on Translations {
 			'metadataEdit.tvdbAiring' => 'TheTVDB (Aired)',
 			'metadataEdit.tvdbAbsolute' => 'TheTVDB (Absolute)',
 			'metadataEdit.metadataLanguage' => 'Metadata Language',
-			'metadataEdit.useOriginalTitle' => 'Use Original Title',
-			'metadataEdit.preferredAudioLanguage' => 'Preferred Audio Language',
 			_ => null,
 		} ?? switch (path) {
+			'metadataEdit.useOriginalTitle' => 'Use Original Title',
+			'metadataEdit.preferredAudioLanguage' => 'Preferred Audio Language',
 			'metadataEdit.preferredSubtitleLanguage' => 'Preferred Subtitle Language',
 			'metadataEdit.subtitleMode' => 'Auto-Select Subtitle Mode',
 			'metadataEdit.manuallySelected' => 'Manually selected',

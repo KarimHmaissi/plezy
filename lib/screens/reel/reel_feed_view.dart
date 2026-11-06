@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -9,6 +10,8 @@ import '../../media/ids.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_library.dart';
+import '../../theme/fork_motion.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/optimized_media_image.dart';
@@ -20,6 +23,11 @@ import 'reel_card_view.dart';
 /// the cards around it are already open and parked on their first frame
 /// ([ReelFeedPlayers]). Swipe right to hide everything and just watch; swipe
 /// left to bring it back. The deck is picked from the button at the top.
+///
+/// With a screen reader (`MediaQuery.accessibleNavigationOf`, V2-54) each
+/// card is one node with Save, More and Hide/Show controls as custom
+/// actions, the Reel starts muted so the clip doesn't talk over it, and the
+/// controls stay shown: the sideways swipe no longer hides them.
 class ReelFeedView extends StatefulWidget {
   const ReelFeedView({
     super.key,
@@ -54,6 +62,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   bool _immersive = false;
   bool _burst = false;
 
+  /// A screen reader is on (V2-54).
+  bool _a11y = false;
+
+  /// The one mute a screen reader brings; unmuting after it sticks.
+  bool _a11yMuted = false;
+
   ReelController get _c => widget.controller;
 
   @override
@@ -62,6 +76,24 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     _deck = _c.deck.id;
     _c.addListener(_onController);
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final a11y = MediaQuery.accessibleNavigationOf(context);
+    if (a11y == _a11y) return;
+    _a11y = a11y;
+    if (!a11y) return;
+    // Controls stay shown with a screen reader; hiding them is the custom
+    // action's choice, never a stray swipe.
+    _immersive = false;
+    if (_a11yMuted) return;
+    _a11yMuted = true;
+    // After this frame: muting tells the players' listeners, which rebuild.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !widget.players.muted) unawaited(widget.players.setMuted(true));
+    });
   }
 
   @override
@@ -119,6 +151,11 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       if (mounted) setState(() => _burst = false);
     });
     unawaited(_c.save());
+  }
+
+  void _toggleControls() {
+    ForkMotion.selection();
+    setState(() => _immersive = !_immersive);
   }
 
   @override
@@ -200,17 +237,40 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     }
     final card = slot.card!;
     final isCurrent = card.id == _c.current.card?.id;
-    // Sideways anywhere on the page hides or shows the controls. Tap,
-    // double-tap and long-press live on the picture only, so the buttons
-    // answer at once instead of waiting out the double-tap window.
+    // One node per card for a screen reader: its texts read together, with
+    // Save, More and Hide/Show controls as custom actions. The feed's own
+    // scroll actions stay on the PageView above it; the sideways swipe is
+    // kept out of the tree, so the page offers no scroll actions of its own.
+    return Semantics(
+      container: true,
+      customSemanticsActions: isCurrent
+          ? {
+              CustomSemanticsAction(label: t.reel.card.save): _save,
+              CustomSemanticsAction(label: t.reel.card.more): widget.onSheet,
+              CustomSemanticsAction(label: _immersive ? t.reel.card.showControls : t.reel.card.hideControls):
+                  _toggleControls,
+            }
+          : null,
+      child: _gestures(slot, card, isCurrent),
+    );
+  }
+
+  Widget _gestures(ReelSlot slot, ReelCardData card, bool isCurrent) {
+    // Sideways anywhere on the page hides or shows the controls (not with a
+    // screen reader on). Tap, double-tap and long-press live on the picture
+    // only, so the buttons answer at once instead of waiting out the
+    // double-tap window.
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onHorizontalDragEnd: (d) {
-        final v = d.primaryVelocity ?? 0;
-        if (v.abs() < 250) return;
-        HapticFeedback.selectionClick();
-        setState(() => _immersive = v > 0);
-      },
+      excludeFromSemantics: true,
+      onHorizontalDragEnd: _a11y
+          ? null
+          : (d) {
+              final v = d.primaryVelocity ?? 0;
+              if (v.abs() < 250) return;
+              HapticFeedback.selectionClick();
+              setState(() => _immersive = v > 0);
+            },
       child: ListenableBuilder(
         listenable: widget.players,
         builder: (context, _) {

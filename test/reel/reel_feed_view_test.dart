@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/media/media_backend.dart';
@@ -196,7 +197,7 @@ void main() {
     await db.close();
   });
 
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(WidgetTester tester, {bool screenReader = false}) async {
     tester.view.physicalSize = const Size(420, 860);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -204,6 +205,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData.dark(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(accessibleNavigation: screenReader),
+          child: child!,
+        ),
         home: Scaffold(
           body: ReelFeedView(
             controller: c,
@@ -384,5 +389,91 @@ void main() {
     expect(opened.single.id, '1');
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
+  });
+
+  group('with a screen reader (V2-54)', () {
+    /// The card's own node: its texts merge into it.
+    SemanticsNode cardNode(WidgetTester tester) => tester.getSemantics(find.text('Title 1'));
+
+    Map<String, int> customActions(SemanticsNode node) => {
+      for (final id in node.getSemanticsData().customSemanticsActionIds ?? const <int>[])
+        CustomSemanticsAction.getAction(id)!.label!: id,
+    };
+
+    void perform(SemanticsNode node, int id) => node.owner!.performAction(node.id, SemanticsAction.customAction, id);
+
+    testWidgets('each card is one node with Save, More and Hide controls; the feed keeps its scroll', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester);
+      final node = cardNode(tester);
+      expect(customActions(node).keys, containsAll(['Save', 'More', 'Hide controls']));
+      final data = node.getSemanticsData();
+      expect(data.hasAction(SemanticsAction.scrollLeft), isFalse, reason: 'the sideways swipe stays out of the tree');
+      expect(data.hasAction(SemanticsAction.scrollRight), isFalse);
+      // The feed's scroll actions live on an ancestor: the PageView's own
+      // scrollable node, not the card.
+      final ancestors = <SemanticsNode>[];
+      for (var n = node.parent; n != null; n = n.parent) {
+        ancestors.add(n);
+      }
+      expect(
+        ancestors.any((n) => n.getSemanticsData().hasAction(SemanticsAction.scrollUp)),
+        isTrue,
+        reason: 'the next card is still a scroll away',
+      );
+
+      perform(node, customActions(node)['More']!);
+      expect(sheets, 1);
+
+      perform(node, customActions(node)['Hide controls']!);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Deck a'), isTrue);
+      final shown = cardNode(tester);
+      expect(customActions(shown).keys, contains('Show controls'));
+      perform(shown, customActions(shown)['Show controls']!);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Deck a'), isFalse);
+      semantics.dispose();
+    });
+
+    testWidgets('Save from the card node saves the card on screen', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester);
+      final node = cardNode(tester);
+      await tester.runAsync(() async {
+        perform(node, customActions(node)['Save']!);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
+      final picks = await tester.runAsync(c.store.picks);
+      expect(picks?.map((p) => p.titleId), contains('t1'));
+      semantics.dispose();
+    });
+
+    testWidgets('the Reel starts muted and the swipe no longer hides the controls', (tester) async {
+      await pump(tester, screenReader: true);
+      await settle(tester);
+      expect(players.muted, isTrue);
+
+      await tester.fling(find.text('Title 1'), const Offset(300, 0), 1500);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Details'), isFalse);
+      expect(hidden(tester, 'Deck a'), isFalse);
+
+      // Unmuting afterwards sticks.
+      await tester.tap(find.byTooltip('Sound on'));
+      await settle(tester);
+      expect(players.muted, isFalse);
+      await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(players.muted, isFalse);
+    });
+
+    testWidgets('without one, the Reel starts with sound', (tester) async {
+      await pump(tester);
+      await settle(tester);
+      expect(players.muted, isFalse);
+    });
   });
 }

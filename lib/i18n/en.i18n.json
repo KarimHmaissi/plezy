@@ -1698,7 +1698,9 @@
       "more": "More",
       "onTv": "On TV",
       "soundOn": "Sound on",
-      "mute": "Mute"
+      "mute": "Mute",
+      "hideControls": "Hide controls",
+      "showControls": "Show controls"
     },
     "sheet": {
       "saveForTv": "Save for the TV",
