@@ -43,11 +43,20 @@ class _FakeBridge implements YouTubeBridge {
   @override
   Widget view() => const SizedBox();
 
+  int releases = 0;
+
   @override
   Future<void> release() async {
     released = true;
-    await _messages.close();
+    releases++;
+    if (!_messages.isClosed) await _messages.close();
   }
+}
+
+/// A page whose script calls never come back.
+class _StuckBridge extends _FakeBridge {
+  @override
+  Future<void> run(String script) => Completer<void>().future;
 }
 
 /// A player page for the feed tests: opens at once, plays when asked.
@@ -324,6 +333,24 @@ void main() {
       expect(bridge.released, isTrue);
       await v.play();
       expect(bridge.scripts.last, 'reelStop()');
+    });
+
+    // Real time: the subscription's cancel completes outside a fake zone.
+    test('a page that never answers the stop is still let go, in bounded time', () async {
+      final stuck = _StuckBridge();
+      final s = YouTubeFeedVideo('AbCdEfGhIj1', origin: () async => 'https://com.example.reelapp', bridge: stuck);
+      final sw = Stopwatch()..start();
+      await s.dispose().timeout(YouTubeFeedVideo.stopTimeout * 3);
+      expect(sw.elapsed, greaterThanOrEqualTo(YouTubeFeedVideo.stopTimeout));
+      expect(stuck.released, isTrue);
+    });
+
+    test('a second dispose while the first runs does nothing', () async {
+      final first = v.dispose();
+      final second = v.dispose();
+      await Future.wait([first, second]);
+      expect(bridge.scripts.where((s) => s == 'reelStop()'), hasLength(1));
+      expect(bridge.releases, 1);
     });
   });
 

@@ -305,16 +305,29 @@ class YouTubeFeedVideo extends ChangeNotifier implements EmbedFeedVideo {
   @override
   Future<void> setLooping(bool looping) => _run('reelLoop($looping)');
 
+  /// How long each step of [dispose] may take before the next goes ahead
+  /// anyway, so letting a page go never hangs the feed.
+  static const Duration stopTimeout = Duration(seconds: 2);
+
   @override
   Future<void> dispose() async {
     if (_disposed) return;
-    // Silenced and destroyed in the page first, then the page itself goes.
-    await bridge.run('reelStop()');
+    // Marked first, so a second call while this one runs does nothing.
     _disposed = true;
+    // Silenced and destroyed in the page first, then the page itself goes.
+    await _bounded(bridge.run('reelStop()'), 'stop');
     await _sub.cancel();
-    await bridge.release();
+    await _bounded(bridge.release(), 'release');
     appLogger.i('[ReelYT] released');
     super.dispose();
+  }
+
+  static Future<void> _bounded(Future<void> step, String name) async {
+    try {
+      await step.timeout(stopTimeout);
+    } catch (e) {
+      appLogger.d('[ReelYT] $name ${e is TimeoutException ? 'timed out' : 'failed'}');
+    }
   }
 
   @override

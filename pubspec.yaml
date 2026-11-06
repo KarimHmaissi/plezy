@@ -128,6 +128,8 @@ dev_dependencies:
   shared_preferences_platform_interface: ^2.4.0
   path_provider_platform_interface: ^2.1.0
   connectivity_plus_platform_interface: ^2.1.0
+  # A fake WebView platform for the Reel's YouTube page bridge (V2-63).
+  webview_flutter_platform_interface: ^2.15.1
   # Exercise vendored desktop preference stores against real file I/O,
   # including #1732 repair and atomic writes.
   shared_preferences_linux: ^2.4.1

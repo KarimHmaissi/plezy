@@ -55,6 +55,7 @@ class WebViewYouTubeBridge implements YouTubeBridge {
 
   @override
   Future<void> load(String html, {required String baseUrl}) async {
+    if (_released) return;
     final loaded = Completer<void>();
     await _c.setJavaScriptMode(JavaScriptMode.unrestricted);
     // See-through until the player draws, so the card's art shows behind
@@ -85,6 +86,9 @@ class WebViewYouTubeBridge implements YouTubeBridge {
     );
     final platform = _c.platform;
     if (platform is AndroidWebViewController) await platform.setMediaPlaybackRequiresUserGesture(false);
+    // Let go while it was being set up: the player page is never loaded
+    // over the blank one [release] put in its place.
+    if (_released) return;
     await _c.loadHtmlString(html, baseUrl: baseUrl);
     return loaded.future;
   }
