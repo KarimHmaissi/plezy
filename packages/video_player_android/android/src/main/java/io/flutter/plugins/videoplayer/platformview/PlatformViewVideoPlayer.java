@@ -13,6 +13,7 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
 import io.flutter.plugins.videoplayer.ExoPlayerEventListener;
+import io.flutter.plugins.videoplayer.PlezyLoadControl;
 import io.flutter.plugins.videoplayer.VideoAsset;
 import io.flutter.plugins.videoplayer.VideoPlayer;
 import io.flutter.plugins.videoplayer.VideoPlayerCallbacks;
@@ -58,21 +59,10 @@ public class PlatformViewVideoPlayer extends VideoPlayer {
         options,
         () -> {
           ExoPlayer.Builder builder = new ExoPlayer.Builder(context);
-          if (options.backBufferDurationMs != null) {
-            if (options.backBufferDurationMs < 0) {
-              throw new IllegalArgumentException("backBufferDurationMs must be at least 0");
-            }
-            if (options.backBufferDurationMs > 0) {
-              // Clamp the value to ensure it fits within the int range expected by
-              // DefaultLoadControl.
-              int backBufferInt =
-                  (int) Math.min(options.backBufferDurationMs.longValue(), Integer.MAX_VALUE);
-              DefaultLoadControl loadControl =
-                  new DefaultLoadControl.Builder()
-                      .setBackBuffer(backBufferInt, /* retainBackBufferFromKeyframe= */ true)
-                      .build();
-              builder.setLoadControl(loadControl);
-            }
+          // PLEZY DELTA: the back buffer and the buffer durations share one load control.
+          DefaultLoadControl loadControl = PlezyLoadControl.build(options);
+          if (loadControl != null) {
+            builder.setLoadControl(loadControl);
           }
           androidx.media3.exoplayer.trackselection.DefaultTrackSelector trackSelector =
               new androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context);

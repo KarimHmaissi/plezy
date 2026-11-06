@@ -53,7 +53,11 @@ android {
     }
 
     dependencies {
-        val exoplayerVersion = "1.9.2"
+        // PLEZY DELTA: upstream builds against 1.9.2. The app's media3 1.11.0
+        // (android/app/build.gradle.kts media3Version) wins resolution and
+        // media3-common's runtime constraints align every media3 module, so the plugin already
+        // ran on 1.11.0; it now also compiles against it. Keep the two equal.
+        val exoplayerVersion = "1.11.0"
         implementation("androidx.media3:media3-exoplayer:${exoplayerVersion}")
         implementation("androidx.media3:media3-exoplayer-hls:${exoplayerVersion}")
         implementation("androidx.media3:media3-exoplayer-dash:${exoplayerVersion}")

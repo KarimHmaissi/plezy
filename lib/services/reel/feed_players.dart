@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_player_android/video_player_android.dart';
 
 import '../../utils/app_logger.dart';
 
@@ -52,9 +53,12 @@ abstract class FeedVideo implements Listenable {
 /// focus: `video_player_android` 2.12.2 builds it with media3's
 /// `handleAudioFocus` on, so music pauses while a card plays and a call
 /// pauses the card. On, it plays over other audio and never pauses for it.
+///
+/// Each player buffers to [FeedBuffer.durations] (V2-08 step 2), not media3's
+/// 50 s default, through the vendored plugin's per-player option.
 class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
   PluginFeedVideo(Uri uri, {bool mixWithOthers = false})
-    : _c = VideoPlayerController.networkUrl(uri, videoPlayerOptions: VideoPlayerOptions(mixWithOthers: mixWithOthers)) {
+    : _c = VideoPlayerController.networkUrl(uri, videoPlayerOptions: feedPlayerOptions(mixWithOthers: mixWithOthers)) {
     _c.addListener(notifyListeners);
   }
 
@@ -140,10 +144,34 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
 /// one after, -1 the one behind).
 typedef FeedClip = ({String id, Uri uri, int offset});
 
-/// How far the window opens around the card on screen (V2-08 step 1). Every
-/// parked player keeps loading (media3's default load control ignores
-/// play/pause), so the cards around it open only once the card on screen
-/// has enough of its own clip loaded not to stall for them.
+/// The options every feed player is built with: [FeedBuffer.durations] on
+/// Android (other platforms ignore them), and [mixWithOthers] as asked.
+@visibleForTesting
+VideoPlayerOptions feedPlayerOptions({required bool mixWithOthers}) =>
+    AndroidBufferedVideoPlayerOptions(bufferDurationsMs: FeedBuffer.durations, mixWithOthers: mixWithOthers);
+
+/// How much each feed player buffers (V2-08 step 2): the TV clip core's
+/// numbers (LoadControlPolicy.kt CLIP_MIN_BUFFER_MS, CLIP_MAX_BUFFER_MS,
+/// CLIP_BUFFER_FOR_PLAYBACK_MS, CLIP_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS).
+/// media3 loads to 12 s, then waits until under 2.5 s before loading more;
+/// playback starts at 0.5 s buffered, and after a stall at 1.5 s. Its
+/// default is 50 s each way, so a parked card would otherwise keep pulling
+/// toward 50 s while the one on screen competes for the link. Only the feed
+/// uses these: the main player is the app's own ExoPlayer and mpv cores.
+abstract final class FeedBuffer {
+  static const durations = BufferDurationsMs(
+    minBufferMs: 2500,
+    maxBufferMs: 12000,
+    bufferForPlaybackMs: 500,
+    bufferForPlaybackAfterRebufferMs: 1500,
+  );
+}
+
+/// How far the window opens around the card on screen (V2-08 step 1). A
+/// parked player keeps loading whether it plays or not (media3's load
+/// control ignores play/pause), up to [FeedBuffer.durations]' 12 s, so the
+/// cards around it open only once the card on screen has enough of its own
+/// clip loaded not to stall for them.
 abstract final class FeedStaging {
   /// The next card opens once the one on screen has this much loaded ahead
   /// of where it is playing...

@@ -68,6 +68,8 @@ void main() {
   setUpMockPlayerWithStream({required int playerId, int? textureId}) {
     final pluginApi = MockAndroidVideoPlayerApi();
     final instanceApi = MockVideoPlayerInstanceApi();
+    // PLEZY DELTA: the app's close_sinks lint; the caller owns the controller.
+    // ignore: close_sinks
     final streamController = StreamController<PlatformVideoEvent>();
     final player = AndroidVideoPlayer(
       pluginApi: pluginApi,
@@ -465,6 +467,119 @@ void main() {
       final VerificationResult verification = verify(api.createForPlatformView(captureAny));
       final creationOptions = verification.captured[0] as CreationOptions;
       expect(creationOptions.backBufferDurationMs, 20000);
+    });
+
+    // PLEZY DELTA: per-player buffer durations.
+    test('createWithOptions passes buffer durations for texture view', () async {
+      final (AndroidVideoPlayer player, MockAndroidVideoPlayerApi api, _) = setUpMockPlayer(
+        playerId: 1,
+        textureId: 100,
+      );
+      when(
+        api.createForTextureView(any),
+      ).thenAnswer((_) async => TexturePlayerIds(playerId: 2, textureId: 100));
+
+      await player.createWithOptions(
+        VideoCreationOptions(
+          dataSource: DataSource(sourceType: DataSourceType.network, uri: 'https://example.com'),
+          viewType: VideoViewType.textureView,
+          videoPlayerOptions: AndroidBufferedVideoPlayerOptions(
+            bufferDurationsMs: const BufferDurationsMs(
+              minBufferMs: 2500,
+              maxBufferMs: 12000,
+              bufferForPlaybackMs: 500,
+              bufferForPlaybackAfterRebufferMs: 1500,
+            ),
+            backBufferDurationMs: 1000,
+          ),
+        ),
+      );
+
+      final VerificationResult verification = verify(api.createForTextureView(captureAny));
+      final creationOptions = verification.captured[0] as CreationOptions;
+      expect(creationOptions.minBufferMs, 2500);
+      expect(creationOptions.maxBufferMs, 12000);
+      expect(creationOptions.bufferForPlaybackMs, 500);
+      expect(creationOptions.bufferForPlaybackAfterRebufferMs, 1500);
+      expect(creationOptions.backBufferDurationMs, 1000);
+    });
+
+    // PLEZY DELTA
+    test('createWithOptions leaves buffer durations unset for plain options', () async {
+      final (AndroidVideoPlayer player, MockAndroidVideoPlayerApi api, _) = setUpMockPlayer(
+        playerId: 1,
+        textureId: 100,
+      );
+      when(
+        api.createForTextureView(any),
+      ).thenAnswer((_) async => TexturePlayerIds(playerId: 2, textureId: 100));
+
+      await player.createWithOptions(
+        VideoCreationOptions(
+          dataSource: DataSource(sourceType: DataSourceType.network, uri: 'https://example.com'),
+          viewType: VideoViewType.textureView,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        ),
+      );
+
+      final VerificationResult verification = verify(api.createForTextureView(captureAny));
+      final creationOptions = verification.captured[0] as CreationOptions;
+      expect(creationOptions.minBufferMs, isNull);
+      expect(creationOptions.maxBufferMs, isNull);
+      expect(creationOptions.bufferForPlaybackMs, isNull);
+      expect(creationOptions.bufferForPlaybackAfterRebufferMs, isNull);
+    });
+
+    // PLEZY DELTA
+    test('createWithOptions passes buffer durations for platform view', () async {
+      final (AndroidVideoPlayer player, MockAndroidVideoPlayerApi api, _) = setUpMockPlayer(
+        playerId: 1,
+      );
+      when(api.createForPlatformView(any)).thenAnswer((_) async => 2);
+
+      await player.createWithOptions(
+        VideoCreationOptions(
+          dataSource: DataSource(sourceType: DataSourceType.network, uri: 'https://example.com'),
+          viewType: VideoViewType.platformView,
+          videoPlayerOptions: AndroidBufferedVideoPlayerOptions(
+            bufferDurationsMs: const BufferDurationsMs(
+              minBufferMs: 2500,
+              maxBufferMs: 12000,
+              bufferForPlaybackMs: 500,
+              bufferForPlaybackAfterRebufferMs: 1500,
+            ),
+          ),
+        ),
+      );
+
+      final VerificationResult verification = verify(api.createForPlatformView(captureAny));
+      final creationOptions = verification.captured[0] as CreationOptions;
+      expect(creationOptions.minBufferMs, 2500);
+      expect(creationOptions.maxBufferMs, 12000);
+      expect(creationOptions.bufferForPlaybackMs, 500);
+      expect(creationOptions.bufferForPlaybackAfterRebufferMs, 1500);
+    });
+
+    // PLEZY DELTA
+    test('BufferDurationsMs asserts media3 order', () {
+      expect(
+        () => BufferDurationsMs(
+          minBufferMs: 1000,
+          maxBufferMs: 500,
+          bufferForPlaybackMs: 500,
+          bufferForPlaybackAfterRebufferMs: 500,
+        ),
+        throwsAssertionError,
+      );
+      expect(
+        () => BufferDurationsMs(
+          minBufferMs: 1000,
+          maxBufferMs: 2000,
+          bufferForPlaybackMs: 1500,
+          bufferForPlaybackAfterRebufferMs: 500,
+        ),
+        throwsAssertionError,
+      );
     });
 
     test('setLooping', () async {

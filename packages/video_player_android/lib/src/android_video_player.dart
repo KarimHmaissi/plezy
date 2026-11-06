@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
+import 'buffer_durations.dart'; // PLEZY DELTA
 import 'messages.g.dart' hide videoEvents;
 import 'messages.g.dart' as pigeon show videoEvents;
 import 'platform_view_player.dart';
@@ -105,6 +106,16 @@ class AndroidVideoPlayer extends VideoPlayerPlatform {
       formatHint: formatHint,
       backBufferDurationMs: options.videoPlayerOptions?.backBufferDurationMs,
     );
+    // PLEZY DELTA: one player's own buffer durations (media3 defaults otherwise).
+    final VideoPlayerOptions? playerOptions = options.videoPlayerOptions;
+    if (playerOptions is AndroidBufferedVideoPlayerOptions) {
+      final BufferDurationsMs durations = playerOptions.bufferDurationsMs;
+      pigeonCreationOptions
+        ..minBufferMs = durations.minBufferMs
+        ..maxBufferMs = durations.maxBufferMs
+        ..bufferForPlaybackMs = durations.bufferForPlaybackMs
+        ..bufferForPlaybackAfterRebufferMs = durations.bufferForPlaybackAfterRebufferMs;
+    }
 
     final int playerId;
     final VideoPlayerViewState state;

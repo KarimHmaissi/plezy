@@ -227,4 +227,57 @@ public final class TextureVideoPlayerTest {
       player.dispose();
     }
   }
+
+  // PLEZY DELTA: buffer durations alone still give the player its own load control.
+  @Test
+  public void create_withBufferDurations_setsLoadControl() {
+    android.content.Context mockContext = mock(android.content.Context.class);
+    VideoPlayerOptions options = new VideoPlayerOptions();
+    options.minBufferMs = 2500;
+    options.maxBufferMs = 12000;
+    options.bufferForPlaybackMs = 500;
+    options.bufferForPlaybackAfterRebufferMs = 1500;
+
+    try (MockedConstruction<ExoPlayer.Builder> mockedBuilder =
+        mockConstruction(
+            ExoPlayer.Builder.class,
+            (mock, context) -> {
+              when(mock.setLoadControl(any())).thenReturn(mock);
+              when(mock.setTrackSelector(any())).thenReturn(mock);
+              when(mock.setMediaSourceFactory(any())).thenReturn(mock);
+              when(mock.build()).thenReturn(mockExoPlayer);
+            })) {
+
+      TextureVideoPlayer player =
+          TextureVideoPlayer.create(mockContext, mockEvents, mockProducer, fakeVideoAsset, options);
+
+      ExoPlayer.Builder builderMock = mockedBuilder.constructed().get(0);
+      verify(builderMock).setLoadControl(any());
+      player.dispose();
+    }
+  }
+
+  // PLEZY DELTA: no options, no load control: media3's default, as upstream.
+  @Test
+  public void create_withoutBufferOptions_keepsDefaultLoadControl() {
+    android.content.Context mockContext = mock(android.content.Context.class);
+
+    try (MockedConstruction<ExoPlayer.Builder> mockedBuilder =
+        mockConstruction(
+            ExoPlayer.Builder.class,
+            (mock, context) -> {
+              when(mock.setTrackSelector(any())).thenReturn(mock);
+              when(mock.setMediaSourceFactory(any())).thenReturn(mock);
+              when(mock.build()).thenReturn(mockExoPlayer);
+            })) {
+
+      TextureVideoPlayer player =
+          TextureVideoPlayer.create(
+              mockContext, mockEvents, mockProducer, fakeVideoAsset, new VideoPlayerOptions());
+
+      ExoPlayer.Builder builderMock = mockedBuilder.constructed().get(0);
+      verify(builderMock, never()).setLoadControl(any());
+      player.dispose();
+    }
+  }
 }

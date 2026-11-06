@@ -3,3 +3,5 @@
 // found in the LICENSE file.
 
 export 'src/android_video_player.dart';
+// PLEZY DELTA
+export 'src/buffer_durations.dart';

@@ -83,6 +83,12 @@ class CreationOptions {
   Map<String, String> httpHeaders;
   String? userAgent;
   int? backBufferDurationMs;
+  // PLEZY DELTA: media3 DefaultLoadControl.Builder.setBufferDurationsMs. All
+  // four are set together or none (media3's defaults then apply).
+  int? minBufferMs;
+  int? maxBufferMs;
+  int? bufferForPlaybackMs;
+  int? bufferForPlaybackAfterRebufferMs;
 }
 
 class TexturePlayerIds {

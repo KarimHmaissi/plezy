@@ -396,6 +396,10 @@ class CreationOptions {
     required this.httpHeaders,
     this.userAgent,
     this.backBufferDurationMs,
+    this.minBufferMs,
+    this.maxBufferMs,
+    this.bufferForPlaybackMs,
+    this.bufferForPlaybackAfterRebufferMs,
   });
 
   String uri;
@@ -408,8 +412,26 @@ class CreationOptions {
 
   int? backBufferDurationMs;
 
+  int? minBufferMs;
+
+  int? maxBufferMs;
+
+  int? bufferForPlaybackMs;
+
+  int? bufferForPlaybackAfterRebufferMs;
+
   List<Object?> _toList() {
-    return <Object?>[uri, formatHint, httpHeaders, userAgent, backBufferDurationMs];
+    return <Object?>[
+      uri,
+      formatHint,
+      httpHeaders,
+      userAgent,
+      backBufferDurationMs,
+      minBufferMs,
+      maxBufferMs,
+      bufferForPlaybackMs,
+      bufferForPlaybackAfterRebufferMs,
+    ];
   }
 
   Object encode() {
@@ -424,6 +446,10 @@ class CreationOptions {
       httpHeaders: (result[2]! as Map<Object?, Object?>).cast<String, String>(),
       userAgent: result[3] as String?,
       backBufferDurationMs: result[4] as int?,
+      minBufferMs: result[5] as int?,
+      maxBufferMs: result[6] as int?,
+      bufferForPlaybackMs: result[7] as int?,
+      bufferForPlaybackAfterRebufferMs: result[8] as int?,
     );
   }
 
@@ -440,7 +466,11 @@ class CreationOptions {
         _deepEquals(formatHint, other.formatHint) &&
         _deepEquals(httpHeaders, other.httpHeaders) &&
         _deepEquals(userAgent, other.userAgent) &&
-        _deepEquals(backBufferDurationMs, other.backBufferDurationMs);
+        _deepEquals(backBufferDurationMs, other.backBufferDurationMs) &&
+        _deepEquals(minBufferMs, other.minBufferMs) &&
+        _deepEquals(maxBufferMs, other.maxBufferMs) &&
+        _deepEquals(bufferForPlaybackMs, other.bufferForPlaybackMs) &&
+        _deepEquals(bufferForPlaybackAfterRebufferMs, other.bufferForPlaybackAfterRebufferMs);
   }
 
   @override
@@ -449,7 +479,7 @@ class CreationOptions {
 
   @override
   String toString() {
-    return 'CreationOptions(uri: $uri, formatHint: $formatHint, httpHeaders: $httpHeaders, userAgent: $userAgent, backBufferDurationMs: $backBufferDurationMs)';
+    return 'CreationOptions(uri: $uri, formatHint: $formatHint, httpHeaders: $httpHeaders, userAgent: $userAgent, backBufferDurationMs: $backBufferDurationMs, minBufferMs: $minBufferMs, maxBufferMs: $maxBufferMs, bufferForPlaybackMs: $bufferForPlaybackMs, bufferForPlaybackAfterRebufferMs: $bufferForPlaybackAfterRebufferMs)';
   }
 }
 

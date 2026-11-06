@@ -20,6 +20,7 @@ import java.util.HashMap;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.MockitoAnnotations;
@@ -82,6 +83,11 @@ public class VideoPlayerPluginTest {
               null,
               new HashMap<>(),
               null,
+              null,
+              // PLEZY DELTA: no buffer durations.
+              null,
+              null,
+              null,
               null);
 
       final long playerId = plugin.createForPlatformView(options);
@@ -105,12 +111,51 @@ public class VideoPlayerPluginTest {
               null,
               new HashMap<>(),
               null,
+              null,
+              // PLEZY DELTA: no buffer durations.
+              null,
+              null,
+              null,
               null);
 
       final TexturePlayerIds ids = plugin.createForTextureView(options);
 
       final LongSparseArray<VideoPlayer> videoPlayers = getVideoPlayers();
       assertTrue(videoPlayers.get(ids.getPlayerId()) instanceof TextureVideoPlayer);
+    }
+  }
+
+  // PLEZY DELTA: a create call's buffer durations reach the player's options.
+  @Test
+  public void createsTextureVideoPlayerWithBufferDurations() throws Exception {
+    try (MockedStatic<TextureVideoPlayer> mockedTextureVideoPlayerStatic =
+        mockStatic(TextureVideoPlayer.class)) {
+      mockedTextureVideoPlayerStatic
+          .when(() -> TextureVideoPlayer.create(any(), any(), any(), any(), any()))
+          .thenReturn(mock(TextureVideoPlayer.class));
+
+      final CreationOptions options =
+          new CreationOptions(
+              "https://example.com/clip.mp4",
+              null,
+              new HashMap<>(),
+              null,
+              null,
+              2500L,
+              12000L,
+              500L,
+              1500L);
+
+      plugin.createForTextureView(options);
+
+      ArgumentCaptor<VideoPlayerOptions> captor = ArgumentCaptor.forClass(VideoPlayerOptions.class);
+      mockedTextureVideoPlayerStatic.verify(
+          () -> TextureVideoPlayer.create(any(), any(), any(), any(), captor.capture()));
+      VideoPlayerOptions playerOptions = captor.getValue();
+      assertEquals(Integer.valueOf(2500), playerOptions.minBufferMs);
+      assertEquals(Integer.valueOf(12000), playerOptions.maxBufferMs);
+      assertEquals(Integer.valueOf(500), playerOptions.bufferForPlaybackMs);
+      assertEquals(Integer.valueOf(1500), playerOptions.bufferForPlaybackAfterRebufferMs);
     }
   }
 }
