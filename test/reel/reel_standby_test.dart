@@ -24,6 +24,7 @@ import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart' show ReelCellular;
 import 'package:plezy/utils/app_logger.dart';
 
+import '../test_helpers/reel_link.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 /// The Shield's long-standby spin (2026-11-06 smoke): every wait on the way
@@ -219,6 +220,7 @@ void main() {
         store: store,
         aniList: (_) async => null,
         animeThemes: (_) async => const {},
+        profile: metered == null ? null : FakeLinkProfile(metered, linkChanged),
       ),
       clips: ClipPlayer(
         engine: () {
@@ -234,8 +236,6 @@ void main() {
       addToWatchlist: (_) async => true,
       externalClips: externalClips,
       cellular: cellular,
-      metered: metered,
-      linkChanged: linkChanged,
     );
     c.timeouts = timeouts;
     c.stuckAfter = stuckAfter;

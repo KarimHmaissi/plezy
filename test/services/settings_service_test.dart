@@ -6,6 +6,7 @@ import 'package:plezy/models/audio_channel_limit.dart';
 import 'package:plezy/models/audio_quality_preset.dart';
 import 'package:plezy/models/transcode_quality_preset.dart';
 import 'package:plezy/services/base_shared_preferences_service.dart';
+import 'package:plezy/services/settings_export_service.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/trackers/tracker_constants.dart';
 import 'package:plezy/utils/platform_detector.dart';
@@ -142,6 +143,28 @@ void main() {
       expect(settings.read(SettingsService.reelHintSessions), 0);
       expect(settings.read(SettingsService.reelImmersiveHintSeen), isFalse);
       expect(settings.read(SettingsService.showReelTab), isTrue);
+    });
+
+    test('the sound pref starts muted on the TV and with sound on the phone, and the TV\'s default is never '
+        'stored, so an export never carries it to the phone', () async {
+      TvDetectionService.debugSetAppleTVOverride(true);
+      final settings = await SettingsService.getInstance();
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.muted);
+      expect(settings.prefs.containsKey(SettingsService.reelStartSound.key), isFalse);
+
+      // Reel prefs don't sync; only an export file moves them, and it holds
+      // stored choices only.
+      final export = SettingsExportService.buildExportMap(settings.prefs);
+      expect(export.toString(), isNot(contains(SettingsService.reelStartSound.key)));
+
+      // The same storage read on the phone: nothing of the TV's default.
+      TvDetectionService.debugSetAppleTVOverride(false);
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+
+      // A choice made here is this device's, and is what an export carries.
+      await settings.write(SettingsService.reelStartSound, ReelStartSound.muted);
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.muted);
+      expect(SettingsExportService.buildExportMap(settings.prefs).toString(), contains('reel_start_sound'));
     });
 
     test('persist by enum name across a restart', () async {

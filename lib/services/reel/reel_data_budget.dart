@@ -27,7 +27,8 @@ class ReelDataBudget {
   static const stills = ReelDataBudget._('stills only', clips: false, ahead: 0, behind: false);
 
   /// The budget for [pref] on the current link: [metered] is a
-  /// cellular-only connection (`OfflineModeProvider.isCellularOnly`).
+  /// cellular-only connection, as the playback profile's link says
+  /// ([ReelPlaybackProfile.link], the controller's one link source).
   static ReelDataBudget of(ReelCellular pref, {required bool metered}) {
     if (!metered) return full;
     return switch (pref) {

@@ -314,6 +314,22 @@ Future<void> _pumpTv(
 }
 
 void main() {
+  group('ReelCardView.clipLabel', () {
+    ResolvedClip clip(ClipKind kind, {int? number}) => ResolvedClip(
+      source: const ClipSource(uri: 'https://cdn.example/a.mp4', origin: ClipOrigin.plexExtra),
+      assetId: 'plex:1',
+      kind: kind,
+      number: number,
+    );
+
+    test('names the stored kind in the app language at display time', () {
+      expect(ReelCardView.clipLabel(clip(ClipKind.trailer)), 'Trailer');
+      expect(ReelCardView.clipLabel(clip(ClipKind.teaser)), 'Teaser');
+      expect(ReelCardView.clipLabel(clip(ClipKind.opening, number: 2)), 'Opening 2');
+      expect(ReelCardView.clipLabel(clip(ClipKind.opening)), 'Opening 1', reason: 'the ladder plays OP1');
+    });
+  });
+
   group('ReelCardView.clipState (V2-01)', () {
     test("only this card's own clip, once on screen, takes the artwork away", () {
       final s = ReelCardView.clipState(clip: _b, onScreen: _b, phase: ClipPhase.playing, isCurrent: true);

@@ -75,6 +75,41 @@ void main() {
     expect(find.text(s.showTab), findsOneWidget);
   });
 
+  group('sound when a card starts', () {
+    Future<void> openSound(WidgetTester tester) async {
+      await tester.tap(find.text(s.startSound));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('TV: Start muted or With sound; muted if other audio is the phone\'s', (tester) async {
+      await pump(tester, tv: true);
+      await openSound(tester);
+
+      expect(find.text(s.startSoundMuted), findsWidgets);
+      expect(find.text(s.startSoundMutedDescription), findsOneWidget);
+      expect(find.text(s.startSoundOn), findsWidgets);
+      expect(find.text(s.startSoundMutedIfOtherAudio), findsNothing, reason: 'the TV can\'t tell other audio apart');
+
+      await tester.tap(find.text(s.startSoundOn).last);
+      await tester.pumpAndSettle();
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(find.text(s.startSoundOn), findsOneWidget, reason: 'the row\'s subtitle follows the pick');
+    });
+
+    testWidgets('phone: all three, and Start muted can be picked', (tester) async {
+      await pump(tester, tv: false);
+      await openSound(tester);
+
+      expect(find.text(s.startSoundMutedIfOtherAudio), findsOneWidget);
+      expect(find.text(s.startSoundMuted), findsOneWidget);
+      await tester.tap(find.text(s.startSoundMuted));
+      await tester.pumpAndSettle();
+
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.muted);
+      expect(find.text(s.startSoundMuted), findsOneWidget, reason: 'the row\'s subtitle follows the pick');
+    });
+  });
+
   testWidgets('a clip-end pick is stored and shown at once', (tester) async {
     await pump(tester, tv: false);
 
@@ -160,7 +195,7 @@ void main() {
   });
 
   test('every choice has its own label', () {
-    expect(ReelStartSound.values.map(ReelSettingsScreen.startSoundLabel).toSet(), hasLength(2));
+    expect(ReelStartSound.values.map(ReelSettingsScreen.startSoundLabel).toSet(), hasLength(3));
     expect(ReelClipEnd.values.map(ReelSettingsScreen.clipEndLabel).toSet(), hasLength(3));
     expect(ReelCellular.values.map(ReelSettingsScreen.cellularLabel).toSet(), hasLength(3));
     expect(ReelCellular.values.map(ReelSettingsScreen.cellularSubtitle).toSet(), hasLength(3));

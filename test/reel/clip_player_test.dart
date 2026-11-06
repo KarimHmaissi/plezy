@@ -807,4 +807,46 @@ void main() {
       expect(wake.last, isFalse);
     });
   });
+
+  group('turning the sound on never jumps to full', () {
+    test('it rises from silence over the unmute ramp, step by step, to the full level', () {
+      fakeAsync((async) {
+        clips = ClipPlayer(engine: () => engine, muted: true);
+        clips.play(_a, first: true);
+        async.elapse(const Duration(seconds: 1));
+        expect(clips.level, 0);
+        engine.volumes.clear();
+
+        clips.setMuted(false);
+        async.flushMicrotasks();
+        expect(engine.volumes.where((v) => v > 0), isEmpty, reason: 'nothing audible before the first step');
+
+        async.elapse(ClipPlayer.unmuteRamp ~/ 2);
+        expect(clips.level, greaterThan(0));
+        expect(clips.level, lessThan(100));
+
+        async.elapse(ClipPlayer.unmuteRamp);
+        expect(clips.level, 100);
+        expect(engine.volumes.first, lessThan(ClipPlayer.dipLevel));
+        expect(engine.volumes, orderedEquals([...engine.volumes]..sort()));
+        expect(engine.volumes.length, greaterThan(3));
+      });
+    });
+
+    test('muting is immediate, and unmuting a clip that has its sound changes nothing', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.elapse(const Duration(seconds: 1));
+        expect(clips.level, 100);
+        engine.volumes.clear();
+        clips.setMuted(false);
+        async.elapse(const Duration(seconds: 1));
+        expect(engine.volumes, isEmpty);
+
+        clips.setMuted(true);
+        expect(clips.level, 0);
+        expect(engine.volumes.last, 0);
+      });
+    });
+  });
 }

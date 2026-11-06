@@ -44,6 +44,7 @@ import 'reel_lean_back.dart';
 import 'reel_intro.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
+import 'reel_sound_badge.dart';
 import 'reel_stuck.dart';
 
 /// Fork: The Reel. A full-screen feed of trailers and anime openings from
@@ -198,6 +199,25 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// Watch handed over to the player: coming back is the same session.
   bool _toWatch = false;
 
+  /// A page the Reel opened itself (Watch, Details, its settings, Arrange
+  /// decks) is covering it: coming back is the same visit, so the TV's sound
+  /// stays as the viewer left it instead of starting muted again.
+  bool _ownPage = false;
+
+  /// How the next visit's sound starts, settled in [_visit] and taken by
+  /// the controller in [_start] before its first card plays. It is kept
+  /// while the build runs, so a build that lands after the screen gave up
+  /// on it ([ReelScreen.createLimit]), or the one Retry makes, still starts
+  /// the way the visit settled. [_release] keeps it too: a build that lands
+  /// while the app is away still starts the session, and the resume that
+  /// follows finds it playing and settles no sound of its own. The next
+  /// visit settles it afresh ([_visit]).
+  bool? _visitMuted;
+
+  /// TV: bumped each time the viewer turns the sound on, for the badge's
+  /// "Sound on" ([ReelSoundBadge]).
+  final ValueNotifier<int> _soundOn = ValueNotifier(0);
+
   /// The first-run intro (V2-55), until it is dismissed on this device.
   /// While it shows, the session is built but not started: nothing plays,
   /// nothing is recorded, and no card slot is taken.
@@ -223,8 +243,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// Phone: the screen held on while a card plays (V2-22).
   final WakelockController _awake = WakelockController();
 
+  /// This device's sound pref: start muted on the TV, with sound on the
+  /// phone, unless changed on the Reel's settings page.
   ReelStartSound get _startSoundPref =>
-      SettingsService.instanceOrNull?.read(SettingsService.reelStartSound) ?? ReelStartSound.sound;
+      SettingsService.instanceOrNull?.read(SettingsService.reelStartSound) ??
+      (_isTv ? ReelStartSound.muted : ReelStartSound.sound);
 
   bool get _isTv => PlatformDetector.isTV();
 
@@ -286,7 +309,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     } else if (_introUnseen && _shown) {
       // An On TV open may have just deferred the intro: start what it held.
       if (!_intro) _beginLeanBack();
-      unawaited(_visit());
+      unawaited(_visit('request'));
     }
     if (_introUnseen && mounted) setState(() {});
   }
@@ -300,9 +323,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _focus.requestFocus();
     if (!_shown) return;
     // The session starts now, so the TV's hint rule counts it from here
-    // (V2-28), and the phone settles how its sound starts first (V2-22).
+    // (V2-28), and its sound is settled first (V2-22).
     _beginLeanBack();
-    unawaited(_visit());
+    unawaited(_visit('intro'));
   }
 
   @override
@@ -322,6 +345,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _controller?.toast.removeListener(_onToast);
     _controller?.clips.phase.removeListener(_onPhase);
     _leanBack.dispose();
+    _soundOn.dispose();
     _controller?.dispose();
     _focus.dispose();
     _longPress.dispose();
@@ -409,7 +433,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       _release();
     } else {
       // The feed was let go: its sound settles again, as on any visit.
-      unawaited(_visit());
+      unawaited(_visit('online'));
     }
   }
 
@@ -432,7 +456,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (!_shown || widget.offline || _intro) return;
     appLogger.i('[ReelLife] starting afresh ($why)');
     _release();
-    unawaited(_visit());
+    unawaited(_visit('restart: $why'));
   }
 
   Future<void> _precacheTvArt(ReelCardData card, MediaItem item, {required bool clip}) async {
@@ -488,17 +512,23 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   /// Opens a deck (deep link `plezy://reel?deck=…`, Reel it, On TV mode),
   /// on the card for [groupKey] when given and in the deck.
+  ///
+  /// A Reel that isn't playing (let go while the app was away) starts a new
+  /// visit here, its sound settled as on any; one that is playing only
+  /// changes deck, and its sound stays as it is.
   Future<void> openDeck(String deckId, {String? groupKey}) async {
     _pendingDeck = deckId;
     _pendingCard = groupKey;
-    if (_shown) await _start();
+    if (!_shown) return;
+    if (_controller?.active ?? false) return _start();
+    await _visit('link');
   }
 
   ReelController? get controller => _controller;
 
-  /// [visitMuted]: how a phone visit's sound starts ([_startSound]), handed
-  /// to the controller before its first card plays.
-  Future<void> _start({bool? visitMuted}) async {
+  /// The visit's sound ([_visitMuted]) is handed to the controller before
+  /// its first card plays.
+  Future<void> _start() async {
     if (widget.offline) return;
     // Any new attempt (Retry, the tab shown again, back online, resumed)
     // shows the curtain while it builds.
@@ -512,7 +542,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Under the intro the session is ready but waits; a requested deck is
     // kept for when it ends.
     if (!mounted || !_shown || widget.offline || _intro) return;
-    if (visitMuted != null) await c.setMuted(visitMuted, remember: false);
+    final muted = _visitMuted;
+    if (muted != null) {
+      _visitMuted = null;
+      appLogger.d('[ReelLife] the visit starts ${muted ? 'muted' : 'with sound'}');
+      await c.setMuted(muted, remember: false);
+    }
     if (!mounted || !_shown) return;
     final deck = _pendingDeck, card = _pendingCard;
     _pendingDeck = null;
@@ -567,8 +602,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       'replay' => c.replay(),
       'spoiled' => c.spoiledMe(),
       'seenIt' => c.seenIt(),
-      'details' => c.openDetails(),
-      'mute' => c.setMuted(!c.clips.muted),
+      'details' => _openOwn(c.openDetails),
+      'mute' => c.clips.muted ? _turnSoundOn(c, 'remote') : _mute(c, 'remote'),
       'volumeUp' => _louder(c, 1),
       'volumeDown' => _louder(c, -1),
       _ => Future<void>.value(),
@@ -579,7 +614,35 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// while muted brings the sound back too.
   Future<void> _louder(ReelController c, int dir) async {
     ReelVolume.adjust(dir);
-    if (dir > 0 && c.clips.muted) await c.setMuted(false);
+    if (dir > 0 && c.clips.muted) await _turnSoundOn(c, 'remote');
+  }
+
+  /// The viewer turns the sound on ([source]: `key` for ≡ on the TV,
+  /// `remote` for On TV mode, `sheet`): kept for the next card (and, with
+  /// "With sound", the next launch), rising from silence (ClipPlayer), and
+  /// the TV's badge says "Sound on".
+  Future<void> _turnSoundOn(ReelController c, String source) async {
+    appLogger.i('[ReelSound] sound on (source=$source, level=${ReelVolume.level.value})');
+    _soundOn.value++;
+    await c.setMuted(false);
+  }
+
+  Future<void> _mute(ReelController c, String source) async {
+    appLogger.i('[ReelSound] muted (source=$source)');
+    await c.setMuted(true);
+  }
+
+  /// Opens a page of the Reel's own over it ([open] awaits its route): Back
+  /// from it is the same visit ([_ownPage]). The tab shown again takes the
+  /// mark; one still hidden when [open] returns keeps it for that, and
+  /// nothing opened (no item) drops it.
+  Future<void> _openOwn(Future<void> Function() open) async {
+    _ownPage = true;
+    try {
+      await open();
+    } finally {
+      if (_shown) _ownPage = false;
+    }
   }
 
   @override
@@ -588,23 +651,45 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _shown = true;
     ReelScreen.showing.value = true;
     _perf.attachFrames();
+    // Back from Watch (or another page the Reel opened) is the same visit.
+    final back = _toWatch || _ownPage;
+    _ownPage = false;
     // Under the first-run intro nothing has started yet ([_endIntro]).
     if (!_intro) _beginLeanBack();
-    unawaited(_visit());
+    unawaited(_visit(back ? 'back' : 'tab'));
   }
 
-  /// A visit starts (the tab shown, the app back, Back from the player):
-  /// the phone settles how its sound starts before any card plays.
-  Future<void> _visit() async {
-    // Only from a feed that was let go: a resume that never paused (the
-    // shade pulled down) keeps the sound as it is, and the feed's own clip
-    // must not count as other audio. Offline nothing is built (V2-60).
-    bool? muted;
-    if (!_isTv && !widget.offline && _players.current == null) {
-      muted = await _startSound();
-      if (muted == null) return;
+  /// A visit starts ([why]: the tab shown, which an app launch onto the
+  /// Reel and a `plezy://reel` link are too; the app resumed after the
+  /// Reel was let go, a Shield woken from standby among them; back online;
+  /// the intro ended; started afresh; or `back` from a page the Reel
+  /// opened): its sound is settled before any card plays.
+  Future<void> _visit(String why) async {
+    if (widget.offline) return _start();
+    if (_isTv) {
+      final screenReader = MediaQuery.maybeAccessibleNavigationOf(context) ?? false;
+      final saved = SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false;
+      final pref = _startSoundPref;
+      final start = ReelSound.tvVisitStart(
+        pref: pref,
+        saved: saved,
+        screenReader: screenReader,
+        backFromPage: why == 'back',
+      );
+      _visitMuted = start.muted;
+      final muted = start.muted ?? _controller?.clips.muted;
+      appLogger.i('[ReelSound] visit start ($why): ${muted == true ? 'muted' : 'sound on'} because ${start.why}');
+      return _start();
     }
-    await _start(visitMuted: muted);
+    // Phone: only from a feed that was let go. A resume that never paused
+    // (the shade pulled down) keeps the sound as it is, and the feed's own
+    // clip must not count as other audio. Offline nothing is built (V2-60).
+    if (_players.current == null) {
+      final muted = await _startSound(why);
+      if (muted == null) return;
+      _visitMuted = muted;
+    }
+    await _start();
   }
 
   /// Phone (V2-22): a visit starts muted when the mute was kept, while the
@@ -613,7 +698,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// Only the kept mute is saved; the others hold for this visit. The players take it here; the controller
   /// takes it in [_start], once it is built (a failed build shows Retry
   /// there). Null: the visit ended while it looked.
-  Future<bool?> _startSound() async {
+  Future<bool?> _startSound(String visit) async {
     final screenReader = MediaQuery.maybeAccessibleNavigationOf(context) ?? false;
     final remote = context.read<CompanionRemoteProvider?>();
     final tvPlaying =
@@ -625,6 +710,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (!mounted || !_shown) return null;
     final muted =
         screenReader || ReelSound.startMuted(saved: saved, pref: pref, tvPlaying: tvPlaying, otherAudio: otherAudio);
+    final why = ReelSound.phoneWhy(
+      muted: muted,
+      pref: pref,
+      saved: saved,
+      screenReader: screenReader,
+      tvPlaying: tvPlaying,
+    );
+    appLogger.i('[ReelSound] visit start ($visit): ${muted ? 'muted' : 'sound on'} because $why');
     await _players.setMuted(muted);
     return muted;
   }
@@ -688,7 +781,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
           if (held) unawaited(_playOnAfterHold(c));
           return;
         }
-        unawaited(_visit());
+        unawaited(_visit('resumed'));
     }
   }
 
@@ -771,13 +864,17 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       case ReelSheetAction.seenIt:
         await c.seenIt();
       case ReelSheetAction.details:
-        await c.openDetails();
+        await _openOwn(c.openDetails);
       case ReelSheetAction.sound:
-        await c.setMuted(!c.clips.muted);
+        await (c.clips.muted ? _turnSoundOn(c, 'sheet') : _mute(c, 'sheet'));
       case ReelSheetAction.settings:
-        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ReelSettingsScreen()));
+        await _openOwn(
+          () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ReelSettingsScreen())),
+        );
       case ReelSheetAction.arrangeDecks:
-        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => reelDecksScreenFor(c)));
+        await _openOwn(
+          () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => reelDecksScreenFor(c))),
+        );
       case ReelSheetAction.deck:
         break;
       case null:
@@ -836,7 +933,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
             ReelOkTarget.nextDeck => c.switchDeck(1),
             ReelOkTarget.retry => c.retryDeck(),
             ReelOkTarget.watch => _watch(),
-            ReelOkTarget.details => c.openDetails(),
+            ReelOkTarget.details => _openOwn(c.openDetails),
           }),
       onLongPress: () => unawaited(_openSheet()),
     );
@@ -880,7 +977,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       c.clips.markKey(Stopwatch()..start(), trigger: 'deck');
       unawaited(c.switchDeck(-1));
     } else if (key.isContextMenuKey) {
-      unawaited(_openSheet());
+      // TV: ≡ on a muted card turns the sound on (the badge says so); with
+      // the sound on it opens the sheet, as hold OK always does. A held ≡
+      // acts once.
+      if (event is KeyDownEvent) {
+        unawaited(_isTv && c.clips.muted ? _turnSoundOn(c, 'key') : _openSheet());
+      }
     } else {
       // Back and everything else go on to the shell (Back → the rail).
       return KeyEventResult.ignored;
@@ -1009,6 +1111,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         ),
       ),
       ReelPauseFeedback(controller: c, leanBack: _leanBack),
+      // The sound at a glance: every TV visit starts muted.
+      ReelSoundBadge(controller: c, soundOn: _soundOn),
       ReelDeckStrip(controller: c),
     ],
   );

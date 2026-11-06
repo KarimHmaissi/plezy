@@ -1357,7 +1357,7 @@ class _Info extends StatelessWidget {
                   icon: clip.source.origin == ClipOrigin.animeTheme
                       ? Symbols.music_note_rounded
                       : Symbols.movie_rounded,
-                  label: clip.label,
+                  label: ReelCardView.clipLabel(clip),
                 ),
               if (card.chip case final chip?) StatChip(label: chip),
               if (badge != null) StatChip(icon: Symbols.check_rounded, label: badge),

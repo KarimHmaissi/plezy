@@ -9,6 +9,7 @@ import '../../media/ids.dart';
 import '../../media/media_item.dart';
 import '../../services/device_performance.dart';
 import '../../services/reel/clip_player.dart';
+import '../../services/reel/clip_resolver.dart' show ClipKind, ResolvedClip;
 import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_library.dart';
@@ -299,6 +300,14 @@ class ReelCardView extends StatelessWidget {
       ? Duration.zero
       : DevicePerformance.reducedDuration(const Duration(milliseconds: 280));
 
+  /// A clip's kind in the app's language: "Trailer", "Teaser", "Opening 1".
+  /// The resolver and its cache keep the kind, never the words.
+  static String clipLabel(ResolvedClip clip) => switch (clip.kind) {
+    ClipKind.trailer => t.reel.card.clipKind.trailer,
+    ClipKind.teaser => t.reel.card.clipKind.teaser,
+    ClipKind.opening => t.reel.card.clipKind.opening(n: clip.number ?? 1),
+  };
+
   /// The clip's kind (Trailer, Opening 1) as the last fact on the
   /// spotlight's metadata line, in the line's own style.
   Widget? _clipKind(BuildContext context, double scale) {
@@ -316,7 +325,7 @@ class ReelCardView extends StatelessWidget {
           color: style.color,
         ),
         SizedBox(width: 4 * scale),
-        Text(clip.label, maxLines: 1, style: style),
+        Text(clipLabel(clip), maxLines: 1, style: style),
       ],
     );
   }

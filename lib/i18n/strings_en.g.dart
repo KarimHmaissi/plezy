@@ -8394,6 +8394,8 @@ class Translations$reel$card$en {
 	/// en: 'Theme via AnimeThemes'
 	String get themeCredit => 'Theme via AnimeThemes';
 
+	late final Translations$reel$card$clipKind$en clipKind = Translations$reel$card$clipKind$en.internal(_root);
+
 	/// en: 'Replay'
 	String get replay => 'Replay';
 
@@ -8417,6 +8419,18 @@ class Translations$reel$card$en {
 
 	/// en: 'Sound on'
 	String get soundOn => 'Sound on';
+
+	/// en: 'Sound off'
+	String get soundOffBadge => 'Sound off';
+
+	/// en: 'press ≡ for sound'
+	String get soundOffKey => 'press ≡ for sound';
+
+	/// en: 'Sound off. Press the Menu button for sound.'
+	String get soundOffAnnounce => 'Sound off. Press the Menu button for sound.';
+
+	/// en: 'Sound on'
+	String get soundOnAnnounce => 'Sound on';
 
 	/// en: 'Mute'
 	String get mute => 'Mute';
@@ -8747,6 +8761,12 @@ class Translations$reel$settings$en {
 
 	/// en: 'Starts muted while music or another app is playing'
 	String get startSoundMutedIfOtherAudioDescription => 'Starts muted while music or another app is playing';
+
+	/// en: 'Start muted'
+	String get startSoundMuted => 'Start muted';
+
+	/// en: 'Every visit starts silent, until you turn the sound on'
+	String get startSoundMutedDescription => 'Every visit starts silent, until you turn the sound on';
 
 	/// en: 'When a clip ends'
 	String get clipEnd => 'When a clip ends';
@@ -10142,6 +10162,24 @@ class Translations$services$libraryFilter$en {
 
 	/// en: 'No libraries available'
 	String get noLibraries => 'No libraries available';
+}
+
+// Path: reel.card.clipKind
+class Translations$reel$card$clipKind$en {
+	Translations$reel$card$clipKind$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Trailer'
+	String get trailer => 'Trailer';
+
+	/// en: 'Teaser'
+	String get teaser => 'Teaser';
+
+	/// en: 'Opening ${n}'
+	String opening({required Object n}) => 'Opening ${n}';
 }
 
 /// The flat map containing all translations for locale <en>.
@@ -11714,6 +11752,9 @@ extension on Translations {
 			'reel.card.pickAnotherDeck' => 'Pick another deck to keep going.',
 			'reel.card.decks' => 'Decks',
 			'reel.card.themeCredit' => 'Theme via AnimeThemes',
+			'reel.card.clipKind.trailer' => 'Trailer',
+			'reel.card.clipKind.teaser' => 'Teaser',
+			'reel.card.clipKind.opening' => ({required Object n}) => 'Opening ${n}',
 			'reel.card.replay' => 'Replay',
 			'reel.card.watch' => 'Watch',
 			'reel.card.watchOnTv' => 'Watch on TV',
@@ -11722,6 +11763,10 @@ extension on Translations {
 			'reel.card.more' => 'More',
 			'reel.card.onTv' => 'On TV',
 			'reel.card.soundOn' => 'Sound on',
+			'reel.card.soundOffBadge' => 'Sound off',
+			'reel.card.soundOffKey' => 'press ≡ for sound',
+			'reel.card.soundOffAnnounce' => 'Sound off. Press the Menu button for sound.',
+			'reel.card.soundOnAnnounce' => 'Sound on',
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
 			'reel.card.showControls' => 'Show controls',
@@ -11809,6 +11854,8 @@ extension on Translations {
 			'reel.settings.startSoundOn' => 'With sound',
 			'reel.settings.startSoundMutedIfOtherAudio' => 'Muted if other audio is playing',
 			'reel.settings.startSoundMutedIfOtherAudioDescription' => 'Starts muted while music or another app is playing',
+			'reel.settings.startSoundMuted' => 'Start muted',
+			'reel.settings.startSoundMutedDescription' => 'Every visit starts silent, until you turn the sound on',
 			'reel.settings.clipEnd' => 'When a clip ends',
 			'reel.settings.clipEndLoop' => 'Loop',
 			'reel.settings.clipEndTwiceThenHold' => 'Play twice, then hold',
@@ -12197,6 +12244,8 @@ extension on Translations {
 			'collections.empty' => 'Collection is empty',
 			'collections.deleteCollection' => 'Delete Collection',
 			'collections.deleteConfirm' => ({required Object title}) => 'Delete "${title}"? This can\'t be undone.',
+			_ => null,
+		} ?? switch (path) {
 			'collections.deleted' => 'Collection deleted',
 			'collections.deleteFailed' => 'Failed to delete collection',
 			'collections.deleteFailedWithError' => ({required Object error}) => 'Failed to delete collection: ${error}',
@@ -12206,8 +12255,6 @@ extension on Translations {
 			'collections.addedToCollection' => 'Added to collection',
 			'collections.errorAddingToCollection' => 'Failed to add to collection',
 			'collections.created' => 'Collection created',
-			_ => null,
-		} ?? switch (path) {
 			'collections.removeFromCollection' => 'Remove from collection',
 			'collections.removeFromCollectionConfirm' => ({required Object title}) => 'Remove "${title}" from this collection?',
 			'collections.removedFromCollection' => 'Removed from collection',
@@ -12711,6 +12758,8 @@ extension on Translations {
 			'externalPlayer.useExternalPlayerDescription' => 'Open videos in another app',
 			'externalPlayer.selectPlayer' => 'Select Player',
 			'externalPlayer.customPlayers' => 'Custom Players',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.systemDefault' => 'System Default',
 			'externalPlayer.addCustomPlayer' => 'Add Custom Player',
 			'externalPlayer.playerName' => 'Player Name',
@@ -12720,8 +12769,6 @@ extension on Translations {
 			'externalPlayer.playerUrlScheme' => 'URL Scheme',
 			'externalPlayer.off' => 'Off',
 			'externalPlayer.launchFailed' => 'Failed to open external player',
-			_ => null,
-		} ?? switch (path) {
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} is not installed',
 			'externalPlayer.playInExternalPlayer' => 'Play in External Player',
 			'metadataEdit.editMetadata' => 'Edit...',

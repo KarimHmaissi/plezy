@@ -14,7 +14,6 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
-import '../providers/offline_mode_provider.dart';
 import '../screens/media_detail_screen.dart';
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
@@ -140,7 +139,6 @@ abstract final class ReelApp {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
     final remote = context.read<CompanionRemoteProvider?>();
-    final link = context.read<OfflineModeProvider?>();
     final servers = multi.serverManager;
     final store = ReelStore.instance;
     final library = _library();
@@ -159,9 +157,11 @@ abstract final class ReelApp {
       decks: decks,
       resolver: resolver,
       // The mute is kept across launches (V2-22), and the TV's clip plays
-      // as often as the clip-end pref says (V2-47).
+      // as often as the clip-end pref says (V2-47). The TV's player is built
+      // muted: each visit settles its sound before the first card plays
+      // (ReelScreen._visit), so nothing is ever heard before that.
       clips: ClipPlayer(
-        muted: SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false,
+        muted: PlatformDetector.isTV() || (SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false),
         plays: () => ReelController.clipEndPref().plays,
       ),
       store: store,
@@ -226,13 +226,12 @@ abstract final class ReelApp {
       itemWithNext: media.itemWithNext,
       // The Reel's settings page applies to the Reel that is playing.
       settingsChanged: SettingsService.instanceOrNull?.listenableOfAll(SettingsService.reelChoicePrefs),
-      // The Reel on mobile data (V2-53): the pref, and the app's one
-      // connectivity reading.
+      // The Reel on mobile data (V2-53): the pref. The link itself is the
+      // playback profile's (the resolver's ReelPlaybackWatcher), the one
+      // reading the data budget and the clip's file both follow.
       cellular: () =>
           SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
           SettingsService.reelCellular.resolvedDefault,
-      metered: () => link?.isCellularOnly ?? false,
-      linkChanged: link,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
@@ -301,16 +300,50 @@ abstract final class ReelApp {
   }
 
   /// Sends the current card to a connected phone at once (it just opened
-  /// On TV mode).
-  static VoidCallback? republish;
+  /// On TV mode), from the session the screen holds. A session build that
+  /// ran past the screen's 30 s build limit can land after a second build was
+  /// started; whichever the screen discards is disposed, so it is skipped
+  /// here, and the one kept is forced however the builds finished.
+  static void republish() {
+    _publishers.removeWhere((p) => p.controller.isDisposed);
+    for (final p in [..._publishers]) {
+      p.force();
+    }
+  }
+
+  /// One On TV publisher per session build still alive, oldest first.
+  static final List<({ReelController controller, VoidCallback force})> _publishers = [];
+
+  /// Tests: forgets every publisher.
+  @visibleForTesting
+  static void debugResetPublishers() => _publishers.clear();
 
   /// Host side of On TV mode: a `reelState` on every card, deck or play
   /// state change while a phone is connected.
-  static void _publish(ReelController c, CompanionRemoteProvider remote) {
+  static void _publish(ReelController c, CompanionRemoteProvider remote) => publishState(
+    c,
+    connected: () => remote.isHost && remote.isConnected,
+    send: (state) => remote.sendCommand(RemoteCommandType.reelState, data: state),
+  );
+
+  /// [_publish] over plain hooks (the run-time seam for tests): [send]
+  /// gets [ReelController.remoteState] on every change while [connected],
+  /// never twice the same unless [republish] forces it, and nothing once
+  /// [c] is disposed.
+  @visibleForTesting
+  static void publishState(
+    ReelController c, {
+    required bool Function() connected,
+    required void Function(Map<String, Object?> state) send,
+  }) {
     String? last;
     var disposed = false;
     void publish({bool force = false}) {
-      if (disposed || !remote.isHost || !remote.isConnected) {
+      if (disposed || c.isDisposed) {
+        disposed = true;
+        return;
+      }
+      if (!connected()) {
         last = null;
         return;
       }
@@ -324,13 +357,15 @@ abstract final class ReelApp {
       final key = jsonEncode(state);
       if (!force && key == last) return;
       last = key;
-      remote.sendCommand(RemoteCommandType.reelState, data: state);
+      send(state);
     }
 
     c.addListener(publish);
     c.clips.phase.addListener(publish);
     c.cardChanged.addListener(publish);
-    republish = () => publish(force: true);
+    _publishers
+      ..removeWhere((p) => p.controller.isDisposed)
+      ..add((controller: c, force: () => publish(force: true)));
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).

@@ -155,12 +155,39 @@ class ClipCandidate implements ReelRendition {
   }
 }
 
+/// What a clip is, for its chip. The views name it in the app's language
+/// when they draw it; the cache stores the kind, never the words.
+enum ClipKind {
+  trailer,
+  teaser,
+  opening;
+
+  /// The kind a cached row written before the kind was stored says in its
+  /// English label ("Trailer", "Teaser", "Opening 1"), with the opening's
+  /// number; null when the label says neither.
+  static (ClipKind, int?)? fromLegacyLabel(Object? label) {
+    if (label is! String) return null;
+    final l = label.trim();
+    if (RegExp(r'^teaser$', caseSensitive: false).hasMatch(l)) return (ClipKind.teaser, null);
+    if (RegExp(r'^trailer$', caseSensitive: false).hasMatch(l)) return (ClipKind.trailer, null);
+    final op = RegExp(r'^opening(?:\s+(\d+))?$', caseSensitive: false).firstMatch(l);
+    if (op != null) return (ClipKind.opening, int.tryParse(op.group(1) ?? ''));
+    return null;
+  }
+
+  /// The kind of a Plex extra by its title: a teaser says so, anything else
+  /// the ladder picks is a trailer.
+  static ClipKind ofExtraTitle(String title) =>
+      RegExp(r'teaser', caseSensitive: false).hasMatch(title) ? ClipKind.teaser : ClipKind.trailer;
+}
+
 /// A resolved rung: where the clip is and what it is.
 class ResolvedClip {
   const ResolvedClip({
     required this.source,
     required this.assetId,
-    required this.label,
+    required this.kind,
+    this.number,
     this.serverId,
     this.height,
     this.candidates = const [],
@@ -171,8 +198,11 @@ class ResolvedClip {
   /// `plex:<extra ratingKey>` or `at:<video id>`, for Spoiled me.
   final String assetId;
 
-  /// "Trailer", "Teaser", "Opening 1".
-  final String label;
+  /// Trailer, teaser or opening; the views name it ("Opening 1").
+  final ClipKind kind;
+
+  /// An opening's number (1 for OP1); null for a trailer or teaser.
+  final int? number;
 
   /// Plex rungs: the server the clip streams from (never preloaded off a
   /// server marked slow).
@@ -467,7 +497,7 @@ class ClipResolver {
       if (candidates.isEmpty) return false;
       final banned = await store.spoiledAssets(t.titleId);
       if (candidates.any((c) => banned.contains(c.assetId))) return false;
-      final clip = _opening1('Opening 1', candidates);
+      final clip = _opening1(1, candidates);
       if (clip == null) return false;
       await store.cache('src:${t.groupKey}', jsonEncode(_openingRow(clip, candidates)));
       return true;
@@ -481,9 +511,30 @@ class ClipResolver {
   static Map<String, Object?> _openingRow(ResolvedClip clip, List<ClipCandidate> candidates) => {
     'v': sourceFormat,
     'k': 'at',
-    'l': clip.label,
+    ..._kindRow(clip),
     'c': [for (final c in candidates) c.toJson()],
   };
+
+  /// A row's clip kind: `lk` (the [ClipKind] name) and, for an opening,
+  /// `ln` (its number). Rows written before carry an English `l` instead,
+  /// still read by [_kindOf].
+  static Map<String, Object?> _kindRow(ResolvedClip clip) => {'lk': clip.kind.name, 'ln': ?clip.number};
+
+  /// The kind and number a cached row says: `lk`/`ln`, else the older
+  /// English `l`, else [fallback] (an AnimeThemes row is OP1).
+  static (ClipKind, int?) _kindOf(Map<String, dynamic> j, (ClipKind, int?) fallback) {
+    final lk = j['lk'];
+    if (lk is String) {
+      final kind = ClipKind.values.where((k) => k.name == lk).firstOrNull;
+      if (kind != null) {
+        final n = j['ln'];
+        return (kind, n is int ? n : fallback.$2);
+      }
+    }
+    final legacy = ClipKind.fromLegacyLabel(j['l']);
+    if (legacy != null) return (legacy.$1, legacy.$2 ?? fallback.$2);
+    return fallback;
+  }
 
   /// A cached row in the current [sourceFormat]; anything else (an older
   /// format, a forgotten or unreadable row) is not cached.
@@ -523,8 +574,13 @@ class ClipResolver {
   ResolvedClip? _fromCache(Map<String, dynamic> j) {
     try {
       return switch (j['k']) {
-        'at' => _opening1(j['l'] as String? ?? 'Opening', _candidates(j['c'])),
-        'plex' => _plex(j['sv'] as String, j['pk'] as String, j['a'] as String, j['l'] as String? ?? 'Trailer'),
+        'at' => _opening1(_kindOf(j, (ClipKind.opening, 1)).$2 ?? 1, _candidates(j['c'])),
+        'plex' => _plex(
+          j['sv'] as String,
+          j['pk'] as String,
+          j['a'] as String,
+          _kindOf(j, (ClipKind.trailer, null)).$1,
+        ),
         _ => null,
       };
     } catch (_) {
@@ -545,15 +601,16 @@ class ClipResolver {
     return out;
   }
 
-  /// An AnimeThemes clip as [playback] plays it from [candidates]; null for
-  /// none.
-  ResolvedClip? _opening1(String label, List<ClipCandidate> candidates) {
+  /// Opening [number] of an AnimeThemes show as [playback] plays it from
+  /// [candidates]; null for none.
+  ResolvedClip? _opening1(int number, List<ClipCandidate> candidates) {
     final pick = playback.pick(candidates);
     if (pick == null) return null;
     return ResolvedClip(
       source: ClipSource(uri: pick.uri, origin: ClipOrigin.animeTheme),
       assetId: pick.assetId,
-      label: label,
+      kind: ClipKind.opening,
+      number: number,
       height: pick.height,
       candidates: candidates,
     );
@@ -568,20 +625,21 @@ class ClipResolver {
     return ResolvedClip(
       source: ClipSource(uri: pick.uri, origin: clip.source.origin, preloadable: clip.source.preloadable),
       assetId: pick.assetId,
-      label: clip.label,
+      kind: clip.kind,
+      number: clip.number,
       serverId: clip.serverId,
       height: pick.height,
       candidates: clip.candidates,
     );
   }
 
-  ResolvedClip? _plex(String serverId, String partKey, String asset, String label) {
+  ResolvedClip? _plex(String serverId, String partKey, String asset, ClipKind kind) {
     final url = servers.clipUrl(serverId, partKey);
     if (url == null) return null;
     return ResolvedClip(
       source: ClipSource(uri: url, origin: ClipOrigin.plexExtra, preloadable: !_slowServers.contains(serverId)),
       assetId: asset,
-      label: label,
+      kind: kind,
       serverId: serverId,
     );
   }
@@ -619,7 +677,7 @@ class ClipResolver {
       sure &= opSure;
       final candidates = [for (final op in ops) ClipCandidate.opening(op)];
       // A banned file bans the opening: its other files are the same clip.
-      final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1('Opening 1', candidates);
+      final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1(1, candidates);
       if (clip != null) {
         return _Run((clip, _openingRow(clip, candidates)), sure: sure, offline: offline);
       }
@@ -656,8 +714,7 @@ class ClipResolver {
       ];
       final pick = t.isShow ? ClipFilter.showTrailer(usable, showTitle: t.title) : ClipFilter.filmTrailer(usable);
       if (pick == null) continue;
-      final label = RegExp(r'teaser', caseSensitive: false).hasMatch(pick.title) ? 'Teaser' : 'Trailer';
-      final clip = _plex(c.serverId, pick.partKey, 'plex:${pick.ratingKey}', label);
+      final clip = _plex(c.serverId, pick.partKey, 'plex:${pick.ratingKey}', ClipKind.ofExtraTitle(pick.title));
       if (clip == null) {
         // The server dropped between the read and the URL.
         sure = false;
@@ -665,7 +722,10 @@ class ClipResolver {
         continue;
       }
       return _Run(
-        (clip, {'v': sourceFormat, 'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, 'l': label}),
+        (
+          clip,
+          {'v': sourceFormat, 'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, ..._kindRow(clip)},
+        ),
         sure: sure,
         offline: offline,
       );
