@@ -119,6 +119,7 @@ void main() {
         LiveLink(channel: 'KNTV & co', serverId: ServerId('abc'), startPosition: LiveTvStartPosition.live),
         const ReelLink(),
         const ReelLink(deck: 'ai:42', profile: 'Kids'),
+        const ReelLink(probe: 'coverage'),
       ];
       for (final link in links) {
         final reparsed = DeepLink.tryParse(link.toUri().toString());

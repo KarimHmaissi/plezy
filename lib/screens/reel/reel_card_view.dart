@@ -1,20 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
+import '../../media/ids.dart';
+import '../../media/media_item.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../utils/content_utils.dart';
+import '../../utils/formatters.dart';
+import '../../utils/layout_constants.dart';
+import '../../utils/provider_extensions.dart';
+import '../../widgets/fitted_metadata_line.dart';
+import '../../widgets/media_rating_badge.dart';
+import '../../widgets/stat_chip.dart';
+import '../../widgets/tv_spotlight_background.dart';
 
-/// The Reel's palette: a projection-booth dark with one warm lamp colour.
-abstract final class ReelInk {
-  static const Color lamp = Color(0xFFF2B84B);
-  static const Color paper = Color(0xFFF6F1E7);
-  static const Color dim = Color(0xB3F6F1E7);
-  static const Color booth = Color(0xFF0B0A09);
-}
-
-/// One card: the clip shows through (the native surface sits behind
-/// Flutter), with the title line above the band and the why line under it.
-/// Until the first frame, and for AI cards, the real backdrop is shown as a
-/// still (never panned).
+/// One card, in the app's own look. On the TV it is Home's spotlight (logo or
+/// title, the metadata line with rating badges, the summary, the same scrims)
+/// with the clip playing where the artwork would be: the artwork shows until
+/// the clip's first frame, and stays for AI cards. The Reel adds only its
+/// labels, the why line and the key hints underneath.
 class ReelCardView extends StatelessWidget {
   const ReelCardView({
     super.key,
@@ -39,14 +43,16 @@ class ReelCardView extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (slot.kind) {
       case ReelSlotKind.loading:
-        return const ReelCurtain(label: 'Threading the reel');
+        return const ReelCurtain();
       case ReelSlotKind.empty:
-        return _Message(
+        return ReelMessage(
+          icon: Symbols.movie_rounded,
           title: 'Nothing in ${controller.deck.name} yet',
           body: tv ? 'Press → for the next deck.' : 'Swipe sideways for the next deck.',
         );
       case ReelSlotKind.poolEnd:
-        return _Message(
+        return ReelMessage(
+          icon: Symbols.check_circle_rounded,
           title: controller.deck.id == 'for-you' ? "That's today's For You" : "That's all of ${controller.deck.name}",
           body: tv ? 'Press → for ${_nextDeckName()}.' : 'Swipe sideways for ${_nextDeckName()}.',
         );
@@ -62,91 +68,156 @@ class ReelCardView extends StatelessWidget {
             isCurrent &&
             slot.clip != null &&
             (phase == ClipPhase.playing || phase == ClipPhase.paused || phase == ClipPhase.held);
-        final art = slot.item == null
-            ? null
-            : controller.media.imageUrl(
-                card.best.serverId,
-                slot.item!.artPath ?? slot.item!.thumbPath,
-                width: tv ? 1280 : 900,
-              );
-        final size = MediaQuery.sizeOf(context);
-        final scale = tv ? (size.width / 960).clamp(0.8, 2.0) : 1.0;
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            // Backdrop still: before the first frame, and for AI cards.
-            AnimatedOpacity(
-              opacity: showingClip ? 0 : 1,
-              duration: const Duration(milliseconds: 320),
-              child: ColoredBox(
-                color: ReelInk.booth,
-                child: art == null
-                    ? const SizedBox.expand()
-                    : Image.network(
-                        art,
-                        fit: BoxFit.cover,
-                        cacheWidth: tv ? 1280 : 900,
-                        gaplessPlayback: true,
-                        errorBuilder: (_, _, _) => const SizedBox.expand(),
-                      ),
-              ),
-            ),
-            // Reading band.
-            const Positioned.fill(
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: [0, 0.18, 0.62, 1],
-                      colors: [Color(0x99000000), Color(0x00000000), Color(0x00000000), Color(0xE6000000)],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (slot.isAiCard && slot.item?.tagline != null)
-              Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 48 * scale),
-                  child: _Reveal(
-                    key: ValueKey('hook:${card.id}'),
-                    child: Text(
-                      slot.item!.tagline!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: ReelInk.paper,
-                        fontSize: (tv ? 30 : 26) * scale,
-                        height: 1.15,
-                        fontWeight: FontWeight.w300,
-                        letterSpacing: 0.2,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            Positioned(
-              left: (tv ? 56 : 20) * scale,
-              right: (tv ? 56 : 20) * scale,
-              bottom: (tv ? 40 : 28) * scale,
-              child: _Caption(
-                key: ValueKey('cap:${card.id}'),
-                controller: controller,
-                slot: slot,
-                scale: scale,
-                tv: tv,
-                held: isCurrent && phase == ClipPhase.held,
-                onReplay: onReplay,
-                onWatch: onWatch,
-                onSave: onSave,
-                onRemote: onRemote,
-              ),
-            ),
-          ],
-        );
+        final held = isCurrent && phase == ClipPhase.held;
+        return tv ? _tv(context, showingClip: showingClip, held: held) : _phone(context, showingClip, held);
       },
+    );
+  }
+
+  Widget _tv(BuildContext context, {required bool showingClip, required bool held}) {
+    final scale = TvLayoutConstants.scaleOf(context);
+    final client = context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId));
+    final extrasHeight = 150 * scale;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        TvSpotlightBackground(
+          item: slot.item,
+          client: client,
+          showArtwork: !showingClip,
+          contentBottom: extrasHeight + 44 * scale,
+          contentTop: 120 * scale,
+        ),
+        if (slot.item == null) _titleOnly(context, scale, bottom: extrasHeight + 24 * scale),
+        Positioned(
+          left: TvLayoutConstants.horizontalInset,
+          right: MediaQuery.sizeOf(context).width * 0.43,
+          bottom: 24 * scale,
+          height: extrasHeight,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: _Extras(controller: controller, slot: slot, held: held, tv: true, onReplay: onReplay),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Until the card's metadata lands: the title in the spotlight's style.
+  Widget _titleOnly(BuildContext context, double scale, {required double bottom}) {
+    final theme = Theme.of(context);
+    return Positioned(
+      left: TvLayoutConstants.horizontalInset,
+      right: MediaQuery.sizeOf(context).width * 0.43,
+      bottom: bottom,
+      child: Text(
+        slot.card!.title.title,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.displaySmall?.copyWith(
+          color: theme.colorScheme.onSurface,
+          fontSize: 54 * scale,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _phone(BuildContext context, bool showingClip, bool held) {
+    final theme = Theme.of(context);
+    final bg = theme.scaffoldBackgroundColor;
+    final card = slot.card!;
+    final item = slot.item;
+    final art = item == null
+        ? null
+        : controller.media.imageUrl(card.best.serverId, item.artPath ?? item.thumbPath, width: 900);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        AnimatedOpacity(
+          opacity: showingClip ? 0 : 1,
+          duration: const Duration(milliseconds: 320),
+          child: ColoredBox(
+            color: bg,
+            child: art == null
+                ? const SizedBox.expand()
+                : Image.network(
+                    art,
+                    fit: BoxFit.cover,
+                    cacheWidth: 900,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) => const SizedBox.expand(),
+                  ),
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0, 0.2, 0.5, 0.75, 1],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.5),
+                    Colors.transparent,
+                    Colors.transparent,
+                    bg.withValues(alpha: 0.72),
+                    bg.withValues(alpha: 0.97),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 20,
+          right: 20,
+          bottom: 24,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                card.title.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ReelMetadataLine(item: item, year: card.best.year, fontSize: 14),
+              const SizedBox(height: 10),
+              _Extras(controller: controller, slot: slot, held: held, tv: false, onReplay: onReplay),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: onWatch,
+                    icon: const Icon(Symbols.tv_rounded),
+                    label: const Text('Watch on TV'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onSave,
+                    icon: const Icon(Symbols.bookmark_add_rounded),
+                    label: const Text('Save'),
+                  ),
+                  if (onRemote != null)
+                    OutlinedButton.icon(
+                      onPressed: onRemote,
+                      icon: const Icon(Symbols.settings_remote_rounded),
+                      label: const Text('On TV'),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -156,267 +227,169 @@ class ReelCardView extends StatelessWidget {
   }
 }
 
-class _Caption extends StatelessWidget {
-  const _Caption({
-    super.key,
+/// The spotlight's metadata line (ratings with their badges, certificate,
+/// length, year) for the phone card, where there is no spotlight.
+class ReelMetadataLine extends StatelessWidget {
+  const ReelMetadataLine({super.key, required this.item, this.year, required this.fontSize});
+
+  final MediaItem? item;
+  final int? year;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      color: Theme.of(context).colorScheme.onSurface,
+      fontSize: fontSize,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.1,
+    );
+    final m = item;
+    final parts = <MetadataLinePart>[
+      if (m != null && mediaRatingsFor(m).isNotEmpty) MetadataLineRatings(mediaRatingsFor(m), dropPriority: 4),
+      if (m?.contentRating case final r?) MetadataLineText(formatContentRating(r), dropPriority: 2),
+      if (m?.durationMs case final d?) MetadataLineText(formatDurationTextual(d), dropPriority: 1),
+      if ((m?.year ?? year) case final y?) MetadataLineText('$y', dropPriority: 0),
+    ];
+    if (parts.isEmpty) return const SizedBox.shrink();
+    return FittedMetadataLine(textStyle: style, parts: parts, ratingIconSize: fontSize, ratingSpacing: 4);
+  }
+}
+
+/// What the Reel adds under the title block: its labels (deck chip, seen,
+/// clip kind), the why line, the theme credit, Replay, and the TV key hints.
+class _Extras extends StatelessWidget {
+  const _Extras({
     required this.controller,
     required this.slot,
-    required this.scale,
-    required this.tv,
     required this.held,
+    required this.tv,
     required this.onReplay,
-    this.onWatch,
-    this.onSave,
-    this.onRemote,
   });
 
   final ReelController controller;
   final ReelSlot slot;
-  final double scale;
-  final bool tv;
   final bool held;
+  final bool tv;
   final VoidCallback onReplay;
-  final VoidCallback? onWatch;
-  final VoidCallback? onSave;
-  final VoidCallback? onRemote;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scale = tv ? TvLayoutConstants.scaleOf(context) : 1.0;
     final card = slot.card!;
-    final f = card.facts;
-    final facts = [if (card.best.year != null) '${card.best.year}', ?f.cardLine(compact: true), ?f.lengthLine()];
-    final badge = f.seen.badge;
-    final chips = [
-      ?card.chip,
-      if (badge != null && controller.deck.keepsSeen) badge,
-      if (slot.clip != null) slot.clip!.label,
-    ];
-    return _Reveal(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (chips.isNotEmpty)
-            Wrap(
-              spacing: 8 * scale,
-              children: [for (final c in chips) _Chip(text: c, scale: scale)],
-            ),
+    final badge = card.facts.seen.badge;
+    final bodySize = (tv ? 18 : 15) * scale;
+    return Column(
+      key: ValueKey('extras:${card.id}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            if (slot.clip != null)
+              StatChip(
+                icon: slot.clip!.source.origin == ClipOrigin.animeTheme
+                    ? Symbols.music_note_rounded
+                    : Symbols.movie_rounded,
+                label: slot.clip!.label,
+              ),
+            if (card.chip case final chip?) StatChip(label: chip),
+            if (badge != null && controller.deck.keepsSeen) StatChip(icon: Symbols.check_rounded, label: badge),
+            if (slot.clip?.source.origin == ClipOrigin.animeTheme)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Theme via AnimeThemes',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+          ],
+        ),
+        if (card.why case final why?) ...[
           SizedBox(height: 8 * scale),
           Text(
-            card.title.title,
+            why,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: ReelInk.paper,
-              fontSize: (tv ? 40 : 30) * scale,
-              height: 1.02,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.6,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
+              fontSize: bodySize,
             ),
           ),
-          SizedBox(height: 6 * scale),
-          Text(
-            facts.join('  ·  '),
-            style: TextStyle(color: ReelInk.dim, fontSize: (tv ? 15 : 14) * scale, letterSpacing: 0.4),
-          ),
-          if (card.why != null) ...[
-            SizedBox(height: 10 * scale),
-            Text(
-              card.why!,
-              maxLines: 2,
-              style: TextStyle(
-                color: ReelInk.paper,
-                fontSize: (tv ? 17 : 15) * scale,
-                fontStyle: FontStyle.italic,
-                height: 1.3,
-              ),
-            ),
-          ],
-          if (slot.clip?.source.origin == ClipOrigin.animeTheme) ...[
-            SizedBox(height: 6 * scale),
-            Text(
-              'Theme via AnimeThemes',
-              style: TextStyle(color: ReelInk.dim, fontSize: 11 * scale, letterSpacing: 0.6),
-            ),
-          ],
-          if (held) ...[
-            SizedBox(height: 14 * scale),
-            _Pill(
-              label: 'Replay',
-              icon: Icons.replay_rounded,
-              scale: scale,
-              primary: true,
-              onTap: onReplay,
-              autofocus: tv,
-            ),
-          ],
-          if (!tv) ...[
-            SizedBox(height: 16 * scale),
-            Row(
-              children: [
-                _Pill(label: 'Watch on TV', icon: Icons.tv_rounded, scale: scale, primary: true, onTap: onWatch),
-                const SizedBox(width: 10),
-                _Pill(label: 'Save', icon: Icons.bookmark_add_outlined, scale: scale, onTap: onSave),
-                if (onRemote != null) ...[
-                  const SizedBox(width: 10),
-                  _Pill(label: 'On TV', icon: Icons.settings_remote_rounded, scale: scale, onTap: onRemote),
-                ],
-              ],
-            ),
-          ] else
-            Padding(
-              padding: EdgeInsets.only(top: 14 * scale),
-              child: Text(
-                'OK  watch    ↓  next    →  next deck    hold OK  more',
-                style: TextStyle(color: ReelInk.dim.withValues(alpha: 0.55), fontSize: 12 * scale, letterSpacing: 1.1),
-              ),
-            ),
         ],
+        if (held) ...[
+          SizedBox(height: 10 * scale),
+          FilledButton.icon(
+            // The Reel's own focus node keeps the keys; OK replays here.
+            onPressed: onReplay,
+            icon: const Icon(Symbols.replay_rounded),
+            label: const Text('Replay'),
+          ),
+        ],
+        if (tv) ...[
+          SizedBox(height: 10 * scale),
+          Text(
+            // OK replays a held clip (ReelScreen's key map).
+            '${held ? 'OK replay' : 'OK watch'}  ·  ↓ next  ·  → next deck  ·  hold OK for more',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 14 * scale,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// An empty deck or the end of one.
+class ReelMessage extends StatelessWidget {
+  const ReelMessage({super.key, required this.icon, required this.title, required this.body});
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      color: theme.scaffoldBackgroundColor,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 48, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(height: 16),
+            Text(title, textAlign: TextAlign.center, style: theme.textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Text(
+              body,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _Chip extends StatelessWidget {
-  const _Chip({required this.text, required this.scale});
-
-  final String text;
-  final double scale;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: EdgeInsets.symmetric(horizontal: 9 * scale, vertical: 3 * scale),
-    decoration: BoxDecoration(
-      border: Border.all(color: ReelInk.lamp.withValues(alpha: 0.85), width: 1),
-      borderRadius: BorderRadius.circular(3),
-    ),
-    child: Text(
-      text.toUpperCase(),
-      style: TextStyle(color: ReelInk.lamp, fontSize: 11 * scale, fontWeight: FontWeight.w700, letterSpacing: 1.4),
-    ),
-  );
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.label,
-    required this.icon,
-    required this.scale,
-    this.primary = false,
-    this.onTap,
-    this.autofocus = false,
-  });
-
-  final String label;
-  final IconData icon;
-  final double scale;
-  final bool primary;
-  final VoidCallback? onTap;
-  final bool autofocus;
-
-  @override
-  Widget build(BuildContext context) => FilledButton.icon(
-    autofocus: autofocus,
-    onPressed: onTap,
-    icon: Icon(icon, size: 18 * scale),
-    label: Text(label),
-    style: FilledButton.styleFrom(
-      backgroundColor: primary ? ReelInk.lamp : const Color(0x33F6F1E7),
-      foregroundColor: primary ? ReelInk.booth : ReelInk.paper,
-      padding: EdgeInsets.symmetric(horizontal: 16 * scale, vertical: 10 * scale),
-      textStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 14 * scale),
-      shape: const StadiumBorder(),
-    ),
-  );
-}
-
-/// A soft rise-and-fade when a card's text arrives.
-class _Reveal extends StatelessWidget {
-  const _Reveal({super.key, required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
-    tween: Tween(begin: 0, end: 1),
-    duration: const Duration(milliseconds: 420),
-    curve: Curves.easeOutCubic,
-    builder: (context, t, child) => Opacity(
-      opacity: t,
-      child: Transform.translate(offset: Offset(0, (1 - t) * 14), child: child),
-    ),
-    child: child,
-  );
-}
-
-class _Message extends StatelessWidget {
-  const _Message({required this.title, required this.body});
-
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) => ColoredBox(
-    color: ReelInk.booth,
-    child: Center(
-      child: _Reveal(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 2, color: ReelInk.lamp),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: ReelInk.paper, fontSize: 28, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 10),
-            Text(body, style: const TextStyle(color: ReelInk.dim, fontSize: 15)),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-/// Loading: a dark booth with the lamp warming up.
+/// Loading, as everywhere else in the app.
 class ReelCurtain extends StatelessWidget {
-  const ReelCurtain({super.key, required this.label});
-
-  final String label;
+  const ReelCurtain({super.key});
 
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: ReelInk.booth,
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.2, end: 1),
-            duration: const Duration(milliseconds: 900),
-            curve: Curves.easeInOut,
-            builder: (context, t, _) => Container(
-              width: 64 * t,
-              height: 2,
-              decoration: BoxDecoration(
-                color: ReelInk.lamp,
-                boxShadow: [BoxShadow(color: ReelInk.lamp.withValues(alpha: 0.6 * t), blurRadius: 18)],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            label.toUpperCase(),
-            style: const TextStyle(color: ReelInk.dim, fontSize: 12, letterSpacing: 3.2, fontWeight: FontWeight.w600),
-          ),
-        ],
-      ),
-    ),
+    color: Theme.of(context).scaffoldBackgroundColor,
+    child: const Center(child: CircularProgressIndicator()),
   );
 }
 
-/// The deck name for 1.5 s after a change, like a channel number.
+/// The deck name for 1.5 s after a change, as an app chip.
 class ReelDeckStrip extends StatelessWidget {
   const ReelDeckStrip({super.key, required this.controller});
 
@@ -425,79 +398,34 @@ class ReelDeckStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<String?>(
     valueListenable: controller.deckStrip,
-    builder: (context, name, _) => Positioned(
-      top: 36,
-      right: 40,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
-        child: name == null
-            ? const SizedBox.shrink()
-            : Container(
-                key: ValueKey(name),
-                padding: const EdgeInsets.fromLTRB(14, 8, 16, 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xCC0B0A09),
-                  border: const Border(left: BorderSide(color: ReelInk.lamp, width: 3)),
-                  borderRadius: BorderRadius.circular(2),
+    builder: (context, name, _) {
+      final theme = Theme.of(context);
+      return Positioned(
+        top: 36,
+        right: 40,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          child: name == null
+              ? const SizedBox.shrink()
+              : Container(
+                  key: ValueKey(name),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Symbols.movie_rounded, size: 20, color: theme.colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Text(name, style: theme.textTheme.titleMedium),
+                    ],
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      (controller.deckIndex + 1).toString().padLeft(2, '0'),
-                      style: const TextStyle(
-                        color: ReelInk.lamp,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        fontFeatures: [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      name.toUpperCase(),
-                      style: const TextStyle(
-                        color: ReelInk.paper,
-                        fontSize: 14,
-                        letterSpacing: 2,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-      ),
-    ),
-  );
-}
-
-/// One-line confirmations ("On the TV tonight").
-class ReelToast extends StatelessWidget {
-  const ReelToast({super.key, required this.controller});
-
-  final ReelController controller;
-
-  @override
-  Widget build(BuildContext context) => ValueListenableBuilder<String?>(
-    valueListenable: controller.toast,
-    builder: (context, text, _) => Positioned(
-      top: 36,
-      left: 0,
-      right: 0,
-      child: Center(
-        child: AnimatedOpacity(
-          opacity: text == null ? 0 : 1,
-          duration: const Duration(milliseconds: 200),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            decoration: BoxDecoration(color: ReelInk.lamp, borderRadius: BorderRadius.circular(40)),
-            child: Text(
-              text ?? '',
-              style: const TextStyle(color: ReelInk.booth, fontWeight: FontWeight.w800, fontSize: 14),
-            ),
-          ),
         ),
-      ),
-    ),
+      );
+    },
   );
 }
 
@@ -524,14 +452,6 @@ class ReelDeckChips extends StatelessWidget {
               label: Text(d.name, maxLines: 1, overflow: TextOverflow.ellipsis),
               selected: i == controller.deckIndex,
               onSelected: (_) => controller.openDeck(d.id),
-              selectedColor: ReelInk.lamp,
-              backgroundColor: const Color(0x660B0A09),
-              labelStyle: TextStyle(
-                color: i == controller.deckIndex ? ReelInk.booth : ReelInk.paper,
-                fontWeight: FontWeight.w700,
-              ),
-              side: BorderSide.none,
-              showCheckmark: false,
             ),
           ),
       ],

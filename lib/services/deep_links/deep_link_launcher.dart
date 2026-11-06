@@ -22,6 +22,7 @@ import '../../utils/video_player_navigation.dart';
 import '../catalog/plex_catalog_source.dart';
 import '../data_aggregation_service.dart';
 import '../media_list_playback_launcher.dart';
+import '../reel_probe.dart';
 import 'deep_link.dart';
 
 /// How long a link waits for the server it needs to come online, e.g. while
@@ -34,6 +35,10 @@ Future<void> launchDeepLink(BuildContext context, DeepLink link, {required bool 
   switch (link) {
     case OpenLink() || ExternalPlayerReturnLink():
       return;
+    case ReelLink(:final probe) when probe == 'coverage':
+      await ReelProbe.run(context);
+    case ReelLink(:final probe) when probe == 'watchstate':
+      await ReelProbe.watchState(context);
     case ReelLink(:final deck):
       // Fork: the shell owns the Reel tab.
       ReelScreen.open(context, deck: deck);

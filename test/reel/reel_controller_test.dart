@@ -212,6 +212,21 @@ void main() {
     c.dispose();
   });
 
+  test('a new visit starts with clips again after memory pressure', () async {
+    final c = make();
+    await c.start();
+    await c.trimMemory(severe: true);
+    expect(c.memoryLevel, 2);
+    await c.suspend();
+    final made = engines;
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.memoryLevel, 0);
+    expect(engines, greaterThan(made), reason: 'the clip core is rebuilt');
+    expect(engine.calls.where((x) => x.startsWith('open ')), isNotEmpty);
+    c.dispose();
+  });
+
   test('the On TV state carries image paths, never a server URL', () async {
     final c = make();
     await c.start();

@@ -46,6 +46,10 @@ class TvSpotlightBackground extends StatelessWidget {
   /// Optional caller-owned fact appended to the existing metadata line.
   final Widget? metadataTrailing;
 
+  /// Fork (The Reel): false fades the artwork out so a video playing behind
+  /// Flutter shows through; the scrims lighten and the info block stays.
+  final bool showArtwork;
+
   const TvSpotlightBackground({
     super.key,
     required this.item,
@@ -60,6 +64,7 @@ class TvSpotlightBackground extends StatelessWidget {
     this.allowNetwork = true,
     this.condensed = false,
     this.metadataTrailing,
+    this.showArtwork = true,
   });
 
   double _scale(BuildContext context) => TvLayoutConstants.scaleOf(context);
@@ -98,11 +103,20 @@ class TvSpotlightBackground extends StatelessWidget {
         return Stack(
           fit: StackFit.expand,
           children: [
-            RepaintBoundary(
-              child: cornerBackdrop ? _buildCornerBackdrop(backdropSize, backdrop) : blurArtwork(backdrop),
+            AnimatedOpacity(
+              opacity: showArtwork ? 1 : 0,
+              duration: DevicePerformance.reducedDuration(const Duration(milliseconds: 320)),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  RepaintBoundary(
+                    child: cornerBackdrop ? _buildCornerBackdrop(backdropSize, backdrop) : blurArtwork(backdrop),
+                  ),
+                  // A light overall dim so busy artwork never competes with text.
+                  const ColoredBox(color: Color(0x38000000)),
+                ],
+              ),
             ),
-            // A light overall dim so busy artwork never competes with text.
-            const ColoredBox(color: Color(0x38000000)),
             _buildHorizontalScrim(bgColor),
             RasterizedGradient(
               gradient: LinearGradient(
@@ -214,11 +228,12 @@ class TvSpotlightBackground extends StatelessWidget {
       gradient: LinearGradient(
         begin: Alignment.centerLeft,
         end: Alignment.centerRight,
-        // Dark behind the title and summary column, clear by ~85% across.
+        // Dark behind the title and summary column, clear by ~85% across
+        // (lighter over a video, which needs its frame).
         colors: [
-          bgColor.withValues(alpha: 0.94),
-          bgColor.withValues(alpha: 0.78),
-          bgColor.withValues(alpha: 0.3),
+          bgColor.withValues(alpha: showArtwork ? 0.94 : 0.8),
+          bgColor.withValues(alpha: showArtwork ? 0.78 : 0.5),
+          bgColor.withValues(alpha: showArtwork ? 0.3 : 0.1),
           Colors.transparent,
         ],
         stops: const [0.0, 0.36, 0.62, 0.85],

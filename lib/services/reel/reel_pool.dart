@@ -182,7 +182,7 @@ Choose about $target candidates and put them in the order you think they would m
 - Ratings are labelled with their source; IMDb with its vote count is the most reliable. Few votes means unproven. "Plex audience (source unknown)" is a weaker signal.
 - "skipped quickly in the Reel lately" is a fact, not a ban: show such titles sparingly when an equally good fresh one exists.
 - Kids' and family titles only when their own history shows they watch them.
-- why: optional, at most 16 words, about why THEY would like it. It must name one anchor from that candidate's evidence ("similar to …" titles or "from their ask …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
+- why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence ("similar to …" titles or "from their ask …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
 - anchor: the exact evidence title or ask your why line names.
 - cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.''';
 

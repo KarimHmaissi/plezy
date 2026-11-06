@@ -2837,9 +2837,14 @@ class ExoPlayerCore(private val activity: Activity) :
 
   private fun setCurrentMediaSource(player: ExoPlayer, uri: String, positionMs: Long) {
     if (clipMode) {
-      val preloaded = preloadItems[uri]?.let { preloadManager?.getMediaSource(it) }
+      val item = preloadItems[uri]
+      val preloaded = item?.let { preloadManager?.getMediaSource(it) }
       emitLog("info", "clip", "Open clip: preloaded=${preloaded != null}")
-      if (preloaded != null) {
+      if (item != null && preloaded != null) {
+        // The preloaded item was built before this open, so its mediaId is "clip:N", not the
+        // generation; map it, or every generation-gated event (first frame, decoder checks) for
+        // it is dropped.
+        clipGenerations[item.mediaId] = currentMediaGeneration
         player.setMediaSource(preloaded, positionMs)
         return
       }
@@ -2900,7 +2905,8 @@ class ExoPlayerCore(private val activity: Activity) :
     val timeline = eventTime.timeline
     val windowIndex = eventTime.windowIndex
     if (windowIndex !in 0 until timeline.windowCount) return null
-    return timeline.getWindow(windowIndex, Timeline.Window()).mediaItem.mediaId.toIntOrNull()
+    val mediaId = timeline.getWindow(windowIndex, Timeline.Window()).mediaItem.mediaId
+    return mediaId.toIntOrNull() ?: clipGenerations[mediaId]
   }
 
   private fun requestFallbackForUnsupportedTracks(tracks: Tracks, mediaGeneration: Int) {
@@ -4394,6 +4400,9 @@ class ExoPlayerCore(private val activity: Activity) :
    * Clip mode: buffer the first seconds of [uri] for the next card, dropping any older
    * preload (only the next card is ever held). No-op outside clip mode.
    */
+  /** Clip mode: the generation each preloaded item was opened under (its mediaId is "clip:N"). */
+  private val clipGenerations = HashMap<String, Int>()
+
   fun preloadClip(uri: String) {
     val manager = preloadManager ?: return
     if (!clipMode || preloadItems.containsKey(uri)) return
@@ -4412,7 +4421,10 @@ class ExoPlayerCore(private val activity: Activity) :
     val manager = preloadManager ?: return
     val drop = preloadItems.keys.filter { it != keep }
     for (u in drop) {
-      preloadItems.remove(u)?.let { manager.remove(it) }
+      preloadItems.remove(u)?.let {
+        manager.remove(it)
+        clipGenerations.remove(it.mediaId)
+      }
     }
   }
 

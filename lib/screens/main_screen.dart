@@ -2364,31 +2364,39 @@ class _MainScreenState extends State<MainScreen>
                             top: 0,
                             bottom: 0,
                             left: 0,
-                            child: FocusScope(
-                              node: _sidebarFocusScope,
-                              child: SideNavigationRail(
-                                key: _sideNavKey,
-                                selectedTab: _currentTab,
-                                selectedLibraryKey: _selectedLibraryGlobalKey,
-                                isOfflineMode: _isOffline,
-                                isSidebarFocused: _isSidebarFocused,
-                                alwaysExpanded: alwaysExpanded,
-                                isReconnecting: _isReconnecting,
-                                onDestinationSelected: (tab) {
-                                  final restorePreviousFocus = tab == _currentTab;
-                                  _selectTab(tab);
-                                  _focusContent(restorePreviousFocus: restorePreviousFocus);
-                                },
-                                onLibrarySelected: (key) {
-                                  _selectLibrary(key);
-                                  _focusContent(restorePreviousFocus: false);
-                                },
-                                onNavigateToContent: _focusContent,
-                                onFloatingPanelChanged: (floating) {
-                                  if (_isSidebarFloatingPanel == floating) return;
-                                  setState(() => _isSidebarFloatingPanel = floating);
-                                },
-                                onReconnect: _triggerReconnect,
+                            // Fork: the rail paints its own ground while the
+                            // Reel's video shows through the shell.
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: ReelScreen.showing,
+                              builder: (context, reel, rail) => reel
+                                  ? ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: rail)
+                                  : rail!,
+                              child: FocusScope(
+                                node: _sidebarFocusScope,
+                                child: SideNavigationRail(
+                                  key: _sideNavKey,
+                                  selectedTab: _currentTab,
+                                  selectedLibraryKey: _selectedLibraryGlobalKey,
+                                  isOfflineMode: _isOffline,
+                                  isSidebarFocused: _isSidebarFocused,
+                                  alwaysExpanded: alwaysExpanded,
+                                  isReconnecting: _isReconnecting,
+                                  onDestinationSelected: (tab) {
+                                    final restorePreviousFocus = tab == _currentTab;
+                                    _selectTab(tab);
+                                    _focusContent(restorePreviousFocus: restorePreviousFocus);
+                                  },
+                                  onLibrarySelected: (key) {
+                                    _selectLibrary(key);
+                                    _focusContent(restorePreviousFocus: false);
+                                  },
+                                  onNavigateToContent: _focusContent,
+                                  onFloatingPanelChanged: (floating) {
+                                    if (_isSidebarFloatingPanel == floating) return;
+                                    setState(() => _isSidebarFloatingPanel = floating);
+                                  },
+                                  onReconnect: _triggerReconnect,
+                                ),
                               ),
                             ),
                           ),

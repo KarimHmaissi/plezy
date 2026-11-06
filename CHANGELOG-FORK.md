@@ -113,16 +113,19 @@ Details of each are in the dated entries below.
   drawer).
 - Decks, like channels: **For You** (one daily Sonnet build over the taste
   pool, code order meanwhile), **Anime openings**, **Most Watched** (the
-  Trakt charts, raw), and every saved AI answer (**Reel it** on the answer's
+  Trakt charts, raw; offered only while Trakt is connected), and every saved AI answer (**Reel it** on the answer's
   menu, on the AI tab or on Home).
 - TV: Up/Down next or previous card, Left/Right another deck, OK = Watch,
-  long OK or ≡ = Save / Not for me / Spoiled me / Seen it and the deck list.
+  long OK or ≡ (or a gamepad's X) = Save / Not for me / Spoiled me / Seen it
+  and the deck list, in the app's own menu sheet. The TV card is Home's
+  spotlight (logo, ratings line, summary) over the playing clip, with the
+  app's chips, buttons and snackbars: no look of its own.
   Phone: swipe, double-tap to Save, long-press for the sheet.
 - **Save** is one action: the title waits in a new Home row, "From the
   Reel" (seated once at the top, 3 days, at most 3), and goes to the Plex
   watchlist.
 - **On TV mode** (Fold): the phone drives the Shield's Reel (current card and
-  the next three, swipe to step, Watch / Save / Not for me / Pause) and
+  the next three, swipe the card to step, Watch / Save / Not for me / Pause) and
   plays nothing. Five new companion commands, appended so older peers ignore
   them.
 - Clips play on one ExoPlayer core in clip mode (`DefaultPreloadManager`,
@@ -133,6 +136,10 @@ Details of each are in the dated entries below.
 - `plezy://reel[?deck=<id>]` opens the Reel (adb testing now, Arc later).
 - Memory: while the Reel plays the brain's indexer rests and its ONNX session
   is released; memory pressure first drops the preload, then shows stills.
+  Each new visit starts with clips again.
+- `plezy://reel?probe=coverage|watchstate` (debug): the measure-day probes
+  (clip coverage across 50 shows, and a card's Plex watch state) write
+  counts to the log, never titles or addresses.
 - Fork database schema 3: `ReelEvents` and `ReelCache`. Picks and vetoes are
   synced settings (`reel.picks`, `reel.vetoes`).
 

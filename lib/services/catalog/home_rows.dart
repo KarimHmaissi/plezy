@@ -213,6 +213,7 @@ class HomeRowResolver {
             appLogger.d('Home: Reel pick unavailable', error: e);
           }
         }
+        appLogger.i('[ReelSave] Home row: ${items.length} saved titles found');
       default:
         return null;
     }

@@ -146,6 +146,10 @@ class ReelController extends ChangeNotifier {
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
     _active = true;
+    // Each visit starts at the top of the degrade ladder: pressure from an
+    // earlier visit (or while the Reel was hidden) has usually passed, and a
+    // fresh callback steps it down again.
+    memoryLevel = 0;
     if (deckId != null) {
       final i = await _deckIndex(deckId);
       if (i >= 0) _deck = i;
@@ -171,7 +175,13 @@ class ReelController extends ChangeNotifier {
     if (have != null) return have;
     final f = _loading[d.id] ??= () async {
       try {
-        final loaded = await finishDeck(d, await d.load(), store: store, hasClip: (_) => true);
+        final sw = Stopwatch()..start();
+        final raw = await d.load();
+        final loadMs = sw.elapsedMilliseconds;
+        final loaded = await finishDeck(d, raw, store: store, hasClip: (_) => true);
+        appLogger.i(
+          '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
+        );
         _cards[d.id] = loaded;
         return loaded;
       } catch (e) {

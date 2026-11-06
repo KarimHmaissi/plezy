@@ -25,6 +25,7 @@ import 'brain/history_brain.dart';
 import 'catalog/home_pins.dart';
 import 'catalog/home_rows.dart';
 import 'catalog/library_watchlist_candidates.dart';
+import 'catalog/trakt_lists_catalog_source.dart';
 import 'customisation/customisation_store.dart';
 import 'library_index/library_index.dart';
 import 'multi_server_manager.dart';
@@ -54,7 +55,7 @@ abstract final class ReelApp {
     final store = ReelStore.instance;
     final facts = IndexTitleFactsSource.app();
     final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
-    final resolver = ClipResolver(servers: PlexReelServers(servers), store: store, aniList: _aniList);
+    final resolver = resolverFor(servers, store);
     final pool = ReelPool(store: store, library: library, model: _sonnet);
     final media = _AppReelMedia(servers);
     final resolverRows = catalog == null
@@ -63,11 +64,16 @@ abstract final class ReelApp {
 
     Future<List<MediaItem>> chart(String id) async {
       final r = resolverRows;
-      if (r == null) return const [];
+      if (r == null) {
+        appLogger.i('[ReelDeck] chart $id: no catalogue sources');
+        return const [];
+      }
       try {
-        return (await r.fetch((id: id, title: '', sources: const <String>[])))?.items ?? const [];
+        final hub = await r.fetch((id: id, title: '', sources: const <String>[]));
+        appLogger.i('[ReelDeck] chart $id: ${hub == null ? 'no Trakt Lists source' : '${hub.items.length} items'}');
+        return hub?.items ?? const [];
       } catch (e) {
-        appLogger.d('Reel: chart $id unavailable', error: e);
+        appLogger.i('[ReelDeck] chart $id unavailable (${e.runtimeType})');
         return const [];
       }
     }
@@ -80,11 +86,14 @@ abstract final class ReelApp {
         facts: () => forYouFacts(store: store),
       ),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
-      mostWatchedDeck(
-        library: library,
-        films: () => chart(HomeRowIds.traktLists('chart:watched:movies')),
-        shows: () => chart(HomeRowIds.traktLists('chart:watched:shows')),
-      ),
+      // The raw charts come from Explore's Trakt Lists source; without Trakt
+      // the deck would only ever be empty, so it isn't offered.
+      if (catalog?.connectedSources.any((s) => s is TraktListsCatalogSource) ?? false)
+        mostWatchedDeck(
+          library: library,
+          films: () => chart(HomeRowIds.traktLists('chart:watched:movies')),
+          shows: () => chart(HomeRowIds.traktLists('chart:watched:shows')),
+        ),
       for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
     ];
 
@@ -183,14 +192,22 @@ abstract final class ReelApp {
   /// The first Save puts "From the Reel" at the top of Home, once.
   static Future<void> _seatHomeRow() async {
     final settings = await Customisation.store;
-    if (await settings.readSetting(homeRowSeatedKey) != null) return;
-    await HomePinsController.instance.insertFirst((
+    if (await settings.readSetting(homeRowSeatedKey) != null) {
+      appLogger.i('[ReelSave] Home row seated before; left where the user keeps it');
+      return;
+    }
+    final added = await HomePinsController.instance.insertFirst((
       id: HomeRowIds.reelPicks,
       title: 'From the Reel',
       sources: const <String>[],
     ));
     await settings.writeSetting(homeRowSeatedKey, '1');
+    appLogger.i('[ReelSave] Home row ${added ? 'seated first' : 'already on Home'}');
   }
+
+  /// The clip resolver over the app's servers (also the measure-day probe).
+  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store) =>
+      ClipResolver(servers: PlexReelServers(servers), store: store, aniList: _aniList);
 
   /// Answers worth a deck: the user's own asks, not Tonight or the briefing.
   static Future<List<AiHistoryEntry>> _answers() async {

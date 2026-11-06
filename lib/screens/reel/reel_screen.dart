@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../focus/dpad_navigator.dart';
 import '../../focus/dpad_select_long_press_controller.dart';
 import '../../focus/transport_keys.dart';
 import '../../mixins/refreshable.dart';
@@ -13,6 +14,7 @@ import '../../providers/companion_remote_provider.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../utils/platform_detector.dart';
+import '../../utils/snackbar_helper.dart';
 import 'reel_card_view.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
@@ -40,6 +42,9 @@ class ReelScreen extends StatefulWidget {
   /// first so the tab is what shows.
   /// The Reel screen that is showing, for On TV mode's commands.
   static ReelScreenState? _live;
+
+  /// The showing Reel's session (the measure-day probe reads its card).
+  static ReelController? get liveController => _live?._controller;
 
   /// Memory pressure (main.dart): the showing Reel steps down its ladder.
   static void trimMemory({bool severe = false}) {
@@ -97,6 +102,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     ReelScreen.requestedDeck.removeListener(_takeRequest);
     ReelScreen.showing.value = false;
     _controller?.removeListener(_onChanged);
+    _controller?.toast.removeListener(_onToast);
     _controller?.dispose();
     _focus.dispose();
     _longPress.dispose();
@@ -113,8 +119,15 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         return c;
       }
       setState(() => _controller = c..addListener(_onChanged));
+      c.toast.addListener(_onToast);
       return c;
     });
+  }
+
+  /// Confirmations ("On the TV tonight") as the app's own snackbar.
+  void _onToast() {
+    final text = _controller?.toast.value;
+    if (mounted && text != null) showAppSnackBar(context, text);
   }
 
   void _onChanged() {
@@ -282,7 +295,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       unawaited(c.clips.seekBy(const Duration(seconds: 10)));
     } else if (key == LogicalKeyboardKey.mediaRewind) {
       unawaited(c.clips.seekBy(const Duration(seconds: -10)));
-    } else if (key == LogicalKeyboardKey.contextMenu) {
+    } else if (key.isContextMenuKey) {
       unawaited(_openSheet());
     } else {
       // Back and everything else go on to the shell (Back → the rail).
@@ -300,7 +313,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onKeyEvent: _onKey,
       child: ColoredBox(
         color: Colors.transparent,
-        child: c == null ? const ReelCurtain(label: 'The Reel') : (_isTv ? _tv(c) : _phone(c)),
+        child: c == null ? const ReelCurtain() : (_isTv ? _tv(c) : _phone(c)),
       ),
     );
   }
@@ -310,7 +323,6 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     children: [
       ReelCardView(controller: c, slot: c.current, tv: true, onReplay: c.replay),
       ReelDeckStrip(controller: c),
-      ReelToast(controller: c),
     ],
   );
 
@@ -359,7 +371,6 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         ),
         ReelDeckChips(controller: c),
         ReelDeckStrip(controller: c),
-        ReelToast(controller: c),
       ],
     );
   }
