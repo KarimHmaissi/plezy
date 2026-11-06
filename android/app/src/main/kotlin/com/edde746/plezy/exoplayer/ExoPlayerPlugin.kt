@@ -239,6 +239,11 @@ class ExoPlayerPlugin :
       "initialize" -> handleInitialize(call, result)
       "dispose" -> handleDispose(call, result)
       "open" -> handleOpen(call, result)
+      "preloadClip" -> handlePreloadClip(call, result)
+      "clearPreloads" -> runOnMain {
+        playerCore?.clearPreloads()
+        result.success(null)
+      }
       "play" -> handlePlay(result)
       "pause" -> handlePause(result)
       "stop" -> handleStop(result)
@@ -310,6 +315,8 @@ class ExoPlayerPlugin :
     // ExoPlayer-only: mpv's read-ahead is owned by the mpv.conf editor, so there is no
     // fallback replay for this one. Resolved in the core; unrecognised means Auto (#1816).
     val bufferTier = call.argument<String>("bufferTier") ?: "auto"
+    // The Reel's clip core: short buffer + preload manager (ExoPlayerCore.clipMode).
+    val clipMode = call.argument<Boolean>("clipMode") ?: false
     // Seed the request here rather than waiting for Dart's separate setAudioPassthrough
     // call, so a fallback raised before that arrives still derives audio-spdif correctly.
     audioPassthroughRequested = audioPassthroughEnabled
@@ -352,7 +359,8 @@ class ExoPlayerPlugin :
         val success = core.initialize(
           tunnelingEnabled = tunnelingEnabled,
           audioPassthroughEnabled = audioPassthroughEnabled,
-          bufferTier = bufferTier
+          bufferTier = bufferTier,
+          clipMode = clipMode
         )
         if (!success) {
           if (playerCore === core) playerCore = null
@@ -374,6 +382,18 @@ class ExoPlayerPlugin :
         playerCore = null
         result.error("INIT_FAILED", e.message, null)
       }
+    }
+  }
+
+  private fun handlePreloadClip(call: MethodCall, result: MethodChannel.Result) {
+    val uri = call.argument<String>("uri")
+    if (uri == null) {
+      result.error("INVALID_ARGS", "Missing 'uri'", null)
+      return
+    }
+    runOnMain {
+      playerCore?.preloadClip(uri)
+      result.success(null)
     }
   }
 

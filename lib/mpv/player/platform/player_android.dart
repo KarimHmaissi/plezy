@@ -9,6 +9,12 @@ import '../player_base.dart';
 
 /// Android implementation using ExoPlayer with ASS subtitle support via libass-android.
 class PlayerAndroid extends PlayerBase {
+  /// [clipMode]: the Reel's clip core (short buffer, media3 preload manager,
+  /// PCM out, no tunneling). Set once, before the core initializes.
+  PlayerAndroid({this.clipMode = false});
+
+  final bool clipMode;
+
   static const _methodChannel = MethodChannel('com.plezy/exo_player');
   static const _eventChannel = EventChannel('com.plezy/exo_player/events');
 
@@ -117,6 +123,7 @@ class PlayerAndroid extends PlayerBase {
         'tunnelingEnabled': _tunnelingEnabled,
         'dvConversionMode': _dvConversionMode,
         'audioPassthroughEnabled': _audioPassthroughEnabled,
+        if (clipMode) 'clipMode': true,
         // Cheap (32-bit) TV boxes run the hardware video path a frame behind a GL
         // subtitle overlay; render the ASS one frame earlier there to realign.
         'assVideoLatencyFrames': DevicePerformance.isLowEndHardware ? 1 : 0,
@@ -235,6 +242,20 @@ class PlayerAndroid extends PlayerBase {
       }
       rethrow;
     }
+  }
+
+  /// Clip mode: buffer the first seconds of [uri] for the next card (only
+  /// one preload is held). Initializes the core if needed.
+  Future<void> preloadClip(String uri) async {
+    if (disposed || !clipMode) return;
+    await _ensureInitialized();
+    await invoke('preloadClip', {'uri': uri});
+  }
+
+  /// Clip mode: drop any preloaded next card.
+  Future<void> clearPreloads() async {
+    if (disposed || !clipMode || !initialized) return;
+    await invoke('clearPreloads');
   }
 
   @override

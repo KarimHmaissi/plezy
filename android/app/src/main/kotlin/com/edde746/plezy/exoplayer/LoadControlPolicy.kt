@@ -140,6 +140,23 @@ internal object LoadControlPolicy {
     return maxOf(budget, MIN_TARGET_BYTES.toLong()).toInt()
   }
 
+  /**
+   * The Reel's clip branch: short trailers and openings, so a shallow buffer that starts fast.
+   * Separate on purpose: it never edits [MIN_TARGET_BYTES], [BUFFER_FOR_PLAYBACK_MS] or the
+   * play-start floor the main path's audio-starvation fix (#1618) depends on. The byte target
+   * is a cap, not a reservation.
+   */
+  const val CLIP_MIN_BUFFER_MS = 2_500
+  const val CLIP_MAX_BUFFER_MS = 12_000
+  const val CLIP_BUFFER_FOR_PLAYBACK_MS = 500
+  const val CLIP_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 1_500
+  const val CLIP_TARGET_BYTES = 16 * MIB
+
+  /** How much of the next card the preloader keeps in memory. */
+  const val CLIP_PRELOAD_MS = 3_000L
+
+  fun clipBufferDurations(): BufferDurations = BufferDurations(CLIP_MIN_BUFFER_MS, CLIP_MAX_BUFFER_MS)
+
   /** Seconds of media a budget covers at [bitrateBps], for logs. Null when unknown. */
   fun readAheadSeconds(targetBufferBytes: Int, bitrateBps: Long): Double? {
     if (bitrateBps <= 0L) return null
