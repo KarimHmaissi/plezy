@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
 import '../../focus/dpad_navigator.dart';
@@ -18,6 +19,7 @@ import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_perf.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/settings_service.dart';
+import '../../utils/app_logger.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../services/reel/feed_players.dart';
@@ -33,10 +35,15 @@ import 'reel_sheet.dart';
 /// its player whenever the tab is hidden, a page covers it, or the app goes
 /// to the background.
 class ReelScreen extends StatefulWidget {
-  const ReelScreen({super.key, required this.create});
+  const ReelScreen({super.key, required this.create, this.offline = false});
 
   /// Builds the session from the app's services (`ReelApp.controller`).
   final Future<ReelController> Function(BuildContext context) create;
+
+  /// The app is offline (no server reachable). The tab stays, with a
+  /// message in place of the feed; nothing plays or resolves until it is
+  /// back online.
+  final bool offline;
 
   /// Whether the Reel is the visible tab: the shell goes see-through so the
   /// native video surface behind Flutter shows.
@@ -86,6 +93,14 @@ class ReelScreen extends StatefulWidget {
 class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, TabVisibilityAware, FocusableTab {
   ReelController? _controller;
   Future<ReelController>? _creating;
+
+  /// The last attempt to build the session failed: a message with Retry
+  /// shows instead of a curtain that never lifts.
+  bool _createFailed = false;
+
+  /// TV: the clip was paused (not released) for an `inactive` app, and
+  /// plays on when the app is resumed.
+  bool _heldInactive = false;
   bool _shown = false;
   String? _pendingDeck;
   final FocusNode _focus = FocusNode(debugLabel: 'reel');
@@ -173,15 +188,51 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   Future<ReelController> _ensure() {
     final c = _controller;
     if (c != null) return Future.value(c);
-    return _creating ??= widget.create(context).then((c) {
-      if (!mounted) {
-        c.dispose();
-        return c;
-      }
-      setState(() => _controller = c..addListener(_onChanged));
-      c.toast.addListener(_onToast);
-      return c;
-    });
+    return _creating ??= widget
+        .create(context)
+        .then(
+          (c) {
+            if (!mounted) {
+              c.dispose();
+              return c;
+            }
+            setState(() => _controller = c..addListener(_onChanged));
+            c.toast.addListener(_onToast);
+            return c;
+          },
+          onError: (Object e, StackTrace s) {
+            // A failed build is not kept: the next start (Retry, the tab shown
+            // again, the app resumed) tries again.
+            _creating = null;
+            appLogger.w('[ReelLife] the Reel could not open', error: e);
+            if (mounted) setState(() => _createFailed = true);
+            Error.throwWithStackTrace(e, s);
+          },
+        );
+  }
+
+  /// Retry after a failed open.
+  void _retry() {
+    if (mounted) unawaited(_start());
+  }
+
+  @override
+  void didUpdateWidget(ReelScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.offline == widget.offline || !_shown) return;
+    appLogger.i('[ReelLife] ${widget.offline ? 'offline: suspended' : 'back online'}');
+    if (widget.offline) {
+      _release();
+    } else {
+      unawaited(_start());
+    }
+  }
+
+  /// Stops the card and lets go of every decoder (rebuilt on the next start).
+  void _release() {
+    _heldInactive = false;
+    unawaited(_controller?.suspend());
+    unawaited(_players.releaseAll());
   }
 
   /// Confirmations ("On the TV tonight") as the app's own snackbar.
@@ -203,8 +254,17 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   ReelController? get controller => _controller;
 
   Future<void> _start() async {
-    final c = await _ensure();
-    if (!mounted || !_shown) return;
+    if (widget.offline) return;
+    // Any new attempt (Retry, the tab shown again, back online, resumed)
+    // shows the curtain while it builds.
+    if (_createFailed && mounted) setState(() => _createFailed = false);
+    final ReelController c;
+    try {
+      c = await _ensure();
+    } catch (_) {
+      return; // shown as a message with Retry (_ensure)
+    }
+    if (!mounted || !_shown || widget.offline) return;
     final deck = _pendingDeck;
     _pendingDeck = null;
     if (deck != null && c.active) {
@@ -216,7 +276,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   void _remoteStep(Map<String, dynamic> data) {
     final c = _controller;
-    if (c == null || !_shown) return;
+    if (c == null || !_shown || widget.offline) return;
     final dir = data['dir'];
     final deckDir = data['deckDir'];
     if (dir is int && dir != 0) {
@@ -231,7 +291,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   void _remoteAction(String action) {
     final c = _controller;
-    if (c == null || !_shown) return;
+    if (c == null || !_shown || widget.offline) return;
     unawaited(switch (action) {
       'watch' => _watch(),
       'save' => c.save(),
@@ -256,8 +316,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _shown = false;
     ReelScreen.showing.value = false;
     _perf.detachFrames();
-    unawaited(_controller?.suspend());
-    unawaited(_players.releaseAll());
+    _release();
   }
 
   @override
@@ -265,15 +324,43 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted) _focus.requestFocus();
   }
 
+  /// Android sends `inactive` on `Activity.onPause` (or without window
+  /// focus), then `hidden` and `paused` on `onStop`
+  /// (https://api.flutter.dev/flutter/dart-ui/AppLifecycleState.html).
+  /// Each state is logged so a device session can see which ones the TV's
+  /// screensaver sends.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final c = _controller;
+    appLogger.i(
+      '[ReelLife] app ${state.name} (shown=$_shown, phase=${c?.clips.phase.value.name ?? 'none'}, tv=$_isTv)',
+    );
     if (!_shown) return;
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      unawaited(_controller?.suspend());
-      unawaited(_players.releaseAll());
-    } else if (state == AppLifecycleState.resumed) {
-      unawaited(_start());
+    switch (state) {
+      case AppLifecycleState.paused || AppLifecycleState.hidden || AppLifecycleState.detached:
+        _release();
+      case AppLifecycleState.inactive:
+        // TV: pause without releasing, so a screensaver or an overlay that
+        // only takes focus costs no cold open when it goes.
+        if (_isTv) unawaited(_holdForInactive(c));
+      case AppLifecycleState.resumed:
+        if (_heldInactive) {
+          _heldInactive = false;
+          if (c != null && c.active && c.clips.phase.value == ClipPhase.paused) {
+            unawaited(c.clips.resume());
+            return;
+          }
+        }
+        unawaited(_start());
     }
+  }
+
+  Future<void> _holdForInactive(ReelController? c) async {
+    if (c == null || !c.active || _heldInactive) return;
+    final phase = c.clips.phase.value;
+    if (phase != ClipPhase.playing && phase != ClipPhase.loading) return;
+    _heldInactive = true;
+    await c.clips.pause();
   }
 
   Future<void> _watch({bool onTv = false}) async {
@@ -325,7 +412,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final c = _controller;
-    if (c == null) return KeyEventResult.ignored;
+    if (c == null || widget.offline) {
+      // TV: OK on the failed-open message is its Retry.
+      if (c == null && _createFailed && !widget.offline && event.logicalKey.isSelectKey) {
+        if (event is KeyDownEvent) _retry();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
     final sel = _longPress.handleKeyEvent(
       event,
       isOwnerActive: () => _shown && !_sheetOpen,
@@ -386,8 +480,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onKeyEvent: _onKey,
       child: ColoredBox(
         color: Colors.transparent,
-        child: c == null
-            ? const ReelCurtain()
+        child: widget.offline
+            ? const ReelMessage(
+                icon: Symbols.cloud_off_rounded,
+                title: "You're offline",
+                body: 'The Reel plays from your servers. It picks up again once you are back online.',
+              )
+            : c == null
+            ? (_createFailed ? _failed() : const ReelCurtain())
             : Stack(
                 fit: StackFit.expand,
                 children: [
@@ -401,6 +501,18 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       ),
     );
   }
+
+  /// The session could not be built: say so, with Retry.
+  Widget _failed() => ReelMessage(
+    icon: Symbols.error_outline_rounded,
+    title: "The Reel didn't open",
+    body: _isTv ? 'Press OK to try again.' : 'Something went wrong getting it ready.',
+    action: FilledButton.tonalIcon(
+      onPressed: _retry,
+      icon: const Icon(Symbols.refresh_rounded),
+      label: const Text('Retry'),
+    ),
+  );
 
   /// V2-07: the debug overlay; on the TV it follows the clip core, which is
   /// rebuilt after every release.

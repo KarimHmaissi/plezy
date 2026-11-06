@@ -69,6 +69,7 @@ class ReelController extends ChangeNotifier {
     this.onOpen,
     this.externalClips = false,
     this.memoryRestored,
+    this.onActive,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
@@ -107,6 +108,11 @@ class ReelController extends ChangeNotifier {
   /// tier (`MemoryTrimPolicy.restores`): the only thing that brings the
   /// degrade ladder back to 0.
   final Listenable? memoryRestored;
+
+  /// Told each time the Reel starts playing or stops ([start], [suspend]),
+  /// and once more on [dispose] while it was still active, so whatever
+  /// stepped aside for it (the brain's indexer) is always given back.
+  final void Function(bool active)? onActive;
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -187,6 +193,16 @@ class ReelController extends ChangeNotifier {
   int get index => _cursor[deck.id] ?? 0;
   bool get active => _active;
 
+  void _setActive(bool on) {
+    if (_active == on) return;
+    _active = on;
+    try {
+      onActive?.call(on);
+    } catch (e) {
+      appLogger.w('Reel: active hook failed', error: e);
+    }
+  }
+
   ReelSlot slotAt(int i) {
     final list = cards;
     if (list == null) return const ReelSlot.loading();
@@ -209,7 +225,7 @@ class ReelController extends ChangeNotifier {
 
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
-    _active = true;
+    _setActive(true);
     // The degrade ladder carries over: coming back from Watch or another tab
     // says nothing about memory. Only the policy's restore resets it.
     if (deckId != null) {
@@ -234,7 +250,7 @@ class ReelController extends ChangeNotifier {
   /// Tab hidden, Home pressed or the app paused: stop and release the
   /// player (it is rebuilt on the next start).
   Future<void> suspend() async {
-    _active = false;
+    _setActive(false);
     _generation++;
     await _leaveCard();
     await clips.release();
@@ -756,7 +772,7 @@ class ReelController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _active = false;
+    _setActive(false);
     _generation++;
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);

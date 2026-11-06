@@ -169,12 +169,27 @@ void main() {
     expect([for (final s in cached.shows) s.title], contains('Show A'));
     await cached.removeShow(_show(7, 'Show A'));
     expect([for (final s in cached.shows) s.title], isNot(contains('Show A')));
-    expect([for (final op in sent) (op['op'], op['action'], (op['show'] as Map)['trakt'])], [
-      ('comfortList', 'add', 7),
-      ('comfortList', 'remove', 7),
-    ]);
+    expect(
+      [for (final op in sent) (op['op'], op['action'], (op['show'] as Map)['trakt'])],
+      [('comfortList', 'add', 7), ('comfortList', 'remove', 7)],
+    );
 
     ComfortShowsController.sendMirrorEdit = (_) => false;
     expect(() => cached.addShow(_show(8, 'Show B')), throwsStateError);
+  });
+
+  test('settings read by key prefix: exactly the keys that start with it', () async {
+    final db = ForkDatabase.memory();
+    addTearDown(db.close);
+    final store = LocalCustomisationStore(db);
+    await store.writeSetting('reel.pick.a', '1');
+    await store.writeSetting('reel.pick.b_2', '2');
+    await store.writeSetting('reel.picks', 'old');
+    await store.writeSetting('reel.pick', 'bare');
+    await store.writeSetting('reel.pick/', 'after');
+    await store.writeSetting('reel.veto.a', '3');
+    expect(await store.readSettingsWithPrefix('reel.pick.'), {'reel.pick.a': '1', 'reel.pick.b_2': '2'});
+    expect(await store.readSettingsWithPrefix('reel.veto.'), {'reel.veto.a': '3'});
+    expect(await store.readSettingsWithPrefix('none.'), isEmpty);
   });
 }

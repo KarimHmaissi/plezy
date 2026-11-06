@@ -37,6 +37,7 @@ import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
 import 'reel/reel_decks.dart';
+import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
@@ -137,7 +138,9 @@ abstract final class ReelApp {
         if (plex == null) return false;
         return mutateWatchlistMembership(item.kind, plex, add: true);
       },
-      onSaved: _seatHomeRow,
+      // The TV seats "From the Reel" on its Home; a phone's Save writes
+      // only the pick (see ReelHomeRow).
+      onSaved: () => ReelHomeRow.seat(),
       // A phone on its own data reaches the TV by catching up while
       // connected; a mirroring phone writes to the TV (or can't write).
       reachesTvNow: () =>
@@ -147,6 +150,11 @@ abstract final class ReelApp {
       externalClips: !PlatformDetector.isTV(),
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
+      // While the Reel plays, the brain's indexer rests and its ONNX session
+      // (about 66 MB) is released; it reopens on the next embed. The hook
+      // also fires when the Reel is disposed while playing (V2-60), so the
+      // indexer never stays parked.
+      onActive: (on) => unawaited(HistoryBrain.instance.yieldTo(on)),
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
@@ -158,16 +166,28 @@ abstract final class ReelApp {
       },
     );
     if (remote != null) _publish(controller, remote);
-    // While the Reel plays, the brain's indexer rests and its ONNX session
-    // (about 66 MB) is released; it reopens on the next embed.
-    var yielded = false;
-    controller.addListener(() {
-      if (controller.active == yielded) return;
-      yielded = controller.active;
-      unawaited(HistoryBrain.instance.yieldTo(yielded));
-    });
+    _sweepLater(store);
     return controller;
   }
+
+  /// How long after the Reel opens the daily sweep waits, so it never
+  /// competes with the open's own cache reads.
+  static const Duration sweepDelay = Duration(seconds: 30);
+
+  /// The Reel's cache housekeeping ([ReelStore.sweep]), at most once a day.
+  /// It runs here until the warm start before the tab opens (V2-14) exists.
+  static void _sweepLater(ReelStore store) => Timer(sweepDelay, () async {
+    try {
+      final s = await store.sweep();
+      if (s == null) return;
+      appLogger.i(
+        '[ReelCache] daily sweep: ${s.pools} pool, ${s.days} deck/cursor, '
+        '${s.sources} source rows, ${s.events} events',
+      );
+    } catch (e) {
+      appLogger.w('[ReelCache] daily sweep failed', error: e);
+    }
+  });
 
   /// Sends the current card to a connected phone at once (it just opened
   /// On TV mode).
@@ -200,26 +220,6 @@ abstract final class ReelApp {
     c.clips.phase.addListener(publish);
     c.cardChanged.addListener(publish);
     republish = () => publish(force: true);
-  }
-
-  /// Synced: set once the Reel's Home row has been seated, so removing it in
-  /// Manage Home sticks.
-  static const String homeRowSeatedKey = 'reel.homeRowSeated';
-
-  /// The first Save puts "From the Reel" at the top of Home, once.
-  static Future<void> _seatHomeRow() async {
-    final settings = await Customisation.store;
-    if (await settings.readSetting(homeRowSeatedKey) != null) {
-      appLogger.i('[ReelSave] Home row seated before; left where the user keeps it');
-      return;
-    }
-    final added = await HomePinsController.instance.insertFirst((
-      id: HomeRowIds.reelPicks,
-      title: 'From the Reel',
-      sources: const <String>[],
-    ));
-    await settings.writeSetting(homeRowSeatedKey, '1');
-    appLogger.i('[ReelSave] Home row ${added ? 'seated first' : 'already on Home'}');
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).

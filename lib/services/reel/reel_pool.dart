@@ -53,8 +53,9 @@ class ReelPool {
   static const int maxCandidates = 250;
   static const int target = 90;
 
-  static String dayKey(DateTime d) =>
-      'pool:${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  /// Read for [ReelStore.daysKept] days at most; the daily sweep deletes
+  /// older ones.
+  static String dayKey(DateTime d) => 'pool:${ReelStore.dayStamp(d)}';
 
   /// Today's day key, by this pool's clock.
   String today() => dayKey(_clock());
@@ -68,7 +69,7 @@ class ReelPool {
   /// kept title ids are returned whole.
   Future<List<DeckEntry>?> cachedPool() async {
     final now = _clock();
-    for (var back = 0; back < 3; back++) {
+    for (var back = 0; back < ReelStore.daysKept; back++) {
       final day = now.subtract(Duration(days: back));
       final raw = await store.cached(dayKey(day));
       if (raw == null) continue;

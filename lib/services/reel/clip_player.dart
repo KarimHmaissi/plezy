@@ -247,10 +247,13 @@ class ClipPlayer {
     _current = null;
     _preloaded = null;
     _perf.cancel();
-    for (final s in _subs) {
+    // Taken before the first await: Android's hidden and paused arrive
+    // back to back, and a second release must not walk the same list.
+    final subs = List.of(_subs);
+    _subs.clear();
+    for (final s in subs) {
       await s.cancel();
     }
-    _subs.clear();
     phase.value = ClipPhase.idle;
     if (e != null) await e.dispose();
   }

@@ -1392,7 +1392,7 @@ class _MainScreenState extends State<MainScreen>
       NavigationTabId.explore => ExploreScreen(key: _screenKeys[tab]),
       NavigationTabId.watchlist => WatchlistScreen(key: _screenKeys[tab]),
       NavigationTabId.comfort => ComfortScreen(key: _screenKeys[tab]),
-      NavigationTabId.reel => ReelScreen(key: _screenKeys[tab], create: ReelApp.controller),
+      NavigationTabId.reel => ReelScreen(key: _screenKeys[tab], create: ReelApp.controller, offline: _isOffline),
       NavigationTabId.ai => AiScreen(key: _screenKeys[tab]),
       NavigationTabId.history => HistoryScreen(key: _screenKeys[tab]),
       NavigationTabId.libraries => LibrariesScreen(

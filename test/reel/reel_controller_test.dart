@@ -200,6 +200,7 @@ void main() {
     ReelWatchlist? addToWatchlist,
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
+    void Function(bool active)? onActive,
   }) => ReelController(
     decks:
         decks ??
@@ -226,6 +227,7 @@ void main() {
     reachesTvNow: reachesTvNow,
     externalClips: externalClips,
     memoryRestored: memoryRestored,
+    onActive: onActive,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -245,6 +247,28 @@ void main() {
 
   tearDown(() async {
     await db.close();
+  });
+
+  test('V2-60: the active hook hears start and suspend, and a dispose while playing gives the brain back', () async {
+    final heard = <bool>[];
+    final c = make(onActive: heard.add);
+    await c.start();
+    await c.start(); // already active: no second call
+    expect(heard, [true]);
+    await c.suspend();
+    expect(heard, [true, false]);
+    await c.start();
+    c.dispose();
+    expect(heard, [true, false, true, false]);
+  });
+
+  test('V2-60: a dispose after a suspend says nothing more', () async {
+    final heard = <bool>[];
+    final c = make(onActive: heard.add);
+    await c.start();
+    await c.suspend();
+    c.dispose();
+    expect(heard, [true, false]);
   });
 
   test('the first card plays its trailer and the next one is preloaded', () async {
