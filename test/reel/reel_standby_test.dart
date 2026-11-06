@@ -12,6 +12,7 @@ import 'package:plezy/screens/reel/reel_stuck.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/library_index/index_database.dart';
+import 'package:plezy/services/memory_trim_policy.dart' show WatchdogTrim;
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
@@ -20,6 +21,7 @@ import 'package:plezy/services/reel/reel_deck_prefs.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/settings_service.dart' show ReelCellular;
 import 'package:plezy/utils/app_logger.dart';
 
 import 'clip_player_test.dart' show FakeClipEngine;
@@ -206,6 +208,9 @@ void main() {
     ReelTimeouts timeouts = _never,
     Duration? stuckAfter,
     Duration openLimit = ClipPlayer.defaultOpenLimit,
+    ReelCellular Function()? cellular,
+    bool Function()? metered,
+    Listenable? linkChanged,
   }) {
     final c = ReelController(
       decks: [deck],
@@ -228,6 +233,9 @@ void main() {
       onWatch: (_, {required onTv}) async => false,
       addToWatchlist: (_) async => true,
       externalClips: externalClips,
+      cellular: cellular,
+      metered: metered,
+      linkChanged: linkChanged,
     );
     c.timeouts = timeouts;
     c.stuckAfter = stuckAfter;
@@ -437,6 +445,39 @@ void main() {
       await c.suspend();
       await _wait(after * 2);
       expect(c.stuck.value, isNull);
+    });
+
+    for (final externalClips in [false, true]) {
+      final where = externalClips ? 'phone' : 'TV';
+      test('$where: a card whose clip memory pressure takes while it opens is a still, never stuck', () async {
+        final c = make(externalClips: externalClips, stuckAfter: after);
+        await c.start();
+        expect(c.stage, ReelStage.frame);
+        await c.trimForWatchdog(WatchdogTrim.cleared);
+        await _wait(after * 2);
+        expect(c.stuck.value, isNull);
+        expect(c.stage, ReelStage.still);
+      });
+    }
+
+    test('phone: a card whose link goes to Stills only while it opens is a still, never stuck', () async {
+      var cellular = false;
+      final link = ValueNotifier(0);
+      addTearDown(link.dispose);
+      final c = make(
+        externalClips: true,
+        stuckAfter: after,
+        cellular: () => ReelCellular.stillsOnly,
+        metered: () => cellular,
+        linkChanged: link,
+      );
+      await c.start();
+      expect(c.stage, ReelStage.frame);
+      cellular = true;
+      link.value++;
+      await _wait(after * 2);
+      expect(c.stuck.value, isNull);
+      expect(c.stage, ReelStage.still);
     });
 
     test('phone: a feed player that never starts is stuck; its start clears it', () async {

@@ -390,6 +390,10 @@ class ReelController extends ChangeNotifier {
     if (now == _wasMetered) return;
     _wasMetered = now;
     appLogger.i('Reel: ${now ? 'mobile data' : 'off mobile data'}, $_budget');
+    // Stills only: the phone feed lets its players go now, so the card on
+    // screen is a still and waits on no first frame (the TV's clip plays
+    // on until the next card).
+    if (externalClips && !_budget.clips && _cardShown != null) _settle(_generation, playing: false);
     notifyListeners();
   }
 
@@ -2320,6 +2324,9 @@ class ReelController extends ChangeNotifier {
     } else {
       await clips.release();
       _firstClip = true;
+      // The card on screen is a still now (the TV's core and the phone's
+      // players are let go): it waits on no first frame.
+      if (_cardShown != null) _settle(_generation, playing: false);
     }
     _syncHold();
     // The phone feed re-syncs its players to the new level.
