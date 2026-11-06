@@ -1,5 +1,6 @@
 // The fake engine's controllers are closed in tearDown.
 // ignore_for_file: close_sinks
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -59,6 +60,20 @@ class _LateMedia extends _Media {
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async {
     if (_asked.add(ratingKey)) throw StateError('not yet');
+    return super.item(serverId, ratingKey);
+  }
+}
+
+/// Metadata for one card that lands only when the test says so.
+class _GatedMedia extends _Media {
+  _GatedMedia(this.gated);
+
+  final String gated;
+  final gate = Completer<void>();
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) async {
+    if (ratingKey == gated) await gate.future;
     return super.item(serverId, ratingKey);
   }
 }
@@ -488,6 +503,82 @@ void main() {
       now = now.add(const Duration(milliseconds: 300));
       await c.step(1);
       expect(await actions(), [ReelAction.unplayed.name]);
+      c.dispose();
+    });
+  });
+
+  group('a held key coalesces steps', () {
+    late DateTime now;
+    DateTime clock() => now;
+
+    setUp(() => now = DateTime.utc(2026, 3, 1, 20));
+
+    List<String> opens() => [
+      for (final x in engine.calls)
+        if (x.startsWith('open ')) x.substring(x.lastIndexOf('/assets/') + 8).split('/').first,
+    ];
+
+    test('five steps at once move five cards, open one clip and record nothing in between', () async {
+      final c = make(
+        clock: clock,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 7; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 9));
+      engine.calls.clear();
+
+      await Future.wait([for (var k = 0; k < 5; k++) c.step(1)]);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.index, 5);
+      expect(c.current.card?.id, 't6');
+      expect(opens(), ['6'], reason: 'only the landed card opens');
+      expect(engine.calls, contains('preload https://s1.example/services/iva/assets/7/video.mp4'));
+      final events = await store.events(since: DateTime(2000));
+      expect([for (final e in events) '${e.titleId} ${e.action}'], ['t1 ${ReelAction.sampled.name}']);
+      expect(await store.quickSkips(), isEmpty);
+      c.dispose();
+    });
+
+    test('a step while the last one is still resolving lands on the later card', () async {
+      final media = _GatedMedia('2');
+      final c = make(
+        clock: clock,
+        media: media,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 4; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      engine.calls.clear();
+
+      final first = c.step(1);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.index, 1);
+      final second = c.step(1);
+      await second;
+      media.gate.complete();
+      await first;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.current.card?.id, 't3');
+      expect(opens(), ['3'], reason: 'the card passed over while resolving never opens');
+      final events = await store.events(since: DateTime(2000));
+      expect([for (final e in events) e.titleId], ['t1']);
+      c.dispose();
+    });
+
+    test('steps back past the start stop at the first card', () async {
+      final c = make(clock: clock);
+      await c.start();
+      await Future.wait([c.step(1), c.step(-1), c.step(-1)]);
+      expect(c.index, 0);
+      expect(c.current.card?.id, 't1');
       c.dispose();
     });
   });

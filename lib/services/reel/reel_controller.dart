@@ -236,13 +236,23 @@ class ReelController extends ChangeNotifier {
   }
 
   /// Next / previous card.
+  ///
+  /// The target is computed and committed before any await, under the
+  /// generation counter, so a held D-pad's repeats coalesce: each one moves
+  /// the cursor on from where the last left it, and only the card the
+  /// cursor lands on is resolved and opened. Cards passed over were never on
+  /// screen, so they record nothing.
   Future<void> step(int dir) async {
     final list = cards;
     if (list == null) return;
     final to = (index + dir).clamp(0, list.length);
     if (to == index) return;
-    await _leaveCard();
     _cursor[deck.id] = to;
+    final gen = ++_generation;
+    await _leaveCard();
+    // A later step moved the cursor on while this one was leaving: that
+    // step shows the card it lands on.
+    if (gen != _generation) return;
     await _show(direction: dir);
   }
 
