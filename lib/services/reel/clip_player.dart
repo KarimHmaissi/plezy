@@ -51,6 +51,12 @@ abstract interface class ClipEngine {
   /// preload and decoder lines; they arrive only with debug logging on).
   Stream<PlayerLog> get logs;
   Duration get position;
+
+  /// The playhead about four times a second, and the clip's length when it
+  /// is known (the TV's progress line, V2-28).
+  Stream<Duration> get positions;
+  Stream<Duration> get durations;
+  Duration get duration;
   Future<void> dispose();
 }
 
@@ -103,10 +109,43 @@ class ExoClipEngine implements ClipEngine {
   Duration get position => _p.state.position;
 
   @override
+  Stream<Duration> get positions => _p.streams.position;
+
+  @override
+  Stream<Duration> get durations => _p.streams.duration;
+
+  @override
+  Duration get duration => _p.state.duration;
+
+  @override
   Future<void> dispose() => _p.dispose();
 }
 
 enum ClipPhase { idle, loading, playing, paused, held, failed }
+
+/// How far through the clip on screen is (V2-28): zero until its first
+/// frame, the whole length once it holds.
+@immutable
+class ClipProgress {
+  const ClipProgress(this.position, this.length);
+
+  static const ClipProgress zero = ClipProgress(Duration.zero, Duration.zero);
+
+  final Duration position;
+  final Duration length;
+
+  /// 0–1, or null while the length is unknown.
+  double? get fraction {
+    if (length <= Duration.zero) return null;
+    return (position.inMilliseconds / length.inMilliseconds).clamp(0.0, 1.0);
+  }
+
+  @override
+  bool operator ==(Object other) => other is ClipProgress && other.position == position && other.length == length;
+
+  @override
+  int get hashCode => Object.hash(position, length);
+}
 
 /// The Reel's clip player: plays one card's clip, preloads the next, loops a
 /// clip twice and then holds on its last frame, and ramps the sound between
@@ -173,6 +212,13 @@ class ClipPlayer {
   /// Time to first frame of the last clip, for the measure-day stopwatch.
   final ValueNotifier<Duration?> lastTtff = ValueNotifier(null);
 
+  /// The TV's progress line (V2-28): the clip on screen only, so the clip
+  /// before it never moves the line of the card that is opening.
+  final ValueNotifier<ClipProgress> progress = ValueNotifier(ClipProgress.zero);
+
+  /// The current clip's length: its source's, until the core reports one.
+  Duration _length = Duration.zero;
+
   ClipEngine? get engine => _engine;
   ClipSource? get current => _current;
   bool get muted => _muted;
@@ -194,7 +240,15 @@ class ClipPlayer {
           phase.value = ClipPhase.failed;
         }),
       )
-      ..add(e.logs.listen(_onLog));
+      ..add(e.logs.listen(_onLog))
+      ..add(e.positions.listen(_onPosition))
+      ..add(
+        e.durations.listen((d) {
+          if (d <= Duration.zero) return;
+          _length = d;
+          if (onScreen.value != null) progress.value = ClipProgress(progress.value.position, d);
+        }),
+      );
     return e;
   }
 
@@ -223,6 +277,8 @@ class ClipPlayer {
     final outgoing = _current != null && !first;
     _current = source;
     _played = 0;
+    _length = source.length ?? Duration.zero;
+    progress.value = ClipProgress.zero;
     onScreen.value = null;
     phase.value = ClipPhase.loading;
     _ttff = Stopwatch()..start();
@@ -281,6 +337,7 @@ class ClipPlayer {
     _played = 0;
     await e.seek(Duration.zero);
     await e.play();
+    if (onScreen.value != null) progress.value = ClipProgress(Duration.zero, _length);
     phase.value = ClipPhase.playing;
   }
 
@@ -313,6 +370,8 @@ class ClipPlayer {
     _openKey = null;
     _ttff = null;
     _level = 0;
+    _length = Duration.zero;
+    progress.value = ClipProgress.zero;
     _perf.cancel();
     for (final s in _subs) {
       await s.cancel();
@@ -339,7 +398,18 @@ class ClipPlayer {
       _perf.markFirstFrame();
     }
     onScreen.value = _current;
+    // The core reports a length only when it changes, so a clip as long as
+    // the one before it takes the length the core already holds.
+    if (_length <= Duration.zero) _length = _engine?.duration ?? Duration.zero;
+    progress.value = ClipProgress(Duration.zero, _length);
     if (phase.value == ClipPhase.loading) phase.value = ClipPhase.playing;
+  }
+
+  /// The playhead of the clip on screen; a tick from before its first frame
+  /// (the outgoing clip's) is not this clip's.
+  void _onPosition(Duration at) {
+    if (onScreen.value == null || phase.value == ClipPhase.held) return;
+    progress.value = ClipProgress(at, _length);
   }
 
   /// ExoPlayerCore's `Open clip: preloaded=` and `Decoder initialized:`
@@ -361,6 +431,7 @@ class ClipPlayer {
     } else {
       // Hold on the last frame; Replay is focused by the view.
       unawaited(e.pause());
+      if (onScreen.value != null) progress.value = ClipProgress(_length, _length);
       phase.value = ClipPhase.held;
     }
   }

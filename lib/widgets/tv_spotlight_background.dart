@@ -65,6 +65,18 @@ class TvSpotlightBackground extends StatelessWidget {
   /// an item that will not land (its request failed).
   final bool pendingSkeleton;
 
+  /// Fork (The Reel, V2-28): lean back. True fades the summary out in place
+  /// (the title and metadata line stay where they are) and lightens the side
+  /// scrim, over [quietFade]. Null (Home) never goes quiet and adds no
+  /// opacity layers.
+  final bool? quiet;
+
+  /// Fork (The Reel): how long the [quiet] change takes.
+  final Duration quietFade;
+
+  /// How much of the side scrim stays while [quiet].
+  static const double quietScrim = 0.55;
+
   const TvSpotlightBackground({
     super.key,
     required this.item,
@@ -83,6 +95,8 @@ class TvSpotlightBackground extends StatelessWidget {
     this.artworkCurve = Curves.linear,
     this.pendingTitle,
     this.pendingSkeleton = true,
+    this.quiet,
+    this.quietFade = const Duration(milliseconds: 200),
   });
 
   double _scale(BuildContext context) => TvLayoutConstants.scaleOf(context);
@@ -136,7 +150,11 @@ class TvSpotlightBackground extends StatelessWidget {
                 ],
               ),
             ),
-            _buildHorizontalScrim(bgColor),
+            _quietable(
+              const ValueKey('spotlight-side-scrim'),
+              quietOpacity: quietScrim,
+              child: _buildHorizontalScrim(bgColor),
+            ),
             RasterizedGradient(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
@@ -277,14 +295,18 @@ class TvSpotlightBackground extends StatelessWidget {
         _buildMetadataLine(context, media),
         if (summary != null && summary.isNotEmpty) ...[
           SizedBox(height: _sectionGap(scale)),
-          Text(
-            summary,
-            maxLines: _summaryMaxLines,
-            overflow: .ellipsis,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: colorScheme.onSurface.withValues(alpha: 0.78),
-              fontSize: _summaryFontSize(scale),
-              height: compact ? 1.34 : 1.45,
+          _quietable(
+            const ValueKey('spotlight-summary'),
+            quietOpacity: 0,
+            child: Text(
+              summary,
+              maxLines: _summaryMaxLines,
+              overflow: .ellipsis,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: colorScheme.onSurface.withValues(alpha: 0.78),
+                fontSize: _summaryFontSize(scale),
+                height: compact ? 1.34 : 1.45,
+              ),
             ),
           ),
         ] else if (shouldHideSpoiler && media.isEpisode) ...[
@@ -301,6 +323,20 @@ class TvSpotlightBackground extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+
+  /// Fork (The Reel): [child] fades to [quietOpacity] while [quiet]; as it
+  /// is when [quiet] is null.
+  Widget _quietable(Key key, {required double quietOpacity, required Widget child}) {
+    final q = quiet;
+    if (q == null) return child;
+    return AnimatedOpacity(
+      key: key,
+      opacity: q ? quietOpacity : 1,
+      duration: quietFade,
+      curve: Curves.easeOutCubic,
+      child: child,
     );
   }
 

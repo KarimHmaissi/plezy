@@ -10,6 +10,7 @@ import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/screens/reel/reel_card_view.dart';
+import 'package:plezy/screens/reel/reel_lean_back.dart';
 import 'package:plezy/screens/reel/reel_sheet.dart' show reelDeckIcon;
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
@@ -25,8 +26,10 @@ import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/fork_motion.dart';
 import 'package:plezy/utils/layout_constants.dart';
 import 'package:plezy/widgets/fork_motion_widgets.dart';
+import 'package:plezy/widgets/media_progress_bar.dart';
 import 'package:plezy/widgets/stat_chip.dart';
 import 'package:plezy/widgets/tv_spotlight_background.dart';
+import 'package:plezy/widgets/video_controls/widgets/transport_feedback_indicator.dart';
 
 import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
@@ -254,6 +257,7 @@ Future<void> _pumpTv(
   ReelController c, {
   Size size = const Size(1920, 1080),
   bool reduceMotion = false,
+  ReelLeanBack? leanBack,
 }) async {
   await tester.runAsync(SettingsService.getInstance);
   tester.view.physicalSize = size;
@@ -271,7 +275,13 @@ Future<void> _pumpTv(
         home: Scaffold(
           body: ListenableBuilder(
             listenable: c,
-            builder: (context, _) => ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}),
+            builder: (context, _) => Stack(
+              fit: StackFit.expand,
+              children: [
+                ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}, leanBack: leanBack),
+                if (leanBack != null) ReelPauseFeedback(controller: c, leanBack: leanBack),
+              ],
+            ),
           ),
         ),
       ),
@@ -490,7 +500,8 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Replay'), findsOneWidget);
       final heldBottom = spotlight(tester).contentBottom;
-      expect(heldBottom - playingBottom, closeTo(58 * scale, 1e-9));
+      // Replay and its focus ring (V2-28).
+      expect(heldBottom - playingBottom, closeTo(66 * scale, 1e-9));
       final box = tester.getRect(extras('1'));
       expect(540 - heldBottom + 20 * scale, closeTo(box.top, 0.5));
       expect(box.bottom, closeTo(540 - 24 * scale, 0.5));
@@ -832,6 +843,189 @@ void main() {
       await tester.pump();
       final strip = find.byKey(const ValueKey('reel-deck-strip:anime-openings'));
       expect(tester.getRect(strip).top, closeTo(1080 * ReelDeckStrip.overscan, 0.5));
+    });
+  });
+
+  group('TV lean back (V2-28)', () {
+    late ForkDatabase db;
+    late ReelController c;
+    late FakeClipEngine engine;
+    late ReelLeanBack lb;
+
+    setUp(() async {
+      db = ForkDatabase.memory();
+      c = _controller(db, _Deck(['1', '2'], cardOf: _animeCard), (e) => engine = e);
+      lb = ReelLeanBack();
+    });
+
+    tearDown(() async {
+      lb.dispose();
+      c.dispose();
+      await db.close();
+    });
+
+    Finder extras(String id) => find.byKey(ValueKey('extras:t$id'));
+
+    /// The opacity [finder] is faded to (its nearest [AnimatedOpacity]).
+    AnimatedOpacity fadeOf(WidgetTester tester, Finder finder) =>
+        tester.widget<AnimatedOpacity>(find.ancestor(of: finder, matching: find.byType(AnimatedOpacity)).first);
+
+    final summary = find.byKey(const ValueKey('spotlight-summary'));
+    final scrim = find.byKey(const ValueKey('spotlight-side-scrim'));
+    final hints = find.byKey(const ValueKey('reel-hints'));
+    const why = 'Because the harbour towns';
+
+    /// The card's clip on screen and playing, as ReelScreen wires it.
+    Future<void> playing(WidgetTester tester, {int session = 1, Size size = const Size(1920, 1080)}) async {
+      lb.begin(session: session);
+      await _pumpTv(tester, c, leanBack: lb, size: size);
+      engine.firstFrameCtl.add(null);
+      lb.playing = c.clips.phase.value == ClipPhase.playing;
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('after 6 s of play the summary, why line, chips and hints fade in place; a key brings them back '
+        'over 200 ms', (tester) async {
+      await playing(tester);
+      final title = tester.getRect(find.text('Harbor Lights').first);
+      final block = tester.getRect(extras('1'));
+      expect(tester.widget<AnimatedOpacity>(summary).opacity, 1);
+
+      await tester.pump(const Duration(seconds: 6));
+      expect(lb.quiet, isTrue);
+      await tester.pumpAndSettle();
+      expect(tester.widget<AnimatedOpacity>(summary).opacity, 0);
+      expect(tester.widget<AnimatedOpacity>(scrim).opacity, TvSpotlightBackground.quietScrim);
+      expect(fadeOf(tester, find.text('#1 show this week')).opacity, 0);
+      expect(fadeOf(tester, find.textContaining(why)).opacity, 0);
+      expect(fadeOf(tester, hints).opacity, 0);
+      // The title, the metadata line and the credit stay, and nothing moves.
+      expect(
+        find.ancestor(of: find.text('Theme via AnimeThemes'), matching: find.byType(AnimatedOpacity)),
+        findsNothing,
+      );
+      expect(tester.getRect(find.text('Harbor Lights').first), title);
+      expect(tester.getRect(extras('1')), block);
+
+      lb.poke();
+      await tester.pump();
+      final back = tester.widget<AnimatedOpacity>(summary);
+      expect(back.opacity, 1);
+      expect(back.duration, const Duration(milliseconds: 200));
+      expect(fadeOf(tester, hints).duration, const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.widget<AnimatedOpacity>(scrim).opacity, 1);
+      expect(fadeOf(tester, find.text('#1 show this week')).opacity, 1);
+      expect(fadeOf(tester, hints).opacity, 1);
+      lb.end();
+    });
+
+    testWidgets('a held clip is never quiet, and Replay is drawn focused', (tester) async {
+      await playing(tester);
+      for (var i = 0; i < 2; i++) {
+        engine.completedCtl.add(true);
+        await tester.pump();
+      }
+      expect(c.clips.phase.value, ClipPhase.held);
+      lb.playing = c.clips.phase.value == ClipPhase.playing;
+      await tester.pump(const Duration(seconds: 20));
+      await tester.pumpAndSettle();
+      expect(lb.quiet, isFalse);
+      expect(tester.widget<AnimatedOpacity>(summary).opacity, 1);
+      expect(find.text('Replay'), findsOneWidget);
+
+      final ring = tester.widget<DecoratedBox>(find.byKey(const ValueKey('reel-replay-focus')));
+      final border = (ring.decoration as BoxDecoration).border! as Border;
+      final context = tester.element(find.text('Replay'));
+      expect(border.top.color, Theme.of(context).colorScheme.primary);
+      expect(border.top.width, 2.5);
+      final button = tester.getRect(
+        find.ancestor(of: find.text('Replay'), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)),
+      );
+      final box = tester.getRect(find.byKey(const ValueKey('reel-replay-focus')));
+      expect(box.contains(button.topLeft) && box.contains(button.bottomRight), isTrue);
+      expect(button.top - box.top, greaterThan(2.5), reason: 'a gap between the ring and the button');
+      lb.end();
+    });
+
+    testWidgets('from the fourth session the hints take no room until 10 s with no key', (tester) async {
+      lb.begin(session: 4);
+      await _pumpTv(tester, c, leanBack: lb);
+      engine.firstFrameCtl.add(null);
+      // Paused: the card stays up, so the hints can come in.
+      await tester.runAsync(c.clips.pause);
+      lb.playing = false;
+      await tester.pumpAndSettle();
+      expect(hints, findsNothing);
+      final without = tester.widget<TvSpotlightBackground>(find.byType(TvSpotlightBackground)).contentBottom;
+
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(hints, findsOneWidget);
+      expect(fadeOf(tester, hints).opacity, 1);
+      expect(
+        tester.widget<TvSpotlightBackground>(find.byType(TvSpotlightBackground)).contentBottom,
+        greaterThan(without),
+      );
+
+      lb.poke();
+      await tester.pumpAndSettle();
+      expect(hints, findsNothing);
+      lb.end();
+    });
+
+    testWidgets('the progress line is 3*scale on an onSurface track and follows the clip', (tester) async {
+      const scale = 0.85;
+      await playing(tester, size: const Size(960, 540));
+      engine.durationCtl.add(const Duration(seconds: 100));
+      engine.positionCtl.add(const Duration(seconds: 25));
+      await tester.pump();
+
+      final bar = tester.widget<MediaProgressBar>(find.byType(MediaProgressBar));
+      expect(bar.minHeight, closeTo(3 * scale, 1e-9));
+      final onSurface = Theme.of(tester.element(find.byType(MediaProgressBar))).colorScheme.onSurface;
+      expect(bar.backgroundColor, onSurface.withValues(alpha: 0.12));
+      expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, closeTo(0.25, 1e-9));
+      final rect = tester.getRect(find.byType(MediaProgressBar));
+      expect(rect.bottom, closeTo(540 - 10 * scale, 0.5));
+      expect(rect.top, greaterThanOrEqualTo(tester.getRect(extras('1')).bottom));
+      expect(fadeOf(tester, find.byType(MediaProgressBar)).opacity, 1);
+
+      // It stays while the card is quiet.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(lb.quiet, isTrue);
+      expect(fadeOf(tester, find.byType(MediaProgressBar)).opacity, 1);
+      lb.end();
+    });
+
+    testWidgets('a pause shows the centre disc and a Paused chip inside the overscan margin', (tester) async {
+      const size = Size(960, 540);
+      await playing(tester, size: size);
+      expect(find.text('Paused'), findsNothing);
+
+      await tester.runAsync(c.clips.pause);
+      lb.playing = false;
+      lb.pulse(paused: true);
+      await tester.pump();
+      await tester.pump(ForkMotion.sheetIn);
+      final disc = tester.widget<TransportFeedbackIndicator>(find.byType(TransportFeedbackIndicator));
+      expect(disc.text, 'Paused');
+      expect(disc.pulse, 1);
+      final chip = find.byKey(const ValueKey('reel-paused'));
+      expect(chip, findsOneWidget);
+      expect(find.descendant(of: chip, matching: find.text('Paused')), findsOneWidget);
+      final rect = tester.getRect(chip);
+      expect(rect.left, closeTo(size.width * ReelDeckStrip.overscan, 0.5));
+      expect(rect.top, closeTo(size.height * ReelDeckStrip.overscan, 0.5));
+
+      await tester.runAsync(c.clips.resume);
+      lb.playing = true;
+      lb.pulse(paused: false);
+      await tester.pumpAndSettle();
+      expect(chip, findsNothing);
+      expect(tester.widget<TransportFeedbackIndicator>(find.byType(TransportFeedbackIndicator)).text, 'Playing');
+      lb.end();
     });
   });
 }

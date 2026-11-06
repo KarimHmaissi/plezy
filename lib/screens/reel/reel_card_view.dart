@@ -3,21 +3,25 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../focus/focus_theme.dart';
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/device_performance.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../theme/fork_motion.dart';
+import '../../theme/mono_tokens.dart';
 import '../../utils/content_utils.dart';
 import '../../utils/formatters.dart';
 import '../../utils/layout_constants.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/fitted_metadata_line.dart';
+import '../../widgets/media_progress_bar.dart';
 import '../../widgets/media_rating_badge.dart';
 import '../../widgets/stat_chip.dart';
 import '../../widgets/tv_spotlight_background.dart';
+import 'reel_lean_back.dart';
 import 'reel_sheet.dart' show reelDeckIcon;
 
 /// One card, in the app's own look. On the TV it is Home's spotlight (logo or
@@ -25,7 +29,8 @@ import 'reel_sheet.dart' show reelDeckIcon;
 /// with the clip playing where the artwork would be: the artwork covers a
 /// clip that is slow to start (held back briefly, so a quick one never shows
 /// it) and stays for AI cards. The Reel adds only its labels, the why line
-/// and the key hints underneath.
+/// and the key hints underneath, and the clip's progress line. With
+/// [leanBack], the card goes quiet while its clip plays (V2-28).
 class ReelCardView extends StatelessWidget {
   const ReelCardView({
     super.key,
@@ -36,6 +41,7 @@ class ReelCardView extends StatelessWidget {
     this.onWatch,
     this.onSave,
     this.onRemote,
+    this.leanBack,
   });
 
   final ReelController controller;
@@ -45,6 +51,9 @@ class ReelCardView extends StatelessWidget {
   final VoidCallback? onWatch;
   final VoidCallback? onSave;
   final VoidCallback? onRemote;
+
+  /// TV: quiet mode and the hint rule (V2-28); null always shows everything.
+  final ReelLeanBack? leanBack;
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +118,7 @@ class ReelCardView extends StatelessWidget {
     final isCurrent = identical(controller.current.card, card);
     final clips = controller.clips;
     return ListenableBuilder(
-      listenable: Listenable.merge([clips.phase, clips.onScreen]),
+      listenable: Listenable.merge([clips.phase, clips.onScreen, ?leanBack]),
       builder: (context, _) {
         final state = ReelCardView.clipState(
           clip: slot.clip?.source,
@@ -120,8 +129,13 @@ class ReelCardView extends StatelessWidget {
         return ReelArtCover(
           cover: !state.showingClip,
           delay: state.artDelay,
-          builder: (context, showArtwork) =>
-              _tv(context, showArtwork: showArtwork, showInfo: !state.behind, held: state.held),
+          builder: (context, showArtwork) => _tv(
+            context,
+            showArtwork: showArtwork,
+            showInfo: !state.behind,
+            held: state.held,
+            progress: state.progress,
+          ),
         );
       },
     );
@@ -137,7 +151,9 @@ class ReelCardView extends StatelessWidget {
   /// - [artDelay]: a card with a clip holds its artwork back by
   ///   [ReelArtCover.clipGrace], so a preloaded start (about 170 ms) never
   ///   shows it; AI cards and failures show it at once.
-  static ({bool showingClip, bool behind, bool held, Duration artDelay}) clipState({
+  /// - [progress]: the card has a clip of its own, so its progress line
+  ///   shows (at zero until the first frame, V2-28).
+  static ({bool showingClip, bool behind, bool held, Duration artDelay, bool progress}) clipState({
     required ClipSource? clip,
     required ClipSource? onScreen,
     required ClipPhase phase,
@@ -150,11 +166,24 @@ class ReelCardView extends StatelessWidget {
       behind: hasClip && onScreen != null && onScreen != clip,
       held: isCurrent && phase == ClipPhase.held,
       artDelay: hasClip ? ReelArtCover.clipGrace : Duration.zero,
+      progress: hasClip,
     );
   }
 
-  Widget _tv(BuildContext context, {required bool showArtwork, required bool showInfo, required bool held}) {
+  Widget _tv(
+    BuildContext context, {
+    required bool showArtwork,
+    required bool showInfo,
+    required bool held,
+    required bool progress,
+  }) {
     final scale = TvLayoutConstants.scaleOf(context);
+    // V2-28: lean back. Held and failed clips are never quiet (the lean-back
+    // state only goes quiet while a clip plays).
+    final lean = leanBack;
+    final quiet = lean?.quiet ?? false;
+    final showHints = lean?.showHints ?? true;
+    final quietFade = ReelLeanBack.fade(context, quiet: quiet);
     final client = context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId));
     final screenWidth = MediaQuery.sizeOf(context).width;
     final right = screenWidth * 0.43;
@@ -165,6 +194,7 @@ class ReelCardView extends StatelessWidget {
       controller: controller,
       slot: slot,
       held: held,
+      hints: lean?.hintsReserved ?? true,
       width: screenWidth - TvLayoutConstants.horizontalInset - right,
     );
     final extrasBottom = 24 * scale;
@@ -187,6 +217,8 @@ class ReelCardView extends StatelessWidget {
           // cross-fades in over it in place.
           pendingTitle: slot.card!.title.title,
           pendingSkeleton: !slot.resolved,
+          quiet: quiet,
+          quietFade: quietFade,
         ),
         if (showInfo) ...[
           Positioned(
@@ -205,13 +237,25 @@ class ReelCardView extends StatelessWidget {
                 layout: extras,
                 resize: duration,
                 onReplay: onReplay,
+                quiet: quiet,
+                quietFade: quietFade,
+                showHints: showHints,
+                hintsFade: ReelLeanBack.fade(context, quiet: !showHints),
               ),
             ),
+          ),
+          Positioned(
+            left: TvLayoutConstants.horizontalInset,
+            right: right,
+            bottom: _ExtrasLayout.progressBottom * scale,
+            child: _ProgressLine(clips: clips, visible: progress, scale: scale),
           ),
         ],
       ],
     );
   }
+
+  ClipPlayer get clips => controller.clips;
 
   /// The spotlight's 280 ms info cross-fade (none on the reduced tier or
   /// with animations turned off).
@@ -374,6 +418,7 @@ class _ExtrasLayout {
     required ReelSlot slot,
     required bool held,
     required double width,
+    bool hints = true,
   }) {
     final theme = Theme.of(context);
     final scale = TvLayoutConstants.scaleOf(context);
@@ -399,7 +444,7 @@ class _ExtrasLayout {
     );
     final credit = slot.clip?.source.origin == ClipOrigin.animeTheme ? 'Theme via AnimeThemes' : null;
     // OK replays a held clip (ReelScreen's key map).
-    final hints = '${held ? 'OK replay' : 'OK watch'}  ·  ↓ next  ·  → next deck  ·  hold OK for more';
+    final hintText = '${held ? 'OK replay' : 'OK watch'}  ·  ↓ next  ·  → next deck  ·  hold OK for more';
 
     var height = 0.0;
     if (chips.isNotEmpty) height += _chipsHeight(context, chips, chipFontSize, scale, width);
@@ -412,7 +457,9 @@ class _ExtrasLayout {
       height += _textHeight(context, credit, creditStyle, width);
     }
     if (held) height += heldExtra * scale;
-    height += sectionGap * scale + _textHeight(context, hints, hintStyle, width);
+    // V2-28: past the first sessions the hint line takes no room until it
+    // shows ([ReelLeanBack.hintsReserved]).
+    if (hints) height += sectionGap * scale + _textHeight(context, hintText, hintStyle, width);
 
     return _ExtrasLayout._(
       scale: scale,
@@ -424,7 +471,7 @@ class _ExtrasLayout {
       whyStyle: whyStyle,
       credit: credit,
       creditStyle: creditStyle,
-      hints: hints,
+      hints: hints ? hintText : null,
       hintStyle: hintStyle,
       height: height,
     );
@@ -437,9 +484,16 @@ class _ExtrasLayout {
   static const double chipSpacing = 8;
   static const double chipRunSpacing = 6;
 
-  /// Replay's gap and button, the room a held clip adds.
-  static const double replayHeight = 48;
+  /// Replay's gap and button, the room a held clip adds: the button and
+  /// the focus ring around it ([replayRingGap] clear of the button, V2-28).
+  static const double replayHeight = 56;
+  static const double replayRingGap = 3;
   static const double heldExtra = sectionGap + replayHeight;
+
+  /// The progress line (V2-28): its thickness and its gap to the bottom
+  /// edge, under the hint line.
+  static const double progressHeight = 3;
+  static const double progressBottom = 10;
 
   final double scale;
   final double width;
@@ -450,7 +504,9 @@ class _ExtrasLayout {
   final TextStyle? whyStyle;
   final String? credit;
   final TextStyle? creditStyle;
-  final String hints;
+
+  /// Null when the hint line takes no room.
+  final String? hints;
   final TextStyle? hintStyle;
 
   /// What the block takes at [width], Replay included when [held].
@@ -498,7 +554,16 @@ class _ExtrasLayout {
 }
 
 class _Extras extends StatelessWidget {
-  const _Extras({super.key, required this.layout, required this.resize, required this.onReplay});
+  const _Extras({
+    super.key,
+    required this.layout,
+    required this.resize,
+    required this.onReplay,
+    this.quiet = false,
+    this.quietFade = Duration.zero,
+    this.showHints = true,
+    this.hintsFade = Duration.zero,
+  });
 
   final _ExtrasLayout layout;
 
@@ -506,6 +571,18 @@ class _Extras extends StatelessWidget {
   /// info block above moves up with it.
   final Duration resize;
   final VoidCallback onReplay;
+
+  /// Lean back (V2-28): the chips and the why line fade out in place; the
+  /// credit stays.
+  final bool quiet;
+  final Duration quietFade;
+
+  /// Whether the hint line shows (it fades in place when it has room).
+  final bool showHints;
+  final Duration hintsFade;
+
+  Widget _fading(bool visible, Duration over, Widget child) =>
+      AnimatedOpacity(opacity: visible ? 1 : 0, duration: over, curve: Curves.easeOutCubic, child: child);
 
   @override
   Widget build(BuildContext context) {
@@ -517,11 +594,19 @@ class _Extras extends StatelessWidget {
             padding: EdgeInsets.only(top: _ExtrasLayout.sectionGap * s),
             child: SizedBox(
               height: _ExtrasLayout.replayHeight * s,
-              child: FilledButton.icon(
-                // The Reel's own focus node keeps the keys; OK replays here.
-                onPressed: onReplay,
-                icon: const Icon(Symbols.replay_rounded),
-                label: const Text('Replay'),
+              // V2-28: drawn focused, as OK replays it (the Reel's own focus
+              // node keeps the keys, so the button never takes focus).
+              child: DecoratedBox(
+                key: const ValueKey('reel-replay-focus'),
+                decoration: FocusTheme.focusDecoration(context, isFocused: true, borderRadius: MonoTokens.radiusFull),
+                child: Padding(
+                  padding: EdgeInsets.all(FocusTheme.focusBorderWidth + _ExtrasLayout.replayRingGap * s),
+                  child: FilledButton.icon(
+                    onPressed: onReplay,
+                    icon: const Icon(Symbols.replay_rounded),
+                    label: const Text('Replay'),
+                  ),
+                ),
               ),
             ),
           )
@@ -533,15 +618,19 @@ class _Extras extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (hasChips) ...[
-            Wrap(
-              spacing: _ExtrasLayout.chipSpacing * s,
-              runSpacing: _ExtrasLayout.chipRunSpacing * s,
-              children: [for (final c in l.chips) StatChip(icon: c.icon, label: c.label, fontSize: l.chipFontSize)],
+            _fading(
+              !quiet,
+              quietFade,
+              Wrap(
+                spacing: _ExtrasLayout.chipSpacing * s,
+                runSpacing: _ExtrasLayout.chipRunSpacing * s,
+                children: [for (final c in l.chips) StatChip(icon: c.icon, label: c.label, fontSize: l.chipFontSize)],
+              ),
             ),
           ],
           if (l.why case final why?) ...[
             if (hasChips) SizedBox(height: _ExtrasLayout.whyGap * s),
-            Text(why, maxLines: 2, overflow: TextOverflow.ellipsis, style: l.whyStyle),
+            _fading(!quiet, quietFade, Text(why, maxLines: 2, overflow: TextOverflow.ellipsis, style: l.whyStyle)),
           ],
           if (l.credit case final credit?) ...[
             if (hasChips || l.why != null) SizedBox(height: _ExtrasLayout.creditGap * s),
@@ -553,9 +642,46 @@ class _Extras extends StatelessWidget {
             replay
           else
             AnimatedSize(duration: resize, curve: Curves.easeOutCubic, alignment: Alignment.topLeft, child: replay),
-          SizedBox(height: _ExtrasLayout.sectionGap * s),
-          Text(l.hints, style: l.hintStyle),
+          if (l.hints case final hints?) ...[
+            SizedBox(height: _ExtrasLayout.sectionGap * s),
+            _fading(showHints, hintsFade, Text(key: const ValueKey('reel-hints'), hints, style: l.hintStyle)),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+/// The clip's progress (V2-28): a thin line under the extras, on the
+/// app's own progress bar. The mono scheme maps `surfaceContainerHighest`
+/// onto `surface`, so the track is set from `onSurface` here.
+class _ProgressLine extends StatelessWidget {
+  const _ProgressLine({required this.clips, required this.visible, required this.scale});
+
+  final ClipPlayer clips;
+  final bool visible;
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final height = _ExtrasLayout.progressHeight * scale;
+    return AnimatedOpacity(
+      key: const ValueKey('reel-progress'),
+      opacity: visible ? 1 : 0,
+      duration: ReelLeanBack.fade(context, quiet: !visible),
+      curve: Curves.easeOutCubic,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(height),
+        child: ValueListenableBuilder<ClipProgress>(
+          valueListenable: clips.progress,
+          builder: (context, p, _) => MediaProgressBar(
+            viewOffset: visible ? p.position.inMilliseconds : 0,
+            duration: visible ? p.length.inMilliseconds : 0,
+            minHeight: height,
+            backgroundColor: onSurface.withValues(alpha: 0.12),
+          ),
+        ),
       ),
     );
   }

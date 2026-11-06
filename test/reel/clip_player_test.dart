@@ -16,6 +16,8 @@ class FakeClipEngine implements ClipEngine {
   final firstFrameCtl = StreamController<void>.broadcast(sync: true);
   final errorCtl = StreamController<PlayerError>.broadcast(sync: true);
   final logCtl = StreamController<PlayerLog>.broadcast(sync: true);
+  final positionCtl = StreamController<Duration>.broadcast(sync: true);
+  final durationCtl = StreamController<Duration>.broadcast(sync: true);
   final volumes = <double>[];
   bool disposed = false;
   Completer<void>? disposeGate;
@@ -69,6 +71,15 @@ class FakeClipEngine implements ClipEngine {
   Duration position = const Duration(seconds: 20);
 
   @override
+  Stream<Duration> get positions => positionCtl.stream;
+
+  @override
+  Stream<Duration> get durations => durationCtl.stream;
+
+  @override
+  Duration duration = Duration.zero;
+
+  @override
   Future<void> dispose() async {
     calls.add('dispose');
     await disposeGate?.future;
@@ -88,6 +99,8 @@ void main() {
     await engine.firstFrameCtl.close();
     await engine.errorCtl.close();
     await engine.logCtl.close();
+    await engine.positionCtl.close();
+    await engine.durationCtl.close();
   });
 
   setUp(() {
@@ -313,6 +326,60 @@ void main() {
     engine.position = const Duration(seconds: 4);
     await clips.seekBy(const Duration(seconds: -10));
     expect(engine.calls.where((c) => c.startsWith('seek')), ['seek 30', 'seek 0']);
+  });
+
+  group('progress line (V2-28)', () {
+    test('follows the clip on screen only, from its first frame', () async {
+      await clips.play(_a, first: true);
+      engine.durationCtl.add(const Duration(seconds: 90));
+      // The outgoing clip's tick before this one's first frame.
+      engine.positionCtl.add(const Duration(seconds: 40));
+      expect(clips.progress.value, ClipProgress.zero);
+
+      engine.firstFrameCtl.add(null);
+      expect(clips.progress.value, const ClipProgress(Duration.zero, Duration(seconds: 90)));
+      engine.positionCtl.add(const Duration(seconds: 45));
+      expect(clips.progress.value.fraction, closeTo(0.5, 1e-9));
+
+      // The next card starts again from nothing.
+      await clips.play(const ClipSource(uri: 'https://cdn.example/c.mp4', origin: ClipOrigin.plexExtra));
+      expect(clips.progress.value, ClipProgress.zero);
+    });
+
+    test('a clip as long as the one before takes the length the core holds', () async {
+      engine.duration = const Duration(seconds: 60);
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      engine.positionCtl.add(const Duration(seconds: 15));
+      expect(clips.progress.value.fraction, closeTo(0.25, 1e-9));
+    });
+
+    test('a held clip reads as full; Replay starts it again', () async {
+      await clips.play(_a, first: true);
+      engine.durationCtl.add(const Duration(seconds: 80));
+      engine.firstFrameCtl.add(null);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(clips.phase.value, ClipPhase.held);
+      expect(clips.progress.value.fraction, 1);
+      // A late tick does not pull a held line back.
+      engine.positionCtl.add(const Duration(seconds: 79));
+      expect(clips.progress.value.fraction, 1);
+
+      await clips.replay();
+      expect(clips.progress.value.fraction, 0);
+    });
+
+    test('no length known is no fraction, and release clears it', () async {
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      engine.positionCtl.add(const Duration(seconds: 5));
+      expect(clips.progress.value.fraction, isNull);
+      await clips.release();
+      expect(clips.progress.value, ClipProgress.zero);
+    });
   });
 
   group('debug overlay tape (V2-07)', () {
