@@ -73,6 +73,12 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
     notifyListeners();
   }
 
+  /// The system stops or restarts it (audio focus lost or given back).
+  void systemPlaying(bool playing) {
+    _playing = playing;
+    notifyListeners();
+  }
+
   /// The plugin's buffer poll.
   void loadTo(Duration to) {
     loaded = to;
@@ -629,6 +635,125 @@ void main() {
         unawaited(players.releaseAll());
         async.flushMicrotasks();
       });
+    });
+  });
+
+  group('audio focus and the screen (V2-22)', () {
+    late List<bool> awake;
+    late ReelFeedPlayers p;
+
+    setUp(() {
+      awake = [];
+      made = {};
+      p = ReelFeedPlayers(
+        create: (uri) => made[uri.pathSegments.last.split('.').first] = _FakeVideo(uri),
+        keepAwake: (on) async => awake.add(on),
+        riseOver: Duration.zero,
+      );
+    });
+
+    tearDown(() => p.dispose());
+
+    test('the screen stays on only while the card on screen plays', () async {
+      p.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      expect(awake, [true]);
+
+      await p.togglePause();
+      expect(awake, [true, false], reason: 'a tap pause lets the screen time out');
+      await p.togglePause();
+      expect(awake, [true, false, true]);
+
+      // A swipe onto a card with no clip (a still).
+      p.sync(current: 's', window: _win('b', [], 'a').where((w) => w.id != 'b').toList());
+      await _settle();
+      expect(awake.last, isFalse);
+
+      p.sync(current: 'b', window: _win('b', [], 'a'));
+      await _settle();
+      expect(awake.last, isTrue);
+      await p.releaseAll();
+      expect(awake.last, isFalse);
+      expect(awake.where((on) => on).length, awake.where((on) => !on).length, reason: 'every hold let go');
+    });
+
+    test('a card that stops by itself lets the screen go and is not played again by a re-sync', () async {
+      p.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      final a = made['a']!;
+
+      a.systemPlaying(false);
+      await _settle();
+      expect(awake.last, isFalse);
+
+      // The controller changes and the feed re-syncs: no play, so the
+      // focus is not taken back from the app that took it.
+      p.sync(current: 'a', window: _win('a', ['b']));
+      p.sync(current: 'a', window: _win('a', ['b', 'c']));
+      await _settle();
+      expect(a.playing, isFalse);
+      expect(a.calls.where((c) => c == 'play'), hasLength(1));
+
+      // A screen switch re-syncs with resume: it plays on (V2-65).
+      p.sync(current: 'a', window: _win('a', ['b']), resume: true);
+      await _settle();
+      expect(a.playing, isTrue);
+      a.systemPlaying(false);
+      await _settle();
+
+      // The system gives it back (a call ended): the screen is held again.
+      a.systemPlaying(true);
+      await _settle();
+      expect(awake.last, isTrue);
+    });
+
+    test('a card that stopped by itself plays again on a tap, or on the next visit', () async {
+      p.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      final a = made['a']!;
+      a.systemPlaying(false);
+      await _settle();
+
+      await p.togglePause();
+      await p.togglePause();
+      expect(a.playing, isTrue, reason: 'a tap brings it back');
+
+      a.systemPlaying(false);
+      p.sync(current: 'b', window: _win('b', [], 'a'));
+      await _settle();
+      p.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      expect(a.playing, isTrue, reason: 'swiped away and back: a new visit plays');
+    });
+
+    test('everything let go waits for the screen to be let go', () async {
+      final gate = Completer<void>();
+      final q = ReelFeedPlayers(
+        create: _FakeVideo.new,
+        keepAwake: (on) => on ? Future.value() : gate.future,
+        riseOver: Duration.zero,
+      );
+      q.sync(current: 'a', window: _win('a'));
+      await _settle();
+      var done = false;
+      unawaited(q.releaseAll().then((_) => done = true));
+      await _settle();
+      expect(done, isFalse, reason: 'real playback must not take the screen first');
+      gate.complete();
+      await _settle();
+      expect(done, isTrue);
+      q.dispose();
+    });
+
+    test('letting go of the feed for good lets the screen go', () async {
+      p.sync(current: 'a', window: _win('a'));
+      await _settle();
+      expect(awake, [true]);
+      p.dispose();
+      await _settle();
+      expect(awake, [true, false]);
+      // tearDown disposes again; make that a no-op.
+      p = ReelFeedPlayers(create: _FakeVideo.new);
     });
   });
 }

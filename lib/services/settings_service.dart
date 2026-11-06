@@ -107,9 +107,9 @@ enum ContinueWatchingAction { play, details }
 
 enum EpisodeAction { play, details }
 
-/// Fork: how a Reel card's sound starts (plan D5). [sound] plays it; once
-/// V2-22 lands it takes audio focus, so music pauses. [mutedIfOtherAudio]
-/// starts muted while other audio is playing.
+/// Fork: how a Reel card's sound starts (plan D5). [sound] plays it and, on
+/// the phone, takes audio focus, so music pauses (V2-22). [mutedIfOtherAudio]
+/// starts muted while other audio is playing and mixes with it.
 enum ReelStartSound { sound, mutedIfOtherAudio }
 
 /// Fork: what a Reel clip does when it ends (plan D6, V2-47).

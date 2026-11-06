@@ -22,7 +22,9 @@ import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/settings_service.dart';
 
+import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 class _Servers implements ReelServers {
@@ -566,6 +568,37 @@ void main() {
     final events = await store.events(since: DateTime(2000));
     expect(events.map((e) => e.action), contains(ReelAction.details.name));
     c.dispose();
+  });
+
+  group('mute (V2-22)', () {
+    setUp(resetSharedPreferencesForTest);
+
+    test('an unmute is recorded and the choice kept for the next launch', () async {
+      final settings = await SettingsService.getInstance();
+      final c = make(externalClips: true);
+      await c.start();
+      await c.setMuted(true);
+      expect(c.muted, isTrue);
+      expect(settings.read(SettingsService.reelMuted), isTrue);
+      await c.setMuted(false);
+      expect(settings.read(SettingsService.reelMuted), isFalse);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.map((e) => e.action).where((a) => a == ReelAction.unmute.name), hasLength(1));
+      c.dispose();
+    });
+
+    test('a mute the visit starts with is neither recorded nor kept', () async {
+      final settings = await SettingsService.getInstance();
+      final c = make(externalClips: true);
+      await c.start();
+      await c.setMuted(true, remember: false);
+      expect(c.muted, isTrue);
+      await c.setMuted(false, remember: false);
+      expect(settings.read(SettingsService.reelMuted), isFalse);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.map((e) => e.action), isNot(contains(ReelAction.unmute.name)));
+      c.dispose();
+    });
   });
 
   test('the On TV state carries image paths, never a server URL', () async {

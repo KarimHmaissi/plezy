@@ -844,6 +844,33 @@ void main() {
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
   });
+  group('mute (V2-22)', () {
+    setUp(resetSharedPreferencesForTest);
+
+    testWidgets('the button goes through the controller: the unmute is recorded and kept', (tester) async {
+      final settings = (await tester.runAsync(SettingsService.getInstance))!;
+      await pump(tester);
+      await tester.runAsync(() async {
+        await tester.tap(find.byTooltip('Mute'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pump();
+      expect(players.muted, isTrue);
+      expect(c.muted, isTrue);
+      expect(settings.read(SettingsService.reelMuted), isTrue);
+
+      await tester.runAsync(() async {
+        await tester.tap(find.byTooltip('Sound on'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pump();
+      expect(players.muted, isFalse);
+      expect(settings.read(SettingsService.reelMuted), isFalse);
+      final events = (await tester.runAsync(() => store.events(since: DateTime(2000))))!;
+      expect(events.map((e) => e.action), contains(ReelAction.unmute.name));
+    });
+  });
+
   group('V2-29: Details first, Save shows saved', () {
     Finder button<T extends Widget>(String label) =>
         find.ancestor(of: find.text(label).first, matching: find.byWidgetPredicate((w) => w is T));

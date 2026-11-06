@@ -36,9 +36,14 @@ abstract class FeedVideo implements Listenable {
 }
 
 /// [FeedVideo] on the `video_player` plugin (ExoPlayer on Android).
+///
+/// With [mixWithOthers] off (the default, V2-22) the player takes audio
+/// focus: `video_player_android` 2.12.2 builds it with media3's
+/// `handleAudioFocus` on, so music pauses while a card plays and a call
+/// pauses the card. On, it plays over other audio and never pauses for it.
 class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
-  PluginFeedVideo(Uri uri)
-    : _c = VideoPlayerController.networkUrl(uri, videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true)) {
+  PluginFeedVideo(Uri uri, {bool mixWithOthers = false})
+    : _c = VideoPlayerController.networkUrl(uri, videoPlayerOptions: VideoPlayerOptions(mixWithOthers: mixWithOthers)) {
     _c.addListener(notifyListeners);
   }
 
@@ -170,6 +175,14 @@ typedef FeedCardState = ({FeedVideo? video, bool current, bool paused});
 /// still half on screen (and plays on from there if the drag comes back).
 /// It goes back to its start at [settle], once the page has come to rest;
 /// on a metered link that is also when it is let go if it is now behind.
+///
+/// The screen stays on only while the card on screen is really playing
+/// ([keepAwake], V2-22): a tap pause, a clip that stops by itself (it ended,
+/// or the system took its audio focus), a swipe onto a still and letting
+/// everything go all let the screen time out again. A card that has started
+/// its visit is never played again by a re-sync: once it stops by itself
+/// (a call, another app's music) it stays stopped until tapped (or a screen
+/// switch re-syncs with `resume`), so it never takes the audio focus back.
 class ReelFeedPlayers extends ChangeNotifier {
   ReelFeedPlayers({
     FeedVideo Function(Uri uri)? create,
@@ -177,6 +190,7 @@ class ReelFeedPlayers extends ChangeNotifier {
     this.onStarted,
     this.onFailed,
     this.onLeft,
+    this.keepAwake,
     this.riseOver = FeedRamp.over,
   }) : _create = create ?? PluginFeedVideo.new;
 
@@ -199,6 +213,13 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// The card stopped being the one on screen (a swipe went past the middle,
   /// or everything was let go). Its next [onStarted] is a new visit.
   final void Function(String cardId)? onLeft;
+
+  /// Holds the screen on (true) or lets it time out (false); called only
+  /// when that changes. The Reel screen hands in a `WakelockController`.
+  final Future<void> Function(bool on)? keepAwake;
+
+  /// What [keepAwake] was last told.
+  bool _awake = false;
 
   final Map<String, _Entry> _byId = {};
   final Map<String, _CardNotifier> _cards = {};
@@ -254,7 +275,16 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// [metered] link it never reaches past the next card. Under memory
   /// pressure ([memoryLevel] 1) only the card on screen keeps a player, and
   /// at level 2 none does (stills only).
-  void sync({required String? current, required List<FeedClip> window, int memoryLevel = 0, bool metered = false}) {
+  ///
+  /// A card on screen that stopped by itself is left stopped by a re-sync
+  /// (V2-22), unless [resume] asks for it again (a screen switch, V2-65).
+  void sync({
+    required String? current,
+    required List<FeedClip> window,
+    int memoryLevel = 0,
+    bool metered = false,
+    bool resume = false,
+  }) {
     if (_disposed) return;
     _window = window;
     _memoryLevel = memoryLevel;
@@ -273,8 +303,18 @@ class ReelFeedPlayers extends ChangeNotifier {
       if (_byId[left] case final old?) unawaited(_leave(old));
       if (left != null) onLeft?.call(left);
     }
-    if (_byId[_current] case final e?) unawaited(e.opened!.then((_) => _apply(e)));
+    if (_byId[_current] case final e?) unawaited(e.opened!.then((_) => _apply(e, resume: resume)));
+    unawaited(_syncAwake());
     notifyListeners();
+  }
+
+  /// Tells [keepAwake] whether the card on screen is really playing.
+  Future<void> _syncAwake() async {
+    final e = _byId[_current];
+    final on = !_disposed && !_paused && e != null && e.video.ready && e.video.playing;
+    if (on == _awake) return;
+    _awake = on;
+    await keepAwake?.call(on);
   }
 
   /// The clips that may hold a player now, in priority order.
@@ -372,18 +412,24 @@ class ReelFeedPlayers extends ChangeNotifier {
 
   _Entry _open(FeedClip w) {
     final e = _Entry(w.id, w.uri, _create(w.uri));
-    e.video.addListener(() => _watchLoop(e));
+    e.video.addListener(() {
+      _watchLoop(e);
+      if (e.id == _current) unawaited(_syncAwake());
+    });
     return e;
   }
 
   bool _isLive(_Entry e) => !_disposed && identical(_byId[e.id], e);
 
-  Future<void> _apply(_Entry e) async {
+  Future<void> _apply(_Entry e, {bool resume = false}) async {
     if (!_isLive(e) || !e.video.ready) return;
     if (e.id == _current && !_paused) {
       if (e.video.playing) return;
       // A start already on its way (the open and the sync both apply).
       if (e.starting case final s?) return s;
+      // Started this visit and stopped by itself since (the system took the
+      // audio focus): left as it is, or it would take the focus back.
+      if (e.voiced && !resume) return;
       await (e.starting = _start(e).whenComplete(() => e.starting = null));
     } else if (e.id != _current) {
       // Paused, not rewound: it may still be half on screen.
@@ -399,6 +445,7 @@ class ReelFeedPlayers extends ChangeNotifier {
     if (rise) await _volume(e, FeedRamp.from);
     if (!_isLive(e)) return;
     await e.video.play();
+    unawaited(_syncAwake());
     if (rise && _isLive(e) && e.id == _current && !_muted) _rise(e);
   }
 
@@ -496,7 +543,9 @@ class ReelFeedPlayers extends ChangeNotifier {
     final e = _byId[_current];
     if (e == null || !e.video.ready) return;
     _paused = !_paused;
+    unawaited(_syncAwake());
     _paused ? await e.video.pause() : await e.video.play();
+    unawaited(_syncAwake());
     notifyListeners();
   }
 
@@ -522,8 +571,11 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// The tab went away or the screen locked: everything stops, players stay.
   Future<void> pauseAll() async {
     for (final e in _byId.values) {
+      // Played afresh when the feed comes back (a new visit).
+      e.voiced = false;
       if (e.video.ready && e.video.playing) await e.video.pause();
     }
+    await _syncAwake();
   }
 
   /// Real playback is about to start, or the Reel closed: free every decoder,
@@ -534,8 +586,10 @@ class ReelFeedPlayers extends ChangeNotifier {
     _holding = null;
     _window = const [];
     if (left != null) onLeft?.call(left);
-    final drops = [for (final id in _byId.keys.toList()) _drop(id)];
+    final drops = [for (final id in _byId.keys.toList()) _drop(id), _syncAwake()];
     notifyListeners();
+    // The screen is let go before real playback takes it (two
+    // WakelockControllers, one platform flag).
     await Future.wait(drops);
   }
 

@@ -18,12 +18,14 @@ import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_perf.dart';
+import '../../services/reel/reel_sound.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/settings_service.dart';
 import '../../theme/mono_theme.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../services/reel/feed_players.dart';
+import '../video_player/wakelock_controller.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
 import 'reel_feed_view.dart';
@@ -101,12 +103,22 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _sheetOpen = false;
 
   /// Phone: the feed's players (the TV plays on the native clip core).
+  /// They take audio focus unless the sound pref says to mix (V2-22), and
+  /// hold the screen on only while a card really plays.
   late final ReelFeedPlayers _players = ReelFeedPlayers(
+    create: (uri) => PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
+    keepAwake: _awake.setEnabled,
     onLooped: (_) => _controller?.clipEnded(),
     onStarted: (id) => _controller?.clipStarted(id),
     onFailed: (id) => _controller?.clipFailed(id),
     onLeft: (id) => _controller?.clipLeft(id),
   );
+
+  /// Phone: the screen held on while a card plays (V2-22).
+  final WakelockController _awake = WakelockController();
+
+  ReelStartSound get _startSoundPref =>
+      SettingsService.instanceOrNull?.read(SettingsService.reelStartSound) ?? ReelStartSound.sound;
 
   bool get _isTv => PlatformDetector.isTV();
 
@@ -261,7 +273,36 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _shown = true;
     ReelScreen.showing.value = true;
     _perf.attachFrames();
-    unawaited(_start());
+    unawaited(_visit());
+  }
+
+  /// A visit starts (the tab shown, the app back, Back from the player):
+  /// the phone settles how its sound starts before any card plays.
+  Future<void> _visit() async {
+    // Only from a feed that was let go: a resume that never paused (the
+    // shade pulled down) keeps the sound as it is, and the feed's own clip
+    // must not count as other audio.
+    if (!_isTv && _players.current == null) await _startSound();
+    await _start();
+  }
+
+  /// Phone (V2-22): a visit starts muted when the mute was kept, while the
+  /// connected TV is playing, or, with "Muted if other audio is playing",
+  /// while another app's audio plays. Only the kept mute is saved; the
+  /// others hold for this visit.
+  Future<void> _startSound() async {
+    final remote = context.read<CompanionRemoteProvider?>();
+    final tvPlaying =
+        remote != null && remote.isRemote && remote.isConnected && ReelSound.tvPlaying(remote.nowPlaying.value);
+    final saved = SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false;
+    final pref = _startSoundPref;
+    final otherAudio =
+        !saved && !tvPlaying && pref == ReelStartSound.mutedIfOtherAudio && await ReelSound.otherAudioPlaying();
+    if (!mounted || !_shown) return;
+    final muted = ReelSound.startMuted(saved: saved, pref: pref, tvPlaying: tvPlaying, otherAudio: otherAudio);
+    await _players.setMuted(muted);
+    final c = await _ensure();
+    if (mounted) await c.setMuted(muted, remember: false);
   }
 
   @override
@@ -285,7 +326,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       unawaited(_controller?.suspend());
       unawaited(_players.releaseAll());
     } else if (state == AppLifecycleState.resumed) {
-      unawaited(_start());
+      unawaited(_visit());
     }
   }
 

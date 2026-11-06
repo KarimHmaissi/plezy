@@ -235,7 +235,8 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         if (page.round() != _c.index) _pages.jumpToPage(_c.index);
       }
     }
-    _sync();
+    // A card the switch stopped plays on (V2-65).
+    _sync(resume: true);
     widget.onResize?.call();
   }
 
@@ -347,7 +348,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   /// The card on screen, the next two, then the one behind; the players
   /// open them in stages as the card on screen loads (V2-08).
-  void _sync() {
+  void _sync({bool resume = false}) {
     // Hidden, paused or handing over to real playback: nothing plays.
     if (!_c.active) return;
     final i = _page;
@@ -362,6 +363,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       window: window,
       memoryLevel: _c.memoryLevel,
       metered: widget.metered,
+      resume: resume,
     );
   }
 
@@ -481,13 +483,21 @@ class _ReelFeedViewState extends State<ReelFeedView> {
           deckName: _c.deck.name,
           muted: widget.players.muted,
           onDecks: widget.onDecks,
-          onMute: () => unawaited(widget.players.setMuted(!widget.players.muted)),
+          onMute: () => unawaited(_toggleMute()),
           onRemote: widget.onRemote,
         ),
       ),
       _SaveBurst(shown: _burst, count: _bursts),
     ],
   );
+
+  /// The mute button (V2-22): the players go silent (or rise) at once, and
+  /// the controller records an unmute and keeps the choice.
+  Future<void> _toggleMute() async {
+    final muted = !widget.players.muted;
+    await widget.players.setMuted(muted);
+    await _c.setMuted(muted);
+  }
 
   /// The cards after page [i] for the two-pane Up next (V2-30).
   List<(int, ReelSlot)> _upNext(int i) => [

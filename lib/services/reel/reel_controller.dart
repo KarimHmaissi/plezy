@@ -6,6 +6,7 @@ import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
 import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
+import '../settings_service.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
 import 'reel_decks.dart';
@@ -726,9 +727,19 @@ class ReelController extends ChangeNotifier {
     await clips.replay();
   }
 
-  Future<void> setMuted(bool muted) async {
+  bool get muted => clips.muted;
+
+  /// The mute button (V2-22): an unmute is recorded against the card on
+  /// screen, and the choice is kept for the next card and the next launch
+  /// ([SettingsService.reelMuted]). The phone feed's own players follow it
+  /// from the view. With [remember] off (a visit starting muted while the TV
+  /// plays, or the saved mute put back) nothing is recorded or kept.
+  Future<void> setMuted(bool muted, {bool remember = true}) async {
     final c = current.card;
-    if (!muted && c != null) await store.record(c.id, ReelAction.unmute, deck: deck.id);
+    if (remember) {
+      if (!muted && c != null) await store.record(c.id, ReelAction.unmute, deck: deck.id);
+      await SettingsService.instanceOrNull?.write(SettingsService.reelMuted, muted);
+    }
     await clips.setMuted(muted);
     notifyListeners();
   }
