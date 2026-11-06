@@ -11,6 +11,7 @@ import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
+import 'package:plezy/services/customisation/mirror_store.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
@@ -51,6 +52,17 @@ class _Media implements ReelMedia {
   String? imageUrl(String serverId, String? path, {required int width}) => null;
 }
 
+/// Metadata that isn't there yet the first time each card asks.
+class _LateMedia extends _Media {
+  final Set<String> _asked = {};
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) async {
+    if (_asked.add(ratingKey)) throw StateError('not yet');
+    return super.item(serverId, ratingKey);
+  }
+}
+
 class _Deck extends ReelDeck {
   _Deck(this.id, this.cards);
 
@@ -61,8 +73,10 @@ class _Deck extends ReelDeck {
   @override
   String get name => 'Deck $id';
 
+  bool keeps = true;
+
   @override
-  bool get keepsSeen => true;
+  bool get keepsSeen => keeps;
 
   @override
   bool get raw => true;
@@ -118,6 +132,10 @@ void main() {
     bool externalClips = false,
     List<MediaItem>? opened,
     DateTime Function()? clock,
+    ReelMedia? media,
+    ReelWatch? onWatch,
+    ReelWatchlist? addToWatchlist,
+    bool Function()? reachesTvNow,
   }) => ReelController(
     decks:
         decks ??
@@ -137,10 +155,11 @@ void main() {
       },
     ),
     store: store,
-    media: _Media(),
-    onWatch: (_, {required onTv}) async => false,
-    addToWatchlist: (_) async => true,
+    media: media ?? _Media(),
+    onWatch: onWatch ?? (_, {required onTv}) async => false,
+    addToWatchlist: addToWatchlist ?? (_) async => true,
     onSaved: () async => seated++,
+    reachesTvNow: reachesTvNow,
     externalClips: externalClips,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
@@ -179,8 +198,77 @@ void main() {
     await c.save();
     expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
     expect(seated, 1);
-    expect(c.toast.value, 'On the TV tonight');
+    expect(c.toast.value, ReelController.savedOnTv);
     c.dispose();
+  });
+
+  group('card actions say where the pick lives', () {
+    void readOnlyMirror() => store = ReelStore(
+      database: () async => db,
+      settings: () async => MirrorCustomisationStore({}, send: (_) => false),
+    );
+
+    test('a phone on its own data, with no TV connected, says the pick waits for the next connect', () async {
+      final c = make(reachesTvNow: () => false);
+      await c.start();
+      await c.save();
+      expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
+      expect(c.toast.value, ReelController.savedForLater);
+      c.dispose();
+    });
+
+    test('Save on a mirror that lost its TV says it could not save, and keeps nothing', () async {
+      readOnlyMirror();
+      final c = make();
+      await c.start();
+      await expectLater(c.save(), completes);
+      expect(await store.freshPicks(), isEmpty);
+      expect(seated, 0);
+      expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+
+    test('Not for me and Seen it on a read-only mirror leave the card where it was', () async {
+      readOnlyMirror();
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2')])..keeps = false,
+        ],
+      );
+      await c.start();
+      await expectLater(c.notForMe(), completes);
+      expect(c.current.card?.id, 't1');
+      await expectLater(c.seenIt(), completes);
+      expect(c.current.card?.id, 't1');
+      expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+
+    test('a card saved before its metadata landed still goes to the watchlist', () async {
+      final mirrored = <String>[];
+      final c = make(
+        media: _LateMedia(),
+        addToWatchlist: (item) async {
+          mirrored.add(item.id);
+          return true;
+        },
+      );
+      await c.start();
+      expect(c.current.item, isNull);
+      await c.save();
+      await pumpEventQueue();
+      expect(mirrored, ['1']);
+      c.dispose();
+    });
+
+    test('Watch on TV that cannot reach the TV keeps the pick and says when it lands', () async {
+      final c = make(onWatch: (_, {required onTv}) async => false, reachesTvNow: () => false);
+      await c.start();
+      expect(await c.watch(onTv: true), isFalse);
+      expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
+      expect(c.toast.value, ReelController.savedForLater);
+      c.dispose();
+    });
   });
 
   test('Not for me rests the title and moves on', () async {

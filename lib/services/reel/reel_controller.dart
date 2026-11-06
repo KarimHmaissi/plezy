@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
+import '../customisation/mirror_store.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
 import 'reel_decks.dart';
@@ -61,6 +62,7 @@ class ReelController extends ChangeNotifier {
     required this.onWatch,
     required this.addToWatchlist,
     this.onSaved,
+    this.reachesTvNow,
     this.deckFor,
     this.onOpen,
     this.externalClips = false,
@@ -79,6 +81,12 @@ class ReelController extends ChangeNotifier {
 
   /// After a Save: seats the Home row the first time (ReelApp).
   final Future<void> Function()? onSaved;
+
+  /// Whether a Save lands on the TV's Home now: this is the TV, or a phone
+  /// writing to (or catching up with) a connected TV. False for a phone on
+  /// its own data with no TV connected: the pick reaches the TV when it next
+  /// connects. Null means now.
+  final bool Function()? reachesTvNow;
 
   /// Opens the title's own page (the app's detail screen).
   final Future<void> Function(MediaItem item)? onOpen;
@@ -141,7 +149,7 @@ class ReelController extends ChangeNotifier {
   final ValueNotifier<String?> deckStrip = ValueNotifier(null);
   Timer? _stripTimer;
 
-  /// One-line confirmations ("On the TV tonight").
+  /// One-line confirmations ([savedOnTv]).
   final ValueNotifier<String?> toast = ValueNotifier(null);
   Timer? _toastTimer;
 
@@ -427,16 +435,33 @@ class ReelController extends ChangeNotifier {
       _firstClip = true;
     }
     final ok = await onWatch(item, onTv: onTv);
-    if (!ok && onTv) {
-      await save(silent: true);
-      _say('Saved for the TV.');
-    }
+    // The TV couldn't be reached: keep the pick instead, and say where it
+    // went (or that it couldn't be kept).
+    if (!ok && onTv) await save();
     return ok;
+  }
+
+  /// Confirmations that say where a Save went.
+  static const String savedOnTv = 'On the TV tonight';
+  static const String savedForLater = 'Saved, on the TV next time you connect';
+  static const String notConnected = "Couldn't save: not connected to the TV";
+
+  /// Runs a card action that writes the synced Reel data. A phone mirroring
+  /// a TV it has lost can't write ([MirrorReadOnlyException]): say so and
+  /// leave the card as it was, rather than fail silently. Only the action's
+  /// name is logged, never the title.
+  Future<void> _act(String name, Future<void> Function() fn) async {
+    try {
+      await fn();
+    } on MirrorReadOnlyException {
+      appLogger.w('Reel: $name not kept, not connected to the TV');
+      _say(notConnected);
+    }
   }
 
   /// One Save: waits on the TV's Home for 3 days and goes to the Plex
   /// watchlist so it's never lost.
-  Future<void> save({bool silent = false}) async {
+  Future<void> save() => _act('save', () async {
     final s = current;
     final c = s.card;
     if (c == null) return;
@@ -452,15 +477,25 @@ class ReelController extends ChangeNotifier {
       ),
     );
     await store.record(c.id, ReelAction.save, deck: deck.id);
-    final item = s.item;
-    if (item != null) unawaited(addToWatchlist(item).catchError((Object _) => false));
+    unawaited(_mirrorToWatchlist(s.item, c));
     final seat = onSaved;
     if (seat != null) unawaited(seat().catchError((Object _) {}));
-    if (!silent) _say('On the TV tonight');
+    _say((reachesTvNow?.call() ?? true) ? savedOnTv : savedForLater);
+  });
+
+  /// Save's watchlist mirror. A card saved before its metadata landed
+  /// resolves the item first, as [watch] does, so the mirror isn't skipped.
+  Future<void> _mirrorToWatchlist(MediaItem? known, ReelCardData c) async {
+    try {
+      final item = known ?? await media.item(c.best.serverId, c.best.ratingKey);
+      if (item != null) await addToWatchlist(item);
+    } catch (_) {
+      // The pick is kept either way; the mirror is best effort.
+    }
   }
 
   /// Not for me: the title rests 90 days (never a ban) and the feed moves on.
-  Future<void> notForMe() async {
+  Future<void> notForMe() => _act('notForMe', () async {
     final c = current.card;
     if (c == null) return;
     await store.notForMe(c.id);
@@ -468,10 +503,10 @@ class ReelController extends ChangeNotifier {
     _cardShown = null;
     _drop(c);
     await _show();
-  }
+  });
 
   /// Spoiled me: bans this asset for good and drops to the next rung.
-  Future<void> spoiledMe() async {
+  Future<void> spoiledMe() => _act('spoiledMe', () async {
     final s = current;
     final c = s.card, clip = s.clip;
     if (c == null || clip == null) return;
@@ -483,10 +518,10 @@ class ReelController extends ChangeNotifier {
     _clip.remove(c.id);
     _cardShown = null;
     await _show();
-  }
+  });
 
   /// Seen it: a fact, so permanent (and the title leaves unseen-only decks).
-  Future<void> seenIt() async {
+  Future<void> seenIt() => _act('seenIt', () async {
     final c = current.card;
     if (c == null) return;
     await store.markFact(c.id, 'seen');
@@ -496,7 +531,7 @@ class ReelController extends ChangeNotifier {
       _drop(c);
       await _show();
     }
-  }
+  });
 
   void _drop(ReelCardData c) {
     for (final e in _cards.entries) {
