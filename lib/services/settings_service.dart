@@ -735,6 +735,11 @@ class SettingsService extends BaseSharedPreferencesService {
   static const autoCheckUpdatesOnStartup = BoolPref('auto_check_updates_on_startup', defaultValue: true);
   static const showPerformanceOverlay = BoolPref('show_performance_overlay');
   static const autoHidePerformanceOverlay = BoolPref('auto_hide_performance_overlay', defaultValue: true);
+
+  /// Fork: the Reel's debug overlay and `[ReelPerf]` ring (plan V2-07). Off by
+  /// default; switched from the hidden developer setting (V2-62). Per-device
+  /// runtime state, so it takes part in neither reset nor export.
+  static const reelDebugOverlay = BoolPref('reel_debug_overlay');
   static const enableDiscordRPC = BoolPref('enable_discord_rpc');
   static const enableTraktWatchedSync = BoolPref('enable_trakt_watched_sync', defaultValue: true);
 
@@ -1019,6 +1024,7 @@ class SettingsService extends BaseSharedPreferencesService {
     'video_player_navigation_enabled',
     defaultValueProvider: PlatformDetector.isTV,
   );
+
   /// Fork: the TV is the home hub, so it hosts the companion remote out of the
   /// box (like desktops) and phones on the same Plex account find it.
   static bool _companionRemoteServerDefault() => PlatformDetector.isDesktopOS() || PlatformDetector.isTV();

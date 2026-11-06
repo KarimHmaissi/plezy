@@ -6,6 +6,7 @@ import '../../mpv/models.dart';
 import '../../mpv/player/platform/player_android.dart';
 import '../../mpv/player/player.dart';
 import '../../utils/app_logger.dart';
+import 'reel_perf.dart';
 
 /// Where a clip comes from. Clips never carry request headers: the Plex
 /// token rides in the PMS URL only, so nothing Plex reaches AnimeThemes.
@@ -45,6 +46,10 @@ abstract interface class ClipEngine {
   Stream<bool> get completed;
   Stream<void> get firstFrame;
   Stream<PlayerError> get errors;
+
+  /// The native player's forwarded log lines (the debug overlay reads the
+  /// preload and decoder lines; they arrive only with debug logging on).
+  Stream<PlayerLog> get logs;
   Duration get position;
   Future<void> dispose();
 }
@@ -92,6 +97,9 @@ class ExoClipEngine implements ClipEngine {
   Stream<PlayerError> get errors => _p.streams.error;
 
   @override
+  Stream<PlayerLog> get logs => _p.streams.log;
+
+  @override
   Duration get position => _p.state.position;
 
   @override
@@ -105,9 +113,14 @@ enum ClipPhase { idle, loading, playing, paused, held, failed }
 /// cards. It never reports a timeline, a scrobble or a media session: it
 /// imports none of that code (test/reel/no_reporting_guard_test.dart).
 class ClipPlayer {
-  ClipPlayer({ClipEngine Function()? engine, this.loops = 2}) : _create = engine ?? ExoClipEngine.new;
+  ClipPlayer({ClipEngine Function()? engine, this.loops = 2, ReelPerf? perf})
+    : _create = engine ?? ExoClipEngine.new,
+      _perf = perf ?? ReelPerf.instance;
 
   final ClipEngine Function() _create;
+
+  /// The debug overlay's tape (it records nothing unless switched on).
+  final ReelPerf _perf;
 
   /// Plays before holding on the last frame.
   final int loops;
@@ -119,6 +132,9 @@ class ClipPlayer {
   bool _muted = false;
   Timer? _fade;
   Stopwatch? _ttff;
+
+  /// The clip last handed to the core's preload, until it is used or cleared.
+  String? _preloaded;
 
   final ValueNotifier<ClipPhase> phase = ValueNotifier(ClipPhase.idle);
 
@@ -142,7 +158,8 @@ class ClipPlayer {
           appLogger.w('Reel: clip error: ${err.message}');
           phase.value = ClipPhase.failed;
         }),
-      );
+      )
+      ..add(e.logs.listen(_onLog));
     return e;
   }
 
@@ -151,6 +168,8 @@ class ClipPlayer {
   /// 300 ms after the outgoing clip fades out over 250 ms.
   Future<void> play(ClipSource source, {bool first = false}) async {
     final e = _ensure();
+    _perf.markResolved(preloaded: _preloaded == source.uri, origin: source.origin.name);
+    _preloaded = null;
     if (_current != null && !first) await _fadeTo(0, const Duration(milliseconds: 250));
     _current = source;
     _played = 0;
@@ -158,6 +177,7 @@ class ClipPlayer {
     _ttff = Stopwatch()..start();
     await e.setVolume(_muted ? 0 : (first ? 0 : 30));
     await e.open(source.uri);
+    _perf.markOpened();
     if (!_muted) unawaited(_fadeTo(100, Duration(milliseconds: first ? 600 : 300)));
   }
 
@@ -165,14 +185,19 @@ class ClipPlayer {
   Future<void> preload(ClipSource? next) async {
     final e = _ensure();
     if (next == null || !next.preloadable) {
+      _preloaded = null;
       await e.clearPreloads();
       return;
     }
+    _preloaded = next.uri;
     await e.preload(next.uri);
   }
 
   /// Memory pressure: drop the buffered next card without building a core.
-  Future<void> dropPreload() async => _engine?.clearPreloads();
+  Future<void> dropPreload() async {
+    _preloaded = null;
+    await _engine?.clearPreloads();
+  }
 
   Future<void> pause() async {
     await _engine?.pause();
@@ -220,6 +245,8 @@ class ClipPlayer {
     final e = _engine;
     _engine = null;
     _current = null;
+    _preloaded = null;
+    _perf.cancel();
     for (final s in _subs) {
       await s.cancel();
     }
@@ -235,8 +262,19 @@ class ClipPlayer {
       lastTtff.value = sw.elapsed;
       appLogger.i('[ReelTTFF] ${_current?.origin.name} ${sw.elapsedMilliseconds}ms');
       _ttff = null;
+      _perf.markFirstFrame();
     }
     if (phase.value == ClipPhase.loading) phase.value = ClipPhase.playing;
+  }
+
+  /// ExoPlayerCore's `Open clip: preloaded=` and `Decoder initialized:`
+  /// lines (forwarded only while the player's debug log is on).
+  void _onLog(PlayerLog log) {
+    if (log.prefix == 'clip' && log.text.startsWith('Open clip: preloaded=')) {
+      _perf.markPreloaded(log.text.endsWith('true'));
+    } else if (log.prefix == 'decoder-hang' && log.text.startsWith('Decoder initialized')) {
+      _perf.markDecoder();
+    }
   }
 
   void _onCompleted() {

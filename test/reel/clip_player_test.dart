@@ -7,12 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/mpv/models.dart';
 import 'package:plezy/mpv/player/player.dart';
 import 'package:plezy/services/reel/clip_player.dart';
+import 'package:plezy/services/reel/reel_perf.dart';
 
 class FakeClipEngine implements ClipEngine {
   final calls = <String>[];
   final completedCtl = StreamController<bool>.broadcast(sync: true);
   final firstFrameCtl = StreamController<void>.broadcast(sync: true);
   final errorCtl = StreamController<PlayerError>.broadcast(sync: true);
+  final logCtl = StreamController<PlayerLog>.broadcast(sync: true);
   final volumes = <double>[];
   bool disposed = false;
   Completer<void>? disposeGate;
@@ -54,6 +56,9 @@ class FakeClipEngine implements ClipEngine {
   Stream<PlayerError> get errors => errorCtl.stream;
 
   @override
+  Stream<PlayerLog> get logs => logCtl.stream;
+
+  @override
   Duration position = const Duration(seconds: 20);
 
   @override
@@ -75,6 +80,7 @@ void main() {
     await engine.completedCtl.close();
     await engine.firstFrameCtl.close();
     await engine.errorCtl.close();
+    await engine.logCtl.close();
   });
 
   setUp(() {
@@ -157,5 +163,56 @@ void main() {
     engine.position = const Duration(seconds: 4);
     await clips.seekBy(const Duration(seconds: -10));
     expect(engine.calls.where((c) => c.startsWith('seek')), ['seek 30', 'seek 0']);
+  });
+
+  group('debug overlay tape (V2-07)', () {
+    late ReelPerf perf;
+
+    setUp(() {
+      perf = ReelPerf()..recording = true;
+      clips = ClipPlayer(engine: () => engine, perf: perf);
+    });
+
+    PlayerLog log(String prefix, String text) => PlayerLog(level: PlayerLogLevel.debug, prefix: prefix, text: text);
+
+    test('a key press to the first frame records one card, preloaded when the next card was', () async {
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      expect(perf.last!.trigger, ReelPerfTrigger.open);
+      expect(perf.last!.preloaded, isFalse);
+      expect(perf.last!.origin, 'plexExtra');
+
+      await clips.preload(_b);
+      perf.begin(ReelPerfTrigger.key);
+      final playing = clips.play(_b);
+      engine.logCtl.add(log('clip', 'Open clip: preloaded=true'));
+      await playing;
+      engine.logCtl.add(log('decoder-hang', 'Decoder initialized: c2.example.decoder (12ms)'));
+      engine.firstFrameCtl.add(null);
+      final s = perf.last!;
+      expect(perf.samples, hasLength(2));
+      expect(s.trigger, ReelPerfTrigger.key);
+      expect(s.preloaded, isTrue);
+      expect(s.origin, 'animeTheme');
+      expect(s.openMs, isNotNull);
+      expect(s.decoderMs, isNotNull);
+    });
+
+    test('a preload cleared before the open is a miss', () async {
+      await clips.preload(_b);
+      await clips.preload(null);
+      perf.begin(ReelPerfTrigger.key);
+      await clips.play(_b, first: true);
+      engine.firstFrameCtl.add(null);
+      expect(perf.last!.preloaded, isFalse);
+    });
+
+    test('a release drops the card still waiting for its picture', () async {
+      perf.begin(ReelPerfTrigger.key);
+      await clips.play(_a, first: true);
+      await clips.release();
+      perf.markFirstFrame();
+      expect(perf.samples, isEmpty);
+    });
   });
 }
