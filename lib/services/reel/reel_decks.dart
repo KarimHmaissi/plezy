@@ -43,6 +43,45 @@ abstract class ReelDeck {
   Listenable? get rebuilt => null;
 
   Future<List<ReelCardData>> load();
+
+  /// How many of a deck's entries are matched to cards first (V2-04): the
+  /// first card waits for these only, and the rest follow.
+  static const int headEntries = 10;
+
+  /// The deck's list in two parts (V2-04): its first [head] entries'
+  /// cards, then a call that loads the rest, so the first card shows
+  /// before the whole deck is matched. A deck that can't split its list
+  /// loads it whole, with nothing to follow.
+  Future<ReelDeckParts> loadParts(int head) async => ReelDeckParts(await load());
+}
+
+/// A deck's list as [ReelDeck.loadParts] gives it: the cards to show now,
+/// and the call that loads the rest (null: there is no rest). The rest may
+/// repeat a title already in [head]; the controller leaves repeats out.
+class ReelDeckParts {
+  const ReelDeckParts(this.head, [this.rest]);
+
+  final List<ReelCardData> head;
+  final Future<List<ReelCardData>> Function()? rest;
+
+  /// [entries] matched by [cards]: the first [head] now, the rest when
+  /// asked. A list no longer than [head] is matched whole.
+  static Future<ReelDeckParts> split(
+    List<DeckEntry> entries,
+    int head,
+    Future<List<ReelCardData>> Function(List<DeckEntry> entries) cards,
+  ) async {
+    if (entries.length <= head) return ReelDeckParts(await cards(entries));
+    final more = entries.sublist(head);
+    return ReelDeckParts(await cards(entries.sublist(0, head)), () => cards(more));
+  }
+
+  /// Both parts passed through [f] (a deck that filters or reshapes
+  /// another deck's cards).
+  ReelDeckParts map(List<ReelCardData> Function(List<ReelCardData> cards) f) {
+    final later = rest;
+    return ReelDeckParts(f(head), later == null ? null : () async => f(await later()));
+  }
 }
 
 /// Applies a deck's hard rules: unseen only unless it keeps seen titles,
@@ -87,6 +126,9 @@ class EntriesDeck extends ReelDeck {
 
   @override
   Future<List<ReelCardData>> load() async => library.cards(await entries());
+
+  @override
+  Future<ReelDeckParts> loadParts(int head) async => ReelDeckParts.split(await entries(), head, library.cards);
 }
 
 /// For You: today's pool (or yesterday's remainder while today's builds),
@@ -148,12 +190,31 @@ class ForYouDeck extends ReelDeck {
 
   @override
   Future<List<ReelCardData>> load() async {
+    final cached = await _poolEntries();
+    if (cached != null) return library.cards(cached);
+    return _codeOrder();
+  }
+
+  /// Today's pool (or yesterday's remainder) splits: its first entries are
+  /// matched first. Code order ranks the whole list, so it loads whole.
+  @override
+  Future<ReelDeckParts> loadParts(int head) async {
+    final cached = await _poolEntries();
+    if (cached != null) return ReelDeckParts.split(cached, head, library.cards);
+    return ReelDeckParts(await _codeOrder());
+  }
+
+  /// The cached pool's entries, or null when there is none and code order
+  /// stands in. Starts today's build when it is due.
+  Future<List<DeckEntry>?> _poolEntries() async {
     _sharedSeen = _seen(await pool.shared());
     final cached = await pool.cachedPool();
     await buildIfDue();
-    if (cached != null && cached.isNotEmpty) return library.cards(cached);
-    return worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
+    return cached != null && cached.isNotEmpty ? cached : null;
   }
+
+  Future<List<ReelCardData>> _codeOrder() async =>
+      worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
 
   /// The synced data changed (a sync or a TV snapshot): when it brought the
   /// shared pool for today, and this device has no pool of its own for
@@ -315,8 +376,14 @@ class FitsTonightDeck extends ReelDeck {
   Listenable get rebuilt => forYou.rebuilt;
 
   @override
-  Future<List<ReelCardData>> load() async => [
-    for (final c in await forYou.load())
+  Future<List<ReelCardData>> load() async => _fitting(await forYou.load());
+
+  /// For You's parts, each kept to what fits.
+  @override
+  Future<ReelDeckParts> loadParts(int head) async => (await forYou.loadParts(head)).map(_fitting);
+
+  static List<ReelCardData> _fitting(List<ReelCardData> cards) => [
+    for (final c in cards)
       if (fitLine(c.facts) case final chip?)
         ReelCardData(
           title: c.title,

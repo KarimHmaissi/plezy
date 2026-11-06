@@ -79,6 +79,15 @@ void main() {
   group('daily sweep', () {
     Future<Set<String>> keys() async => {for (final r in await db.select(db.reelCache).get()) r.key};
 
+    test("V2-04: a deck's head card row goes once it hasn't been written for 3 days", () async {
+      final old = ReelStore(database: () async => db, clock: () => now.subtract(const Duration(days: 4)));
+      await old.cache(ReelStore.headKey('anime-openings'), '{}');
+      await store.cache(ReelStore.headKey('for-you'), '{}');
+      final swept = await store.sweep();
+      expect(swept?.days, 1);
+      expect(await keys(), {ReelStore.headKey('for-you'), ReelStore.sweptKey});
+    });
+
     test('drops old pools, stale day rows, expired sources, old metadata and old events', () async {
       String day(int back) => ReelStore.dayStamp(now.subtract(Duration(days: back)));
       // Written over the past days, each on its own day.

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../i18n/strings.g.dart';
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
+import '../../utils/trace_span.dart';
 import '../customisation/customisation_store.dart';
 import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
@@ -15,6 +16,7 @@ import 'reel_data_budget.dart';
 import 'reel_decay.dart';
 import 'reel_deck_prefs.dart';
 import 'reel_decks.dart';
+import 'reel_head.dart';
 import 'reel_library.dart';
 import 'reel_playback_profile.dart';
 import 'reel_pool.dart';
@@ -51,6 +53,10 @@ typedef ReelArtPrecache = Future<void> Function(ReelCardData card, MediaItem ite
 /// A show's metadata and its next episode (the server's on-deck episode,
 /// the one Watch plays) from the card's one metadata read.
 typedef ReelItemWithNext = Future<({MediaItem? item, MediaItem? next})> Function(String serverId, String ratingKey);
+
+/// Rebuilds a kept head card ([ReelHead]) from the library index (local
+/// reads only), or null when the index no longer has it (V2-04).
+typedef ReelHeadCard = Future<ReelCardData?> Function(DeckEntry entry);
 
 /// More like this (V2-39): the cards chosen for titles like [seed], or null
 /// when none could be found. [skip] are the cards already shown in this
@@ -269,6 +275,9 @@ class ReelController extends ChangeNotifier {
     this.cellular,
     this.metered,
     this.linkChanged,
+    this.warmClipCore = false,
+    this.headCard,
+    this.moreDecks,
     Listenable? deckPrefsChanged,
     ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
@@ -396,6 +405,22 @@ class ReelController extends ChangeNotifier {
     if (externalClips && !_budget.clips && _cardShown != null) _settle(_generation, playing: false);
     notifyListeners();
   }
+
+  /// TV (V2-04): each start builds the clip core and initializes it with no
+  /// media ([ClipPlayer.warm]) alongside the deck load, at memory level 0
+  /// and with clips allowed on this link. Off: the first open builds it.
+  final bool warmClipCore;
+
+  /// TV (V2-04): rebuilds the card kept at the last suspend ([ReelHead]),
+  /// which a cold start (its deck not loaded) opens at once, before the
+  /// deck's list lands. Null: no card is kept or replayed.
+  final ReelHeadCard? headCard;
+
+  /// Decks added once the first card has shown (V2-04): the saved AI
+  /// answers, whose read would otherwise hold up the Reel's open. A deck
+  /// already there (opened by id meanwhile) isn't added again.
+  final Future<List<ReelDeck>> Function()? moreDecks;
+  bool _moreDecksAsked = false;
 
   /// Fires when the deck prefs change (a picker or the Decks screen on this
   /// device, or the other device's arrangement arriving): the pickers and
@@ -601,6 +626,31 @@ class ReelController extends ChangeNotifier {
   final Map<String, int> _cursor = {};
   final Map<String, Future<List<ReelCardData>>> _loading = {};
 
+  /// Decks whose list is only the head card a cold start replayed
+  /// ([headCard]): the deck's own load, when it lands, follows it.
+  final Set<String> _provisional = {};
+
+  /// Per deck, the rest of its list still loading after its first cards
+  /// ([ReelDeck.loadParts]): only that load may append it. A rebuild or a
+  /// new day's list drops it.
+  final Map<String, Future<void>> _restFor = {};
+
+  /// Per deck, the rest of its list whose load failed: asked again when the
+  /// cursor reaches the end of the cards it has.
+  final Map<String, Future<List<ReelCardData>> Function()> _restRetry = {};
+
+  /// The deck's list is still growing (a replayed head card, or a rest to
+  /// follow): the decision card doesn't wait at its end yet.
+  bool _partial(String deckId) => _provisional.contains(deckId) || _restFor.containsKey(deckId);
+
+  /// Drops what is still to come for [deckId]'s list (a fresh build or a new
+  /// day replaced it).
+  void _dropPartial(String deckId) {
+    _provisional.remove(deckId);
+    unawaited(_restFor.remove(deckId));
+    _restRetry.remove(deckId);
+  }
+
   /// The day ([ReelPool.dayKey]) each deck's list was loaded on.
   final Map<String, String> _loadedOn = {};
 
@@ -702,8 +752,10 @@ class ReelController extends ChangeNotifier {
   /// still: nothing is stuck. A later card change has its own watchdog.
   void _settle(int gen, {required bool playing}) {
     if (_disposed || gen != _generation) return;
-    _stage = playing ? ReelStage.playing : ReelStage.still;
+    _toStage(playing ? ReelStage.playing : ReelStage.still);
     _disarm();
+    _endSpans(_stage.name);
+    _addMoreDecks();
     final open = _startOpen;
     if (open != null && open.gen == gen) {
       _startOpen = null;
@@ -712,6 +764,26 @@ class ReelController extends ChangeNotifier {
   }
 
   int _since(DateTime at) => _clock().difference(at).inMilliseconds;
+
+  /// The latest start's stage times, until its card settles (V2-04).
+  _StartSpans? _spans;
+
+  /// Moves to [s]; while a start is timed, the time spent in each stage is
+  /// added to its `[ReelStart] #n spans` line.
+  void _toStage(ReelStage s) {
+    _stage = s;
+    if (s == ReelStage.playing || s == ReelStage.still || s == ReelStage.idle) return;
+    _spans?.enter(s.name, _clock());
+  }
+
+  /// Logs the timed start's spans with [outcome] and stops timing it; with
+  /// [only], only when that is still the one timed.
+  void _endSpans(String outcome, {_StartSpans? only}) {
+    final sp = _spans;
+    if (sp == null || (only != null && !identical(sp, only))) return;
+    _spans = null;
+    appLogger.i(sp.finish(outcome, _clock()));
+  }
 
   void _onStuck() {
     _stuckTimer = null;
@@ -722,6 +794,9 @@ class ReelController extends ChangeNotifier {
       '[ReelStuck] stage=${_stage.name} gen=$_generation after=${after.inMilliseconds}ms slot=${current.kind.name}',
     );
     stuck.value = ReelStuck(stage: _stage, generation: _generation, after: after);
+    _endSpans('stuck');
+    // A stuck first card doesn't keep the answer decks away.
+    _addMoreDecks();
   }
 
   /// The deck strip: up from a deck change until [stripHold] after the
@@ -803,7 +878,7 @@ class ReelController extends ChangeNotifier {
   int? _decideAt(String deckId, List<ReelCardData> list) {
     if (list.isEmpty) return null;
     final d = _decide;
-    if (d == null) return _decideSeen || _picks.isEmpty ? null : list.length;
+    if (d == null) return _decideSeen || _picks.isEmpty || _partial(deckId) ? null : list.length;
     if (d.deck != deckId || (!_decideSeen && _picks.isEmpty)) return null;
     final before = d.before;
     if (before == null) return list.length;
@@ -898,21 +973,24 @@ class ReelController extends ChangeNotifier {
   Future<void> start({String? deckId, String? groupKey}) async {
     final run = ++_startRun, no = ++_starts, at = _clock();
     _startOpen = null;
-    _stage = ReelStage.prefs;
+    _endSpans('superseded');
+    final spans = _spans = _StartSpans(no, at);
+    _toStage(ReelStage.prefs);
     appLogger.i('[ReelStart] #$no begin gen=$_generation${_active ? ' active' : ''}');
     _arm();
     var outcome = 'threw';
     try {
-      outcome = await _startFrom(run, deckId: deckId, groupKey: groupKey);
+      outcome = await _startFrom(run, no, deckId: deckId, groupKey: groupKey);
     } finally {
       final settled = _stage == ReelStage.playing || _stage == ReelStage.still;
       appLogger.i('[ReelStart] #$no $outcome stage=${_stage.name} gen=$_generation ${_since(at)}ms');
       if (outcome == 'shown' && !settled) _startOpen = (no: no, gen: _generation, at: at);
+      if (outcome != 'shown') _endSpans(outcome, only: spans);
     }
   }
 
   /// [start]'s steps; what became of it, for the log.
-  Future<String> _startFrom(int run, {String? deckId, String? groupKey}) async {
+  Future<String> _startFrom(int run, int no, {String? deckId, String? groupKey}) async {
     bool superseded() => _disposed || run != _startRun;
     final leaving = _suspending;
     if (leaving != null) {
@@ -925,6 +1003,8 @@ class ReelController extends ChangeNotifier {
     }
     if (!_active) _comeBack();
     _setActive(true);
+    // TV: the clip core comes up alongside the deck (V2-04).
+    _warmCore(no);
     // Opening the Reel (or coming back to it) is someone there.
     noteInput();
     // The picks are synced: the other device may have saved since.
@@ -933,7 +1013,7 @@ class ReelController extends ChangeNotifier {
     // says nothing about memory. Only the policy's restore resets it.
     await _ensurePrefs();
     if (superseded()) return 'superseded';
-    _stage = ReelStage.deck;
+    _toStage(ReelStage.deck);
     if (deckId != null) {
       final i = await _deckIndex(deckId);
       if (i >= 0) _deck = i;
@@ -953,6 +1033,7 @@ class ReelController extends ChangeNotifier {
         _cards.remove(d.id);
         _cursor.remove(d.id);
         _onDecide.remove(d.id);
+        _dropPartial(d.id);
       }
     }
     if (_decideDay != today) {
@@ -963,12 +1044,148 @@ class ReelController extends ChangeNotifier {
       _pickAt = 0;
       _onDecide.clear();
     }
-    _stage = ReelStage.load;
-    final (list, _) = await (_ensureDeck(deck), _refreshPicks()).wait;
+    _toStage(ReelStage.load);
+    // A cold start opens the card kept at the last suspend at once, and
+    // the deck's list follows it (V2-04).
+    if (groupKey == null && await _replayHead(no, superseded)) return 'shown';
+    if (superseded()) return 'superseded';
+    final (loaded, _) = await (_ensureDeck(deck), _refreshPicks()).wait;
     if (!_active || superseded()) return 'superseded';
-    if (deckId != null && deck.id == deckId) _seekTitle(list, groupKey);
+    if (deckId != null && deck.id == deckId) _seekTitle(await _withTitle(deck, loaded, groupKey), groupKey);
     await _show();
     return 'shown';
+  }
+
+  /// TV, [warmClipCore]: builds and initializes the clip core with no media
+  /// alongside the deck (bounded by [ClipPlayer.callLimit]); never at
+  /// memory level 1 or more, nor where only stills play on this link.
+  void _warmCore(int no) {
+    if (!warmClipCore || externalClips || memoryLevel != 0 || !_budget.clips || clips.engine != null) return;
+    final at = _clock();
+    unawaited(
+      clips.warm().then((took) {
+        appLogger.i(
+          took == null
+              ? '[ReelStart] #$no warm core=none ${_since(at)}ms'
+              : '[ReelStart] #$no warm core=${took.inMilliseconds}ms',
+        );
+      }),
+    );
+  }
+
+  /// [list] (deck [d]'s), or, when it doesn't have [groupKey]'s card yet and
+  /// the rest of the deck is still loading, the deck's list once that has
+  /// landed (bounded): On TV mode asks for a card that may be past the
+  /// first ones.
+  Future<List<ReelCardData>> _withTitle(ReelDeck d, List<ReelCardData> list, String? groupKey) async {
+    final rest = _restFor[d.id];
+    if (groupKey == null || rest == null || _indexOf(list, groupKey) != null) return list;
+    try {
+      await rest.timeout(timeouts.deck);
+    } catch (_) {
+      // The rest failed or ran out: the deck stays on its own cursor.
+    }
+    return _cards[d.id] ?? list;
+  }
+
+  /// TV cold start ([headCard]): when the deck playing isn't loaded, the card
+  /// kept at the last suspend ([ReelHead]) opens at once, if it still
+  /// passes the deck's rules (not resting after Not for me, not marked seen
+  /// or for kids, unseen unless the deck keeps seen titles). Its clip and
+  /// text come from the Reel's own caches as usual. The deck's own load
+  /// starts first, and its list follows the card when it lands. False when
+  /// nothing was replayed.
+  Future<bool> _replayHead(int no, bool Function() superseded) async {
+    final make = headCard;
+    final d = deck;
+    if (make == null || externalClips || _cards.containsKey(d.id) || _loading.containsKey(d.id)) return false;
+    unawaited(_ensureDeck(d));
+    final at = _clock();
+    ReelCardData? card;
+    try {
+      card = await _readHead(d, make).timeout(timeouts.store);
+    } catch (e) {
+      appLogger.d('Reel: the kept head card could not be read (${e.runtimeType})');
+    }
+    if (superseded() || !_active) return false;
+    if (card == null || _cards.containsKey(d.id)) {
+      appLogger.i('[ReelStart] #$no head none deck=${d.id} ${_since(at)}ms');
+      return false;
+    }
+    _cards[d.id] = [card];
+    _provisional.add(d.id);
+    _loadedOn[d.id] = _today();
+    _cursor[d.id] = 0;
+    _onDecide.remove(d.id);
+    _spans?.note('head', 'replay');
+    appLogger.i('[ReelStart] #$no head replay deck=${d.id} ${_since(at)}ms');
+    unawaited(_refreshPicks());
+    await _show();
+    return true;
+  }
+
+  /// The card kept for [d], rebuilt and checked against [d]'s rules; null
+  /// when there is none, it is stale (a daily deck's from another day, any
+  /// other's older than [ReelStore.daysKept] days) or it no longer passes.
+  Future<ReelCardData?> _readHead(ReelDeck d, ReelHeadCard make) async {
+    final head = ReelHead.decode(await store.cached(ReelStore.headKey(d.id)));
+    if (head == null) return null;
+    final fresh = d.daily
+        ? head.day == _today()
+        : _clock().difference(head.at) < const Duration(days: ReelStore.daysKept);
+    if (!fresh) return null;
+    final card = await make(head.entry);
+    if (card == null || card.id != head.titleId || card.resume) return null;
+    final kept = await finishDeck(d, [card], store: store, hasClip: (_) => true);
+    return kept.isEmpty ? null : kept.first;
+  }
+
+  /// TV ([headCard]): keeps the card on screen as the deck's head for the
+  /// next cold start, when it is a card with a clip; otherwise forgets the
+  /// deck's head, so an older one is never replayed. Bounded; a write that
+  /// fails is let go.
+  Future<void> _rememberHead() async {
+    if (headCard == null || externalClips || decks.isEmpty) return;
+    final deckId = deck.id;
+    final c = current.card;
+    final key = ReelStore.headKey(deckId);
+    try {
+      if (c == null || c.resume || _clip[c.id] == null) {
+        await store.uncache(key).timeout(timeouts.store);
+        return;
+      }
+      await store.cache(key, ReelHead.of(c, day: _today(), at: _clock()).encode()).timeout(timeouts.store);
+      appLogger.d('Reel: head card kept for $deckId');
+    } catch (e) {
+      appLogger.d('Reel: the head card was not kept (${e.runtimeType})');
+    }
+  }
+
+  /// [moreDecks], once: added at the end of [decks] after the first card
+  /// has shown (or got stuck), leaving out any already there.
+  void _addMoreDecks() {
+    final load = moreDecks;
+    if (load == null || _moreDecksAsked || _disposed) return;
+    _moreDecksAsked = true;
+    unawaited(() async {
+      List<ReelDeck> more;
+      try {
+        more = await load().timeout(timeouts.deck);
+      } catch (e) {
+        appLogger.d('Reel: answer decks unavailable', error: e);
+        return;
+      }
+      if (_disposed) return;
+      var added = 0;
+      for (final d in more) {
+        if (decks.any((x) => x.id == d.id)) continue;
+        decks.add(d);
+        _watchDeck(d);
+        added++;
+      }
+      appLogger.i('[ReelDeck] $added answer decks added after the first card');
+      if (added > 0) notifyListeners();
+    }());
   }
 
   /// Coming back (first open, resume or tab show): servers that weren't
@@ -1073,12 +1290,16 @@ class ReelController extends ChangeNotifier {
   Future<void>? _suspending;
 
   Future<void> _suspend() async {
+    // The card on screen is the deck's head for the next cold start (TV),
+    // read before anything here moves on.
+    final remembering = _rememberHead();
     _setActive(false);
     _generation++;
     // A start still on its way stops at its next step.
     _startRun++;
     _startOpen = null;
-    _stage = ReelStage.idle;
+    _endSpans('suspended');
+    _toStage(ReelStage.idle);
     _disarm();
     _forgetPending();
     _clearPrefetch();
@@ -1089,6 +1310,7 @@ class ReelController extends ChangeNotifier {
     await _leaveCard();
     await clips.release();
     _firstClip = true;
+    await remembering;
     notifyListeners();
   }
 
@@ -1109,7 +1331,8 @@ class ReelController extends ChangeNotifier {
 
   Future<List<ReelCardData>> _ensureDeck(ReelDeck d) {
     final have = _cards[d.id];
-    if (have != null) return Future.value(have);
+    // A replayed head card alone isn't the deck: its own load follows it.
+    if (have != null && !_provisional.contains(d.id)) return Future.value(have);
     final pending = _loading[d.id];
     if (pending != null) return pending;
     // Registered before the load starts, so the load can tell whether it is
@@ -1127,21 +1350,32 @@ class ReelController extends ChangeNotifier {
     if (_failed.remove(d.id)) notifyListeners();
     try {
       final sw = Stopwatch()..start();
-      final raw = await d.load().timeout(timeouts.deck);
+      // The first entries only (V2-04): the first card waits for these, and
+      // the rest of the list is appended when it lands.
+      final parts = await d.loadParts(ReelDeck.headEntries).timeout(timeouts.deck);
       final loadMs = sw.elapsedMilliseconds;
-      final loaded = await _finish(d, raw).timeout(timeouts.deck);
+      final loaded = await _finish(d, parts.head).timeout(timeouts.deck);
+      final rest = parts.rest;
       appLogger.i(
-        '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
+        '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)'
+        '${rest == null ? '' : ', the rest to follow'}',
       );
       // The first list to land is the deck's (a load a suspend dropped
-      // included); a later one never swaps the list under the cursor.
+      // included); a later one never swaps the list under the cursor. A
+      // replayed head card is followed by the list instead.
       final kept = _cards[d.id];
-      if (kept != null) return kept;
-      _cards[d.id] = loaded;
+      if (kept != null && !_provisional.contains(d.id)) return kept;
+      if (kept == null) {
+        _cards[d.id] = loaded;
+      } else {
+        _provisional.remove(d.id);
+        _append(d, loaded);
+      }
       // One AnimeThemes batch for the deck's anime shows (plan V2-12);
       // the first card waits for it rather than asking on its own.
       unawaited(resolver.warm([for (final c in loaded) c.title]));
-      return loaded;
+      if (rest != null) _followWith(d, rest);
+      return _cards[d.id] ?? loaded;
     } catch (e) {
       // Not kept as an empty list: the deck says it failed, and loads
       // again next time it is asked for. A load a suspend dropped says
@@ -1156,6 +1390,79 @@ class ReelController extends ChangeNotifier {
   }
 
   String _today() => ReelPool.dayKey(_clock());
+
+  /// Loads the rest of [d]'s list ([ReelDeckParts.rest]) and appends it,
+  /// unless a fresh build or a new day's list has replaced the list by
+  /// then. A rest that fails is asked again when the cursor reaches the end
+  /// of the cards the deck has.
+  void _followWith(ReelDeck d, Future<List<ReelCardData>> Function() rest) {
+    _restRetry.remove(d.id);
+    final done = Completer<void>();
+    final self = done.future;
+    _restFor[d.id] = self;
+    done.complete(() async {
+      try {
+        final sw = Stopwatch()..start();
+        final raw = await rest().timeout(timeouts.deck);
+        final loadMs = sw.elapsedMilliseconds;
+        final more = await _finish(d, raw).timeout(timeouts.deck);
+        if (_disposed || !identical(_restFor[d.id], self)) return;
+        unawaited(_restFor.remove(d.id));
+        final added = _append(d, more);
+        appLogger.i(
+          '[ReelDeck] ${d.id}: +$added cards after the first (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
+        );
+        unawaited(resolver.warm([for (final c in more) c.title]));
+      } catch (e) {
+        appLogger.w('Reel: the rest of deck ${d.id} failed to load', error: e);
+        if (_disposed || !identical(_restFor[d.id], self)) return;
+        unawaited(_restFor.remove(d.id));
+        _restRetry[d.id] = rest;
+        notifyListeners();
+      }
+    }());
+  }
+
+  /// Appends [more] to [d]'s list, leaving out titles it already has, and
+  /// returns how many were added. The cursor and the phone's page index
+  /// don't move. A decision card seen at the end of the list stays after
+  /// the cards it followed. With [d] on screen, a cursor at the end of the
+  /// deck shows the first new card, and otherwise the window and the
+  /// preload take the new cards in.
+  int _append(ReelDeck d, List<ReelCardData> more) {
+    final old = _cards[d.id];
+    if (old == null) {
+      _cards[d.id] = more;
+      notifyListeners();
+      return more.length;
+    }
+    final ids = {for (final c in old) c.id};
+    final groups = {for (final c in old) c.title.groupKey};
+    final add = [
+      for (final c in more)
+        if (ids.add(c.id) && groups.add(c.title.groupKey)) c,
+    ];
+    if (add.isEmpty) {
+      notifyListeners();
+      return 0;
+    }
+    final list = [...old, ...add];
+    _cards[d.id] = list;
+    final dc = _decide;
+    if (dc != null && dc.deck == d.id && dc.before == null && _decideSeen) {
+      _decide = (deck: d.id, before: add.first.id);
+    }
+    notifyListeners();
+    if (identical(deck, d) && _active) {
+      if (index >= old.length && !_onDecide.contains(d.id)) {
+        unawaited(_show());
+      } else {
+        _plan(list, _generation);
+        _preloadNext(list, _generation);
+      }
+    }
+    return add.length;
+  }
 
   /// [finishDeck] with what is known of each card's clip: a cached miss is
   /// an AI card, so the 1-in-6 spacing applies to it; a card not resolved
@@ -1193,6 +1500,8 @@ class ReelController extends ChangeNotifier {
     }
     if (_disposed || fresh.isEmpty) return;
     _loadedOn[d.id] = _today();
+    // The fresh build is the whole list: nothing still to come is appended.
+    _dropPartial(d.id);
     // The new build's anime shows, in one batch (titles already answered
     // are skipped).
     unawaited(resolver.warm([for (final c in fresh) c.title]));
@@ -1300,7 +1609,7 @@ class ReelController extends ChangeNotifier {
     _deck = to;
     _remember();
     _showStrip();
-    _stage = ReelStage.load;
+    _toStage(ReelStage.load);
     notifyListeners();
     await _ensureDeck(deck);
     await _show();
@@ -1317,7 +1626,7 @@ class ReelController extends ChangeNotifier {
     if (i == _deck) {
       if (groupKey == null) return;
       final d = deck;
-      final at = _indexOf(await _ensureDeck(d), groupKey);
+      final at = _indexOf(await _withTitle(d, await _ensureDeck(d), groupKey), groupKey);
       // A deck change while the list loaded wins.
       if (at == null || at == index || !identical(d, deck)) return;
       // As [step]: the cursor moves first, under the generation counter.
@@ -1336,8 +1645,9 @@ class ReelController extends ChangeNotifier {
     _deck = i;
     _remember();
     _showStrip();
-    _stage = ReelStage.load;
-    _seekTitle(await _ensureDeck(deck), groupKey);
+    _toStage(ReelStage.load);
+    final loaded = await _ensureDeck(deck);
+    _seekTitle(await _withTitle(deck, loaded, groupKey), groupKey);
     await _show();
   }
 
@@ -1346,7 +1656,7 @@ class ReelController extends ChangeNotifier {
     final d = deck;
     if (!_failed.contains(d.id)) return;
     _arm();
-    _stage = ReelStage.load;
+    _toStage(ReelStage.load);
     await _ensureDeck(d);
     if (!_active || !identical(deck, d)) return;
     await _show();
@@ -1507,7 +1817,15 @@ class ReelController extends ChangeNotifier {
       if (list != null || _failed.contains(deck.id)) {
         _settle(gen, playing: false);
       } else {
-        _stage = ReelStage.load;
+        _toStage(ReelStage.load);
+      }
+      // The end of the cards a deck has, whose rest failed to load: it is
+      // asked for again, and appended when it lands.
+      final retry = _restRetry.remove(deck.id);
+      if (list != null && retry != null) _followWith(deck, retry);
+      // A replayed head card whose deck failed to load: the deck loads again.
+      if (list != null && _provisional.contains(deck.id) && !_loading.containsKey(deck.id)) {
+        unawaited(_ensureDeck(deck));
       }
       _prefetch.release();
       if (list != null) _plan(list, gen);
@@ -1516,7 +1834,7 @@ class ReelController extends ChangeNotifier {
       return;
     }
     final c = list[index];
-    _stage = ReelStage.resolve;
+    _toStage(ReelStage.resolve);
     // The card's own clip and art start at once; on the TV the cards around
     // it wait until its clip shows a frame (or turns out to be a still).
     if (!externalClips) _prefetch.hold();
@@ -1553,7 +1871,7 @@ class ReelController extends ChangeNotifier {
       if (clip == null || _cardSince != null || !_budget.clips || memoryLevel >= 2) {
         _settle(gen, playing: clip != null && _cardSince != null);
       } else {
-        _stage = ReelStage.frame;
+        _toStage(ReelStage.frame);
       }
     } else if (clip == null) {
       _sinceAiCard = 0;
@@ -1574,11 +1892,11 @@ class ReelController extends ChangeNotifier {
     } else {
       _sinceAiCard++;
       _cardClip = clip.source.uri;
-      _stage = ReelStage.open;
+      _toStage(ReelStage.open);
       await clips.play(clip.source, first: _firstClip);
       _firstClip = false;
       // Opened; the first frame settles it ([_onPhase]) unless it already has.
-      if (gen == _generation && _stage == ReelStage.open) _stage = ReelStage.frame;
+      if (gen == _generation && _stage == ReelStage.open) _toStage(ReelStage.frame);
     }
     _syncHold();
     _preloadNext(list, gen);
@@ -1875,13 +2193,13 @@ class ReelController extends ChangeNotifier {
     if (gen != _generation) return;
     if (memoryLevel >= 2 || !_budget.clips) return _settle(gen, playing: false);
     _arm();
-    _stage = externalClips ? ReelStage.frame : ReelStage.open;
+    _toStage(externalClips ? ReelStage.frame : ReelStage.open);
     if (externalClips) return;
     _cardClip = clip.source.uri;
     _prefetch.hold();
     await clips.play(clip.source, first: _firstClip);
     _firstClip = false;
-    if (gen == _generation && _stage == ReelStage.open) _stage = ReelStage.frame;
+    if (gen == _generation && _stage == ReelStage.open) _toStage(ReelStage.frame);
     _syncHold();
   }
 
@@ -1958,6 +2276,9 @@ class ReelController extends ChangeNotifier {
     }
     await store.record(target.id, onTv ? ReelAction.watchOnTv : ReelAction.watch, deck: deck.id);
     if (!onTv) {
+      // The card Watch leaves from is the deck's head, should the app not
+      // survive the playback (TV).
+      unawaited(_rememberHead());
       // A card change still on its way stops here: real playback is next.
       _generation++;
       _disarm();
@@ -2449,5 +2770,53 @@ class ReelController extends ChangeNotifier {
     cardChanged.dispose();
     unawaited(clips.release());
     super.dispose();
+  }
+}
+
+/// A start's stage times (V2-04), from its begin to its first settle: the
+/// `[ReelStart] #n spans` line, and a [TraceSpan] per stage for a profile
+/// build's DevTools performance view.
+class _StartSpans {
+  _StartSpans(this.no, this.at);
+
+  final int no;
+  final DateTime at;
+
+  /// Milliseconds per stage, in the order first entered.
+  final Map<String, int> _ms = {};
+  final Map<String, String> _notes = {};
+  String? _stage;
+  DateTime? _since;
+  TraceSpan? _task;
+
+  /// The start moved to [stage] at [now].
+  void enter(String stage, DateTime now) {
+    if (stage == _stage) return;
+    _close(now);
+    _stage = stage;
+    _since = now;
+    _task = TraceSpan('ReelStart.$stage', arguments: {'start': no});
+  }
+
+  /// A fact for the line (`head=replay`).
+  void note(String key, String value) => _notes[key] = value;
+
+  void _close(DateTime now) {
+    final stage = _stage, since = _since;
+    if (stage != null && since != null) _ms[stage] = (_ms[stage] ?? 0) + now.difference(since).inMilliseconds;
+    _task?.end();
+    _task = null;
+    _stage = null;
+    _since = null;
+  }
+
+  /// Ends the stage in progress at [now]; the line to log.
+  String finish(String outcome, DateTime now) {
+    _close(now);
+    final parts = [
+      for (final MapEntry(:key, :value) in _ms.entries) '$key=${value}ms',
+      for (final MapEntry(:key, :value) in _notes.entries) '$key=$value',
+    ];
+    return '[ReelStart] #$no spans $outcome ${parts.join(' ')} total=${now.difference(at).inMilliseconds}ms';
   }
 }

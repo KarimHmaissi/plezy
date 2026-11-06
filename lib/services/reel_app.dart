@@ -64,9 +64,9 @@ abstract final class ReelApp {
   static Future<List<({String id, String name})>> deckList(BuildContext context) async {
     final store = ReelStore.instance;
     final library = _library();
+    final base = await _decks(context, library: library, store: store, pool: _pool(store, library));
     return [
-      for (final d in await _decks(context, library: library, store: store, pool: _pool(store, library)))
-        (id: d.id, name: d.name),
+      for (final d in [...base, ...await _answerDecks(library)]) (id: d.id, name: d.name),
     ];
   }
 
@@ -79,9 +79,10 @@ abstract final class ReelApp {
       ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
 
   /// The decks in the app's own order: For You, Fits tonight, Give it
-  /// another go, Anime openings, Most Watched (with Trakt) and the saved
-  /// answers. The controller applies the user's order and hidden decks
-  /// ([ReelController.shownDecks]). For You is always first.
+  /// another go, Anime openings and Most Watched (with Trakt); the saved
+  /// answers follow ([_answerDecks]). The controller applies the user's
+  /// order and hidden decks ([ReelController.shownDecks]). For You is
+  /// always first.
   static Future<List<ReelDeck>> _decks(
     BuildContext context, {
     required ReelLibrary library,
@@ -132,9 +133,14 @@ abstract final class ReelApp {
           films: () => chart(HomeRowIds.traktLists('chart:watched:movies')),
           shows: () => chart(HomeRowIds.traktLists('chart:watched:shows')),
         ),
-      for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
     ];
   }
+
+  /// The saved answers as decks (newest first). The Reel adds them once its
+  /// first card has shown (V2-04), so reading them never holds up its open.
+  static Future<List<ReelDeck>> _answerDecks(ReelLibrary library) async => [
+    for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
+  ];
 
   static Future<ReelController> controller(BuildContext context) async {
     final multi = context.read<MultiServerProvider>();
@@ -203,6 +209,12 @@ abstract final class ReelApp {
       // The phone's feed plays each card in its own page; the TV keeps the
       // native clip core.
       externalClips: !PlatformDetector.isTV(),
+      // TV cold open (V2-04): the clip core comes up alongside the deck, the
+      // card the Reel was left on opens at once (matched from the local
+      // index only), and the saved answers join after the first card.
+      warmClipCore: PlatformDetector.isTV(),
+      headCard: PlatformDetector.isTV() ? (entry) async => (await library.cards([entry])).firstOrNull : null,
+      moreDecks: () => _answerDecks(library),
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
       // While the Reel plays, the brain's indexer rests and its ONNX session

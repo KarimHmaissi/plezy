@@ -161,6 +161,11 @@ class ReelStore {
   /// far as its 30-day facts. About 11 KB a day.
   static const int poolsKept = 30;
 
+  /// The card a deck's next cold start opens at once (V2-04, ReelHead):
+  /// one row per deck on this device, swept with the day rows once it hasn't
+  /// been written for [daysKept] days.
+  static String headKey(String deckId) => 'head:$deckId';
+
   /// The cache row holding the day ([dayStamp]) the sweep last ran on.
   static const String sweptKey = 'sweep:day';
 
@@ -279,7 +284,8 @@ class ReelStore {
   /// The daily sweep, at most once per day on this device: `pool:` rows
   /// older than [poolsKept] days, `again:` rows older than [daysKept] days,
   /// `deck:` and `cursor:` rows not written for [daysKept] days, `src:` rows
-  /// past [sourceTtl], `meta:` rows not written for [metadataKept], and old
+  /// past [sourceTtl], `head:` rows not written for [daysKept] days,
+  /// `meta:` rows not written for [metadataKept], and old
   /// events ([prune]). Returns what it deleted, or null when it already ran
   /// today. Calls made while one runs share it.
   Future<ReelSweep?> sweep() => _sweeping ??= _sweep().whenComplete(() => _sweeping = null);
@@ -303,7 +309,9 @@ class ReelStore {
     final dayRowsBefore = nowMs - const Duration(days: daysKept).inMilliseconds;
     final days =
         await (db.delete(db.reelCache)..where(
-              (c) => (c.key.like('deck:%') | c.key.like('cursor:%')) & c.updatedAt.isSmallerThanValue(dayRowsBefore),
+              (c) =>
+                  (c.key.like('deck:%') | c.key.like('cursor:%') | c.key.like('head:%')) &
+                  c.updatedAt.isSmallerThanValue(dayRowsBefore),
             ))
             .go();
     final sources = await (db.delete(
