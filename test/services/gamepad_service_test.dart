@@ -20,7 +20,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 80));
     await tester.pump();
-    expect(_downCount(events, LogicalKeyboardKey.arrowRight), greaterThan(1));
+    expect(_repeatCount(events, LogicalKeyboardKey.arrowRight), greaterThan(0));
 
     service.debugHandleGamepadEvent(_disconnect());
     await tester.pump();
@@ -28,15 +28,20 @@ void main() {
     // The held A key was released by the disconnect teardown.
     expect(_upCount(events, LogicalKeyboardKey.enter), 1);
 
-    final repeatsAtDisconnect = _downCount(events, LogicalKeyboardKey.arrowRight);
+    // The held direction was released exactly once.
+    expect(_upCount(events, LogicalKeyboardKey.arrowRight), 1);
+
+    final repeatsAtDisconnect = _repeatCount(events, LogicalKeyboardKey.arrowRight);
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump();
     expect(
-      _downCount(events, LogicalKeyboardKey.arrowRight),
+      _repeatCount(events, LogicalKeyboardKey.arrowRight),
       repeatsAtDisconnect,
       reason: 'no synthesized repeats may fire after the controller disconnects',
     );
+    expect(_downCount(events, LogicalKeyboardKey.arrowRight), 1);
+    expect(_upCount(events, LogicalKeyboardKey.arrowRight), 1);
 
     // Held-button state was cleared: the release that never arrived from the
     // dead controller cannot double-fire when a reconnected pad sends it.
@@ -60,6 +65,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
     expect(_downCount(events, LogicalKeyboardKey.arrowDown), repeatsAtDisconnect);
+    expect(_repeatCount(events, LogicalKeyboardKey.arrowDown), 0);
 
     // The latch was cleared, so a fresh deflection navigates immediately
     // without first passing back through the deadzone.
@@ -92,6 +98,10 @@ GamepadConnectionEvent _disconnect() {
 
 int _downCount(List<KeyEvent> events, LogicalKeyboardKey key) {
   return events.whereType<KeyDownEvent>().where((e) => e.logicalKey == key).length;
+}
+
+int _repeatCount(List<KeyEvent> events, LogicalKeyboardKey key) {
+  return events.whereType<KeyRepeatEvent>().where((e) => e.logicalKey == key).length;
 }
 
 int _upCount(List<KeyEvent> events, LogicalKeyboardKey key) {

@@ -483,4 +483,14 @@ void main() {
       expect(MediaImageHelper.boundedDecode(base, memWidth: 0, memHeight: 0), same(base));
     });
   });
+
+  // Reserved for the parked art-timing work: the tags are what a future
+  // `art_timing` log line and its Mac-side analysis would group by.
+  test('ArtSurface tags are stable and include the reserved reel surface', () {
+    expect(
+      {for (final surface in ArtSurface.values) surface.tag},
+      {'home_row', 'ai_results', 'hero_backdrop', 'detail', 'reel'},
+    );
+    expect(ArtSurface.reel.tag, 'reel');
+  });
 }

@@ -36,9 +36,14 @@ class HostNowPlaying {
   String? get audioId => data['audioId'] as String?;
   String? get subtitleId => data['subtitleId'] as String?;
 
+  /// "23.976 matched · Direct Play · E-AC3 5.1", from a TV that sends it.
+  String? get signal {
+    final value = data['signal'];
+    return value is String && value.isNotEmpty ? value : null;
+  }
+
   List<({String id, String label})> _tracks(String key) => [
-    for (final t in (data[key] as List? ?? const []).whereType<Map>())
-      (id: '${t['id']}', label: '${t['label']}'),
+    for (final t in (data[key] as List? ?? const []).whereType<Map>()) (id: '${t['id']}', label: '${t['label']}'),
   ];
   List<({String id, String label})> get audio => _tracks('audio');
   List<({String id, String label})> get subtitles => _tracks('subtitles');
@@ -175,6 +180,17 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        if (now.signal case final signal?)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              signal,
+              key: const ValueKey('now-playing-signal'),
+              style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         const SizedBox(height: 16),
         Slider(
           value: _dragValue ?? now.progress,
@@ -182,10 +198,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           onChangeEnd: (v) {
             _remote.seekHostTo(Duration(milliseconds: (v * total.inMilliseconds).round()));
             // Hold the thumb where it was dropped until the TV reports back.
-            _now = HostNowPlaying({
-              ...now.data,
-              'positionMs': (v * total.inMilliseconds).round(),
-            });
+            _now = HostNowPlaying({...now.data, 'positionMs': (v * total.inMilliseconds).round()});
             setState(() => _dragValue = null);
           },
         ),
@@ -244,9 +257,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           children: [
             if (now.marker != null)
               FilledButton.tonalIcon(
-                onPressed: () => _send(
-                  now.marker == 'credits' ? RemoteCommandType.skipCredits : RemoteCommandType.skipIntro,
-                ),
+                onPressed: () =>
+                    _send(now.marker == 'credits' ? RemoteCommandType.skipCredits : RemoteCommandType.skipIntro),
                 icon: const Icon(Symbols.fast_forward_rounded),
                 label: Text(now.marker == 'credits' ? t.cast.skipCredits : t.cast.skipIntro),
               ),

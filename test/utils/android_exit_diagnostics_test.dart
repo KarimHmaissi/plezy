@@ -64,4 +64,38 @@ void main() {
 
     expect(AndroidExitDiagnostics.sentryMessageFor({'reason': 'anr'}), isNull);
   });
+
+  group('low-memory kill counter', () {
+    Map<String, Object?> summary({Object? background = 3, bool firstSummary = false}) => {
+      'exitsInHistory': 9,
+      'lowMemoryBackground': background,
+      'lowMemoryBackgroundNew': 1,
+      'lowMemoryForeground': 0,
+      'otherBackground': 4,
+      'firstSummary': firstSummary,
+      'oldestTimestamp': DateTime.utc(2026, 11, 1).millisecondsSinceEpoch,
+      'newestTimestamp': DateTime.utc(2026, 11, 5, 21).millisecondsSinceEpoch,
+    };
+
+    test('logs one tagged line with the counts since the last launch', () {
+      expect(
+        AndroidExitDiagnostics.describeLowMemoryKills(summary()),
+        '[LmkCounter] background low-memory kills: 3 in history, 1 since last launch; '
+        'foreground low-memory=0 other background exits=4 '
+        'history=9 exits 2026-11-01T00:00:00.000Z..2026-11-05T21:00:00.000Z',
+      );
+      expect(AndroidExitDiagnostics.describeLowMemoryKills(summary(firstSummary: true)), contains('1 (first count)'));
+    });
+
+    test('drops a malformed or missing summary', () {
+      expect(AndroidExitDiagnostics.describeLowMemoryKills(null), isNull);
+      expect(AndroidExitDiagnostics.describeLowMemoryKills(summary(background: 'three')), isNull);
+      expect(AndroidExitDiagnostics.describeLowMemoryKills(summary(background: -1)), isNull);
+      expect(AndroidExitDiagnostics.describeLowMemoryKills({...summary()}..remove('firstSummary')), isNull);
+      expect(
+        AndroidExitDiagnostics.describeLowMemoryKills({...summary()}..remove('oldestTimestamp')),
+        contains('exits none..'),
+      );
+    });
+  });
 }

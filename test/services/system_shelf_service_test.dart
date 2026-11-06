@@ -165,7 +165,7 @@ void main() {
     final sent = (envelope['items'] as List).single as Map;
     expect(sent['posterSourceUri'], startsWith('https://media.invalid/'));
     expect(sent, isNot(contains('posterUri')));
-    expect(client.thumbnailRequests.single, (path: '/poster', width: 640, height: 360));
+    expect(client.thumbnailRequests.single, (path: '/poster', width: 1280, height: 720));
 
     calls.clear();
     expect(
@@ -244,7 +244,7 @@ void main() {
     });
   }
 
-  test('non-tvOS target keeps 640x360 episode thumbnails and the spoiler-safe override', () async {
+  test('non-tvOS target publishes 1280x720 episode thumbnails and the spoiler-safe override', () async {
     messenger.setMockMethodCallHandler(channel, (call) async => true);
     final client = _ShelfClient();
     final service = SystemShelfService.forTesting(
@@ -260,7 +260,7 @@ void main() {
 
     expect(client.thumbnailRequests.map((request) => request.path), ['/spoiler-safe-art', '/episode-still']);
     for (final request in client.thumbnailRequests) {
-      expect((request.width, request.height), (640, 360));
+      expect((request.width, request.height), (1280, 720));
     }
   });
 
@@ -384,5 +384,137 @@ void main() {
     expect(await pending, isFalse);
     await ended;
     expect(calls.map((call) => call.method), ['clear']);
+  });
+
+  group('Watch Next cap and stable engagement (A1)', () {
+    List<Map> sentItems(List<MethodCall> calls) =>
+        ((calls.lastWhere((c) => c.method == 'sync').arguments as Map)['items'] as List).cast<Map>();
+
+    MediaItem onDeck(int i, {int? lastViewedAt}) => testMediaItem(
+      id: 'ep-$i',
+      kind: MediaKind.episode,
+      title: 'Episode $i',
+      grandparentTitle: 'Show $i',
+      serverId: 'server-a',
+      serverName: 'Server',
+      lastViewedAt: lastViewedAt,
+    );
+
+    test('61 on-deck items publish one sync of at most 20, in the original order', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final service = SystemShelfService.forTesting(channel: channel, isSupported: () async => true);
+      service.beginProfileSession('owner-a');
+      final items = [for (var i = 0; i < 61; i++) onDeck(i, lastViewedAt: 1700000000 - i)];
+
+      expect(await service.syncFromContinueWatching('owner-a', items, (_) => _ShelfClient()), isTrue);
+
+      expect(calls.where((c) => c.method == 'sync'), hasLength(1));
+      final sent = sentItems(calls);
+      expect(sent, hasLength(SystemShelf.maxItems));
+      expect(SystemShelf.maxItems, 20);
+      expect(sent.map((m) => m['episodeTitle']), [for (var i = 0; i < 20; i++) 'Episode $i']);
+    });
+
+    test('next-up episodes without lastViewedAt inside the top 20 survive the cut', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final service = SystemShelfService.forTesting(channel: channel, isSupported: () async => true);
+      service.beginProfileSession('owner-a');
+      final items = [
+        onDeck(0), // next-up: never viewed
+        for (var i = 1; i < 30; i++) onDeck(i, lastViewedAt: 1800000000 + i), // newer views, but later in order
+      ];
+      items.insert(5, onDeck(99));
+
+      await service.syncFromContinueWatching('owner-a', items, (_) => _ShelfClient());
+
+      final ids = sentItems(calls).map((m) => m['episodeTitle']).toList();
+      expect(ids, hasLength(20));
+      expect(ids.first, 'Episode 0');
+      expect(ids[5], 'Episode 99');
+    });
+
+    test('two syncs of identical data publish identical lastEngagementTime values', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      var now = DateTime.utc(2026, 11, 5, 19);
+      final store = MemoryShelfFirstPublishedStore();
+      final service = SystemShelfService.forTesting(
+        channel: channel,
+        isSupported: () async => true,
+        firstPublishedStore: store,
+        clock: () => now,
+      );
+      service.beginProfileSession('owner-a');
+      final items = [onDeck(0), onDeck(1, lastViewedAt: 1700000000), onDeck(2)];
+
+      await service.syncFromContinueWatching('owner-a', items, (_) => _ShelfClient());
+      final first = sentItems(calls).map((m) => m['lastEngagementTime']).toList();
+      now = now.add(const Duration(hours: 2));
+      await service.syncFromContinueWatching('owner-a', items, (_) => _ShelfClient());
+      final second = sentItems(calls).map((m) => m['lastEngagementTime']).toList();
+
+      expect(second, first);
+      expect(first[0], DateTime.utc(2026, 11, 5, 19).millisecondsSinceEpoch);
+      expect(first[1], 1700000000 * 1000);
+
+      // A fresh service (app restart) reads the same times back from the store.
+      final restarted = SystemShelfService.forTesting(
+        channel: channel,
+        isSupported: () async => true,
+        firstPublishedStore: store,
+        clock: () => now.add(const Duration(days: 1)),
+      );
+      restarted.beginProfileSession('owner-a');
+      await restarted.syncFromContinueWatching('owner-a', items, (_) => _ShelfClient());
+      expect(sentItems(calls).map((m) => m['lastEngagementTime']).toList(), first);
+    });
+
+    test('a newly published next-up episode gets now; the store is pruned to current items', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      var now = DateTime.utc(2026, 11, 5, 19);
+      final store = MemoryShelfFirstPublishedStore();
+      final service = SystemShelfService.forTesting(
+        channel: channel,
+        isSupported: () async => true,
+        firstPublishedStore: store,
+        clock: () => now,
+      );
+      service.beginProfileSession('owner-a');
+      await service.syncFromContinueWatching('owner-a', [onDeck(0), onDeck(1)], (_) => _ShelfClient());
+      now = now.add(const Duration(minutes: 50));
+      await service.syncFromContinueWatching('owner-a', [onDeck(2), onDeck(1)], (_) => _ShelfClient());
+
+      final sent = sentItems(calls);
+      expect(sent[0]['lastEngagementTime'], now.millisecondsSinceEpoch);
+      expect(sent[1]['lastEngagementTime'], DateTime.utc(2026, 11, 5, 19).millisecondsSinceEpoch);
+      expect(store.value.keys, unorderedEquals([sent[0]['contentId'], sent[1]['contentId']]));
+    });
+
+    test('exact duplicate contentIds keep the first occurrence', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final service = SystemShelfService.forTesting(channel: channel, isSupported: () async => true);
+      service.beginProfileSession('owner-a');
+      await service.syncFromContinueWatching('owner-a', [onDeck(0), onDeck(1), onDeck(0)], (_) => _ShelfClient());
+      expect(sentItems(calls).map((m) => m['episodeTitle']), ['Episode 0', 'Episode 1']);
+    });
   });
 }

@@ -9,6 +9,7 @@ import '../library_index/library_index.dart';
 import '../trackers/trakt/trakt_client.dart';
 import '../trackers/trakt/trakt_constants.dart';
 import 'ai_history_tools.dart';
+import 'ai_watch_state.dart';
 
 /// One pick the model chose for the user: an index title id and why.
 typedef AiPick = ({String id, String reason});
@@ -17,10 +18,14 @@ typedef AiPick = ({String id, String reason});
 /// ratings for a shortlist). All read-only except [showPicksTool], which is
 /// how the model hands back its final picks.
 class AiTools {
-  AiTools({required this.index, this.trakt, this.history});
+  AiTools({required this.index, this.trakt, this.history, WatchStates? watch}) : watch = watch ?? WatchStates.none;
 
   final LibraryIndex index;
   final TraktClient? trakt;
+
+  /// Fork: what the user has seen (the history brain merged in), for this
+  /// ask only.
+  final WatchStates watch;
 
   /// Fork: tools over the history brain, on hosts that have one.
   final AiHistoryTools? history;
@@ -47,10 +52,16 @@ class AiTools {
   List<({String id, String text})> topPicks = const [];
 
   /// Fork: how big the request is ('narrow', 'broad' or 'list'), and every
-  /// title id the lookups returned, in order: a short broad row is topped
-  /// up from these without another turn.
+  /// title id the lookups returned, in order, with the tool that returned
+  /// it: a short broad row is topped up from [topUpTools]' ones without
+  /// another turn. Only for this answer; never saved.
   String? scope;
   final Set<String> _seenCandidates = {};
+
+  /// Fork: the lookups a top-up may draw from: the model's own candidates
+  /// and its structured searches. Surface matches (text_search,
+  /// similar_titles) and history lookups never fill a row.
+  static const Set<String> topUpTools = {'find_titles', 'search_library'};
 
   static final RegExp _lineId = RegExp(r'^([^\s|]+:[^\s|]+) \|', multiLine: true);
 
@@ -72,16 +83,18 @@ class AiTools {
       _ => 2,
     };
     for (final m in _lineId.allMatches(result)) {
-      if (_seenCandidates.add(m.group(1)!)) _ranked.add((id: m.group(1)!, rank: rank, order: _ranked.length));
+      final id = m.group(1)!;
+      if (_seenCandidates.add('$tool $id')) _ranked.add((id: id, tool: tool, rank: rank, order: _ranked.length));
     }
   }
 
-  final List<({String id, int rank, int order})> _ranked = [];
+  final List<({String id, String tool, int rank, int order})> _ranked = [];
 
-  /// [noteCandidates]' ids, best source first.
-  List<String> get candidates => [
-    for (final c in [..._ranked]..sort((a, b) => a.rank != b.rank ? a.rank - b.rank : a.order - b.order)) c.id,
-  ];
+  /// [noteCandidates]' ids from [topUpTools], best source first.
+  List<String> get topUpCandidates => {
+    for (final c in [..._ranked]..sort((a, b) => a.rank != b.rank ? a.rank - b.rank : a.order - b.order))
+      if (topUpTools.contains(c.tool)) c.id,
+  }.toList();
 
   /// Remember the titles a history tool's [result] lists; returns it.
   String noteHistoryTitles(String result) {
@@ -438,7 +451,7 @@ class AiTools {
   Future<String> run(String name, Map<String, dynamic> input) async {
     switch (name) {
       case 'search_library':
-        return _list(await index.search(_query(input)));
+        return _list(await index.search(_query(input), seen: watch.seen));
       case 'text_search':
         return _list(
           await index.textSearch(
@@ -541,8 +554,10 @@ class AiTools {
     );
   }
 
-  /// One compact line per title, cheap in tokens.
-  static String line(IndexedTitle t, {bool withWatched = false}) {
+  /// One compact line per title, cheap in tokens. Fork: [watch] is what the
+  /// user has seen of it (the brain merged in); the row's own counts if not
+  /// given.
+  static String line(IndexedTitle t, {bool withWatched = false, WatchState? watch}) {
     final parts = <String>[
       t.id,
       '${t.title}${t.year == null ? '' : ' (${t.year})'}',
@@ -553,27 +568,15 @@ class AiTools {
       if (t.type == 'movie' && t.durationMinutes != null) '${t.durationMinutes} min',
       if (t.type == 'show' && t.episodeCount != null) '${t.episodeCount} eps',
       if (t.releaseDate != null && t.type == 'show') 'first aired ${t.releaseDate}',
-      _watchState(t),
+      (watch ?? WatchState.of(t)).label,
       t.libraryTitle,
     ];
     return parts.where((p) => p.isNotEmpty).join(' | ');
   }
 
-  static String _watchState(IndexedTitle t) {
-    if (t.type == 'show') {
-      final watched = t.watchedEpisodeCount ?? 0;
-      final total = t.episodeCount ?? 0;
-      if (watched == 0) return 'unwatched';
-      if (watched >= total) return 'watched all';
-      return 'watched $watched/$total';
-    }
-    if ((t.viewOffsetMs ?? 0) > 0) return 'in progress';
-    if ((t.viewCount ?? 0) > 0) return 'watched';
-    return 'unwatched';
-  }
-
-  static String _list(List<IndexedTitle> titles, {bool withWatched = false}) =>
-      titles.isEmpty ? 'No matches.' : titles.map((t) => line(t, withWatched: withWatched)).join('\n');
+  String _list(List<IndexedTitle> titles, {bool withWatched = false}) => titles.isEmpty
+      ? 'No matches.'
+      : titles.map((t) => line(t, withWatched: withWatched, watch: watch.of(t))).join('\n');
 
   Future<String> _findTitles(Map<String, dynamic> input) async {
     final db = await index.database;
@@ -613,7 +616,7 @@ class AiTools {
       if (match == null) {
         missing.add(year == null ? w.title : '${w.title} ($year)');
       } else {
-        found.add(line(match));
+        found.add(line(match, watch: watch.of(match)));
       }
     }
     return [
@@ -628,7 +631,7 @@ class AiTools {
     if (t == null) return 'No title with id $id.';
     final copies = await index.copiesOf(t.groupKey);
     return [
-      line(t),
+      line(t, watch: watch.of(t)),
       if (t.originalTitle != null) 'Original title: ${t.originalTitle}',
       if (t.summary != null) 'Summary: ${t.summary}',
       if (t.cast.isNotEmpty) 'Cast: ${t.cast.replaceAll('|', ', ')}',

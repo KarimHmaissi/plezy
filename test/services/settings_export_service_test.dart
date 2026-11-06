@@ -9,6 +9,7 @@ import 'package:plezy/models/audio_channel_limit.dart';
 import 'package:plezy/models/shader_preset.dart';
 import 'package:plezy/services/base_shared_preferences_service.dart';
 import 'package:plezy/services/file_picker_service.dart';
+import 'package:plezy/services/sensitive_prefs.dart';
 import 'package:plezy/services/settings_export_service.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/trackers/tracker_constants.dart';
@@ -167,6 +168,22 @@ void main() {
       for (final canary in canaries) {
         expect(encoded, isNot(contains(canary)));
       }
+    });
+
+    test('never exports the Anthropic or TMDB key', () async {
+      const canary = 'API-KEY-CANARY';
+      final prefs = await BaseSharedPreferencesService.sharedCache();
+      await prefs.setString(aiApiKeyPref, 'enc:v1:$canary');
+      await prefs.setString(tmdbApiKeyPref, 'enc:v1:$canary');
+      await prefs.setBool('enable_hdr', true);
+
+      final out = SettingsExportService.buildExportMap(prefs, currentUserUuid: 'alice');
+      final exported = out['prefs'] as Map<String, dynamic>;
+
+      expect(exported, contains('enable_hdr'));
+      expect(exported, isNot(contains(aiApiKeyPref)));
+      expect(exported, isNot(contains(tmdbApiKeyPref)));
+      expect(jsonEncode(out), isNot(contains(canary)));
     });
 
     test('does not export any user-scoped value without an active user', () async {

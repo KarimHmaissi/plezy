@@ -26,7 +26,17 @@ class PlayerPerformanceOverlay extends StatefulWidget {
   /// has no server play method (live TV, offline playback).
   final bool? isTranscoding;
 
-  const PlayerPerformanceOverlay({super.key, required this.player, required this.active, this.isTranscoding});
+  /// The signal line ("23.976 matched · Direct Play · E-AC3 5.1"), read on
+  /// every stats refresh; shown across the top of the card when non-null.
+  final String? Function()? signalLine;
+
+  const PlayerPerformanceOverlay({
+    super.key,
+    required this.player,
+    required this.active,
+    this.isTranscoding,
+    this.signalLine,
+  });
 
   @override
   State<PlayerPerformanceOverlay> createState() => _PlayerPerformanceOverlayState();
@@ -72,6 +82,7 @@ class _PlayerPerformanceOverlayState extends State<PlayerPerformanceOverlay> {
   @override
   Widget build(BuildContext context) {
     final isMpv = _stats.playerType == 'mpv';
+    final signal = widget.signalLine?.call();
 
     final sections = <Widget>[
       _buildSection(Symbols.videocam_rounded, t.fileInfo.video, [
@@ -166,7 +177,21 @@ class _PlayerPerformanceOverlayState extends State<PlayerPerformanceOverlay> {
                 borderRadius: const BorderRadius.all(Radius.circular(8)),
                 boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 4)],
               ),
-              child: Wrap(spacing: 24, runSpacing: 12, children: sections),
+              child: Column(
+                crossAxisAlignment: .start,
+                mainAxisSize: .min,
+                children: [
+                  if (signal != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        '${t.performanceOverlay.signal}: $signal',
+                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: .w600),
+                      ),
+                    ),
+                  Wrap(spacing: 24, runSpacing: 12, children: sections),
+                ],
+              ),
             ),
           ),
         );

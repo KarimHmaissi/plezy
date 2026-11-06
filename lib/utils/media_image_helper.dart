@@ -24,6 +24,26 @@ enum ImageType {
   square, // 1:1 grid-cell artwork (albums, artists, tracks, cast cards)
 }
 
+/// Where a piece of art is shown, by the tag its timing would be logged under.
+///
+/// Reserved for the parked Instant Art measurement (polish plan Part 4): its
+/// `art_timing` line would carry one of these, passed in by the callers of
+/// [MediaImageHelper.getOptimizedImageUrl]. Nothing reads or logs it yet.
+/// [reel] is reserved now for The Reel's cards, nearly all unseen titles and
+/// so the coldest art surface there will be.
+enum ArtSurface {
+  homeRow('home_row'),
+  aiResults('ai_results'),
+  heroBackdrop('hero_backdrop'),
+  detail('detail'),
+  reel('reel');
+
+  const ArtSurface(this.tag);
+
+  /// The surface tag as it would appear in a log line.
+  final String tag;
+}
+
 /// Backend-neutral image URL helper.
 ///
 /// Builds optimally-sized image URLs that go through the right server-side

@@ -18,6 +18,7 @@ import 'package:plezy/services/data_aggregation_service.dart';
 import 'package:plezy/services/library_events/library_event_service.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/utils/continue_watching_logo_notifier.dart';
 import 'package:plezy/utils/deletion_notifier.dart';
 import 'package:plezy/utils/watch_state_notifier.dart';
 import 'package:plezy/utils/library_content_notifier.dart';
@@ -31,6 +32,7 @@ MediaItem _item(
   String? grandparentId,
   MediaKind kind = MediaKind.episode,
   String serverId = 'server_1',
+  int? viewCount,
 }) => testMediaItem(
   id: id,
   backend: MediaBackend.plex,
@@ -40,6 +42,7 @@ MediaItem _item(
   serverName: 'Server',
   parentId: parentId,
   grandparentId: grandparentId,
+  viewCount: viewCount,
 );
 
 MediaHub _hub(
@@ -461,6 +464,80 @@ void main() {
     expect(shelfSyncs, hasLength(1));
     expect(shelfSyncs.single.$1, 'profile-a');
     expect(shelfSyncs.single.$2.first.viewOffsetMs, 30000);
+  });
+
+  group('show logos that land after the Continue Watching row', () {
+    const logoA = '/library/metadata/show-a/clearLogo/1';
+    const logoB = '/library/metadata/show-b/clearLogo/1';
+
+    test('fill the row in place: same rows, same order, no refetch', () async {
+      final own = _item('ep-3', grandparentId: 'show-c').copyWith(clearLogoPath: '/own-logo');
+      aggregation.onDeckResult = () => [
+        _item('ep-1', grandparentId: 'show-a'),
+        _item('movie-1', kind: MediaKind.movie),
+        _item('ep-2', grandparentId: 'show-b'),
+        own,
+      ];
+      aggregation.hubsResult = () => [_hub('hub-1')];
+      await provider.load();
+      await pumpEventQueue();
+      final generation = provider.loadGeneration;
+      final onDeckCalls = aggregation.onDeckCalls;
+      var notifies = 0;
+      provider.addListener(() => notifies++);
+
+      ContinueWatchingLogoNotifier().notifyLogos(
+        const ContinueWatchingLogoPatch({
+          'server_1:show-a': logoA,
+          'server_1:show-b': logoB,
+          'server_1:show-c': '/patched-over-own',
+        }),
+      );
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((item) => item.id), ['ep-1', 'movie-1', 'ep-2', 'ep-3']);
+      expect(provider.onDeck.map((item) => item.clearLogoPath), [logoA, null, logoB, '/own-logo']);
+      expect(notifies, 1);
+      expect(provider.loadGeneration, generation, reason: 'a patch is not a new load, so the hero stays put');
+      expect(aggregation.onDeckCalls, onDeckCalls);
+    });
+
+    test('a patch while hubs are still loading does not supersede the pass', () async {
+      final hubs = Completer<void>();
+      aggregation.onDeckResult = () => [_item('ep-1', grandparentId: 'show-a')];
+      aggregation.hubsResult = () => [_hub('hub-1')];
+      aggregation.hubGate = hubs.future;
+
+      final load = provider.load();
+      await pumpEventQueue();
+      expect(provider.onDeck.map((item) => item.id), ['ep-1']);
+
+      ContinueWatchingLogoNotifier().notifyLogos(const ContinueWatchingLogoPatch({'server_1:show-a': logoA}));
+      await pumpEventQueue();
+      expect(provider.onDeck.single.clearLogoPath, logoA);
+
+      hubs.complete();
+      await load;
+      await pumpEventQueue();
+
+      expect(provider.hubs.map((hub) => hub.id), ['hub-1']);
+      expect(provider.onDeck.single.clearLogoPath, logoA);
+      expect(shelfSyncs, isNotEmpty, reason: 'the pass still commits and syncs the launcher shelf');
+    });
+
+    test('rows that arrive after their patch get the logo when they commit', () async {
+      ContinueWatchingLogoNotifier().notifyLogos(const ContinueWatchingLogoPatch({'server_1:show-a': logoA}));
+      await pumpEventQueue();
+      aggregation.onDeckResult = () => [
+        _item('ep-1', grandparentId: 'show-a'),
+        _item('ep-9', grandparentId: 'show-a', serverId: 'server_2'),
+      ];
+      aggregation.hubsResult = () => [_hub('hub-1')];
+
+      await provider.load();
+
+      expect(provider.onDeck.map((item) => item.clearLogoPath), [logoA, null], reason: 'logos are per server');
+    });
   });
 
   group('copies behind a merged Continue Watching row', () {
@@ -1504,6 +1581,158 @@ void main() {
       scoped.dispose();
       await settle();
       expect(aggregation.hubCalls, 1);
+    });
+  });
+
+  group('next episode from a watched event (provisional row)', () {
+    MediaItem episode(String id, {String show = 'show-1', int? viewCount}) =>
+        _item(id, parentId: '$show-season-1', grandparentId: show, viewCount: viewCount);
+    final other = _item('movie-1', kind: MediaKind.movie);
+
+    /// Load [ep-1, movie-1], then hold every later on-deck call until the
+    /// returned completer fires, so assertions can look at the state before
+    /// the background refresh answers.
+    Future<Completer<void>> loadThenHoldRefreshes() async {
+      aggregation.onDeckResult = () => [episode('ep-1'), other];
+      await provider.load();
+      final gate = Completer<void>();
+      aggregation.onDeckGate = gate.future;
+      return gate;
+    }
+
+    test('swaps in the next episode at the head of the row and syncs the shelf before the refresh answers', () async {
+      final gate = await loadThenHoldRefreshes();
+      final onDeckCallsBefore = aggregation.onDeckCalls;
+      final shelfSyncsBefore = shelfSyncs.length;
+
+      WatchStateNotifier().notifyWatched(item: episode('ep-1'), nextItem: episode('ep-2'));
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((i) => i.id), ['ep-2', 'movie-1']);
+      expect(provider.isProvisionalContinueWatchingRow(provider.onDeck[0]), isTrue);
+      expect(shelfSyncs.length, greaterThan(shelfSyncsBefore));
+      expect(shelfSyncs.last.$2.map((i) => i.id), ['ep-2', 'movie-1']);
+      // The background refresh is under way but has not answered.
+      expect(aggregation.onDeckCalls, onDeckCallsBefore + 1);
+
+      aggregation.onDeckResult = () => [episode('ep-2'), other];
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((i) => i.id), ['ep-2', 'movie-1']);
+      expect(provider.isProvisionalContinueWatchingRow(provider.onDeck[0]), isFalse);
+    });
+
+    test('a stale refresh that leaves the show out keeps the row, with no remove-then-return', () async {
+      final gate = await loadThenHoldRefreshes();
+      WatchStateNotifier().notifyWatched(item: episode('ep-1'), nextItem: episode('ep-2'));
+      await pumpEventQueue();
+      final shelfSyncsBefore = shelfSyncs.length;
+      var sawRowWithoutNext = false;
+      provider.addListener(() {
+        if (!provider.onDeck.any((i) => i.id == 'ep-2')) sawRowWithoutNext = true;
+      });
+
+      // Plex's on-deck still lags: the show is missing altogether.
+      aggregation.onDeckResult = () => [other];
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((i) => i.id), ['ep-2', 'movie-1']);
+      expect(provider.isProvisionalContinueWatchingRow(provider.onDeck[0]), isTrue);
+
+      // A later full pass that still lags behaves the same, and so does one
+      // that still names the episode just watched.
+      aggregation.onDeckResult = () => [episode('ep-1'), other];
+      await provider.load();
+
+      expect(provider.onDeck.map((i) => i.id), ['ep-2', 'movie-1']);
+      expect(provider.isProvisionalContinueWatchingRow(provider.onDeck[0]), isTrue);
+      expect(sawRowWithoutNext, isFalse);
+      for (final (_, items) in shelfSyncs.skip(shelfSyncsBefore)) {
+        expect(items.map((i) => i.id), contains('ep-2'));
+        expect(items.map((i) => i.id), isNot(contains('ep-1')));
+      }
+    });
+
+    test('a refresh naming a different next episode for the show replaces it', () async {
+      final gate = await loadThenHoldRefreshes();
+      WatchStateNotifier().notifyWatched(item: episode('ep-1'), nextItem: episode('ep-2'));
+      await pumpEventQueue();
+
+      aggregation.onDeckResult = () => [other, episode('ep-3')];
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((i) => i.id), ['movie-1', 'ep-3']);
+      expect(provider.onDeck.any(provider.isProvisionalContinueWatchingRow), isFalse);
+
+      // Settled: a later refresh that leaves the show out is now authoritative.
+      aggregation.onDeckResult = () => [other];
+      await provider.refreshContinueWatching();
+      expect(provider.onDeck.map((i) => i.id), ['movie-1']);
+    });
+
+    test('an unconfirmed row is dropped after the safety window, not before', () async {
+      final gate = await loadThenHoldRefreshes();
+      WatchStateNotifier().notifyWatched(item: episode('ep-1'), nextItem: episode('ep-2'));
+      await pumpEventQueue();
+      aggregation.onDeckResult = () => [other];
+      gate.complete();
+      await pumpEventQueue();
+
+      currentTime = currentTime.add(DiscoverProvider.provisionalNextEpisodeTtl - const Duration(minutes: 1));
+      await provider.refreshContinueWatching();
+      expect(provider.onDeck.map((i) => i.id), ['ep-2', 'movie-1']);
+
+      currentTime = currentTime.add(const Duration(minutes: 1));
+      await provider.refreshContinueWatching();
+      expect(provider.onDeck.map((i) => i.id), ['movie-1']);
+      expect(shelfSyncs.last.$2.map((i) => i.id), ['movie-1']);
+    });
+
+    test('a show with no row yet gets one from the next episode', () async {
+      aggregation.onDeckResult = () => [other];
+      await provider.load();
+      final gate = Completer<void>();
+      aggregation.onDeckGate = gate.future;
+
+      WatchStateNotifier().notifyWatched(item: episode('ep-1'), nextItem: episode('ep-2'));
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((i) => i.id), ['ep-2', 'movie-1']);
+      gate.complete();
+    });
+
+    test('a next item from another show or already watched only evicts the row', () async {
+      for (final next in [episode('x-1', show: 'show-2'), episode('ep-2', viewCount: 1)]) {
+        aggregation.onDeckGate = null;
+        aggregation.onDeckResult = () => [episode('ep-1'), other];
+        await provider.load();
+        aggregation.onDeckResult = () => [other];
+
+        WatchStateNotifier().notifyWatched(item: episode('ep-1'), nextItem: next);
+        await pumpEventQueue();
+
+        expect(provider.onDeck.map((i) => i.id), ['movie-1'], reason: next.id);
+        expect(provider.onDeck.any(provider.isProvisionalContinueWatchingRow), isFalse);
+      }
+    });
+
+    test('marking the watched episode unwatched lets a refresh bring it back', () async {
+      final gate = await loadThenHoldRefreshes();
+      WatchStateNotifier().notifyWatched(item: episode('ep-1'), nextItem: episode('ep-2'));
+      await pumpEventQueue();
+      aggregation.onDeckResult = () => [other];
+      gate.complete();
+      await pumpEventQueue();
+      aggregation.onDeckGate = null;
+
+      aggregation.onDeckResult = () => [episode('ep-1'), other];
+      WatchStateNotifier().notifyWatched(item: episode('ep-1'), isNowWatched: false);
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((i) => i.id), ['ep-1', 'movie-1']);
     });
   });
 }

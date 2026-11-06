@@ -402,6 +402,8 @@ void main() {
       for (final key in [
         credentialVaultKeyPref,
         legacyPlexTokenPref,
+        aiApiKeyPref,
+        tmdbApiKeyPref,
         'trakt_session',
         'user_abc_mal_session',
         'user_abc_anilist_session',

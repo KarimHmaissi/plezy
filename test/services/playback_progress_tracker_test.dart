@@ -1049,6 +1049,35 @@ void main() {
       expect(watched, hasLength(1));
     });
 
+    test('the watched event carries the next episode the player supplies', () async {
+      // Continue Watching and the launcher shelf show the series' next
+      // episode the moment this one is marked watched, from the player's
+      // queue rather than a server round trip.
+      final client = _StopMarksWatchedClient();
+      final player = _FakePlayer(position: const Duration(seconds: 95), duration: const Duration(seconds: 100));
+      final next = _meta(ratingKey: '43');
+      final tracker = PlaybackProgressTracker(
+        client: client,
+        metadata: _meta(ratingKey: '42'),
+        player: player,
+        isOffline: false,
+        nextItem: () => next,
+      );
+      addTearDown(tracker.dispose);
+
+      final watched = <WatchStateEvent>[];
+      final sub = WatchStateNotifier().stream
+          .where((e) => e.affectsItem('42') && e.changeType == WatchStateChangeType.watched)
+          .listen(watched.add);
+      addTearDown(sub.cancel);
+
+      await tracker.sendProgress('stopped');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(watched, hasLength(1));
+      expect(watched.single.nextItem?.id, '43');
+    });
+
     test('respects a custom server threshold (e.g. 80%)', () async {
       // 81% >= 80%, but < 90% default.
       final client = _FakePlexClient(thresholdPercent: 80);

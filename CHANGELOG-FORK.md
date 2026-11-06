@@ -102,6 +102,119 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-05
+
+### Watch Next row on the Shield's home works again (A1)
+- Since 31 Oct every Watch Next sync was refused with "Too many items":
+  Plezy sent up to 60 Continue Watching items and Android TV takes 20, so
+  Arc's row went stale. Plezy now sends the first 20, in Continue
+  Watching's own order (`SystemShelf.maxItems`), so next-up episodes are
+  kept.
+- Next-up episodes (never viewed) were stamped with "now" on every sync,
+  which reshuffled the row each time. Each one now keeps the time it was
+  first published (remembered across restarts, pruned to what's on the
+  row), so a new next episode leads once and then holds its place.
+### Frame-rate matching on by default on the TV, and a signal line
+- **Match content frame rate** now starts on for a fresh Android TV
+  install, so a 23.976 film plays on a 23.976 Hz mode instead of
+  juddering at 60. Phones and other platforms keep it off. A value saved
+  in Settings, Playback still wins, so if it was once turned off there it
+  stays off until switched back on. Resolution matching stays off, so the
+  Shield keeps outputting 4K and its upscaler still handles 1080p.
+- A new **signal line**, such as "23.976 matched · Direct Play · E-AC3
+  5.1", shows the content rate and whether the display switched for it
+  ("matched"; "no switch" when the request changed nothing, because the
+  mode already matched or the TV lists no mode for it), the play method,
+  and the audio. It appears at the top of the performance overlay and
+  under the title on the phone's now-playing screen. Nothing is added to
+  the TV picture.
+### Back keeps Plezy warm on the Shield, and memory is trimmed, not wiped
+- Back at the home screen (pressed twice, as before) now sends Plezy
+  **behind the launcher instead of closing it**, so opening it again from
+  Arc or a Watch Next card is a hot resume, not a cold start. Phones still
+  exit. **Settings > Quit Plezy** (Android TV only) closes it for real.
+- When Android asks for memory, Plezy **halves** its image cache instead
+  of emptying it, so the artwork you come back to is still there. Going
+  behind the launcher halves the image and Skia caches once; after about
+  30 minutes in the background both drop to their minimum, giving memory
+  back to whatever the family is watching. Coming back restores the
+  device's normal sizes (`MemoryTrimPolicy`).
+- The memory watchdog halves the cache first and only clears cached
+  (off-screen) images if memory is still high on its next check. It no
+  longer clears on-screen images, which could blank the art in view.
+- The startup log now counts how often Android killed Plezy for memory
+  while it was in the background (`[LmkCounter]`), to check that staying
+  warm is not costing it.
+### TMDB key slot (Settings ▸ AI)
+- Settings ▸ AI has a **TMDB** section under the Anthropic key: paste the
+  TMDB key, receive it from a phone over the home network (the same
+  one-time "Send from phone" page, now worded for TMDB), test it, or
+  remove it. Either TMDB credential works: the 32-character API key or the
+  long API Read Access Token. It's checked against TMDB's validate-key
+  endpoint before it's saved (saved anyway if TMDB can't be reached), shown
+  only as its last four characters, and the last check's result is shown
+  next to it.
+- Stored like the Anthropic key (`TmdbKeyStore`): encrypted on the device,
+  registered as a credential, so it is never exported, backed up or
+  logged. Nothing uses it yet; it's ready for the Reel.
+### The next episode shows up as soon as an episode ends (A6)
+- Finishing an episode used to drop its show from Continue Watching and
+  Arc's Watch Next until Plex's on-deck caught up, so pressing Home showed
+  the wrong first card. Now the moment the episode is marked watched, the
+  player's queue puts the **next episode** of that show at the front of
+  Continue Watching and the shelf is synced straight away.
+- The row is provisional until Plex names the show: a refresh that still
+  lags (show missing, or the episode just watched) keeps it in place
+  instead of removing it and bringing it back. If Plex names a different
+  episode, that one wins. An unconfirmed row is dropped after 6 hours
+  (`DiscoverProvider.provisionalNextEpisodeTtl`).
+- Only the same show's next unwatched episode counts (a playlist's next
+  title doesn't). Playing it fetches its metadata fresh, as any row does.
+### Continue Watching no longer waits on a slow server
+- When one server was slow in the evening, the Continue Watching row and
+  the hero could sit empty for 15 to 30 seconds. The older-items top-up
+  (`/library/onDeck`) now runs at the same time as the main Continue
+  Watching request instead of after it, and gets 5 seconds; if it misses
+  that, the row shows without the older items for that load (the log says
+  `ContinueWatching: /library/onDeck top-up ... missed its 5s deadline`).
+- Show logos that a server leaves off episode rows are looked up after the
+  row is shown and filled in a moment later, in place: same cards, same
+  order, focus and hero stay where they are. Also capped at 5 seconds.
+- Each server's Continue Watching now has its own 20-second limit, like the
+  library list already had, so one server that stops answering can't hold
+  back the others. No extra requests to the servers: same calls, just
+  started together.
+### Sharper Watch Next art on the Shield's home (A8)
+- Plezy now publishes Watch Next art at 1280×720 instead of 640×360, so
+  Arc's cards on the 4K TV aren't upscaled from half size. Arc's side of
+  this (decoding at the card's real pixel size) is in the Arc fork.
+### Holding a direction sends real key repeats
+- Holding the D-pad or stick on a game controller used to send a fresh
+  press-and-release every 80 ms. It now behaves like a held hardware key:
+  one press, then a repeat every 80 ms after a 400 ms wait, and one release
+  when you let go (`KeyEventSimulatorController.startKeyRepeat`).
+- A hold during playback now commits **one** seek when you let go, with the
+  same speed-up a remote hold gets. Before, every synthetic release
+  committed a seek, so a one-second hold fired about seven.
+- Holding still walks focus down lists and rows, one item per repeat. This
+  is also the base the phone remote's hold will use.
+### Ask knows what you've seen, and its top-ups stay clean
+- Ask read "watched" from each server copy's own play count, so films
+  marked watched on Trakt or imported (no play on any copy) looked
+  unwatched. It recommended them and wrote "you haven't seen any of these" over cards with Watched
+  badges. The tools now merge in the history brain once per ask and say
+  "seen 2025-03", "seen (logged, no date)" or "watched 12/40 eps"
+  (`WatchStates`), and an "unwatched" search leaves those titles out.
+  Suggested for you lists use the same watched state. Rewatch asks still
+  work: seen only means seen.
+- A short broad row is now topped up only from the model's own title
+  list and its library searches, not from keyword or "similar" matches
+  (where the odd kids'-film picks came from). Kids' libraries stay out
+  unless the model picked from one, titles rated under 6.5 stay out, and
+  unrated titles count as unknown rather than bad. If that runs out, the
+  row stays short. Nothing it leaves out is remembered: a title skipped
+  today can be picked tomorrow.
+
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)
