@@ -40,6 +40,7 @@ import 'package:plezy/widgets/pressable.dart';
 import 'package:plezy/widgets/tv_spotlight_background.dart';
 
 import '../test_helpers/prefs.dart';
+import '../test_helpers/reel_link.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 class _Servers implements ReelServers {
@@ -303,6 +304,7 @@ void main() {
         store: store,
         aniList: (_) async => null,
         animeThemes: (_) async => const {},
+        profile: FakeLinkProfile(() => onCellular, link),
       ),
       clips: ClipPlayer(engine: FakeClipEngine.new),
       store: store,
@@ -313,8 +315,6 @@ void main() {
       memoryRestored: restored,
       settingsChanged: settingsChanged,
       cellular: () => cellular,
-      metered: () => onCellular,
-      linkChanged: link,
       onOpen: (item) async => opened.add(item),
       moreLike: (seed, {required skip}) async => [_card('5'), _card('6')],
       // A resume card's show has its fourth episode on deck.

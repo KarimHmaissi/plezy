@@ -14,7 +14,6 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
-import '../providers/offline_mode_provider.dart';
 import '../screens/media_detail_screen.dart';
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
@@ -140,7 +139,6 @@ abstract final class ReelApp {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
     final remote = context.read<CompanionRemoteProvider?>();
-    final link = context.read<OfflineModeProvider?>();
     final servers = multi.serverManager;
     final store = ReelStore.instance;
     final library = _library();
@@ -228,13 +226,12 @@ abstract final class ReelApp {
       itemWithNext: media.itemWithNext,
       // The Reel's settings page applies to the Reel that is playing.
       settingsChanged: SettingsService.instanceOrNull?.listenableOfAll(SettingsService.reelChoicePrefs),
-      // The Reel on mobile data (V2-53): the pref, and the app's one
-      // connectivity reading.
+      // The Reel on mobile data (V2-53): the pref. The link itself is the
+      // playback profile's (the resolver's ReelPlaybackWatcher), the one
+      // reading the data budget and the clip's file both follow.
       cellular: () =>
           SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
           SettingsService.reelCellular.resolvedDefault,
-      metered: () => link?.isCellularOnly ?? false,
-      linkChanged: link,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));

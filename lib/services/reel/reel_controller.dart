@@ -267,8 +267,6 @@ class ReelController extends ChangeNotifier {
     this.saveMuted,
     this.settingsChanged,
     this.cellular,
-    this.metered,
-    this.linkChanged,
     Listenable? deckPrefsChanged,
     ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
@@ -283,8 +281,7 @@ class ReelController extends ChangeNotifier {
     resolver.profile?.addListener(_onProfile);
     ReelStore.picksChanged.addListener(_onPicksChanged);
     settingsChanged?.addListener(_onSettingsChanged);
-    _wasMetered = metered?.call() ?? false;
-    linkChanged?.addListener(_onLinkChanged);
+    _wasMetered = _metered;
     this.deckPrefsChanged.addListener(_onDeckPrefsChanged);
     decks.forEach(_watchDeck);
   }
@@ -359,13 +356,13 @@ class ReelController extends ChangeNotifier {
   /// pref's default.
   final ReelCellular Function()? cellular;
 
-  /// Whether the link is cellular only (`OfflineModeProvider.isCellularOnly`).
-  /// Null reads as Wi-Fi.
-  final bool Function()? metered;
-
-  /// Fires when the link may have changed (the app's connectivity
-  /// provider). The views re-sync only when [metered] really moved.
-  final Listenable? linkChanged;
+  /// Whether the link is cellular only, as the playback profile says
+  /// ([ClipResolver.profile], `ReelPlaybackWatcher` in the app). The one
+  /// source of the link for the data budget, the file a clip plays and the
+  /// prefetch window, so they never disagree while the network changes. No
+  /// profile reads as Wi-Fi. A profile change re-syncs the views only when
+  /// this really moved ([_onLinkChanged]).
+  bool get _metered => resolver.playback.link == ReelLink.cellular;
   bool _wasMetered = false;
 
   /// What the Reel may spend on this link now ([ReelDataBudget]): the phone
@@ -375,25 +372,27 @@ class ReelController extends ChangeNotifier {
   /// tick. The controller's own reads ([_budget]) note nothing, so they
   /// never swallow a change the views have yet to hear of.
   ReelDataBudget get dataBudget {
-    _wasMetered = metered?.call() ?? false;
+    _wasMetered = _metered;
     return _budget;
   }
 
-  ReelDataBudget get _budget => ReelDataBudget.of(
-    cellular?.call() ?? SettingsService.reelCellular.resolvedDefault,
-    metered: metered?.call() ?? false,
-  );
+  ReelDataBudget get _budget =>
+      ReelDataBudget.of(cellular?.call() ?? SettingsService.reelCellular.resolvedDefault, metered: _metered);
 
   void _onLinkChanged() {
     if (_disposed) return;
-    final now = metered?.call() ?? false;
+    final now = _metered;
     if (now == _wasMetered) return;
     _wasMetered = now;
-    appLogger.i('Reel: ${now ? 'mobile data' : 'off mobile data'}, $_budget');
+    appLogger.i('[ReelLink] ${now ? 'mobile data' : 'off mobile data'}: budget $_budget, ${resolver.playback}');
     // Stills only: the phone feed lets its players go now, so the card on
     // screen is a still and waits on no first frame (the TV's clip plays
     // on until the next card).
     if (externalClips && !_budget.clips && _cardShown != null) _settle(_generation, playing: false);
+    // The prefetch window follows the budget: wider again off mobile data,
+    // narrower on it.
+    final list = cards;
+    if (list != null && _active) _plan(list, _generation);
     notifyListeners();
   }
 
@@ -1628,7 +1627,8 @@ class ReelController extends ChangeNotifier {
   /// Hands the prefetcher the window around the card on screen, nearest
   /// first (0, +1, -1, +2 in the direction of travel), each card's clip
   /// before its art and text, and for +1 and +2 their art decoded last
-  /// (plan V2-13). On a metered or offline link, or under memory pressure,
+  /// (plan V2-13). On an offline link, on mobile data unless the pref is
+  /// Normal ([ReelDataBudget]), or under memory pressure,
   /// only the card on screen and the next; under memory pressure no art is
   /// decoded ahead.
   ///
@@ -1639,7 +1639,11 @@ class ReelController extends ChangeNotifier {
     if (_disposed || gen != _generation) return;
     final at = _decideAt(deck.id, list);
     if (at != null && at > index && at - index <= 2) _readPicks();
-    final lean = memoryLevel >= 1 || resolver.playback.link != ReelLink.unmetered;
+    // The link's lean window follows the data budget, which reads the same
+    // profile link and the mobile-data pref: Normal on mobile data plans as
+    // on Wi-Fi (V2-53), Data saver and Stills only plan 0 and +1.
+    final lean =
+        memoryLevel >= 1 || resolver.playback.link == ReelLink.offline || _budget.ahead < ReelDataBudget.full.ahead;
     final tasks = <ReelPrefetchTask>[];
     final answered = <ReelCardData>[];
     final window = <String>[];
@@ -2375,6 +2379,8 @@ class ReelController extends ChangeNotifier {
     }
     appLogger.d('Reel: playback profile now ${resolver.playback}');
     if (changed) notifyListeners();
+    // The profile carries the link: the budget follows it from here.
+    _onLinkChanged();
   }
 
   /// The On TV state the TV broadcasts on every card change: what the
@@ -2452,7 +2458,6 @@ class ReelController extends ChangeNotifier {
     resolver.profile?.removeListener(_onProfile);
     ReelStore.picksChanged.removeListener(_onPicksChanged);
     settingsChanged?.removeListener(_onSettingsChanged);
-    linkChanged?.removeListener(_onLinkChanged);
     deckPrefsChanged.removeListener(_onDeckPrefsChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);

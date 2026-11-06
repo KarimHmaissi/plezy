@@ -31,6 +31,7 @@ import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
 
 import '../test_helpers/prefs.dart';
+import '../test_helpers/reel_link.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 class _Servers implements ReelServers {
@@ -396,7 +397,8 @@ void main() {
       store: store,
       aniList: aniList ?? (_) async => null,
       animeThemes: animeThemes ?? (_) async => const {},
-      profile: profile,
+      // The link is the profile's (one source for the data budget too).
+      profile: profile ?? (metered == null ? null : FakeLinkProfile(metered, linkChanged)),
     ),
     clips: ClipPlayer(
       plays: plays,
@@ -421,8 +423,6 @@ void main() {
     settingsChanged: settingsChanged,
     deckPrefsChanged: deckPrefsChanged,
     cellular: cellular,
-    metered: metered,
-    linkChanged: linkChanged,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -967,6 +967,30 @@ void main() {
     engine.firstFrameCtl.add(null);
     await pumpEventQueue();
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
+    c.dispose();
+  });
+
+  test('the data budget reads the link from the playback profile, the one source the clip file uses', () async {
+    const wifi = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
+    const mobile = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular);
+    final profile = ValueNotifier<ReelPlaybackProfile>(wifi);
+    addTearDown(profile.dispose);
+    final c = make(cellular: () => ReelCellular.dataSaver, profile: profile);
+    // What a view sees each time the controller tells it something.
+    final seen = <(ReelDataBudget, ReelLink)>[];
+    c.addListener(() => seen.add((c.dataBudget, c.resolver.playback.link)));
+    expect(c.dataBudget, ReelDataBudget.full);
+
+    profile.value = mobile;
+    expect(c.dataBudget, ReelDataBudget.saver);
+    expect(seen, [(ReelDataBudget.saver, ReelLink.cellular)], reason: 'never a budget from another link');
+
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
+    expect(c.dataBudget, ReelDataBudget.full, reason: 'off mobile data with the same notice');
+    expect(seen.last, (ReelDataBudget.full, ReelLink.unmetered));
+
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 0, link: ReelLink.offline);
+    expect(c.dataBudget, ReelDataBudget.full, reason: 'offline is not mobile data');
     c.dispose();
   });
 
@@ -2412,6 +2436,39 @@ void main() {
       await pumpEventQueue();
       expect(servers.reads, ['1', '2']);
       expect(c.slotAt(2).resolved, isFalse);
+      c.dispose();
+    });
+
+    test('on mobile data on Normal the window is as on Wi-Fi (V2-53)', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      addTearDown(profile.dispose);
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), profile: profile, cellular: () => ReelCellular.normal);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(c.dataBudget, ReelDataBudget.full);
+      expect(servers.reads, ['1', '2', '3'], reason: 'the window follows the budget, not the link alone');
+      c.dispose();
+    });
+
+    test('off mobile data the window widens at once, from the profile\'s link', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      addTearDown(profile.dispose);
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), profile: profile, cellular: () => ReelCellular.dataSaver);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2']);
+
+      profile.value = const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2', '3'], reason: 'the link moved: the window is planned again');
       c.dispose();
     });
 
