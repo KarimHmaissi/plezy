@@ -27,10 +27,13 @@ void main() {
 
   test('sends edits and shows them at once', () async {
     final sent = <Map<String, Object?>>[];
-    final store = MirrorCustomisationStore(snapshot(), send: (op) {
-      sent.add(op);
-      return true;
-    });
+    final store = MirrorCustomisationStore(
+      snapshot(),
+      send: (op) {
+        sent.add(op);
+        return true;
+      },
+    );
     await store.writeSetting('ai.history.xyz', '{}');
     await store.writeSetting('ai.history.index', null);
     await store.writeHomeLayout([], curated: false, revision: 4);
@@ -44,5 +47,12 @@ void main() {
     final store = MirrorCustomisationStore(snapshot(), send: (_) => false);
     await expectLater(store.writeSetting('k', 'v'), throwsA(isA<MirrorReadOnlyException>()));
     expect(await store.readSetting('k'), isNull);
+  });
+
+  test('reads settings by key prefix from the snapshot and its own edits', () async {
+    final store = MirrorCustomisationStore(snapshot(), send: (_) => true);
+    await store.writeSetting('ai.history.xyz', '{}');
+    expect(await store.readSettingsWithPrefix('ai.history.'), {'ai.history.index': '["abc"]', 'ai.history.xyz': '{}'});
+    expect(await store.readSettingsWithPrefix('reel.'), isEmpty);
   });
 }

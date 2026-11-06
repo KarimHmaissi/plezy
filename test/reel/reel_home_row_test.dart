@@ -66,7 +66,7 @@ void main() {
 
     final stamps = await phone.store.readSyncStamps();
     expect(stamps.keys, isNot(contains(SyncUnits.home)));
-    expect(stamps.keys, contains(SyncUnits.setting(ReelStore.picksKey)));
+    expect(stamps.keys, contains(SyncUnits.setting(ReelStore.pickKey('a'))));
     expect(await phone.store.readHomeLayout(), isNull);
     expect(await phone.store.readSetting(ReelHomeRow.seatedKey), isNull);
   });
@@ -79,7 +79,7 @@ void main() {
     await phone.reel.savePick(pick('a'));
     await phone.seat(onTv: false);
     final taken = await tv.catchUpFrom(phone);
-    expect(taken, {SyncUnits.setting(ReelStore.picksKey)});
+    expect(taken, {SyncUnits.setting(ReelStore.pickKey('a'))});
 
     // What Home does on Customisation.changed on the TV.
     expect(await tv.seat(onTv: true), isTrue);

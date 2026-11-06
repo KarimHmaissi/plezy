@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
+import 'package:plezy/services/customisation/mirror_store.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 void main() {
@@ -73,9 +75,29 @@ void main() {
     expect(await store.cached('src:g1'), isNotNull);
   });
 
-  test('events and caches never become sync units; picks and vetoes do', () {
+  test('picks and vetoes sync one title at a time; the migration markers stay here', () async {
+    await store.savePick(pick('a', now));
+    await store.spoiled('x', 'plex:1');
+    final stamps = await LocalCustomisationStore(db).readSyncStamps();
+    expect(
+      stamps.keys,
+      containsAll([SyncUnits.setting(ReelStore.pickKey('a')), SyncUnits.setting(ReelStore.vetoKey('x'))]),
+    );
+    expect(stamps.keys, isNot(contains(SyncUnits.setting(ReelStore.picksKey))));
+    expect(stamps.keys, isNot(contains(SyncUnits.setting(ReelStore.vetoesKey))));
+    // The old keys still sync for one release, so an older device's copy arrives.
     expect(SyncUnits.syncsSetting(ReelStore.picksKey), isTrue);
     expect(SyncUnits.syncsSetting(ReelStore.vetoesKey), isTrue);
+    expect(SyncUnits.syncsSetting(ReelStore.picksMigratedKey), isFalse);
+    expect(SyncUnits.syncsSetting(ReelStore.vetoesMigratedKey), isFalse);
+  });
+
+  test('removing a pick removes only that title', () async {
+    await store.savePick(pick('a', now));
+    await store.savePick(pick('b', now));
+    await store.removePick('a');
+    expect((await store.picks()).map((p) => p.titleId), ['b']);
+    expect(await LocalCustomisationStore(db).readSetting(ReelStore.pickKey('a')), isNull);
   });
 
   test('a schema 2 database upgrades to 3 with the Reel tables, keeping its data', () async {
@@ -97,5 +119,178 @@ void main() {
     expect((await s.events(since: DateTime.utc(2000))).single.action, 'save');
     await upgraded.close();
     await dir.delete(recursive: true);
+  });
+
+  group('two devices (catch-up)', () {
+    late ForkDatabase phoneDb;
+    late LocalCustomisationStore tvSettings;
+    late LocalCustomisationStore phoneSettings;
+    late ReelStore phone;
+
+    setUp(() {
+      tvSettings = LocalCustomisationStore(db);
+      phoneDb = ForkDatabase.memory();
+      phoneSettings = LocalCustomisationStore(phoneDb);
+      phone = ReelStore(database: () async => phoneDb, settings: () async => phoneSettings, clock: () => now);
+    });
+
+    tearDown(() => phoneDb.close());
+
+    Future<Set<String>> catchUp(LocalCustomisationStore from, LocalCustomisationStore to) async =>
+        to.applySyncUnits(await from.readSyncUnits((await from.readSyncStamps()).keys));
+
+    test('Spoiled me bans and Not for me from both devices all survive', () async {
+      await store.spoiled('x', 'plex:1');
+      await store.notForMe('m');
+      now = now.add(const Duration(minutes: 5));
+      await phone.spoiled('y', 'plex:2');
+      await phone.markFact('k', 'kids');
+
+      await catchUp(phoneSettings, tvSettings);
+      await catchUp(tvSettings, phoneSettings);
+
+      for (final s in [store, phone]) {
+        expect(await s.spoiledAssets('x'), {'plex:1'});
+        expect(await s.spoiledAssets('y'), {'plex:2'});
+        expect(await s.excluded(), {'m', 'k'});
+      }
+    });
+
+    test('picks saved on both devices all reach both; a removal travels too', () async {
+      await store.savePick(pick('a', now));
+      now = now.add(const Duration(minutes: 1));
+      await phone.savePick(pick('b', now));
+      await catchUp(phoneSettings, tvSettings);
+      await catchUp(tvSettings, phoneSettings);
+      expect((await store.freshPicks()).map((p) => p.titleId), ['b', 'a']);
+      expect((await phone.freshPicks()).map((p) => p.titleId), ['b', 'a']);
+
+      now = now.add(const Duration(minutes: 1));
+      await phone.removePick('a');
+      await catchUp(phoneSettings, tvSettings);
+      expect((await store.picks()).map((p) => p.titleId), ['b']);
+    });
+
+    test('the same title edited on both: the newer edit of that title wins', () async {
+      await store.notForMe('x');
+      now = now.add(const Duration(minutes: 1));
+      await phone.markFact('x', 'seen');
+      await catchUp(phoneSettings, tvSettings);
+      expect(jsonDecode((await tvSettings.readSetting(ReelStore.vetoKey('x')))!), {'k': 'seen'});
+    });
+  });
+
+  group('the old one-setting format', () {
+    late LocalCustomisationStore settings;
+
+    setUp(() => settings = LocalCustomisationStore(db));
+
+    String oldPicks(List<ReelPick> picks) => jsonEncode([for (final p in picks) p.toJson()]);
+
+    test('is moved into per-title keys once, and read from them after', () async {
+      await settings.writeSetting(
+        ReelStore.picksKey,
+        oldPicks([
+          pick('a', now.subtract(const Duration(hours: 2))),
+          pick('old', now.subtract(const Duration(days: 4))),
+        ]),
+      );
+      await settings.writeSetting(
+        ReelStore.vetoesKey,
+        jsonEncode({
+          'x': {
+            's': ['plex:1'],
+          },
+          'y': {'k': 'seen'},
+          'z': {'n': now.millisecondsSinceEpoch},
+        }),
+      );
+
+      expect((await store.freshPicks()).map((p) => p.titleId), ['a']);
+      expect(await store.excluded(), {'y', 'z'});
+      expect(await store.spoiledAssets('x'), {'plex:1'});
+
+      expect(await settings.readSetting(ReelStore.pickKey('a')), isNotNull);
+      expect(await settings.readSetting(ReelStore.pickKey('old')), isNull, reason: 'stale picks are not moved');
+      expect(await settings.readSetting(ReelStore.vetoKey('x')), isNotNull);
+      expect(await settings.readSetting(ReelStore.picksMigratedKey), isNotNull);
+      expect(await settings.readSetting(ReelStore.vetoesMigratedKey), isNotNull);
+      // The old keys are left for an older device still reading them.
+      expect(await settings.readSetting(ReelStore.picksKey), isNotNull);
+    });
+
+    test('a pick removed after the move does not come back from the old key', () async {
+      await settings.writeSetting(ReelStore.picksKey, oldPicks([pick('a', now), pick('b', now)]));
+      expect(await store.picks(), hasLength(2));
+      await store.removePick('a');
+      expect((await store.picks()).map((p) => p.titleId), ['b']);
+      // A fresh store (an app restart) reads the same.
+      final again = ReelStore(database: () async => db, settings: () async => settings, clock: () => now);
+      expect((await again.picks()).map((p) => p.titleId), ['b']);
+    });
+
+    test('removing a pick before anything was read still sticks', () async {
+      await settings.writeSetting(ReelStore.picksKey, oldPicks([pick('a', now)]));
+      await store.removePick('a');
+      expect(await store.picks(), isEmpty);
+    });
+
+    test('a newer copy from an older device is moved again and merged per title', () async {
+      await store.spoiled('x', 'plex:1');
+      await store.savePick(pick('a', now.subtract(const Duration(hours: 1))));
+      // An older device writes its whole set (it never saw the per-title keys).
+      await settings.writeSetting(
+        ReelStore.vetoesKey,
+        jsonEncode({
+          'x': {
+            's': ['plex:9'],
+          },
+        }),
+      );
+      await settings.writeSetting(ReelStore.picksKey, oldPicks([pick('a', now.subtract(const Duration(hours: 3)))]));
+
+      expect(await store.spoiledAssets('x'), {'plex:1', 'plex:9'});
+      expect((await store.picks()).single.at, now.subtract(const Duration(hours: 1)), reason: 'the newer save wins');
+    });
+
+    test('reads made together move it once', () async {
+      await settings.writeSetting(ReelStore.picksKey, oldPicks([pick('a', now)]));
+      final writesBefore = Customisation.localWrites.value;
+      final all = await Future.wait([store.picks(), store.picks(), store.freshPicks()]);
+      expect(all.map((l) => l.single.titleId), ['a', 'a', 'a']);
+      // One pick key and one marker.
+      expect(Customisation.localWrites.value - writesBefore, 2);
+    });
+
+    test('a phone mirroring a TV that has not moved it yet reads it as it is, writing nothing', () async {
+      final sent = <Map<String, Object?>>[];
+      final mirror = MirrorCustomisationStore(
+        {
+          'settings': {
+            ReelStore.picksKey: oldPicks([pick('a', now)]),
+            ReelStore.vetoesKey: jsonEncode({
+              'x': {
+                's': ['plex:1'],
+              },
+              'y': {'k': 'kids'},
+            }),
+          },
+        },
+        send: (op) {
+          sent.add(op);
+          return true;
+        },
+      );
+      final phone = ReelStore(database: () async => db, settings: () async => mirror, clock: () => now);
+      expect((await phone.freshPicks()).map((p) => p.titleId), ['a']);
+      expect(await phone.excluded(), {'y'});
+      expect(await phone.spoiledAssets('x'), {'plex:1'});
+      expect(sent, isEmpty);
+
+      // An edit keeps what the TV's old copy had for that title.
+      await phone.spoiled('x', 'plex:2');
+      expect(sent.single['key'], ReelStore.vetoKey('x'));
+      expect(await phone.spoiledAssets('x'), {'plex:1', 'plex:2'});
+    });
   });
 }

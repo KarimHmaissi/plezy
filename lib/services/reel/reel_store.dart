@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 
@@ -81,9 +83,10 @@ class ReelPick {
   }
 }
 
-/// Facts the Reel keeps. Picks and vetoes are small synced settings (newest
-/// edit wins between the TV and the phone); events and caches stay in this
-/// device's own fork database.
+/// Facts the Reel keeps. Picks and vetoes are small synced settings, one per
+/// title (`reel.pick.<titleId>`, `reel.veto.<titleId>`), so catch-up merges
+/// them title by title and the newest edit of each title wins between the TV
+/// and the phone. Events and caches stay in this device's own fork database.
 class ReelStore {
   ReelStore({
     Future<ForkDatabase> Function()? database,
@@ -99,8 +102,27 @@ class ReelStore {
   final Future<CustomisationStore> Function() _settings;
   final DateTime Function() _clock;
 
+  /// One saved pick per title: a [ReelPick] as JSON.
+  static const String pickKeyPrefix = 'reel.pick.';
+
+  /// One veto per title: `{n: notForMeAt ms, k: 'seen'|'kids', s: [asset ids spoiled]}`.
+  static const String vetoKeyPrefix = 'reel.veto.';
+
+  static String pickKey(String titleId) => '$pickKeyPrefix$titleId';
+  static String vetoKey(String titleId) => '$vetoKeyPrefix$titleId';
+
+  /// The old format: every pick (or every veto) in one setting, so one
+  /// device's write replaced the other's whole set on catch-up. Still read
+  /// for one release: each new copy is moved into the per-title keys once.
+  /// TODO(reel): stop reading these one release after per-title keys ship.
   static const String picksKey = 'reel.picks';
   static const String vetoesKey = 'reel.vetoes';
+
+  /// This device only (see [SyncUnits.syncsSetting]): a digest of the old
+  /// setting last moved into per-title keys here, so a pick removed since
+  /// isn't brought back from it.
+  static const String picksMigratedKey = 'reel.migrated.picks';
+  static const String vetoesMigratedKey = 'reel.migrated.vetoes';
 
   /// How long a clip asset identity (or a miss) is trusted.
   static const Duration sourceTtl = Duration(days: 30);
@@ -178,16 +200,141 @@ class ReelStore {
         );
   }
 
+  // ---- old one-setting format (read for one release) ----
+
+  /// The old setting's last raw value and its digest, per old key, so
+  /// repeat reads skip hashing it.
+  final Map<String, ({String raw, String digest})> _digests = {};
+  final Map<String, Future<void>> _moving = {};
+
+  String _digest(String oldKey, String raw) {
+    final last = _digests[oldKey];
+    if (last != null && last.raw == raw) return last.digest;
+    final digest = sha1.convert(utf8.encode(raw)).toString();
+    _digests[oldKey] = (raw: raw, digest: digest);
+    return digest;
+  }
+
+  /// The entries of the old setting [oldKey] not yet moved into per-title
+  /// keys, by title id; empty once moved. On this device's own data it moves
+  /// them now ([move]) and returns empty. A phone mirroring its TV leaves
+  /// that to the TV and reads them as they are.
+  Future<Map<String, T>> _unmoved<T>(
+    CustomisationStore settings, {
+    required String oldKey,
+    required String markerKey,
+    required Map<String, T> Function(String raw) decode,
+    required Future<void> Function(Map<String, T> entries) move,
+  }) async {
+    final raw = await settings.readSetting(oldKey);
+    if (raw == null) return const {};
+    final digest = _digest(oldKey, raw);
+    if (await settings.readSetting(markerKey) == digest) return const {};
+    final entries = _tryDecode(decode, raw);
+    if (settings is! LocalCustomisationStore) return entries;
+    // Reads made together move it once.
+    final run = _moving.putIfAbsent(oldKey, () => _move(() => move(entries), settings, markerKey, digest));
+    try {
+      await run;
+    } finally {
+      // Already awaited above.
+      unawaited(_moving.remove(oldKey));
+    }
+    return const {};
+  }
+
+  static Map<String, T> _tryDecode<T>(Map<String, T> Function(String raw) decode, String raw) {
+    try {
+      return decode(raw);
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  static Future<void> _move(
+    Future<void> Function() move,
+    CustomisationStore settings,
+    String markerKey,
+    String digest,
+  ) async {
+    await move();
+    await settings.writeSetting(markerKey, digest);
+  }
+
+  static Map<String, ReelPick> _decodeOldPicks(String raw) => {
+    for (final p in (jsonDecode(raw) as List).map(ReelPick.fromJson).nonNulls) p.titleId: p,
+  };
+
+  static Map<String, Map<String, Object?>> _decodeOldVetoes(String raw) => {
+    for (final MapEntry(:key, :value) in (jsonDecode(raw) as Map).entries)
+      if (value is Map) '$key': value.cast<String, Object?>(),
+  };
+
+  Future<Map<String, ReelPick>> _oldPicks(CustomisationStore settings) => _unmoved(
+    settings,
+    oldKey: picksKey,
+    markerKey: picksMigratedKey,
+    decode: _decodeOldPicks,
+    move: (old) async {
+      final now = _clock();
+      for (final p in old.values) {
+        if (!p.isFresh(now)) continue;
+        final have = _decodePick(await settings.readSetting(pickKey(p.titleId)));
+        if (have != null && !p.at.isAfter(have.at)) continue;
+        await settings.writeSetting(pickKey(p.titleId), jsonEncode(p.toJson()));
+      }
+    },
+  );
+
+  Future<Map<String, Map<String, Object?>>> _oldVetoes(CustomisationStore settings) => _unmoved(
+    settings,
+    oldKey: vetoesKey,
+    markerKey: vetoesMigratedKey,
+    decode: _decodeOldVetoes,
+    move: (old) async {
+      for (final MapEntry(key: titleId, value: v) in old.entries) {
+        final have = _decodeVeto(await settings.readSetting(vetoKey(titleId)));
+        final merged = _mergeVeto(have, v);
+        if (have != null && jsonEncode(merged) == jsonEncode(have)) continue;
+        await settings.writeSetting(vetoKey(titleId), jsonEncode(merged));
+      }
+    },
+  );
+
+  /// One title's veto with [other] folded in: the later Not for me, either
+  /// fact, and every spoiled asset.
+  static Map<String, Object?> _mergeVeto(Map<String, Object?>? mine, Map<String, Object?> other) {
+    final out = {...?mine};
+    final n = [out['n'], other['n']].whereType<int>();
+    if (n.isNotEmpty) out['n'] = n.reduce((a, b) => a > b ? a : b);
+    out['k'] ??= other['k'];
+    final s = {..._assets(out['s']), ..._assets(other['s'])};
+    if (s.isNotEmpty) out['s'] = s.toList();
+    return out;
+  }
+
+  static Iterable<String> _assets(Object? s) => ((s as List?) ?? const []).map((e) => '$e');
+
   // ---- picks (synced) ----
 
-  Future<List<ReelPick>> picks() async {
-    final raw = await (await _settings()).readSetting(picksKey);
-    if (raw == null) return const [];
+  static ReelPick? _decodePick(String? raw) {
+    if (raw == null) return null;
     try {
-      return [for (final j in jsonDecode(raw) as List) ?ReelPick.fromJson(j)];
+      return ReelPick.fromJson(jsonDecode(raw));
     } catch (_) {
-      return const [];
+      return null;
     }
+  }
+
+  Future<List<ReelPick>> picks() async {
+    final settings = await _settings();
+    final old = await _oldPicks(settings);
+    final byTitle = {
+      ...old,
+      for (final p in (await settings.readSettingsWithPrefix(pickKeyPrefix)).values.map(_decodePick).nonNulls)
+        p.titleId: p,
+    };
+    return byTitle.values.toList();
   }
 
   /// The picks the Home row shows: fresh ones, newest first, at most 3.
@@ -202,63 +349,73 @@ class ReelStore {
   /// caller's.
   Future<void> savePick(ReelPick pick) async {
     final now = _clock();
-    final kept = [
+    final settings = await _settings();
+    final stale = [
       for (final p in await picks())
-        if (p.titleId != pick.titleId && p.isFresh(now)) p,
-      pick,
+        if (p.titleId != pick.titleId && !p.isFresh(now)) p.titleId,
     ];
-    await (await _settings()).writeSetting(picksKey, jsonEncode([for (final p in kept) p.toJson()]));
+    await settings.writeSetting(pickKey(pick.titleId), jsonEncode(pick.toJson()));
+    for (final id in stale) {
+      await settings.writeSetting(pickKey(id), null);
+    }
     picksChanged.value++;
   }
 
   Future<void> removePick(String titleId) async {
-    final kept = [
-      for (final p in await picks())
-        if (p.titleId != titleId) p,
-    ];
-    await (await _settings()).writeSetting(picksKey, jsonEncode([for (final p in kept) p.toJson()]));
+    final settings = await _settings();
+    await _oldPicks(settings);
+    await settings.writeSetting(pickKey(titleId), null);
     picksChanged.value++;
   }
 
   // ---- vetoes (synced) ----
 
-  /// `{titleId: {n: notForMeAt ms, k: 'seen'|'kids', s: [asset ids spoiled]}}`.
-  Future<Map<String, Map<String, Object?>>> _vetoes() async {
-    final raw = await (await _settings()).readSetting(vetoesKey);
-    if (raw == null) return {};
+  static Map<String, Object?>? _decodeVeto(String? raw) {
+    if (raw == null) return null;
     try {
-      return {
-        for (final MapEntry(:key, :value) in (jsonDecode(raw) as Map).entries)
-          if (value is Map) '$key': value.cast<String, Object?>(),
-      };
+      final v = jsonDecode(raw);
+      return v is Map ? v.cast<String, Object?>() : null;
     } catch (_) {
-      return {};
+      return null;
     }
   }
 
-  Future<void> _writeVetoes(Map<String, Map<String, Object?>> v) async =>
-      (await _settings()).writeSetting(vetoesKey, jsonEncode(v));
-
-  Future<void> notForMe(String titleId) async {
-    final v = await _vetoes();
-    (v[titleId] ??= {})['n'] = _clock().millisecondsSinceEpoch;
-    await _writeVetoes(v);
+  /// Every title's veto, by title id.
+  Future<Map<String, Map<String, Object?>>> _vetoes() async {
+    final settings = await _settings();
+    final old = await _oldVetoes(settings);
+    final mine = {
+      for (final MapEntry(:key, :value) in (await settings.readSettingsWithPrefix(vetoKeyPrefix)).entries)
+        key.substring(vetoKeyPrefix.length): ?_decodeVeto(value),
+    };
+    return {
+      for (final id in {...old.keys, ...mine.keys}) id: old[id] == null ? mine[id]! : _mergeVeto(mine[id], old[id]!),
+    };
   }
+
+  /// One title's veto (empty when it has none).
+  Future<Map<String, Object?>> _veto(String titleId) async {
+    final settings = await _settings();
+    final old = await _oldVetoes(settings);
+    final mine = _decodeVeto(await settings.readSetting(vetoKey(titleId)));
+    final o = old[titleId];
+    return o == null ? {...?mine} : _mergeVeto(mine, o);
+  }
+
+  Future<void> _editVeto(String titleId, void Function(Map<String, Object?> v) edit) async {
+    final v = await _veto(titleId);
+    edit(v);
+    await (await _settings()).writeSetting(vetoKey(titleId), jsonEncode(v));
+  }
+
+  Future<void> notForMe(String titleId) => _editVeto(titleId, (v) => v['n'] = _clock().millisecondsSinceEpoch);
 
   /// Seen it / For kids: facts, so permanent.
-  Future<void> markFact(String titleId, String fact) async {
-    final v = await _vetoes();
-    (v[titleId] ??= {})['k'] = fact;
-    await _writeVetoes(v);
-  }
+  Future<void> markFact(String titleId, String fact) => _editVeto(titleId, (v) => v['k'] = fact);
 
   /// Spoiled me: bans that one asset for good (the title drops to the next rung).
-  Future<void> spoiled(String titleId, String assetId) async {
-    final v = await _vetoes();
-    final entry = v[titleId] ??= {};
-    entry['s'] = {...((entry['s'] as List?) ?? const []).map((e) => '$e'), assetId}.toList();
-    await _writeVetoes(v);
-  }
+  Future<void> spoiled(String titleId, String assetId) =>
+      _editVeto(titleId, (v) => v['s'] = {..._assets(v['s']), assetId}.toList());
 
   /// Titles code-built pools leave out today: resting after Not for me, or
   /// marked seen / for kids.
@@ -275,7 +432,5 @@ class ReelStore {
     };
   }
 
-  Future<Set<String>> spoiledAssets(String titleId) async => {
-    ...(((await _vetoes())[titleId]?['s'] as List?) ?? const []).map((e) => '$e'),
-  };
+  Future<Set<String>> spoiledAssets(String titleId) async => {..._assets((await _veto(titleId))['s'])};
 }
