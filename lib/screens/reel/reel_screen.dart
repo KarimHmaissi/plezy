@@ -18,6 +18,7 @@ import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_perf.dart';
 import '../../services/reel/reel_store.dart';
+import '../../services/reel/reel_volume.dart';
 import '../../services/settings_service.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
@@ -296,8 +297,21 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       'notForMe' => c.notForMe(),
       'pause' => c.togglePause(),
       'replay' => c.replay(),
+      'spoiled' => c.spoiledMe(),
+      'seenIt' => c.seenIt(),
+      'details' => c.openDetails(),
+      'mute' => c.setMuted(!c.clips.muted),
+      'volumeUp' => _louder(c, 1),
+      'volumeDown' => _louder(c, -1),
       _ => Future<void>.value(),
     });
+  }
+
+  /// On TV mode's volume buttons: the Reel's own level ([ReelVolume]). Up
+  /// while muted brings the sound back too.
+  Future<void> _louder(ReelController c, int dir) async {
+    ReelVolume.adjust(dir);
+    if (dir > 0 && c.clips.muted) await c.setMuted(false);
   }
 
   @override

@@ -11,12 +11,16 @@ import '../../models/companion_remote/remote_command.dart';
 import '../../providers/companion_remote_provider.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
+import '../../widgets/app_menu.dart';
+import '../../widgets/companion_remote/remote_button.dart';
 import '../../widgets/optimized_media_image.dart';
 import '../../widgets/stat_chip.dart';
 
 /// Fork: the Fold's On TV mode. The TV's Reel plays; the phone shows its
 /// card and the next three and sends `reelStep` / `reelAction`. The phone
-/// plays nothing. Built from the app's own theme and widgets.
+/// plays nothing. A full remote (V2-49): previous and next, play and pause,
+/// the TV's Reel volume, and a More menu with the TV sheet's card actions.
+/// Built from the app's own theme and widgets.
 class ReelRemoteView extends StatefulWidget {
   const ReelRemoteView({super.key, this.deck, this.groupKey});
 
@@ -58,8 +62,9 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
     });
   }
 
-  void _step(int dir) {
-    HapticFeedback.selectionClick();
+  /// [haptic]: false from a [RemoteButton], which gives its own.
+  void _step(int dir, {bool haptic = true}) {
+    if (haptic) HapticFeedback.selectionClick();
     _remote.sendCommand(RemoteCommandType.reelStep, data: {'dir': dir});
   }
 
@@ -68,9 +73,27 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
     _remote.sendCommand(RemoteCommandType.reelStep, data: {'deckDir': dir});
   }
 
-  void _act(String action) {
-    HapticFeedback.lightImpact();
+  void _act(String action, {bool haptic = true}) {
+    if (haptic) HapticFeedback.lightImpact();
     _remote.sendCommand(RemoteCommandType.reelAction, data: {'action': action});
+  }
+
+  /// The TV sheet's card actions: Details, Seen it, and with a clip on
+  /// the card, Spoiled me and Replay.
+  Future<void> _more(Map<String, dynamic> card, {required bool hasClip}) async {
+    final picked = await showAdaptiveAppMenu<String>(
+      context,
+      title: card['title'] as String?,
+      entries: [
+        AppMenuItem(value: 'details', icon: Symbols.info_rounded, label: t.reel.sheet.details),
+        AppMenuItem(value: 'seenIt', icon: Symbols.check_rounded, label: t.reel.sheet.seenIt),
+        if (hasClip) ...[
+          AppMenuItem(value: 'spoiled', icon: Symbols.visibility_off_rounded, label: t.reel.sheet.spoiledMe),
+          AppMenuItem(value: 'replay', icon: Symbols.replay_rounded, label: t.reel.card.replay),
+        ],
+      ],
+    );
+    if (picked != null && mounted) _act(picked);
   }
 
   @override
@@ -113,13 +136,17 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
     ].take(3).toList();
     final decks = [for (final d in (state['decks'] as List? ?? const []).whereType<Map>()) d.cast<String, dynamic>()];
     final playing = state['playing'] == true;
+    final hasClip = state['hasClip'] == true;
+    final muted = state['muted'] == true;
+    final remote = t.companionRemote.remote;
     return Column(
       children: [
-        SizedBox(
-          height: 48,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        // Scrolls sideways and takes the chips' own height, so large text
+        // never clips them.
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
             children: [
               for (final d in decks)
                 Padding(
@@ -170,6 +197,50 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                     poolEnd: state['poolEnd'] == true,
                   ),
                 ),
+              ),
+              const SizedBox(height: 20),
+              _ButtonRow(
+                children: [
+                  RemoteButton(
+                    icon: Symbols.skip_previous_rounded,
+                    label: remote.previous,
+                    onPressed: () => _step(-1, haptic: false),
+                  ),
+                  RemoteButton(
+                    icon: playing ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
+                    label: playing ? t.reel.remote.pause : t.reel.remote.play,
+                    size: 64,
+                    iconSize: 36,
+                    onPressed: card == null ? null : () => _act('pause', haptic: false),
+                  ),
+                  RemoteButton(
+                    icon: Symbols.skip_next_rounded,
+                    label: remote.next,
+                    onPressed: () => _step(1, haptic: false),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Text(remote.volume, textAlign: TextAlign.center, style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _ButtonRow(
+                children: [
+                  RemoteButton(
+                    icon: muted ? Symbols.volume_up_rounded : Symbols.volume_off_rounded,
+                    label: muted ? t.reel.card.soundOn : t.reel.card.mute,
+                    onPressed: () => _act('mute', haptic: false),
+                  ),
+                  RemoteButton(
+                    icon: Symbols.volume_down_rounded,
+                    label: remote.volumeDown,
+                    onPressed: () => _act('volumeDown', haptic: false),
+                  ),
+                  RemoteButton(
+                    icon: Symbols.volume_up_rounded,
+                    label: remote.volumeUp,
+                    onPressed: () => _act('volumeUp', haptic: false),
+                  ),
+                ],
               ),
               if (next.isNotEmpty) ...[
                 const SizedBox(height: 20),
@@ -222,9 +293,9 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: card == null ? null : () => _act('pause'),
-                        icon: Icon(playing ? Symbols.pause_rounded : Symbols.play_arrow_rounded),
-                        label: Text(playing ? t.reel.remote.pause : t.reel.remote.play),
+                        onPressed: card == null ? null : () => unawaited(_more(card, hasClip: hasClip)),
+                        icon: const Icon(Symbols.more_horiz_rounded),
+                        label: Text(t.reel.card.more, maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
                     ),
                   ],
@@ -236,6 +307,18 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
       ],
     );
   }
+}
+
+/// Three remote buttons spaced across the width, as on the phone remote;
+/// they wrap rather than overflow at large text.
+class _ButtonRow extends StatelessWidget {
+  const _ButtonRow({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) =>
+      Wrap(alignment: WrapAlignment.spaceEvenly, spacing: 16, runSpacing: 12, children: children);
 }
 
 class _NowCard extends StatelessWidget {

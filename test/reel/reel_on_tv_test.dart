@@ -22,6 +22,7 @@ import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/reel/reel_volume.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:provider/provider.dart';
@@ -49,12 +50,23 @@ class _Remote extends CompanionRemoteProvider {
   void sendCommand(RemoteCommandType type, {Map<String, dynamic>? data}) => sent.add((type, data));
 }
 
+/// Whether the servers have a trailer for every title (off by default).
+var _withClips = false;
+
 class _Servers implements ReelServers {
   @override
-  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async => [];
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async => [
+    if (_withClips)
+      PlexExtraClip(
+        ratingKey: 'x$ratingKey',
+        title: 'Trailer',
+        partKey: '/services/iva/assets/$ratingKey/video.mp4',
+        subtype: 'trailer',
+      ),
+  ];
 
   @override
-  String? clipUrl(String serverId, String partKey) => null;
+  String? clipUrl(String serverId, String partKey) => _withClips ? 'https://$serverId.example$partKey' : null;
 }
 
 class _Media implements ReelMedia {
@@ -121,6 +133,7 @@ void main() {
   late ReelStore store;
   late ReelController c;
   late List<bool> watched;
+  late List<MediaItem> opened;
   final key = GlobalKey<ReelScreenState>();
 
   setUp(() async {
@@ -138,6 +151,9 @@ void main() {
     final custom = LocalCustomisationStore(db);
     store = ReelStore(database: () async => db, settings: () async => custom);
     watched = [];
+    opened = [];
+    _withClips = false;
+    ReelVolume.reset();
     c = ReelController(
       decks: [
         _Deck('a', [_card('1', 'Harbor Lights'), _card('2', 'Lantern Bay')]),
@@ -157,6 +173,7 @@ void main() {
         return true;
       },
       addToWatchlist: (_) async => true,
+      onOpen: (item) async => opened.add(item),
       externalClips: true,
     );
   });
@@ -245,5 +262,50 @@ void main() {
     await settle(tester);
     expect(c.deck.id, 'a');
     expect(c.current.card?.title.title, 'Harbor Lights');
+  });
+
+  group('V2-49 host: the full remote\'s actions', () {
+    Future<List<String>> actions() async => [for (final e in await store.events(since: DateTime(2000))) e.action];
+
+    testWidgets('Seen it and Details from the phone act on the TV\'s card', (tester) async {
+      await show(tester);
+      ReelScreen.remoteAction('seenIt');
+      await settle(tester);
+      expect(await tester.runAsync(actions), contains(ReelAction.seenIt.name));
+
+      ReelScreen.remoteAction('details');
+      await settle(tester);
+      expect(opened.single.id, '1');
+      expect(await tester.runAsync(actions), contains(ReelAction.details.name));
+    });
+
+    testWidgets('Spoiled me needs a clip, and the state tells the phone whether there is one', (tester) async {
+      _withClips = true;
+      await show(tester);
+      expect(c.remoteState()['hasClip'], isTrue);
+      ReelScreen.remoteAction('spoiled');
+      await settle(tester);
+      expect(await tester.runAsync(actions), contains(ReelAction.spoiled.name));
+    });
+
+    testWidgets('mute toggles the Reel\'s sound; volume moves its level, and up brings the sound back', (tester) async {
+      await show(tester);
+      expect(c.remoteState()['muted'], isFalse);
+      ReelScreen.remoteAction('mute');
+      await settle(tester);
+      expect(c.clips.muted, isTrue);
+      expect(c.remoteState()['muted'], isTrue);
+
+      ReelScreen.remoteAction('volumeDown');
+      ReelScreen.remoteAction('volumeDown');
+      await settle(tester);
+      expect(ReelVolume.level.value, 80);
+      expect(c.clips.muted, isTrue);
+
+      ReelScreen.remoteAction('volumeUp');
+      await settle(tester);
+      expect(ReelVolume.level.value, 90);
+      expect(c.clips.muted, isFalse);
+    });
   });
 }

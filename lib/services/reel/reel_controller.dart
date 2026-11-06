@@ -963,6 +963,10 @@ class ReelController extends ChangeNotifier {
       'next': [for (final n in upNext) ?card(n)],
       'playing': clips.phase.value == ClipPhase.playing,
       'poolEnd': s.kind == ReelSlotKind.poolEnd,
+      // V2-49: the phone's More menu offers Replay and Spoiled me only with
+      // a clip, and its mute button follows the TV's sound.
+      'hasClip': s.clip != null,
+      'muted': clips.muted,
     };
   }
 
