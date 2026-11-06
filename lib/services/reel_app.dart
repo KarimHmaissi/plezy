@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../models/companion_remote/remote_command.dart';
 import '../media/media_item.dart';
@@ -39,6 +41,7 @@ import 'multi_server_manager.dart';
 import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
+import 'reel/reel_data_budget.dart';
 import 'reel/reel_decks.dart';
 import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
@@ -46,6 +49,7 @@ import 'reel/reel_metadata.dart';
 import 'reel/reel_playback_profile.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
+import 'reel/reel_tmdb.dart';
 import 'reel_playback_watcher.dart';
 import 'reel_servers_plex.dart';
 import 'settings_service.dart';
@@ -144,7 +148,13 @@ abstract final class ReelApp {
     final servers = multi.serverManager;
     final store = ReelStore.instance;
     final library = _library();
-    final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
+    final resolver = resolverFor(
+      servers,
+      store,
+      serversChanged: multi,
+      profile: ReelPlaybackWatcher.instance,
+      tmdb: _tmdbRung(link),
+    );
     final pool = _pool(store, library);
     final media = _AppReelMedia(servers, store);
     final decks = await _decks(context, library: library, store: store, pool: pool);
@@ -344,6 +354,7 @@ abstract final class ReelApp {
     ReelStore store, {
     Listenable? serversChanged,
     ValueListenable<ReelPlaybackProfile>? profile,
+    ReelTmdbRung? tmdb,
   }) {
     final plex = PlexReelServers(servers);
     return ClipResolver(
@@ -351,9 +362,33 @@ abstract final class ReelApp {
       store: store,
       aniList: _aniList,
       profile: profile,
+      tmdb: tmdb,
       waitForServer: serversChanged == null
           ? null
           : (id) => waitForServers(serversChanged, () => plex.connected(id), timeout: deepLinkServerWait),
+    );
+  }
+
+  /// The TMDB trailer rung (plan V2-63, D16): Android phones only (the
+  /// feed plays it in a WebView; the TV has none, so its clip-less titles
+  /// stay AI cards with a premise). It runs on Wi-Fi, or on mobile data with
+  /// the Normal pref; Data saver and Stills only turn it off (V2-53). The
+  /// TMDB key is the one in Settings ▸ AI; with none set the rung is skipped.
+  static ReelTmdbRung? _tmdbRung(OfflineModeProvider? link) {
+    if (PlatformDetector.isTV() || !Platform.isAndroid) return null;
+    final client = TmdbVideosClient();
+    unawaited(client.prime());
+    return ReelTmdbRung(
+      fetch: client.fetch,
+      on: () =>
+          client.mayHaveKey &&
+          ReelDataBudget.of(
+                SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
+                    SettingsService.reelCellular.resolvedDefault,
+                metered: link?.isCellularOnly ?? false,
+              ) ==
+              ReelDataBudget.full,
+      language: () => LocaleSettings.currentLocale.languageCode,
     );
   }
 

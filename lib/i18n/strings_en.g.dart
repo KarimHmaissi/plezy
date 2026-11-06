@@ -8394,6 +8394,9 @@ class Translations$reel$card$en {
 	/// en: 'Theme via AnimeThemes'
 	String get themeCredit => 'Theme via AnimeThemes';
 
+	/// en: 'Trailer via YouTube'
+	String get youtubeCredit => 'Trailer via YouTube';
+
 	/// en: 'Replay'
 	String get replay => 'Replay';
 
@@ -11714,6 +11717,7 @@ extension on Translations {
 			'reel.card.pickAnotherDeck' => 'Pick another deck to keep going.',
 			'reel.card.decks' => 'Decks',
 			'reel.card.themeCredit' => 'Theme via AnimeThemes',
+			'reel.card.youtubeCredit' => 'Trailer via YouTube',
 			'reel.card.replay' => 'Replay',
 			'reel.card.watch' => 'Watch',
 			'reel.card.watchOnTv' => 'Watch on TV',
@@ -12205,9 +12209,9 @@ extension on Translations {
 			'collections.enterCollectionName' => 'Enter collection name',
 			'collections.addedToCollection' => 'Added to collection',
 			'collections.errorAddingToCollection' => 'Failed to add to collection',
-			'collections.created' => 'Collection created',
 			_ => null,
 		} ?? switch (path) {
+			'collections.created' => 'Collection created',
 			'collections.removeFromCollection' => 'Remove from collection',
 			'collections.removeFromCollectionConfirm' => ({required Object title}) => 'Remove "${title}" from this collection?',
 			'collections.removedFromCollection' => 'Removed from collection',
@@ -12719,9 +12723,9 @@ extension on Translations {
 			'externalPlayer.playerPackage' => 'Package Name',
 			'externalPlayer.playerUrlScheme' => 'URL Scheme',
 			'externalPlayer.off' => 'Off',
-			'externalPlayer.launchFailed' => 'Failed to open external player',
 			_ => null,
 		} ?? switch (path) {
+			'externalPlayer.launchFailed' => 'Failed to open external player',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} is not installed',
 			'externalPlayer.playInExternalPlayer' => 'Play in External Player',
 			'metadataEdit.editMetadata' => 'Edit...',

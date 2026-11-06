@@ -79,6 +79,8 @@ abstract final class ReelProbe {
             plexClip++;
           case ClipOrigin.animeTheme:
             animeClip++;
+          // The probe's resolver has no TMDB rung.
+          case ClipOrigin.youtube:
           case null:
             none++;
             missing.add(c);

@@ -34,6 +34,7 @@ import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../settings/reel_settings_screen.dart';
 import '../../services/reel/feed_players.dart';
+import '../../services/reel/feed_youtube_webview.dart';
 import '../video_player/wakelock_controller.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
@@ -209,8 +210,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// hold the screen on only while a card really plays. A clip plays as
   /// often as the clip-end pref says, then holds (V2-47).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
+    // A TMDB trailer plays in YouTube's player page (V2-63), the rest in
+    // native players.
     create: (uri) =>
         ReelScreen.debugFeedVideo?.call(uri) ??
+        youTubeFeedVideoFor(uri) ??
         PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
     plays: () => ReelController.clipEndPref().plays,
     keepAwake: _awake.setEnabled,

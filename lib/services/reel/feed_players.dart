@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../utils/app_logger.dart';
+import 'feed_youtube.dart';
 
 /// One card's clip in the phone feed: a player drawn into a Flutter texture,
 /// so the picture slides with its page. Nothing here reports anything: these
@@ -166,6 +167,12 @@ abstract final class FeedStaging {
 /// still on screen with nothing said.
 abstract final class FeedWatchdog {
   static const after = Duration(seconds: 6);
+
+  /// The same for a player page ([EmbedFeedVideo], V2-63): its open loads
+  /// the page, YouTube's API script and the player's own frame before the
+  /// video, so it gets longer; the controller's stuck-card watchdog waits
+  /// longer still for such a card, so the feed's fallback comes first.
+  static const embedAfter = Duration(seconds: 12);
 }
 
 /// Where a clip failed: still opening, opened but never moved, or broke
@@ -225,6 +232,14 @@ typedef FeedCardState = ({FeedVideo? video, bool current, bool paused, bool held
 /// (a call, another app's music) it stays stopped until tapped (or a screen
 /// switch re-syncs with `resume`), so it never takes the audio focus back.
 ///
+/// A player page ([EmbedFeedVideo], the TMDB trailer rung, V2-63) opens only
+/// for the card on screen: never parked ahead or kept behind, so a swipe
+/// away lets it go at once and no page plays off screen. It comes on screen
+/// silent on every visit ([quiet]), whatever the mute, until [unquiet]
+/// (the sound control, outside the player); a mute still silences it. Its
+/// watchdog waits [embedStuckAfter], and its first play state counts as
+/// started (an ad before the video moves no position).
+///
 /// When a clip ends (V2-47, D6): it plays as many times as [plays] says,
 /// looping without a gap (media3's repeat mode) until its last play, which
 /// runs with looping off so it stops on its last frame. The card then holds
@@ -241,6 +256,7 @@ class ReelFeedPlayers extends ChangeNotifier {
     this.keepAwake,
     this.riseOver = FeedRamp.over,
     this.stuckAfter = FeedWatchdog.after,
+    this.embedStuckAfter = FeedWatchdog.embedAfter,
     int? Function()? plays,
   }) : _create = create ?? PluginFeedVideo.new,
        _plays = plays ?? _forever;
@@ -280,6 +296,10 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// How long the card on screen may take to start once asked to play
   /// ([FeedWatchdog]); null never times it out.
   final Duration? stuckAfter;
+
+  /// [stuckAfter] for a player page ([FeedWatchdog.embedAfter]); a null
+  /// [stuckAfter] times neither out.
+  final Duration embedStuckAfter;
 
   /// The card stopped being the one on screen (a swipe went past the middle,
   /// or everything was let go). Its next [onStarted] is a new visit.
@@ -322,6 +342,13 @@ class ReelFeedPlayers extends ChangeNotifier {
   bool _disposed = false;
 
   bool get muted => _muted;
+
+  /// The card on screen is a player page still silent this visit: the
+  /// sound control shows sound off until [unquiet].
+  bool get quiet => _byId[_current]?.quiet ?? false;
+
+  /// The card on screen makes no sound now: muted, or [quiet].
+  bool get soundOff => _muted || quiet;
 
   /// Paused by a tap (the card stays paused until tapped again or left).
   bool get paused => _paused;
@@ -409,15 +436,16 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// it is playing this visit. A tap pause stops it; leaving the card, or
   /// its position moving, ends it.
   void _arm() {
-    final after = stuckAfter;
     final e = _byId[_current];
-    if (after == null || e == null || _paused || e.started || e.held || e.watchdog != null) return;
+    if (stuckAfter == null || e == null || _paused || e.started || e.held || e.watchdog != null) return;
+    final after = e.embed ? embedStuckAfter : stuckAfter!;
     e.watchdog = Timer(after, () {
       e.watchdog = null;
       if (!_isLive(e) || e.id != _current || _paused || e.started || e.held) return;
       // Asked to play and stopped by the system before it moved (a call
-      // took the audio focus): not broken, and left stopped (V2-22).
-      if (e.open && e.voiced && !e.video.playing && !e.video.buffering) return;
+      // took the audio focus): not broken, and left stopped (V2-22). A
+      // player page that never played is still opening: it counts.
+      if (!e.embed && e.open && e.voiced && !e.video.playing && !e.video.buffering) return;
       _fail(e, _stageOf(e), FeedFailCause.timeout);
     });
   }
@@ -438,7 +466,9 @@ class ReelFeedPlayers extends ChangeNotifier {
     if (!_isLive(e) || _broken.containsKey(e.uri)) return;
     _broken[e.uri] = stage;
     final where = e.id == _current ? 'screen' : 'parked';
-    appLogger.i('[ReelFeed] clip failed stage=${stage.name} cause=${cause.name} on=$where');
+    appLogger.i(
+      '[ReelFeed] clip failed stage=${stage.name} cause=${cause.name} on=$where${e.embed ? ' kind=embed' : ''}',
+    );
     unawaited(_drop(e.id));
     if (_memoryLevel == 0) _stage = math.max(_stage, _stageNow());
     _reconcile(apply: false);
@@ -467,11 +497,18 @@ class ReelFeedPlayers extends ChangeNotifier {
   List<FeedClip> get _kept => switch (_memoryLevel) {
     0 => [
       for (final w in _window)
-        if (!_broken.containsKey(w.uri) && (w.id == _holding || _reach(w.offset) <= _linkReach)) w,
+        if (!_broken.containsKey(w.uri) &&
+            (!isEmbed(w.uri) || w.offset == 0) &&
+            (w.id == _holding || _reach(w.offset) <= _linkReach))
+          w,
     ],
     1 => _window.where((w) => w.id == _current && !_broken.containsKey(w.uri)).toList(),
     _ => const <FeedClip>[],
   };
+
+  /// A clip played in a player page (V2-63): only the card on screen opens
+  /// one.
+  static bool isEmbed(Uri uri) => ReelYouTube.idOf(uri) != null;
 
   /// How far the link lets the window reach: on a metered one, the card on
   /// screen and the next.
@@ -538,8 +575,8 @@ class ReelFeedPlayers extends ChangeNotifier {
           entry.open = true;
           // Parked (paused, so silent) at the volume a card comes in at
           // ([FeedRamp]), so a swipe onto it plays without first waiting on
-          // a volume change.
-          await _volume(entry, _muted ? 0 : FeedRamp.from);
+          // a volume change. A player page starts silent.
+          await _volume(entry, _muted || entry.quiet ? 0 : FeedRamp.from);
           // Its looping for a first play, sent while parked so a swipe onto
           // it has nothing to wait on (V2-47). Not awaited: the plugin's
           // calls reach the player in the order they are made.
@@ -568,6 +605,10 @@ class ReelFeedPlayers extends ChangeNotifier {
 
   _Entry _open(FeedClip w) {
     final e = _Entry(w.id, w.uri, _create(w.uri));
+    if (e.embed) {
+      e.quiet = true;
+      appLogger.i('[ReelFeed] embed open card on screen');
+    }
     e.video.addListener(() {
       _watchLoop(e);
       if (e.id == _current) unawaited(_syncAwake());
@@ -600,7 +641,7 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// and rises to full (V2-19).
   Future<void> _start(_Entry e) async {
     final fresh = !e.voiced;
-    final rise = fresh && !_muted;
+    final rise = fresh && !_muted && !e.quiet;
     e.voiced = true;
     if (fresh) {
       // A new visit counts its plays afresh, and a card left holding from
@@ -623,6 +664,8 @@ class ReelFeedPlayers extends ChangeNotifier {
 
   /// Off screen for now: silenced, then stopped on the frame it was showing.
   Future<void> _leave(_Entry e) async {
+    // A player page's next visit starts silent again.
+    if (e.embed) e.quiet = true;
     e.last = Duration.zero;
     e.started = false;
     e.voiced = false;
@@ -632,7 +675,9 @@ class ReelFeedPlayers extends ChangeNotifier {
     e.ramp?.cancel();
     e.watchdog?.cancel();
     e.watchdog = null;
-    if (!e.video.ready || !e.video.playing) return;
+    // A player page asked to play may still be loading its player or
+    // buffering, and would start once it can: it is always told to stop.
+    if (!e.video.ready || (!e.video.playing && !e.embed)) return;
     await _volume(e, 0);
     await e.video.pause();
   }
@@ -665,7 +710,7 @@ class ReelFeedPlayers extends ChangeNotifier {
     final from = e.volume ?? FeedRamp.from;
     var i = 0;
     e.ramp = Timer.periodic(riseOver ~/ FeedRamp.steps, (t) {
-      if (!_isLive(e) || _muted || e.id != _current) {
+      if (!_isLive(e) || _muted || e.quiet || e.id != _current) {
         t.cancel();
         return;
       }
@@ -721,7 +766,10 @@ class ReelFeedPlayers extends ChangeNotifier {
     e.ended = false;
     if (!e.video.playing) return;
     final pos = e.video.position;
-    if (!e.started && pos > Duration.zero) {
+    // A player page counts from its first play state: an ad before the
+    // video plays at position 0.
+    final up = pos > Duration.zero || (e.video is EmbedFeedVideo && (e.video as EmbedFeedVideo).pictureUp);
+    if (!e.started && up) {
       e.started = true;
       e.watchdog?.cancel();
       e.watchdog = null;
@@ -819,10 +867,25 @@ class ReelFeedPlayers extends ChangeNotifier {
       if (!e.video.ready || !_isLive(e)) continue;
       if (muted) {
         await _volume(e, 0);
-      } else if (e.id == _current && e.voiced) {
+      } else if (e.id == _current && e.voiced && !e.quiet) {
         await _volume(e, FeedRamp.from);
         if (_isLive(e) && e.id == _current && !_muted) _rise(e);
       }
+    }
+    notifyListeners();
+  }
+
+  /// The sound control on a [quiet] card (V2-63): this visit has sound,
+  /// rising from [FeedRamp.from] unless the feed is muted (the caller then
+  /// lifts the mute, which rises it).
+  Future<void> unquiet() async {
+    final e = _byId[_current];
+    if (e == null || !e.quiet) return;
+    e.quiet = false;
+    appLogger.i('[ReelFeed] embed sound on');
+    if (!_muted && e.video.ready && e.voiced && _isLive(e)) {
+      await _volume(e, FeedRamp.from);
+      if (_isLive(e) && e.id == _current && !_muted && !e.quiet) _rise(e);
     }
     notifyListeners();
   }
@@ -835,7 +898,9 @@ class ReelFeedPlayers extends ChangeNotifier {
       e.voiced = false;
       e.watchdog?.cancel();
       e.watchdog = null;
-      if (e.video.ready && e.video.playing) await e.video.pause();
+      // A player page is always told (one still buffering would play on
+      // behind the app otherwise).
+      if (e.video.ready && (e.video.playing || e.embed)) await e.video.pause();
     }
     await _syncAwake();
   }
@@ -914,6 +979,12 @@ class _Entry {
   final String id;
   final Uri uri;
   final FeedVideo video;
+
+  /// A player page (V2-63) rather than a native player.
+  bool get embed => video is EmbedFeedVideo;
+
+  /// A player page silent this visit until the sound control is tapped.
+  bool quiet = false;
   Future<void>? opened;
 
   /// Completes when the player is let go, so [opened] does too.

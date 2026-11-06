@@ -21,6 +21,7 @@ import 'package:plezy/services/reel/reel_deck_prefs.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/reel/reel_tmdb.dart';
 import 'package:plezy/services/settings_service.dart' show ReelCellular;
 import 'package:plezy/utils/app_logger.dart';
 
@@ -134,6 +135,7 @@ ReelCardData _card(String id) => ReelCardData(
     groupKey: 'g$id',
     title: 'Harbor Lights',
     isShow: false,
+    tmdbId: int.tryParse(id),
     copies: [ReelCopy(serverId: 's1', ratingKey: id)],
   ),
   facts: TitleFacts(
@@ -211,6 +213,7 @@ void main() {
     ReelCellular Function()? cellular,
     bool Function()? metered,
     Listenable? linkChanged,
+    ReelTmdbRung? tmdb,
   }) {
     final c = ReelController(
       decks: [deck],
@@ -219,6 +222,7 @@ void main() {
         store: store,
         aniList: (_) async => null,
         animeThemes: (_) async => const {},
+        tmdb: tmdb,
       ),
       clips: ClipPlayer(
         engine: () {
@@ -478,6 +482,70 @@ void main() {
       await _wait(after * 2);
       expect(c.stuck.value, isNull);
       expect(c.stage, ReelStage.still);
+    });
+
+    group('phone: a TMDB trailer card (V2-63)', () {
+      var rungOn = true;
+      final rung = ReelTmdbRung(
+        fetch: ({required id, required show, required language}) async => [
+          {'key': 'AbCdEfGhIj$id', 'site': 'YouTube', 'type': 'Trailer', 'official': true, 'iso_639_1': 'en'},
+        ],
+        on: () => rungOn,
+        language: () => 'en',
+      );
+
+      setUp(() {
+        rungOn = true;
+        servers.bare.addAll(['1', '2', '3']);
+      });
+
+      test('gets the longer allowance before it counts as stuck', () async {
+        final c = make(externalClips: true, stuckAfter: after, tmdb: rung);
+        c.embedStuckAfter = after * 4;
+        await c.start();
+        expect(c.current.clip?.source.origin, ClipOrigin.youtube);
+        expect(c.stage, ReelStage.frame);
+        await _wait(after * 2);
+        expect(c.stuck.value, isNull, reason: 'a player page loads a page and a player first');
+        await _wait(after * 4);
+        expect(c.stuck.value?.stage, ReelStage.frame);
+        c.clipStarted('t1');
+        expect(c.stuck.value, isNull);
+      });
+
+      test('a native clip keeps the short allowance', () async {
+        servers.bare.clear();
+        final c = make(externalClips: true, stuckAfter: after, tmdb: rung);
+        c.embedStuckAfter = after * 4;
+        await c.start();
+        expect(c.current.clip?.source.origin, ClipOrigin.plexExtra);
+        await _wait(after * 2);
+        expect(c.stuck.value?.stage, ReelStage.frame);
+      });
+
+      test('Data saver on mobile data turns the rung off: the card is a still, never stuck', () async {
+        var cellular = false;
+        final link = ValueNotifier(0);
+        addTearDown(link.dispose);
+        final c = make(
+          externalClips: true,
+          stuckAfter: after,
+          tmdb: rung,
+          cellular: () => ReelCellular.dataSaver,
+          metered: () => cellular,
+          linkChanged: link,
+        );
+        await c.start();
+        expect(c.current.clip?.source.origin, ClipOrigin.youtube);
+        cellular = true;
+        rungOn = false;
+        link.value++;
+        await _wait(after * 2);
+        expect(c.current.clip, isNull);
+        expect(c.stage, ReelStage.still);
+        expect(c.stuck.value, isNull);
+        expect(_log('[ReelTmdb] rung off'), hasLength(1));
+      });
     });
 
     test('phone: a feed player that never starts is stuck; its start clears it', () async {
