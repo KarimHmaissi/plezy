@@ -27,6 +27,13 @@ class PlayerAndroid extends PlayerBase {
   int _downmixCenterBoostDb = 0;
   bool _downmixNormalize = true;
 
+  /// Clip mode: the volume last asked for before the core was up. The plugin
+  /// drops a volume sent while it has no core, and a new core plays at
+  /// ExoPlayer's full volume, so the core is given this (silence when
+  /// nothing was asked) as it comes up, before any open can start a clip:
+  /// a muted Reel's first clip on a new core is never heard.
+  double? _clipVolume;
+
   /// Server-reported frame rate for the next item, or null when unknown.
   ///
   /// Rides on `open` rather than a standalone call because it is per-item and
@@ -154,6 +161,11 @@ class PlayerAndroid extends PlayerBase {
         'centerBoostDb': _downmixCenterBoostDb,
         'normalize': _downmixNormalize,
       });
+      if (clipMode) {
+        final volume = _clipVolume ?? 0;
+        await invoke('setVolume', {'volume': volume});
+        if (!disposed) setVolumeState(volume);
+      }
       if (disposed) throw StateError('Player was disposed during initialization');
 
       initialized = true;
@@ -306,6 +318,8 @@ class PlayerAndroid extends PlayerBase {
 
   @override
   Future<void> setVolume(double volume) async {
+    // Clip mode: kept for the core coming up ([_clipVolume]).
+    if (clipMode && !initialized) _clipVolume = volume;
     await invoke('setVolume', {'volume': volume});
     if (!disposed) setVolumeState(volume);
   }

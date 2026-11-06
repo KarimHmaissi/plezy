@@ -122,6 +122,21 @@ void main() {
       expect(DevicePerformance.imageCacheTierBytes(), 64 << 20);
     });
 
+    test("the Reel's art budget: 12MB on a phone, 24MB on a TV following the display budget (plan §6)", () {
+      DevicePerformance.debugReset(autoReduced: false, override: VisualEffectsSetting.auto, totalMemBytes: 2870 << 20);
+      PlatformDetector.debugSetIsDesktopOSOverride(false);
+      TvDetectionService.debugSetAppleTVOverride(false);
+      expect(DevicePerformance.reelImageBudgetBytes(), 12 << 20);
+
+      TvDetectionService.debugSetAppleTVOverride(true);
+      DevicePerformance.debugDisplayShortestSideOverride = 1080;
+      DevicePerformance.applyImageCacheBudget();
+      expect(DevicePerformance.reelImageBudgetBytes(), 24 << 20);
+      DevicePerformance.debugDisplayShortestSideOverride = 2160;
+      DevicePerformance.applyImageCacheBudget();
+      expect(DevicePerformance.reelImageBudgetBytes(), 48 << 20);
+    });
+
     test('Skia has no tier off Android, so trims leave it alone there', () {
       expect(DevicePerformance.skiaResourceCacheTierBytes(), isNull);
     });

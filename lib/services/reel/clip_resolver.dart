@@ -1,23 +1,42 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:http/http.dart' as http;
 
 import '../../utils/app_logger.dart';
 import 'clip_filter.dart';
 import 'clip_player.dart';
+import 'reel_playback_profile.dart';
 import 'reel_store.dart';
 
 /// The only server calls the Reel may make: per-title extras and a clip URL.
 /// Implemented outside the Reel (`reel_servers_plex.dart`) so no Reel file
 /// imports the Plex client, whose other calls report watch state.
 abstract interface class ReelServers {
+  /// The extras of [ratingKey] on [serverId]. Throws [ReelServerUnavailable]
+  /// when that server isn't connected, and any other error when the read
+  /// failed (a timeout, a 401, a 5xx): neither says the title has no clip.
   Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout});
 
   /// The direct-play URL for a clip part on [serverId], or null when that
   /// server isn't connected.
   String? clipUrl(String serverId, String partKey);
 }
+
+/// [serverId] isn't connected right now (asleep, waking, or signed out), so
+/// whether it holds a clip is unknown, never a miss.
+class ReelServerUnavailable implements Exception {
+  const ReelServerUnavailable(this.serverId);
+
+  final String serverId;
+
+  @override
+  String toString() => 'ReelServerUnavailable';
+}
+
+/// Waits (bounded) for [serverId] to connect; true once it has.
+typedef ReelServerWait = Future<bool> Function(String serverId);
 
 /// A copy of a title on one server, as the index lists it.
 class ReelCopy {
@@ -51,9 +70,101 @@ class ReelTitle {
   final int? tmdbId;
 }
 
+/// One file of a clip with several (an opening at 720 and 1080, with and
+/// without credits). The resolver keeps them all with what ranks them, and
+/// the playback profile picks one when the card plays (plan V2-16, V2-17),
+/// so a change of screen or of the captions pref needs no new lookup.
+class ClipCandidate implements ReelRendition {
+  const ClipCandidate({
+    required this.uri,
+    required this.assetId,
+    this.height,
+    this.sizeBytes,
+    this.transition = false,
+    this.creditless = false,
+    this.captioned = false,
+    this.source,
+  });
+
+  /// An opening's file as cached.
+  factory ClipCandidate.opening(AnimeOpening op) => ClipCandidate(
+    uri: op.url,
+    assetId: 'at:${op.videoId}',
+    height: op.resolution,
+    sizeBytes: op.sizeBytes,
+    transition: op.transition,
+    creditless: op.creditless,
+    captioned: op.captioned,
+    source: op.source,
+  );
+
+  final String uri;
+
+  /// `at:<video id>`.
+  final String assetId;
+  @override
+  final int? height;
+  @override
+  final int? sizeBytes;
+
+  /// See [AnimeOpening.transition], [AnimeOpening.creditless],
+  /// [AnimeOpening.captioned] and [AnimeOpening.source].
+  final bool transition;
+  final bool creditless;
+  final bool captioned;
+  final String? source;
+
+  @override
+  int rankFor(ReelPlaybackProfile profile) => ClipFilter.openingRank(
+    transition: transition,
+    creditless: creditless,
+    captioned: captioned,
+    source: source,
+    captions: profile.captions,
+  );
+
+  Map<String, Object?> toJson() => {
+    'a': assetId,
+    'u': uri,
+    'h': height,
+    'sz': sizeBytes,
+    'tr': transition,
+    'nc': creditless,
+    'cc': captioned,
+    'so': source,
+  };
+
+  /// A cached candidate, or null when it isn't shaped as written.
+  static ClipCandidate? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final (a, u, h, sz, so) = (j['a'], j['u'], j['h'], j['sz'], j['so']);
+    final (tr, nc, cc) = (j['tr'], j['nc'], j['cc']);
+    if (a is! String || u is! String || !u.startsWith('https://')) return null;
+    if ((h != null && h is! int) || (sz != null && sz is! int) || (so != null && so is! String)) return null;
+    if (tr is! bool || nc is! bool || cc is! bool) return null;
+    return ClipCandidate(
+      uri: u,
+      assetId: a,
+      height: h as int?,
+      sizeBytes: sz as int?,
+      transition: tr,
+      creditless: nc,
+      captioned: cc,
+      source: so as String?,
+    );
+  }
+}
+
 /// A resolved rung: where the clip is and what it is.
 class ResolvedClip {
-  const ResolvedClip({required this.source, required this.assetId, required this.label, this.serverId});
+  const ResolvedClip({
+    required this.source,
+    required this.assetId,
+    required this.label,
+    this.serverId,
+    this.height,
+    this.candidates = const [],
+  });
 
   final ClipSource source;
 
@@ -66,26 +177,83 @@ class ResolvedClip {
   /// Plex rungs: the server the clip streams from (never preloaded off a
   /// server marked slow).
   final String? serverId;
+
+  /// The picked file's height, when the source says it.
+  final int? height;
+
+  /// Every file of this clip, the picked one included; empty for a Plex
+  /// trailer, which has the one file. [ClipResolver.repick] chooses again
+  /// from these when the playback profile changes.
+  final List<ClipCandidate> candidates;
 }
 
-/// Maps an anime title to its season-1 AniList id (Fribb), or null.
+/// How sure the ladder is about a title.
+enum ClipAnswer {
+  /// A clip to play.
+  found,
+
+  /// Every rung answered and none has a clip: an AI card, cached 30 days.
+  none,
+
+  /// A rung couldn't answer (a server offline, a timeout, a 401, an
+  /// AnimeThemes 429 or 5xx): an AI card for this session only.
+  unknown,
+}
+
+/// One answer from [ClipResolver.lookup].
+class ClipLookup {
+  const ClipLookup.found(ResolvedClip this.clip) : answer = ClipAnswer.found;
+  const ClipLookup.none() : clip = null, answer = ClipAnswer.none;
+  const ClipLookup.unknown() : clip = null, answer = ClipAnswer.unknown;
+
+  final ClipAnswer answer;
+  final ResolvedClip? clip;
+}
+
+/// Maps an anime title to its season-1 AniList id (Fribb). Null means the
+/// mapping has no id for it; a throw means the mapping couldn't be read.
 typedef AniListLookup = Future<int?> Function(ReelTitle title);
 
 /// Fetches AnimeThemes `anime` records for AniList ids, keyed by AniList id.
+/// An id missing from the map has no record; a throw means no answer.
 typedef AnimeThemesFetch = Future<Map<int, Map<String, dynamic>>> Function(List<int> anilistIds);
+
+/// One ladder run: the hit, whether every rung answered for sure, and the
+/// servers that weren't connected.
+class _Run {
+  _Run(this.hit, {required this.sure, required this.offline});
+
+  final (ResolvedClip, Map<String, Object?>)? hit;
+  final bool sure;
+  final Set<String> offline;
+
+  ClipAnswer get answer => hit != null
+      ? ClipAnswer.found
+      : sure
+      ? ClipAnswer.none
+      : ClipAnswer.unknown;
+}
 
 /// The clip ladder (spec §5), cheapest for the guest servers first:
 /// anime → AnimeThemes OP1, else a Plex extra (Teaser / plain trailer), else
-/// an AI card (null). Caches the asset identity per title for 30 days
-/// (`src:<groupKey>`), never a resolved CDN URL. One request at a time, per
-/// title, on demand: never a batch or crawl of a server.
+/// an AI card. Caches the asset identity per title for 30 days
+/// (`src:<groupKey>`), never a resolved CDN URL. A miss is cached only when
+/// every rung answered for sure; a rung that couldn't answer leaves the
+/// title unknown, which lasts for the session only. Plex servers get one
+/// request at a time, per title, on demand: never a batch or crawl of a
+/// server. AnimeThemes is asked once per deck open for the deck's anime
+/// shows ([warm]). A clip with several files (an opening at 720 and 1080)
+/// caches them all, and the playback [profile] picks one each time the title
+/// is looked up.
 class ClipResolver {
   ClipResolver({
     required this.servers,
     required this.store,
     required this.aniList,
     AnimeThemesFetch? animeThemes,
+    this.waitForServer,
     this.firstTry = const Duration(seconds: 5),
+    this.profile,
   }) : _animeThemes = animeThemes ?? AnimeThemesClient().fetch;
 
   final ReelServers servers;
@@ -93,42 +261,270 @@ class ClipResolver {
   final AniListLookup aniList;
   final AnimeThemesFetch _animeThemes;
 
-  /// A server gets one try this long; a timeout marks it slow for the
-  /// session and the miss is cached for 30 days.
-  final Duration firstTry;
-  final Set<String> _slowServers = {};
-  Future<void> _queue = Future.value();
+  /// Waits for a server that isn't connected yet (after a wake, the Reel
+  /// opens before the servers reconnect). Each server is waited for once
+  /// per start or resume ([resumed]); null never waits.
+  final ReelServerWait? waitForServer;
 
-  /// Servers whose extras call timed out this session.
+  /// A server gets one try this long; a timeout marks it slow for the
+  /// session (its titles stay unknown, never a cached miss).
+  final Duration firstTry;
+
+  /// The device's playback profile, rebuilt when the screen or network
+  /// changes (plan V2-16). Null plays [ReelPlaybackProfile.standard].
+  final ValueListenable<ReelPlaybackProfile>? profile;
+
+  ReelPlaybackProfile get playback => profile?.value ?? ReelPlaybackProfile.standard;
+
+  /// The `src:` row format. Rows written before it (one file per title, a
+  /// miss cached by the older ladder, or candidates cached before `overlap`
+  /// was read, which may include an opening with episode footage over it)
+  /// read as not cached, so the title is resolved once more and every
+  /// candidate is stored with what ranks it.
+  static const int sourceFormat = 3;
+
+  final Set<String> _slowServers = {};
+  final Map<String, Future<bool>> _waits = {};
+
+  /// Per server (and one for AnimeThemes), the tail of its requests: one in
+  /// flight at a time (§9), and a server never waits on another. The order
+  /// the cards ask in is the prefetcher's (plan V2-11).
+  final Map<String, Future<void>> _lanes = {};
+
+  /// Season 1 OP1's files per AniList id, as AnimeThemes answered this
+  /// session; an empty list is a sure "no opening". Failed lookups are never
+  /// kept, so they are asked again.
+  final Map<int, List<AnimeOpening>> _openingsById = {};
+
+  /// Anime shows a [warm] batch is answering, by group key: the ladder waits
+  /// for the batch rather than asking AnimeThemes about the one title.
+  final Map<String, Future<void>> _warming = {};
+
+  /// Servers whose extras call timed out this session. Their clips are
+  /// never preloaded ([ClipSource.preloadable]).
   Set<String> get slowServers => Set.unmodifiable(_slowServers);
 
-  Future<ResolvedClip?> resolve(ReelTitle t) async {
-    final spoiled = await store.spoiledAssets(t.titleId);
-    final cached = await store.cached('src:${t.groupKey}', ttl: ReelStore.sourceTtl);
-    if (cached != null) {
-      final hit = _fromCache(cached, spoiled);
-      if (hit != null || cached == _miss) return hit;
+  /// The Reel came back (a resume or tab show): a server that wasn't
+  /// connected gets waited for again.
+  void resumed() => _waits.clear();
+
+  /// The clip for [t], or null for an AI card.
+  Future<ResolvedClip?> resolve(ReelTitle t) async => (await lookup(t)).clip;
+
+  /// Drops [t]'s cached answer (its clip failed to play).
+  Future<void> forget(ReelTitle t) => store.cache('src:${t.groupKey}', '');
+
+  /// Resolves [t], skipping the assets in [exclude] for this call only (a
+  /// clip that just failed to play). A miss found with assets excluded is
+  /// not cached: the excluded asset may only have failed for a moment.
+  Future<ClipLookup> lookup(ReelTitle t, {Set<String> exclude = const {}}) async {
+    final banned = {...await store.spoiledAssets(t.titleId), ...exclude};
+    final key = 'src:${t.groupKey}';
+    final cached = await store.cached(key, ttl: ReelStore.sourceTtl);
+    var keep = false;
+    final entry = cached == null ? null : _entry(cached);
+    if (entry != null) {
+      if (entry['miss'] == true) return const ClipLookup.none();
+      final assets = _assets(entry);
+      if (assets.isNotEmpty && !assets.any(banned.contains)) {
+        var hit = _fromCache(entry);
+        if (hit == null && entry['k'] == 'plex' && entry['sv'] is String) {
+          // A good identity whose server is offline is kept, never
+          // overwritten by a miss.
+          keep = true;
+          final sv = entry['sv'] as String;
+          if (await _awaitServer(sv)) hit = _fromCache(entry);
+        }
+        if (hit != null) return ClipLookup.found(hit);
+      }
     }
-    final found = await _serial(() => _resolveFresh(t, spoiled));
-    await store.cache('src:${t.groupKey}', found == null ? _miss : jsonEncode(found.$2));
-    return found?.$1;
+    var run = await _ladder(t, banned);
+    if (run.answer == ClipAnswer.unknown && run.offline.isNotEmpty) {
+      final back = await Future.wait([for (final s in run.offline) _awaitServer(s)]);
+      if (back.contains(true)) run = await _ladder(t, banned);
+    }
+    final hit = run.hit;
+    if (hit != null) {
+      if (!keep) await store.cache(key, jsonEncode(hit.$2));
+      return ClipLookup.found(hit.$1);
+    }
+    if (run.sure && !keep) {
+      if (exclude.isEmpty) await store.cache(key, missRow);
+      return const ClipLookup.none();
+    }
+    appLogger.d('Reel: clip answer unknown for now; not cached');
+    return const ClipLookup.unknown();
   }
 
-  static const String _miss = '{"miss":true}';
+  /// A definitive miss in the current [sourceFormat].
+  static const String missRow = '{"v":$sourceFormat,"miss":true}';
 
-  ResolvedClip? _fromCache(String raw, Set<String> spoiled) {
+  /// Asks AnimeThemes about a deck's anime shows when the deck loads (plan
+  /// V2-12): each show is mapped to its AniList id locally (Fribb), then the
+  /// ids not yet answered this session go in one request per
+  /// [AnimeThemesClient.maxBatch], in deck order. A show whose opening is
+  /// found has its `src:` row written as the ladder writes it. A show with
+  /// no opening is kept as a sure answer for the session only: its Plex
+  /// extras are still read per title, on demand, before any miss is cached.
+  /// A failed or blocked batch (429, the local cap) writes and keeps
+  /// nothing, so its shows resolve one by one as before. Shows with a
+  /// cached row are skipped. Never throws.
+  Future<void> warm(List<ReelTitle> titles) async {
+    final keys = <String>{};
+    final shows = [
+      for (final t in titles)
+        if (t.anime && t.isShow && !_warming.containsKey(t.groupKey) && keys.add(t.groupKey)) t,
+    ];
+    if (shows.isEmpty) return;
+    // Registered before the first await, so a card resolving straight after
+    // the deck loads waits for this batch.
+    final done = {for (final t in shows) t.groupKey: Completer<void>()};
+    for (final t in shows) {
+      _warming[t.groupKey] = done[t.groupKey]!.future;
+    }
+    void finish(ReelTitle t) {
+      final c = done[t.groupKey]!;
+      if (c.isCompleted) return;
+      c.complete();
+      if (identical(_warming[t.groupKey], c.future)) _warming.remove(t.groupKey);
+    }
+
+    final sw = Stopwatch()..start();
+    var requests = 0;
+    var hits = 0;
     try {
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      if (j['miss'] == true) return null;
-      final asset = j['a'] as String;
-      if (spoiled.contains(asset)) return null;
+      final idOf = await Future.wait([
+        for (final t in shows)
+          () async {
+            try {
+              final raw = await store.cached('src:${t.groupKey}', ttl: ReelStore.sourceTtl);
+              if (raw != null && _entry(raw) != null) return null;
+              return await aniList(t);
+            } catch (_) {
+              // The mapping couldn't be read: the ladder asks again.
+              return null;
+            }
+          }(),
+      ]);
+      final asking = <int>[];
+      for (final (i, t) in shows.indexed) {
+        final id = idOf[i];
+        if (id == null) {
+          finish(t);
+        } else if (!_openingsById.containsKey(id) && !asking.contains(id)) {
+          asking.add(id);
+        }
+      }
+      for (var i = 0; i < asking.length; i += AnimeThemesClient.maxBatch) {
+        final chunk = asking.sublist(i, (i + AnimeThemesClient.maxBatch).clamp(0, asking.length));
+        final Map<int, Map<String, dynamic>> got;
+        try {
+          requests++;
+          got = await _animeThemes(chunk);
+        } catch (e) {
+          appLogger.d('Reel: AnimeThemes batch failed; its shows resolve one by one', error: e);
+          break;
+        }
+        for (final id in chunk) {
+          try {
+            _openingsById[id] = got[id] == null ? const [] : ClipFilter.openings(got[id]!);
+          } catch (_) {
+            // Not shaped as read: unknown, asked again per title.
+          }
+        }
+        for (final (j, t) in shows.indexed) {
+          final id = idOf[j];
+          if (id == null || done[t.groupKey]!.isCompleted || !_openingsById.containsKey(id)) continue;
+          if (await _writeOpening(t, _openingsById[id]!)) hits++;
+          finish(t);
+        }
+      }
+      // Shows answered by an earlier batch this session.
+      for (final (j, t) in shows.indexed) {
+        final id = idOf[j];
+        if (id == null || done[t.groupKey]!.isCompleted) continue;
+        if (_openingsById[id] case final ops?) {
+          if (await _writeOpening(t, ops)) hits++;
+        }
+        finish(t);
+      }
+    } catch (e) {
+      appLogger.d('Reel: AnimeThemes warm failed', error: e);
+    } finally {
+      shows.forEach(finish);
+    }
+    appLogger.i(
+      '[ReelWarm] ${shows.length} anime shows: $requests requests, $hits openings (${sw.elapsedMilliseconds}ms)',
+    );
+  }
+
+  /// Writes [t]'s `src:` row for [ops] as the ladder would; false when the
+  /// ladder would go on to the Plex rung (no file this profile plays, or a
+  /// file the user marked as a spoiler).
+  Future<bool> _writeOpening(ReelTitle t, List<AnimeOpening> ops) async {
+    try {
+      final candidates = [for (final op in ops) ClipCandidate.opening(op)];
+      if (candidates.isEmpty) return false;
+      final banned = await store.spoiledAssets(t.titleId);
+      if (candidates.any((c) => banned.contains(c.assetId))) return false;
+      final clip = _opening1('Opening 1', candidates);
+      if (clip == null) return false;
+      await store.cache('src:${t.groupKey}', jsonEncode(_openingRow(clip, candidates)));
+      return true;
+    } catch (e) {
+      appLogger.d('Reel: AnimeThemes warm could not cache a show', error: e);
+      return false;
+    }
+  }
+
+  /// The `src:` row for an AnimeThemes clip.
+  static Map<String, Object?> _openingRow(ResolvedClip clip, List<ClipCandidate> candidates) => {
+    'v': sourceFormat,
+    'k': 'at',
+    'l': clip.label,
+    'c': [for (final c in candidates) c.toJson()],
+  };
+
+  /// A cached row in the current [sourceFormat]; anything else (an older
+  /// format, a forgotten or unreadable row) is not cached.
+  Map<String, dynamic>? _entry(String raw) {
+    try {
+      final j = jsonDecode(raw);
+      return j is Map<String, dynamic> && j['v'] == sourceFormat ? j : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Every asset a cached row can play.
+  List<String> _assets(Map<String, dynamic> j) => switch (j['k']) {
+    'at' => [
+      for (final c in (j['c'] is List ? j['c'] as List : const []))
+        if (c is Map && c['a'] is String) c['a'] as String,
+    ],
+    'plex' => [if (j['a'] case final String a) a],
+    _ => const [],
+  };
+
+  /// The group keys of [titles] whose cached answer is a miss (an AI card):
+  /// cached `src:` rows in the current [sourceFormat] only, so nothing is
+  /// resolved and no server is asked. A title with no row, or an older
+  /// format's row, is left out (assumed to have a clip until it is resolved
+  /// on demand).
+  Future<Set<String>> knownMisses(Iterable<ReelTitle> titles) async {
+    final keys = {for (final t in titles) 'src:${t.groupKey}'};
+    final rows = await store.cachedMany(keys, ttl: ReelStore.sourceTtl);
+    return {
+      for (final MapEntry(:key, :value) in rows.entries)
+        if (_entry(value)?['miss'] == true) key.substring(4),
+    };
+  }
+
+  ResolvedClip? _fromCache(Map<String, dynamic> j) {
+    try {
       return switch (j['k']) {
-        'at' => ResolvedClip(
-          source: ClipSource(uri: j['u'] as String, origin: ClipOrigin.animeTheme),
-          assetId: asset,
-          label: j['l'] as String? ?? 'Opening',
-        ),
-        'plex' => _plex(j['sv'] as String, j['pk'] as String, asset, j['l'] as String? ?? 'Trailer'),
+        'at' => _opening1(j['l'] as String? ?? 'Opening', _candidates(j['c'])),
+        'plex' => _plex(j['sv'] as String, j['pk'] as String, j['a'] as String, j['l'] as String? ?? 'Trailer'),
         _ => null,
       };
     } catch (_) {
@@ -136,82 +532,194 @@ class ClipResolver {
     }
   }
 
+  /// A cached candidate list, or empty when any entry isn't shaped as
+  /// written (the row is then resolved again).
+  static List<ClipCandidate> _candidates(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <ClipCandidate>[];
+    for (final j in raw) {
+      final c = ClipCandidate.fromJson(j);
+      if (c == null) return const [];
+      out.add(c);
+    }
+    return out;
+  }
+
+  /// An AnimeThemes clip as [playback] plays it from [candidates]; null for
+  /// none.
+  ResolvedClip? _opening1(String label, List<ClipCandidate> candidates) {
+    final pick = playback.pick(candidates);
+    if (pick == null) return null;
+    return ResolvedClip(
+      source: ClipSource(uri: pick.uri, origin: ClipOrigin.animeTheme),
+      assetId: pick.assetId,
+      label: label,
+      height: pick.height,
+      candidates: candidates,
+    );
+  }
+
+  /// [clip] as the current profile plays it: another of its candidates when
+  /// the profile now picks one, else [clip] itself (identical).
+  ResolvedClip repick(ResolvedClip clip) {
+    if (clip.candidates.length < 2) return clip;
+    final pick = playback.pick(clip.candidates);
+    if (pick == null || pick.assetId == clip.assetId) return clip;
+    return ResolvedClip(
+      source: ClipSource(uri: pick.uri, origin: clip.source.origin, preloadable: clip.source.preloadable),
+      assetId: pick.assetId,
+      label: clip.label,
+      serverId: clip.serverId,
+      height: pick.height,
+      candidates: clip.candidates,
+    );
+  }
+
   ResolvedClip? _plex(String serverId, String partKey, String asset, String label) {
     final url = servers.clipUrl(serverId, partKey);
     if (url == null) return null;
     return ResolvedClip(
-      source: ClipSource(uri: url, origin: ClipOrigin.plexExtra),
+      source: ClipSource(uri: url, origin: ClipOrigin.plexExtra, preloadable: !_slowServers.contains(serverId)),
       assetId: asset,
       label: label,
       serverId: serverId,
     );
   }
 
-  Future<T> _serial<T>(Future<T> Function() run) {
-    final next = _queue.then((_) => run());
-    _queue = next.then((_) {}, onError: (_) {});
-    return next;
+  /// Waits for [serverId] once per start or resume; later callers share the
+  /// answer.
+  Future<bool> _awaitServer(String serverId) {
+    final wait = waitForServer;
+    if (wait == null) return Future.value(false);
+    return _waits[serverId] ??= wait(serverId).catchError((Object _) => false);
   }
 
-  Future<(ResolvedClip, Map<String, Object?>)?> _resolveFresh(ReelTitle t, Set<String> spoiled) async {
+  /// Runs [request] after every earlier request in [lane] has settled.
+  Future<T> _inLane<T>(String lane, Future<T> Function() request) {
+    final before = _lanes[lane] ?? Future<void>.value();
+    final run = before.then((_) => request());
+    final tail = run.then<void>((_) {}, onError: (Object _) {});
+    _lanes[lane] = tail;
+    unawaited(
+      tail.whenComplete(() {
+        if (identical(_lanes[lane], tail)) _lanes.remove(lane);
+      }),
+    );
+    return run;
+  }
+
+  /// The AnimeThemes lane's key (Plex machine ids are alphanumeric).
+  static const String _animeThemesLane = ':animethemes';
+
+  Future<_Run> _ladder(ReelTitle t, Set<String> banned) async {
+    var sure = true;
+    final offline = <String>{};
     if (t.anime && t.isShow) {
-      final op = await _opening(t);
-      if (op != null && !spoiled.contains('at:${op.videoId}')) {
-        final clip = ResolvedClip(
-          source: ClipSource(uri: op.url, origin: ClipOrigin.animeTheme),
-          assetId: 'at:${op.videoId}',
-          label: 'Opening 1',
-        );
-        return (clip, {'k': 'at', 'u': op.url, 'a': clip.assetId, 'l': clip.label});
+      final (ops, opSure) = await _openings(t);
+      sure &= opSure;
+      final candidates = [for (final op in ops) ClipCandidate.opening(op)];
+      // A banned file bans the opening: its other files are the same clip.
+      final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1('Opening 1', candidates);
+      if (clip != null) {
+        return _Run((clip, _openingRow(clip, candidates)), sure: sure, offline: offline);
       }
     }
     // Plex extras: HD copies first, then 4K, skipping servers already slow.
     final copies = [...t.copies]..sort((a, b) => (a.is4k ? 1 : 0).compareTo(b.is4k ? 1 : 0));
     final triedServers = <String>{};
     for (final c in copies) {
-      if (_slowServers.contains(c.serverId) || !triedServers.add(c.serverId)) continue;
+      if (!triedServers.add(c.serverId)) continue;
+      if (_slowServers.contains(c.serverId)) {
+        sure = false;
+        continue;
+      }
       List<PlexExtraClip> extras;
       try {
-        extras = await servers.extras(c.serverId, c.ratingKey, timeout: firstTry);
+        extras = await _inLane(c.serverId, () => servers.extras(c.serverId, c.ratingKey, timeout: firstTry));
+      } on ReelServerUnavailable {
+        sure = false;
+        offline.add(c.serverId);
+        continue;
       } on TimeoutException {
+        sure = false;
         _slowServers.add(c.serverId);
         appLogger.d('Reel: extras timed out on one server; skipping it this session');
         continue;
       } catch (e) {
+        sure = false;
         appLogger.d('Reel: extras read failed', error: e);
         continue;
       }
       final usable = [
         for (final e in extras)
-          if (!spoiled.contains('plex:${e.ratingKey}')) e,
+          if (!banned.contains('plex:${e.ratingKey}')) e,
       ];
       final pick = t.isShow ? ClipFilter.showTrailer(usable, showTitle: t.title) : ClipFilter.filmTrailer(usable);
       if (pick == null) continue;
       final label = RegExp(r'teaser', caseSensitive: false).hasMatch(pick.title) ? 'Teaser' : 'Trailer';
       final clip = _plex(c.serverId, pick.partKey, 'plex:${pick.ratingKey}', label);
-      if (clip == null) continue;
-      return (clip, {'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, 'l': label});
+      if (clip == null) {
+        // The server dropped between the read and the URL.
+        sure = false;
+        offline.add(c.serverId);
+        continue;
+      }
+      return _Run(
+        (clip, {'v': sourceFormat, 'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, 'l': label}),
+        sure: sure,
+        offline: offline,
+      );
     }
-    return null;
+    return _Run(null, sure: sure, offline: offline);
   }
 
-  Future<AnimeOpening?> _opening(ReelTitle t) async {
-    final id = await aniList(t);
-    if (id == null) return null;
+  /// Every file of AnimeThemes OP1 for [t], and whether the answer is
+  /// sure: no mapping or no record is sure, a failed lookup (429, 5xx, the
+  /// local cap, a changed response) is not. A deck's batch ([warm]) in
+  /// flight for [t] is waited for, and its answer used.
+  Future<(List<AnimeOpening>, bool)> _openings(ReelTitle t) async {
     try {
-      final anime = (await _animeThemes([id]))[id];
-      return anime == null ? null : ClipFilter.firstOpening(anime);
+      if (_warming[t.groupKey] case final batch?) await batch;
+      final id = await aniList(t);
+      if (id == null) return (const <AnimeOpening>[], true);
+      if (_openingsById[id] case final known?) return (known, true);
+      final anime = (await _inLane(_animeThemesLane, () => _animeThemes([id])))[id];
+      final ops = anime == null ? const <AnimeOpening>[] : ClipFilter.openings(anime);
+      _openingsById[id] = ops;
+      return (ops, true);
     } catch (e) {
       appLogger.d('Reel: AnimeThemes lookup failed', error: e);
-      return null;
+      return (const <AnimeOpening>[], false);
     }
   }
 }
 
-/// AnimeThemes (volunteer-run): batched lookups by AniList id, under 90
-/// requests a minute, honouring Retry-After. Fields verified against a live
-/// `/anime` response (animethemes[].type/sequence, animethemeentries[]
-/// .episodes/spoiler/nsfw, videos[].link/nc/resolution/size).
+/// AnimeThemes couldn't answer: rate limited (429 with Retry-After, or this
+/// client's own cap), a non-200 (a 404 or 410 once an endpoint is retired),
+/// GraphQL errors, or a response that no longer has the expected shape. The
+/// resolver counts it as unknown, never a miss.
+class AnimeThemesUnavailable implements Exception {
+  const AnimeThemesUnavailable(this.reason);
+
+  final String reason;
+
+  @override
+  String toString() => 'AnimeThemesUnavailable: $reason';
+}
+
+/// AnimeThemes (volunteer-run) over its GraphQL API, which replaces the
+/// deprecated JSON:API: batched lookups by AniList id through
+/// `findAnimeByExternalSite`, under 90 requests a minute, honouring
+/// Retry-After (https://api-docs.animethemes.moe/graphql/intro/ratelimiting/).
+/// Throws [AnimeThemesUnavailable] when it can't answer, so a blocked or
+/// failed lookup never reads as "no record".
+///
+/// The query's fields come from the live schema and one recorded response
+/// (test/reel/fixtures/animethemes_graphql_op.json). Each anime is returned
+/// in the record shape [ClipFilter.firstOpening] reads: `animethemes[]`
+/// .type/sequence/song.title, `animethemeentries[]`.episodes/spoiler/nsfw,
+/// `videos[]`.id/link/nc/resolution/size, plus overlap/lyrics/subbed/source
+/// as the API spells them (`NONE`/`TRANS`/`OVER`, `BD`, `WEB`, …).
 class AnimeThemesClient {
   AnimeThemesClient({http.Client? client}) : _client = client ?? http.Client();
 
@@ -221,36 +729,130 @@ class AnimeThemesClient {
 
   static const int perMinute = 80;
 
+  /// Ids per request; a longer list is split into requests of this size.
+  static const int maxBatch = 50;
+
+  static final Uri endpoint = Uri.https('graphql.animethemes.moe', '/');
+
+  /// Openings only: the ladder never plays an ED or an insert song.
+  static const String query = r'''
+query ReelOpenings($ids: [Int!]) {
+  findAnimeByExternalSite(site: ANILIST, id: $ids) {
+    resources(site: ANILIST) { nodes { site externalId } }
+    animethemes(type: OP) {
+      type
+      sequence
+      song { title { romaji } }
+      animethemeentries {
+        episodes
+        spoiler
+        nsfw
+        videos { nodes { id link nc resolution size overlap lyrics subbed source } }
+      }
+    }
+  }
+}''';
+
   Future<Map<int, Map<String, dynamic>>> fetch(List<int> anilistIds) async {
-    if (anilistIds.isEmpty) return const {};
+    final ids = anilistIds.toSet().toList();
+    final out = <int, Map<String, dynamic>>{};
+    for (var i = 0; i < ids.length; i += maxBatch) {
+      out.addAll(await _fetchBatch(ids.sublist(i, (i + maxBatch).clamp(0, ids.length))));
+    }
+    return out;
+  }
+
+  Future<Map<int, Map<String, dynamic>>> _fetchBatch(List<int> ids) async {
     final now = DateTime.now();
-    if (_blockedUntil != null && now.isBefore(_blockedUntil!)) return const {};
+    if (_blockedUntil != null && now.isBefore(_blockedUntil!)) throw const AnimeThemesUnavailable('blocked');
     _recent.removeWhere((t) => now.difference(t) > const Duration(minutes: 1));
-    if (_recent.length >= perMinute) return const {};
+    if (_recent.length >= perMinute) throw const AnimeThemesUnavailable('local cap');
     _recent.add(now);
-    final uri = Uri.https('api.animethemes.moe', '/anime', {
-      'filter[has]': 'resources',
-      'filter[site]': 'AniList',
-      'filter[external_id]': anilistIds.join(','),
-      'include': 'resources,animethemes.animethemeentries.videos,animethemes.song',
-      'page[size]': '${anilistIds.length.clamp(1, 50)}',
-    });
     final res = await _client
-        .get(uri, headers: const {'Accept': 'application/json', 'User-Agent': 'Plezy'})
+        .post(
+          endpoint,
+          headers: const {'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Plezy'},
+          body: jsonEncode({
+            'query': query,
+            'variables': {'ids': ids},
+          }),
+        )
         .timeout(const Duration(seconds: 20));
     if (res.statusCode == 429) {
       final wait = int.tryParse(res.headers['retry-after'] ?? '') ?? 60;
       _blockedUntil = now.add(Duration(seconds: wait));
-      return const {};
+      throw const AnimeThemesUnavailable('429');
     }
-    if (res.statusCode != 200) return const {};
+    if (res.statusCode != 200) throw AnimeThemesUnavailable('HTTP ${res.statusCode}');
+    final Object? body;
+    try {
+      body = jsonDecode(res.body);
+    } on FormatException {
+      throw const AnimeThemesUnavailable('not JSON');
+    }
+    if (body is! Map) throw const AnimeThemesUnavailable('not an object');
+    // Validation, depth and complexity errors come back as a 200 with
+    // `errors`; a partial answer is no answer.
+    final errors = body['errors'];
+    if (errors is List && errors.isNotEmpty) throw const AnimeThemesUnavailable('GraphQL errors');
+    final data = body['data'];
+    final list = data is Map ? data['findAnimeByExternalSite'] : null;
+    if (list is! List) throw const AnimeThemesUnavailable('no anime list');
     final out = <int, Map<String, dynamic>>{};
-    for (final a in ((jsonDecode(res.body) as Map)['anime'] as List? ?? const [])) {
-      if (a is! Map<String, dynamic>) continue;
-      for (final r in (a['resources'] as List? ?? const [])) {
-        if (r is Map && r['site'] == 'AniList' && r['external_id'] is int) out[r['external_id'] as int] = a;
+    for (final a in list) {
+      final record = _record(a);
+      for (final r in _nodes((a as Map)['resources'])) {
+        if (r['site'] == 'ANILIST' && r['externalId'] is int) out[r['externalId'] as int] = record;
       }
     }
     return out;
   }
+
+  /// One GraphQL anime as the record [ClipFilter.firstOpening] reads. Any
+  /// part not shaped as queried throws: a changed schema must never read as
+  /// "this title has no opening".
+  static Map<String, dynamic> _record(Object? a) {
+    if (a is! Map) throw const AnimeThemesUnavailable('anime not an object');
+    final themes = a['animethemes'];
+    if (themes is! List) throw const AnimeThemesUnavailable('no animethemes list');
+    return {
+      'animethemes': [
+        for (final t in themes)
+          if (t is Map)
+            {
+              'type': t['type'],
+              'sequence': t['sequence'],
+              'song': {'title': ((t['song'] as Map?)?['title'] as Map?)?['romaji']},
+              'animethemeentries': [
+                for (final e in _list(t['animethemeentries'], 'animethemeentries'))
+                  {
+                    'episodes': e['episodes'],
+                    'spoiler': e['spoiler'],
+                    'nsfw': e['nsfw'],
+                    'videos': [for (final v in _nodes(e['videos'])) _video(v)],
+                  },
+              ],
+            },
+      ],
+    };
+  }
+
+  /// One video as queried. An `overlap` this build can't read throws: the
+  /// opening filter drops such a file, and a schema change must leave the
+  /// title unknown, never a 30-day miss.
+  static Map<String, dynamic> _video(Map v) {
+    if (ClipFilter.overlapOf(v['overlap']) == null) throw const AnimeThemesUnavailable('unknown overlap');
+    return Map<String, dynamic>.from(v);
+  }
+
+  static List<Map> _list(Object? v, String what) {
+    if (v is! List) throw AnimeThemesUnavailable('no $what list');
+    return [
+      for (final x in v)
+        if (x is Map) x,
+    ];
+  }
+
+  /// A connection's `nodes`.
+  static List<Map> _nodes(Object? connection) => _list(connection is Map ? connection['nodes'] : null, 'nodes');
 }

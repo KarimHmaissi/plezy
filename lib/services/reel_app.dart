@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -13,6 +14,7 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../providers/offline_mode_provider.dart';
 import '../screens/media_detail_screen.dart';
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
@@ -30,6 +32,7 @@ import 'catalog/library_watchlist_candidates.dart';
 import 'catalog/trakt_lists_catalog_source.dart';
 import 'companion_remote/phone_mode.dart';
 import 'customisation/customisation_store.dart';
+import 'deep_links/deep_link_launcher.dart' show deepLinkServerWait, waitForServers;
 import 'library_index/library_index.dart';
 import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
@@ -37,10 +40,15 @@ import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
 import 'reel/reel_decks.dart';
+import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
+import 'reel/reel_metadata.dart';
+import 'reel/reel_playback_profile.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
+import 'reel_playback_watcher.dart';
 import 'reel_servers_plex.dart';
+import 'settings_service.dart';
 import 'trackers/fribb_mapping_store.dart';
 
 /// Fork: builds the Reel's session from the app's real services. Lives
@@ -51,17 +59,37 @@ abstract final class ReelApp {
   /// Saved AI answers offered as decks (newest first).
   static const int answerDecks = 12;
 
-  static Future<ReelController> controller(BuildContext context) async {
+  /// The decks the Reel offers here, in the app's own order, by id and name
+  /// (the Decks screen, V2-52). Builds the deck objects without loading any.
+  static Future<List<({String id, String name})>> deckList(BuildContext context) async {
+    final store = ReelStore.instance;
+    final library = _library();
+    return [
+      for (final d in await _decks(context, library: library, store: store, pool: _pool(store, library)))
+        (id: d.id, name: d.name),
+    ];
+  }
+
+  static ReelLibrary _library() =>
+      ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app());
+
+  /// The day's For You pool: the TV builds it and shares it; a phone reads
+  /// that copy.
+  static ReelPool _pool(ReelStore store, ReelLibrary library) =>
+      ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
+
+  /// The decks in the app's own order: For You, Fits tonight, Give it
+  /// another go, Anime openings, Most Watched (with Trakt) and the saved
+  /// answers. The controller applies the user's order and hidden decks
+  /// ([ReelController.shownDecks]). For You is always first.
+  static Future<List<ReelDeck>> _decks(
+    BuildContext context, {
+    required ReelLibrary library,
+    required ReelStore store,
+    required ReelPool pool,
+  }) async {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
-    final remote = context.read<CompanionRemoteProvider?>();
-    final servers = multi.serverManager;
-    final store = ReelStore.instance;
-    final facts = IndexTitleFactsSource.app();
-    final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
-    final resolver = resolverFor(servers, store);
-    final pool = ReelPool(store: store, library: library, model: _sonnet);
-    final media = _AppReelMedia(servers);
     final resolverRows = catalog == null
         ? null
         : HomeRowResolver(sources: catalog, clientFor: (id) => multi.getClientForServer(id));
@@ -82,13 +110,19 @@ abstract final class ReelApp {
       }
     }
 
-    final decks = <ReelDeck>[
-      ForYouDeck(
-        pool: pool,
-        library: library,
-        candidates: () => forYouCandidates(library: library, store: store),
-        facts: () => forYouFacts(store: store),
-      ),
+    final forYou = ForYouDeck(
+      pool: pool,
+      library: library,
+      candidates: () => forYouCandidates(library: library, store: store),
+      facts: () => forYouFacts(store: store, pool: pool),
+      again: () => anotherGoCandidates(library: library, store: store),
+      sharedChanges: Customisation.changed,
+      clears: ReelPool.clears,
+    );
+    return <ReelDeck>[
+      forYou,
+      FitsTonightDeck(forYou: forYou),
+      AnotherGoDeck(forYou: forYou, library: library),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.
@@ -100,14 +134,38 @@ abstract final class ReelApp {
         ),
       for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
     ];
+  }
+
+  static Future<ReelController> controller(BuildContext context) async {
+    final multi = context.read<MultiServerProvider>();
+    final catalog = context.read<CatalogSourcesProvider?>();
+    final remote = context.read<CompanionRemoteProvider?>();
+    final link = context.read<OfflineModeProvider?>();
+    final servers = multi.serverManager;
+    final store = ReelStore.instance;
+    final library = _library();
+    final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
+    final pool = _pool(store, library);
+    final media = _AppReelMedia(servers, store);
+    final decks = await _decks(context, library: library, store: store, pool: pool);
+    final forYou = decks.first as ForYouDeck;
 
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;
 
+    // Whether the Reel is playing, as its onActive hook last said.
+    var active = false;
     final controller = ReelController(
       decks: decks,
       resolver: resolver,
-      clips: ClipPlayer(),
+      // The mute is kept across launches (V2-22), and the TV's clip plays
+      // as often as the clip-end pref says (V2-47). The TV's player is built
+      // muted: each visit settles its sound before the first card plays
+      // (ReelScreen._visit), so nothing is ever heard before that.
+      clips: ClipPlayer(
+        muted: PlatformDetector.isTV() || (SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false),
+        plays: () => ReelController.clipEndPref().plays,
+      ),
       store: store,
       media: media,
       onWatch: (item, {required onTv}) async {
@@ -137,7 +195,9 @@ abstract final class ReelApp {
         if (plex == null) return false;
         return mutateWatchlistMembership(item.kind, plex, add: true);
       },
-      onSaved: _seatHomeRow,
+      // The TV seats "From the Reel" on its Home; a phone's Save writes
+      // only the pick (see ReelHomeRow).
+      onSaved: () => ReelHomeRow.seat(),
       // A phone on its own data reaches the TV by catching up while
       // connected; a mirroring phone writes to the TV (or can't write).
       reachesTvNow: () =>
@@ -147,10 +207,48 @@ abstract final class ReelApp {
       externalClips: !PlatformDetector.isTV(),
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
+      // While the Reel plays, the brain's indexer rests and its ONNX session
+      // (about 66 MB) is released; it reopens on the next embed. On a day
+      // For You gathers its candidates, the brain's similarity reads run
+      // first, then it yields. The hook also fires when the Reel is disposed
+      // while playing (V2-60), so the indexer never stays parked. When a
+      // session ends, this device shares its Reel signals so the other
+      // device's daily build hears them.
+      onActive: (on) {
+        active = on;
+        if (on) {
+          unawaited(_yieldAfter(forYou, stillActive: () => active));
+        } else {
+          unawaited(HistoryBrain.instance.yieldTo(false));
+          unawaited(pool.signals.publish());
+        }
+      },
+      // Give it another go: the card's one metadata read brings the show's
+      // next episode, so Watch can say which.
+      itemWithNext: media.itemWithNext,
+      // The Reel's settings page applies to the Reel that is playing.
+      settingsChanged: SettingsService.instanceOrNull?.listenableOfAll(SettingsService.reelChoicePrefs),
+      // The Reel on mobile data (V2-53): the pref, and the app's one
+      // connectivity reading.
+      cellular: () =>
+          SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
+          SettingsService.reelCellular.resolvedDefault,
+      metered: () => link?.isCellularOnly ?? false,
+      linkChanged: link,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
       },
+      // More like this (V2-39): the build's prompt over titles like the
+      // card, one call per press, its spend logged per press.
+      moreLike: (seed, {required skip}) => moreLikeCards(
+        seed,
+        pool: pool,
+        library: library,
+        facts: () => forYouFacts(store: store, pool: pool),
+        call: _moreLikeSonnet,
+        skip: skip,
+      ),
       deckFor: (id) async {
         if (!id.startsWith('ai:')) return null;
         final entry = await AiHistory.get(id.substring(3));
@@ -158,15 +256,50 @@ abstract final class ReelApp {
       },
     );
     if (remote != null) _publish(controller, remote);
-    // While the Reel plays, the brain's indexer rests and its ONNX session
-    // (about 66 MB) is released; it reopens on the next embed.
-    var yielded = false;
-    controller.addListener(() {
-      if (controller.active == yielded) return;
-      yielded = controller.active;
-      unawaited(HistoryBrain.instance.yieldTo(yielded));
-    });
+    _sweepLater(store);
     return controller;
+  }
+
+  /// How long after the Reel opens the daily sweep waits, so it never
+  /// competes with the open's own cache reads.
+  static const Duration sweepDelay = Duration(seconds: 30);
+
+  /// The Reel's cache housekeeping ([ReelStore.sweep]), at most once a day.
+  /// It runs here until the warm start before the tab opens (V2-14) exists.
+  static void _sweepLater(ReelStore store) => Timer(sweepDelay, () async {
+    try {
+      final s = await store.sweep();
+      if (s == null) return;
+      appLogger.i(
+        '[ReelCache] daily sweep: ${s.pools} pool, ${s.days} deck/cursor, '
+        '${s.sources} source rows, ${s.metas} metadata rows, ${s.events} events',
+      );
+    } catch (e) {
+      appLogger.w('[ReelCache] daily sweep failed', error: e);
+    }
+  });
+
+  /// Settings' "Rebuild today's For You" ([ReelPool.clearToday]), with the
+  /// same host rule as the Reel's own pool. Returns whether this device does
+  /// the rebuild; false on a phone whose TV builds For You.
+  static Future<bool> rebuildForYouToday() => ReelPool(
+    store: ReelStore.instance,
+    library: ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app()),
+    host: !PhoneMode.isHandheld,
+  ).clearToday();
+
+  /// The longest the brain's yield waits for For You's gather.
+  static const Duration gatherBeforeYield = Duration(seconds: 8);
+
+  /// Yields the brain to the Reel once For You's gather (when one is due
+  /// today) is done, unless the Reel has closed meanwhile.
+  static Future<void> _yieldAfter(ForYouDeck forYou, {required bool Function() stillActive}) async {
+    try {
+      await forYou.prepare().timeout(gatherBeforeYield);
+    } catch (_) {
+      // Too slow: the gather carries on; the Reel yields now.
+    }
+    if (stillActive()) await HistoryBrain.instance.yieldTo(true);
   }
 
   /// Sends the current card to a connected phone at once (it just opened
@@ -202,29 +335,34 @@ abstract final class ReelApp {
     republish = () => publish(force: true);
   }
 
-  /// Synced: set once the Reel's Home row has been seated, so removing it in
-  /// Manage Home sticks.
-  static const String homeRowSeatedKey = 'reel.homeRowSeated';
-
-  /// The first Save puts "From the Reel" at the top of Home, once.
-  static Future<void> _seatHomeRow() async {
-    final settings = await Customisation.store;
-    if (await settings.readSetting(homeRowSeatedKey) != null) {
-      appLogger.i('[ReelSave] Home row seated before; left where the user keeps it');
-      return;
-    }
-    final added = await HomePinsController.instance.insertFirst((
-      id: HomeRowIds.reelPicks,
-      title: 'From the Reel',
-      sources: const <String>[],
-    ));
-    await settings.writeSetting(homeRowSeatedKey, '1');
-    appLogger.i('[ReelSave] Home row ${added ? 'seated first' : 'already on Home'}');
+  /// The clip resolver over the app's servers (also the measure-day probe).
+  /// With [serversChanged], a server that isn't connected yet is waited for
+  /// as long as a deep link waits ([deepLinkServerWait]), once per start or
+  /// resume: after a wake the Reel opens before the servers reconnect. With
+  /// [profile], a clip's file is picked for the device as it is now (plan
+  /// V2-16); without it, by the standard profile.
+  static ClipResolver resolverFor(
+    MultiServerManager servers,
+    ReelStore store, {
+    Listenable? serversChanged,
+    ValueListenable<ReelPlaybackProfile>? profile,
+  }) {
+    final plex = PlexReelServers(servers);
+    return ClipResolver(
+      servers: plex,
+      store: store,
+      aniList: _aniList,
+      profile: profile,
+      waitForServer: serversChanged == null
+          ? null
+          : (id) => waitForServers(serversChanged, () => plex.connected(id), timeout: deepLinkServerWait),
+    );
   }
 
-  /// The clip resolver over the app's servers (also the measure-day probe).
-  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store) =>
-      ClipResolver(servers: PlexReelServers(servers), store: store, aniList: _aniList);
+  /// The cards' metadata and art over the app's servers, for the run-time
+  /// seam test (V2-62).
+  @visibleForTesting
+  static ReelMedia mediaFor(MultiServerManager servers, ReelStore store) => _AppReelMedia(servers, store);
 
   /// Answers worth a deck: the user's own asks, not Tonight or the briefing.
   static Future<List<AiHistoryEntry>> _answers() async {
@@ -258,18 +396,43 @@ abstract final class ReelApp {
   }
 
   /// Season 1's AniList id through the Fribb mapping (tvdb, then tmdb).
+  /// Throws when the mapping itself couldn't be read, so the resolver
+  /// counts the title as unknown rather than caching a miss.
   static Future<int?> _aniList(ReelTitle t) async {
-    try {
-      final rows = await FribbMappingStore.instance.lookup(movie: !t.isShow, tvdbId: t.tvdbId, tmdbId: t.tmdbId);
-      final s1 = rows.where((r) => r.tvdbSeason == 1 || r.tmdbSeason == 1).firstOrNull ?? rows.firstOrNull;
-      return s1?.anilistId;
-    } catch (_) {
-      return null;
-    }
+    final fribb = FribbMappingStore.instance;
+    final rows = await fribb.lookup(movie: !t.isShow, tvdbId: t.tvdbId, tmdbId: t.tmdbId);
+    if (rows.isEmpty && !await fribb.available()) throw StateError('Fribb mapping unavailable');
+    final s1 = rows.where((r) => r.tvdbSeason == 1 || r.tmdbSeason == 1).firstOrNull ?? rows.firstOrNull;
+    return s1?.anilistId;
   }
 
+  /// The daily build's output ceiling: about 90 cards, each with an id, a
+  /// cluster and optional why, anchor and hook lines (about 7k tokens).
+  /// Only the tokens written are billed. It stays well under the size the
+  /// API docs say needs streaming (about 21k) and inside the client's
+  /// 3-minute timeout. A call cut short ends with `stop_reason` max_tokens
+  /// and a truncated tool input
+  /// (https://platform.claude.com/docs/en/api/handling-stop-reasons).
+  static const int poolMaxTokens = 12000;
+
   /// The daily build's one Sonnet call (spend recorded like every AI call).
-  static Future<Map<String, dynamic>?> _sonnet(String system, String user, Map<String, Object?> tool) async {
+  /// Its `stop_reason` is logged, so a build cut short by the ceiling never
+  /// falls back to code order silently.
+  static Future<Map<String, dynamic>?> _sonnet(String system, String user, Map<String, Object?> tool) =>
+      _claude(system, user, tool, what: '[ReelPool] build');
+
+  /// One More like this press (V2-39): the build's prompt and ceiling over
+  /// 40 candidates. No cost figure is assumed; each press logs its tokens
+  /// and its cost (AiSpend), so the first runs say what a press costs.
+  static Future<Map<String, dynamic>?> _moreLikeSonnet(String system, String user, Map<String, Object?> tool) =>
+      _claude(system, user, tool, what: '[ReelMore] press');
+
+  static Future<Map<String, dynamic>?> _claude(
+    String system,
+    String user,
+    Map<String, Object?> tool, {
+    required String what,
+  }) async {
     final key = await AiKeyStore.read();
     if (key == null) return null;
     const model = ClaudeModel.sonnet;
@@ -277,7 +440,7 @@ abstract final class ReelApp {
     try {
       final response = await client.createMessage({
         'model': model.id,
-        'max_tokens': 6000,
+        'max_tokens': poolMaxTokens,
         'thinking': model.noThinking,
         'system': system,
         'tools': [tool],
@@ -286,7 +449,16 @@ abstract final class ReelApp {
           {'role': 'user', 'content': user},
         ],
       });
-      await AiSpend.record(model, (response['usage'] as Map?)?.cast<String, dynamic>() ?? const {});
+      final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+      final cost = await AiSpend.record(model, usage);
+      final stop = response['stop_reason'] as String?;
+      final out = usage['output_tokens'];
+      final spent = 'input ${usage['input_tokens']} tokens, cost \$${cost.toStringAsFixed(4)}';
+      if (stop == 'max_tokens') {
+        appLogger.w('$what cut short: stop_reason=max_tokens, output $out of $poolMaxTokens tokens, $spent');
+      } else {
+        appLogger.i('$what stop_reason=$stop, output $out tokens, $spent');
+      }
       return [
         for (final b in (response['content'] as List? ?? const []).whereType<Map>())
           if (b['type'] == 'tool_use') (b['input'] as Map).cast<String, dynamic>(),
@@ -298,17 +470,38 @@ abstract final class ReelApp {
 }
 
 class _AppReelMedia implements ReelMedia {
-  _AppReelMedia(this._servers);
+  _AppReelMedia(this._servers, ReelStore store) : _plex = PlexReelMetadata(_servers) {
+    _metadata = ReelMetadata(source: _plex, store: store);
+  }
 
   final MultiServerManager _servers;
+  final PlexReelMetadata _plex;
+  late final ReelMetadata _metadata;
 
   MediaServerClient? _client(String serverId) => _servers.getClient(ServerId(serverId));
 
+  /// Plex: cache-first, else one lean read (plan V2-03). Other backends keep
+  /// their own item read.
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async {
+    if (_plex.serves(serverId)) return _metadata.item(serverId, ratingKey);
+    return fullItem(serverId, ratingKey);
+  }
+
+  @override
+  Future<MediaItem?> fullItem(String serverId, String ratingKey) async {
     final c = _client(serverId);
     if (c == null) return null;
     return c.fetchItem(ratingKey).timeout(const Duration(seconds: 15));
+  }
+
+  /// The same single metadata read with the on-deck episode included (the
+  /// episode [ReelApp._playable] plays).
+  Future<({MediaItem? item, MediaItem? next})> itemWithNext(String serverId, String ratingKey) async {
+    final c = _client(serverId);
+    if (c == null) return (item: null, next: null);
+    final r = await c.fetchItemWithOnDeck(ratingKey).timeout(const Duration(seconds: 15));
+    return (item: r.item, next: r.onDeckEpisode);
   }
 
   @override

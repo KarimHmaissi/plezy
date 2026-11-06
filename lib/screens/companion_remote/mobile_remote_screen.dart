@@ -16,6 +16,7 @@ import '../../theme/mono_tokens.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/dialogs.dart';
 import '../../widgets/companion_remote/discovery_view.dart';
+import '../../widgets/companion_remote/remote_button.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/overlay_sheet.dart';
 import '../../widgets/pill_input_decoration.dart';
@@ -251,17 +252,17 @@ class _RemoteControlContentState extends State<_RemoteControlContent> {
         Row(
           mainAxisAlignment: .spaceEvenly,
           children: [
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.home_rounded,
               label: t.common.home,
               onPressed: () => _sendCommand(RemoteCommandType.home),
             ),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.arrow_back_rounded,
               label: t.common.back,
               onPressed: () => _sendCommand(RemoteCommandType.back),
             ),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.menu_rounded,
               label: t.companionRemote.remote.menu,
               onPressed: () => _sendCommand(RemoteCommandType.contextMenu),
@@ -318,13 +319,13 @@ class _RemoteControlContentState extends State<_RemoteControlContent> {
         Row(
           mainAxisAlignment: .center,
           children: [
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.skip_previous_rounded,
               label: t.companionRemote.remote.previous,
               onPressed: () => _sendCommand(RemoteCommandType.previousTrack),
             ),
             const SizedBox(width: 16),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.play_arrow_rounded,
               label: t.companionRemote.remote.playPause,
               size: 64,
@@ -332,7 +333,7 @@ class _RemoteControlContentState extends State<_RemoteControlContent> {
               onPressed: () => _sendCommand(RemoteCommandType.playPause),
             ),
             const SizedBox(width: 16),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.skip_next_rounded,
               label: t.companionRemote.remote.next,
               onPressed: () => _sendCommand(RemoteCommandType.nextTrack),
@@ -343,19 +344,19 @@ class _RemoteControlContentState extends State<_RemoteControlContent> {
         Row(
           mainAxisAlignment: .center,
           children: [
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.replay_10_rounded,
               label: t.companionRemote.remote.seekBack,
               onPressed: () => _sendCommand(RemoteCommandType.seekBackward),
             ),
             const SizedBox(width: 16),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.stop_rounded,
               label: t.companionRemote.remote.stop,
               onPressed: () => _sendCommand(RemoteCommandType.stop),
             ),
             const SizedBox(width: 16),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.forward_10_rounded,
               label: t.companionRemote.remote.seekForward,
               onPressed: () => _sendCommand(RemoteCommandType.seekForward),
@@ -368,19 +369,19 @@ class _RemoteControlContentState extends State<_RemoteControlContent> {
         Row(
           mainAxisAlignment: .center,
           children: [
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.volume_off_rounded,
               label: t.common.mute,
               onPressed: () => _sendCommand(RemoteCommandType.volumeMute),
             ),
             const SizedBox(width: 16),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.volume_down_rounded,
               label: t.companionRemote.remote.volumeDown,
               onPressed: () => _sendCommand(RemoteCommandType.volumeDown),
             ),
             const SizedBox(width: 16),
-            _RemoteButton(
+            RemoteButton(
               icon: Symbols.volume_up_rounded,
               label: t.companionRemote.remote.volumeUp,
               onPressed: () => _sendCommand(RemoteCommandType.volumeUp),
@@ -605,45 +606,6 @@ class _SectorClipper extends CustomClipper<Path> {
   @override
   bool shouldReclip(covariant _SectorClipper oldClipper) =>
       startAngle != oldClipper.startAngle || innerRadius != oldClipper.innerRadius || gapWidth != oldClipper.gapWidth;
-}
-
-class _RemoteButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  final double size;
-  final double iconSize;
-
-  const _RemoteButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-    this.size = 56,
-    this.iconSize = 24,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: .min,
-      children: [
-        SizedBox(
-          width: size,
-          height: size,
-          child: FilledButton(
-            onPressed: () {
-              HapticFeedback.lightImpact();
-              onPressed();
-            },
-            style: FilledButton.styleFrom(padding: .zero, shape: const CircleBorder()),
-            child: AppIcon(icon, size: iconSize),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(label, style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
-      ],
-    );
-  }
 }
 
 class _RemoteChip extends StatelessWidget {

@@ -454,6 +454,8 @@ class _MainScreenState extends State<MainScreen>
   MultiServerProvider? _multiServerProvider;
   CatalogSourcesProvider? _catalogSourcesProvider;
   ValueListenable<bool>? _showExploreTabListenable;
+  ValueListenable<bool>? _showReelTabListenable;
+  bool _lastHasReel = false;
   RouteObserver<PageRoute<dynamic>>? _profileRouteObserver;
   bool _lastHasLiveTv = false;
   bool _lastHasExplore = false;
@@ -597,6 +599,10 @@ class _MainScreenState extends State<MainScreen>
     // mid-session; the catalog-sources listener covers source changes.
     _showExploreTabListenable = SettingsService.instanceOrNull?.listenable(SettingsService.showExploreTab);
     _showExploreTabListenable?.addListener(_handleCatalogSourcesChanged);
+    // Fork: the Reel's own Show the Reel tab toggle works the same way.
+    _lastHasReel = _hasReel;
+    _showReelTabListenable = SettingsService.instanceOrNull?.listenable(SettingsService.showReelTab);
+    _showReelTabListenable?.addListener(_handleReelTabChanged);
     _currentTab = _defaultTabForMode(_isOffline);
     _lastOnlineTabId = _isOffline ? null : NavigationTabId.discover;
     _autoSwitchedToDownloads = _isOffline && _currentTab == NavigationTabId.downloads;
@@ -1068,8 +1074,13 @@ class _MainScreenState extends State<MainScreen>
     };
     receiver.onReelOpen = (data) {
       if (!_hasReel || !mounted) return;
-      final deck = data['deck'];
-      ReelScreen.open(context, deck: deck is String && deck.isNotEmpty ? deck : null);
+      final deck = data['deck'], groupKey = data['groupKey'];
+      ReelScreen.open(
+        context,
+        deck: deck is String && deck.isNotEmpty ? deck : null,
+        groupKey: groupKey is String && groupKey.isNotEmpty ? groupKey : null,
+        fromRemote: true,
+      );
       ReelApp.republish?.call();
     };
     receiver.onReelStep = ReelScreen.remoteStep;
@@ -1220,6 +1231,7 @@ class _MainScreenState extends State<MainScreen>
     _multiServerProvider?.removeListener(_handleLiveTvChanged);
     _catalogSourcesProvider?.removeListener(_handleCatalogSourcesChanged);
     _showExploreTabListenable?.removeListener(_handleCatalogSourcesChanged);
+    _showReelTabListenable?.removeListener(_handleReelTabChanged);
     if (_bindingSettleListener != null) {
       _activeProfileForListener?.removeListener(_bindingSettleListener!);
     }
@@ -1392,7 +1404,7 @@ class _MainScreenState extends State<MainScreen>
       NavigationTabId.explore => ExploreScreen(key: _screenKeys[tab]),
       NavigationTabId.watchlist => WatchlistScreen(key: _screenKeys[tab]),
       NavigationTabId.comfort => ComfortScreen(key: _screenKeys[tab]),
-      NavigationTabId.reel => ReelScreen(key: _screenKeys[tab], create: ReelApp.controller),
+      NavigationTabId.reel => ReelScreen(key: _screenKeys[tab], create: ReelApp.controller, offline: _isOffline),
       NavigationTabId.ai => AiScreen(key: _screenKeys[tab]),
       NavigationTabId.history => HistoryScreen(key: _screenKeys[tab]),
       NavigationTabId.libraries => LibrariesScreen(
@@ -1526,6 +1538,18 @@ class _MainScreenState extends State<MainScreen>
     _lastHasWatchlist = hasWatchlist;
     _lastHasComfort = hasComfort;
 
+    _handleTabAvailabilityChanged();
+    _applyPendingStartupTab();
+  }
+
+  /// Fork: Show the Reel tab flipped (the Reel's settings page). Hidden, the
+  /// Reel leaves the mounted tabs too, so its session and player go now and
+  /// turning it back on starts it fresh when it is next opened.
+  void _handleReelTabChanged() {
+    final hasReel = _hasReel;
+    if (hasReel == _lastHasReel) return;
+    _lastHasReel = hasReel;
+    if (!hasReel) _mountedTabs.remove(NavigationTabId.reel);
     _handleTabAvailabilityChanged();
     _applyPendingStartupTab();
   }
@@ -2131,8 +2155,9 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
-  /// Fork: The Reel's clip core is ExoPlayer, so Android only.
-  bool get _hasReel => Platform.isAndroid;
+  /// Fork: The Reel's clip core is ExoPlayer, so Android only; its settings
+  /// page can hide it ([ReelScreen.enabled]).
+  bool get _hasReel => ReelScreen.enabled;
 
   List<NavigationTab> _getBottomNavigationTabs(BuildContext context) {
     return mainScreenBottomNavigationTabs(
@@ -2419,6 +2444,9 @@ class _MainScreenState extends State<MainScreen>
       canPop: false,
       onSystemBack: () {
         if (BackKeyCoordinator.consumeIfHandled()) return;
+        // Fork: the immersive Reel feed takes this Back to bring its
+        // controls back (its own PopScope, which runs after this one).
+        if (_currentTab == NavigationTabId.reel && ReelScreen.immersive.value) return;
         _handleMainBack();
       },
       child: ScaffoldMessenger(

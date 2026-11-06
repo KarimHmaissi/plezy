@@ -24,8 +24,9 @@ import 'tmdb/tmdb_key_store.dart';
 /// Fork, The Reel measure day (spec §10): clip coverage over the first 50
 /// shows of the For You pool, read only, one request at a time. Started by
 /// `plezy://reel?probe=coverage` over adb; `probe=watchstate` reads the
-/// shown card's watch state. Logs counts and response shapes
-/// only: never a title, URL, token or key.
+/// shown card's watch state. Runs only in a debug build or with the Reel's
+/// hidden developer setting on (`ReelDeveloper`, plan V2-62). Logs counts
+/// and response shapes only: never a title, URL, token or key.
 abstract final class ReelProbe {
   static bool _running = false;
 

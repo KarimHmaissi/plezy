@@ -125,8 +125,9 @@ enum RemoteCommandType {
   /// Fork, The Reel (On TV mode): show the host's Reel tab.
   tabReel,
 
-  /// Fork, The Reel: open a deck on the host (`deck`, optional); the host
-  /// answers with a [reelState].
+  /// Fork, The Reel: open a deck on the host (`deck`, optional), on the
+  /// phone's card (`groupKey`, optional) when the host's deck has it; the
+  /// host answers with a [reelState].
   reelOpen,
 
   /// Fork, The Reel: next or previous card on the host (`dir`: 1 / -1), or

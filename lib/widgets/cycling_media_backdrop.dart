@@ -34,6 +34,8 @@ class CyclingMediaBackdrop extends StatefulWidget {
     this.alignment = Alignment.center,
     this.rotationInterval = const Duration(seconds: 10),
     this.fadeDuration = const Duration(milliseconds: 280),
+    this.imageType = ImageType.art,
+    this.onImageProvider,
   });
 
   final Object? mediaKey;
@@ -58,6 +60,46 @@ class CyclingMediaBackdrop extends StatefulWidget {
   final Color fallbackColor;
   final Duration rotationInterval;
   final Duration fadeDuration;
+
+  /// The size class to fetch and decode at. Backdrops are [ImageType.art];
+  /// a backdrop shown only briefly (the Reel's clip cards, under a clip that
+  /// starts within a few hundred ms) passes [ImageType.thumb] for the much
+  /// smaller decode cap.
+  final ImageType imageType;
+
+  /// Called with each provider this backdrop builds, for callers that manage
+  /// their art's lifetime in the image cache.
+  final ValueChanged<ImageProvider>? onImageProvider;
+
+  /// The path a fresh backdrop shows first: the first of [imagePaths], else
+  /// the first fallback not already in the rotation. Null when there is none.
+  static String? firstPathOf(List<String> imagePaths, List<String> fallbackImagePaths) {
+    final rotation = _CyclingMediaBackdropState._uniquePaths(imagePaths);
+    if (rotation.isNotEmpty) return rotation.first;
+    return _CyclingMediaBackdropState._uniquePaths(fallbackImagePaths).firstOrNull;
+  }
+
+  /// The provider a backdrop of [width]×[height] (non-finite: the screen's)
+  /// builds for server artwork at [path], for warming it before the backdrop
+  /// shows. Null when there is no URL to fetch.
+  static ImageProvider? networkProviderFor(
+    BuildContext context, {
+    required MediaServerClient? client,
+    required String path,
+    required double width,
+    required double height,
+    ImageType imageType = ImageType.art,
+  }) {
+    final size = MediaQuery.sizeOf(context);
+    return MediaImageHelper.serverArtworkProviderFor(
+      context,
+      client: client,
+      thumbPath: path,
+      width: width.isFinite && width > 0 ? width : size.width,
+      height: height.isFinite && height > 0 ? height : size.height,
+      imageType: imageType,
+    )?.provider;
+  }
 
   @override
   State<CyclingMediaBackdrop> createState() => _CyclingMediaBackdropState();
@@ -218,34 +260,38 @@ class _CyclingMediaBackdropState extends State<CyclingMediaBackdrop> with Widget
   }
 
   ImageProvider? _providerFor(BuildContext context, String path, File? localFile) {
+    final provider = _buildProvider(context, path, localFile);
+    if (provider != null) widget.onImageProvider?.call(provider);
+    return provider;
+  }
+
+  ImageProvider? _buildProvider(BuildContext context, String path, File? localFile) {
     final providerOverride = widget.imageProviderResolver;
     if (providerOverride != null) return providerOverride(path);
 
     final size = MediaQuery.sizeOf(context);
     final width = widget.width.isFinite && widget.width > 0 ? widget.width : size.width;
     final height = widget.height.isFinite && widget.height > 0 ? widget.height : size.height;
-    final pixelRatio = MediaImageHelper.artworkPixelRatio(context, imageType: ImageType.art);
+    final imageType = widget.imageType;
+    final pixelRatio = MediaImageHelper.artworkPixelRatio(context, imageType: imageType);
     final (memWidth, memHeight) = MediaImageHelper.getMemCacheDimensions(
       displayWidth: (width * pixelRatio).round(),
       displayHeight: (height * pixelRatio).round(),
-      imageType: ImageType.art,
+      imageType: imageType,
     );
 
     if (localFile != null) {
       return MediaImageHelper.boundedDecode(FileImage(localFile), memWidth: memWidth, memHeight: memHeight);
     }
     if (!widget.allowNetwork) return null;
-
-    final imageUrl = MediaImageHelper.getOptimizedImageUrl(
+    return CyclingMediaBackdrop.networkProviderFor(
+      context,
       client: widget.client,
-      thumbPath: path,
-      maxWidth: width,
-      maxHeight: height,
-      pixelRatio: pixelRatio,
-      imageType: ImageType.art,
+      path: path,
+      width: width,
+      height: height,
+      imageType: imageType,
     );
-    if (imageUrl.isEmpty) return null;
-    return MediaImageHelper.serverArtworkProvider(imageUrl: imageUrl, memWidth: memWidth, memHeight: memHeight);
   }
 
   void _reportMissingProvider(String path) {

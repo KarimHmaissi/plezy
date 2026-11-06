@@ -117,6 +117,39 @@ Future<List<WatchlistShelf>> loadWatchlistShelves(CatalogSource source, {int min
 /// How an added row last loaded on Home, for Manage Home.
 enum HomeRowLoadState { loading, loaded, empty, unavailable }
 
+/// How a fetched row stands: [HomeRowLoadState.unavailable] when its source
+/// gave nothing back (it may still be connecting), [HomeRowLoadState.empty]
+/// when it answered with no items, else [HomeRowLoadState.loaded].
+HomeRowLoadState homeRowFetchState(MediaHub? hub) => hub == null
+    ? HomeRowLoadState.unavailable
+    : hub.items.isEmpty
+    ? HomeRowLoadState.empty
+    : HomeRowLoadState.loaded;
+
+/// When Home fetches its added rows again after a pass left some
+/// unavailable: after 10 s, 20 s, 30 s and 40 s, then not until something
+/// else reloads them. An empty row is an answer, not a failure: it neither
+/// retries nor holds back the reset once every row has loaded.
+class HomeRowRetries {
+  static const int max = 4;
+
+  int _count = 0;
+  int get count => _count;
+
+  void reset() => _count = 0;
+
+  /// The wait before the next pass, or null for none, after a pass that
+  /// ended in [outcomes].
+  Duration? after(Iterable<HomeRowLoadState> outcomes) {
+    if (!outcomes.contains(HomeRowLoadState.unavailable)) {
+      _count = 0;
+      return null;
+    }
+    if (_count >= max) return null;
+    return Duration(seconds: 10 * ++_count);
+  }
+}
+
 /// Load state of each added row that Home fetches itself, by row id.
 final ValueNotifier<Map<String, HomeRowLoadState>> homeRowLoadStates = ValueNotifier(const {});
 
@@ -125,10 +158,23 @@ final ValueNotifier<Map<String, HomeRowLoadState>> homeRowLoadStates = ValueNoti
 /// Comfort shows, and Plex rows Home's own hubs don't include (library rows,
 /// collections).
 class HomeRowResolver {
-  HomeRowResolver({required this.sources, required this.clientFor});
+  HomeRowResolver({
+    required this.sources,
+    required this.clientFor,
+    this.reel,
+    this.pickFetchTimeout = defaultPickFetchTimeout,
+  });
 
   final CatalogSourcesProvider sources;
   final MediaServerClient? Function(ServerId serverId) clientFor;
+
+  /// The Reel's picks; [ReelStore.instance] when null.
+  final ReelStore? reel;
+
+  /// How long one Reel pick's server may take before the row goes on
+  /// without it.
+  static const Duration defaultPickFetchTimeout = Duration(seconds: 8);
+  final Duration pickFetchTimeout;
 
   static const int itemLimit = TraktListsCatalogSource.rowItemLimit;
 
@@ -202,17 +248,22 @@ class HomeRowResolver {
         items = (await AiHistory.get(rest))?.items;
       case HomeRowIds.reelPicks:
         // Fork: the Reel's fresh Saves, newest first, from the copy saved.
-        items = [];
-        for (final pick in await ReelStore.instance.freshPicks()) {
-          final client = clientFor(ServerId(pick.serverId));
-          if (client == null) continue;
-          try {
-            final item = await client.fetchItem(pick.ratingKey);
-            if (item != null) items.add(item);
-          } catch (e) {
-            appLogger.d('Home: Reel pick unavailable', error: e);
-          }
-        }
+        // Fetched together, each with a time limit, so one slow server
+        // never holds the row back.
+        final found = await Future.wait([
+          for (final pick in await (reel ?? ReelStore.instance).freshPicks())
+            () async {
+              final client = clientFor(ServerId(pick.serverId));
+              if (client == null) return null;
+              try {
+                return await client.fetchItem(pick.ratingKey).timeout(pickFetchTimeout);
+              } catch (e) {
+                appLogger.d('Home: Reel pick unavailable', error: e);
+                return null;
+              }
+            }(),
+        ]);
+        items = [...found.nonNulls];
         appLogger.i('[ReelSave] Home row: ${items.length} saved titles found');
       default:
         return null;
