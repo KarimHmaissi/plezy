@@ -9,6 +9,7 @@ import '../../media/media_item.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/device_performance.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/settings_service.dart' show ReelOkAction;
 import '../../theme/fork_motion.dart';
 import '../../theme/mono_tokens.dart';
 import '../../utils/content_utils.dart';
@@ -21,6 +22,7 @@ import '../../widgets/media_progress_bar.dart';
 import '../../widgets/media_rating_badge.dart';
 import '../../widgets/stat_chip.dart';
 import '../../widgets/tv_spotlight_background.dart';
+import 'reel_keys.dart' show reelHintLine;
 import 'reel_lean_back.dart';
 import 'reel_sheet.dart' show reelDeckIcon;
 
@@ -42,6 +44,7 @@ class ReelCardView extends StatelessWidget {
     this.onSave,
     this.onRemote,
     this.leanBack,
+    this.okAction = ReelOkAction.watch,
   });
 
   final ReelController controller;
@@ -54,6 +57,9 @@ class ReelCardView extends StatelessWidget {
 
   /// TV: quiet mode and the hint rule (V2-28); null always shows everything.
   final ReelLeanBack? leanBack;
+
+  /// TV: what OK does (D12, V2-50), which the hint line follows.
+  final ReelOkAction okAction;
 
   @override
   Widget build(BuildContext context) {
@@ -194,6 +200,7 @@ class ReelCardView extends StatelessWidget {
       controller: controller,
       slot: slot,
       held: held,
+      okAction: okAction,
       hints: lean?.hintsReserved ?? true,
       width: screenWidth - TvLayoutConstants.horizontalInset - right,
     );
@@ -418,6 +425,7 @@ class _ExtrasLayout {
     required ReelSlot slot,
     required bool held,
     required double width,
+    ReelOkAction okAction = ReelOkAction.watch,
     bool hints = true,
   }) {
     final theme = Theme.of(context);
@@ -443,8 +451,8 @@ class _ExtrasLayout {
       fontSize: hintSize * scale,
     );
     final credit = slot.clip?.source.origin == ClipOrigin.animeTheme ? 'Theme via AnimeThemes' : null;
-    // OK replays a held clip (ReelScreen's key map).
-    final hintText = '${held ? 'OK replay' : 'OK watch'}  ·  ↓ next  ·  → next deck  ·  hold OK for more';
+    // OK replays a held clip, else follows the OK pref (ReelScreen's key map).
+    final hintText = reelHintLine(held: held, okAction: okAction);
 
     var height = 0.0;
     if (chips.isNotEmpty) height += _chipsHeight(context, chips, chipFontSize, scale, width);

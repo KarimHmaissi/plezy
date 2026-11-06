@@ -11,7 +11,7 @@ import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/screens/reel/reel_card_view.dart';
 import 'package:plezy/screens/reel/reel_lean_back.dart';
-import 'package:plezy/screens/reel/reel_sheet.dart' show reelDeckIcon;
+import 'package:plezy/screens/reel/reel_sheet.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/library_index/index_database.dart';
@@ -24,6 +24,7 @@ import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/fork_motion.dart';
+import 'package:plezy/theme/mono_theme.dart';
 import 'package:plezy/utils/layout_constants.dart';
 import 'package:plezy/widgets/fork_motion_widgets.dart';
 import 'package:plezy/widgets/media_progress_bar.dart';
@@ -258,6 +259,8 @@ Future<void> _pumpTv(
   Size size = const Size(1920, 1080),
   bool reduceMotion = false,
   ReelLeanBack? leanBack,
+  ReelOkAction okAction = ReelOkAction.watch,
+  ThemeData? theme,
 }) async {
   await tester.runAsync(SettingsService.getInstance);
   tester.view.physicalSize = size;
@@ -267,7 +270,7 @@ Future<void> _pumpTv(
   await tester.pumpWidget(
     TranslationProvider(
       child: MaterialApp(
-        theme: ThemeData.dark(),
+        theme: theme ?? ThemeData.dark(),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(disableAnimations: reduceMotion),
           child: child!,
@@ -278,7 +281,14 @@ Future<void> _pumpTv(
             builder: (context, _) => Stack(
               fit: StackFit.expand,
               children: [
-                ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}, leanBack: leanBack),
+                ReelCardView(
+                  controller: c,
+                  slot: c.current,
+                  tv: true,
+                  onReplay: () {},
+                  leanBack: leanBack,
+                  okAction: okAction,
+                ),
                 if (leanBack != null) ReelPauseFeedback(controller: c, leanBack: leanBack),
               ],
             ),
@@ -1026,6 +1036,102 @@ void main() {
       expect(chip, findsNothing);
       expect(tester.widget<TransportFeedbackIndicator>(find.byType(TransportFeedbackIndicator)).text, 'Playing');
       lb.end();
+    });
+  });
+
+  group('TV remote (V2-50)', () {
+    late ForkDatabase db;
+    late ReelController c;
+    late FakeClipEngine engine;
+
+    setUp(() async {
+      db = ForkDatabase.memory();
+      c = _controller(db, _Deck(['1', '2']), (e) => engine = e);
+    });
+
+    tearDown(() async {
+      c.dispose();
+      await db.close();
+    });
+
+    String? hintLine(WidgetTester tester) => tester.widget<Text>(find.byKey(const ValueKey('reel-hints'))).data;
+
+    Future<void> playing(WidgetTester tester, {ReelOkAction okAction = ReelOkAction.watch}) async {
+      // The app's own theme: the sheet's tiles read its tokens.
+      await _pumpTv(tester, c, okAction: okAction, theme: monoTheme(MonoPalette.dark));
+      engine.firstFrameCtl.add(null);
+      await tester.pumpAndSettle();
+    }
+
+    /// Opens the sheet over the card, returns which of [labels] it showed,
+    /// and closes it again.
+    Future<Set<String>> sheetShows(
+      WidgetTester tester,
+      List<String> labels, {
+      required bool isTv,
+      ReelOkAction okAction = ReelOkAction.watch,
+    }) async {
+      final context = tester.element(find.byType(ReelCardView));
+      unawaited(showReelSheet(context, c, isTv: isTv, okAction: okAction));
+      await tester.pumpAndSettle();
+      final shown = {
+        for (final l in labels)
+          if (find.text(l).evaluate().isNotEmpty) l,
+      };
+      Navigator.of(context).pop();
+      await tester.pumpAndSettle();
+      return shown;
+    }
+
+    testWidgets('the hint line follows the OK pref', (tester) async {
+      await playing(tester);
+      expect(hintLine(tester), startsWith('OK watch'));
+
+      await playing(tester, okAction: ReelOkAction.details);
+      expect(hintLine(tester), startsWith('OK details'));
+      expect(find.textContaining('OK watch'), findsNothing);
+    });
+
+    testWidgets('a held clip still reads OK replay whatever the pref', (tester) async {
+      await playing(tester, okAction: ReelOkAction.details);
+      for (var i = 0; i < 4 && c.clips.phase.value != ClipPhase.held; i++) {
+        engine.completedCtl.add(true);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      expect(hintLine(tester), startsWith('OK replay'));
+    });
+
+    testWidgets("the TV sheet offers Sound off, then Sound on once it's muted", (tester) async {
+      await playing(tester);
+      const sound = ['Sound off', 'Sound on'];
+      expect(await sheetShows(tester, sound, isTv: true), {'Sound off'});
+
+      await tester.runAsync(() => c.setMuted(true));
+      expect(c.clips.muted, isTrue);
+      expect(await sheetShows(tester, sound, isTv: true), {'Sound on'});
+    });
+
+    testWidgets('picking Sound off gives the sound action back', (tester) async {
+      await playing(tester);
+      final context = tester.element(find.byType(ReelCardView));
+      final picked = showReelSheet(context, c, isTv: true);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sound off'));
+      await tester.pumpAndSettle();
+      expect(await picked, ReelSheetAction.sound);
+    });
+
+    testWidgets('with OK on Details, the TV sheet offers Watch instead of Details', (tester) async {
+      await playing(tester, okAction: ReelOkAction.details);
+      const both = ['Watch', 'Details'];
+      expect(await sheetShows(tester, both, isTv: true, okAction: ReelOkAction.details), {'Watch'});
+      expect(await sheetShows(tester, both, isTv: true), {'Details'});
+    });
+
+    testWidgets('the phone sheet has no sound item: its mute button is on the card', (tester) async {
+      await playing(tester);
+      expect(await sheetShows(tester, ['Sound off', 'Sound on', 'Save for the TV'], isTv: false), {'Save for the TV'});
     });
   });
 }

@@ -18,6 +18,7 @@ import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_perf.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/settings_service.dart';
+import '../../utils/app_logger.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../services/reel/feed_players.dart';
@@ -25,6 +26,7 @@ import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
 import 'reel_feed_view.dart';
 import 'reel_held_step.dart';
+import 'reel_keys.dart';
 import 'reel_lean_back.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
@@ -124,6 +126,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   ValueNotifier<bool>? _overlayPref;
   ReelFeedProbe? _feedProbe;
 
+  /// TV: what OK does (D12, V2-50). Followed live, so the hint line and the
+  /// next press change with the setting.
+  ValueNotifier<ReelOkAction>? _okPref;
+  ReelOkAction get _okAction => _okPref?.value ?? ReelOkAction.watch;
+
   @override
   void initState() {
     super.initState();
@@ -131,6 +138,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     ReelScreen.requestedDeck.addListener(_takeRequest);
     _takeRequest();
     _bindPerf();
+    _okPref = SettingsService.instanceOrNull?.listenable(SettingsService.reelOkAction)?..addListener(_onChanged);
   }
 
   void _bindPerf() {
@@ -174,6 +182,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     ReelScreen.requestedDeck.removeListener(_takeRequest);
     ReelScreen.showing.value = false;
     _overlayPref?.removeListener(_onOverlayPref);
+    _okPref?.removeListener(_onChanged);
     _feedProbe?.dispose();
     _perf.detachFrames();
     _perf.cancel();
@@ -367,7 +376,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final c = _controller;
     if (c == null || _sheetOpen) return;
     _sheetOpen = true;
-    final action = await showReelSheet(context, c, isTv: _isTv);
+    final action = await showReelSheet(context, c, isTv: _isTv, okAction: _okAction);
     _sheetOpen = false;
     if (!mounted) return;
     // The sheet took the keys: closing it counts as one.
@@ -375,6 +384,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     switch (action) {
       case ReelSheetAction.save:
         await c.save();
+      case ReelSheetAction.watch:
+        await _watch();
       case ReelSheetAction.notForMe:
         await c.notForMe();
       case ReelSheetAction.spoiled:
@@ -383,6 +394,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         await c.seenIt();
       case ReelSheetAction.details:
         await c.openDetails();
+      case ReelSheetAction.sound:
+        await c.setMuted(!c.clips.muted);
       case ReelSheetAction.deck:
         break;
       case null:
@@ -411,6 +424,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final c = _controller;
     if (c == null) return KeyEventResult.ignored;
     if (_isTv) {
+      // V2-50: the remote's and the CEC bridge's codes, for the device
+      // session (recorded only with the overlay's tape on).
+      if (event is KeyDownEvent && _perf.recording) appLogger.d(reelKeyLogLine(event));
       // V2-28: any key brings the quiet card's chrome back, and still does
       // what it does.
       if (event is KeyDownEvent || event is KeyRepeatEvent) _leanBack.poke();
@@ -420,17 +436,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final sel = _longPress.handleKeyEvent(
       event,
       isOwnerActive: () => _shown && !_sheetOpen,
-      onShortPress: () {
-        if (c.clips.phase.value == ClipPhase.held) {
-          unawaited(c.replay());
-        } else if (c.current.kind == ReelSlotKind.poolEnd) {
-          unawaited(c.switchDeck(1));
-        } else if (c.current.kind == ReelSlotKind.failed) {
-          unawaited(c.retryDeck());
-        } else {
-          unawaited(_watch());
-        }
-      },
+      onShortPress: () =>
+          unawaited(switch (reelOkTarget(phase: c.clips.phase.value, kind: c.current.kind, okAction: _okAction)) {
+            ReelOkTarget.replay => c.replay(),
+            ReelOkTarget.nextDeck => c.switchDeck(1),
+            ReelOkTarget.retry => c.retryDeck(),
+            ReelOkTarget.watch => _watch(),
+            ReelOkTarget.details => c.openDetails(),
+          }),
       onLongPress: () => unawaited(_openSheet()),
     );
     if (sel != KeyEventResult.ignored) return sel;
@@ -439,6 +452,17 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final transport = classifyTransportKey(key);
     if (transport != null) {
       unawaited(_transport(c, transport));
+      return KeyEventResult.handled;
+    }
+    // V2-50: every skip key seeks within the clip, every track key moves a
+    // card. A held track key moves one card, not one per repeat.
+    if (reelMediaKey(key) case (:final action, :final dir)) {
+      switch (action) {
+        case ReelMediaKeyAction.seek:
+          unawaited(c.clips.seekBy(reelSeekStep * dir));
+        case ReelMediaKeyAction.step:
+          if (event is KeyDownEvent) _stepBy(dir, 1);
+      }
       return KeyEventResult.handled;
     }
     // The phone's arrows (a keyboard) step on every press and repeat.
@@ -454,10 +478,6 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       _perf.begin(ReelPerfTrigger.deck);
       c.clips.markKey(Stopwatch()..start(), trigger: 'deck');
       unawaited(c.switchDeck(-1));
-    } else if (key == LogicalKeyboardKey.mediaFastForward) {
-      unawaited(c.clips.seekBy(const Duration(seconds: 10)));
-    } else if (key == LogicalKeyboardKey.mediaRewind) {
-      unawaited(c.clips.seekBy(const Duration(seconds: -10)));
     } else if (key.isContextMenuKey) {
       unawaited(_openSheet());
     } else {
@@ -516,6 +536,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
           tv: true,
           onReplay: c.replay,
           leanBack: _leanBack,
+          okAction: _okAction,
         ),
       ),
       ReelPauseFeedback(controller: c, leanBack: _leanBack),
