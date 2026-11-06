@@ -2430,6 +2430,10 @@ class ReelController extends ChangeNotifier {
 
   bool _disposed = false;
 
+  /// Whether this session has been let go (a build the screen discarded,
+  /// or the screen gone): On TV mode sends nothing more from it.
+  bool get isDisposed => _disposed;
+
   /// Resolves and loads finish in the background; one that lands after the
   /// screen went away is dropped.
   @override

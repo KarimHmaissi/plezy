@@ -1081,7 +1081,7 @@ class _MainScreenState extends State<MainScreen>
         groupKey: groupKey is String && groupKey.isNotEmpty ? groupKey : null,
         fromRemote: true,
       );
-      ReelApp.republish?.call();
+      ReelApp.republish();
     };
     receiver.onReelStep = ReelScreen.remoteStep;
     receiver.onReelAction = ReelScreen.remoteAction;

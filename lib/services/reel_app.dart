@@ -303,16 +303,50 @@ abstract final class ReelApp {
   }
 
   /// Sends the current card to a connected phone at once (it just opened
-  /// On TV mode).
-  static VoidCallback? republish;
+  /// On TV mode), from the session the screen holds. A session build that
+  /// ran past the screen's 30 s build limit can land after a second build was
+  /// started; whichever the screen discards is disposed, so it is skipped
+  /// here, and the one kept is forced however the builds finished.
+  static void republish() {
+    _publishers.removeWhere((p) => p.controller.isDisposed);
+    for (final p in [..._publishers]) {
+      p.force();
+    }
+  }
+
+  /// One On TV publisher per session build still alive, oldest first.
+  static final List<({ReelController controller, VoidCallback force})> _publishers = [];
+
+  /// Tests: forgets every publisher.
+  @visibleForTesting
+  static void debugResetPublishers() => _publishers.clear();
 
   /// Host side of On TV mode: a `reelState` on every card, deck or play
   /// state change while a phone is connected.
-  static void _publish(ReelController c, CompanionRemoteProvider remote) {
+  static void _publish(ReelController c, CompanionRemoteProvider remote) => publishState(
+    c,
+    connected: () => remote.isHost && remote.isConnected,
+    send: (state) => remote.sendCommand(RemoteCommandType.reelState, data: state),
+  );
+
+  /// [_publish] over plain hooks (the run-time seam for tests): [send]
+  /// gets [ReelController.remoteState] on every change while [connected],
+  /// never twice the same unless [republish] forces it, and nothing once
+  /// [c] is disposed.
+  @visibleForTesting
+  static void publishState(
+    ReelController c, {
+    required bool Function() connected,
+    required void Function(Map<String, Object?> state) send,
+  }) {
     String? last;
     var disposed = false;
     void publish({bool force = false}) {
-      if (disposed || !remote.isHost || !remote.isConnected) {
+      if (disposed || c.isDisposed) {
+        disposed = true;
+        return;
+      }
+      if (!connected()) {
         last = null;
         return;
       }
@@ -326,13 +360,15 @@ abstract final class ReelApp {
       final key = jsonEncode(state);
       if (!force && key == last) return;
       last = key;
-      remote.sendCommand(RemoteCommandType.reelState, data: state);
+      send(state);
     }
 
     c.addListener(publish);
     c.clips.phase.addListener(publish);
     c.cardChanged.addListener(publish);
-    republish = () => publish(force: true);
+    _publishers
+      ..removeWhere((p) => p.controller.isDisposed)
+      ..add((controller: c, force: () => publish(force: true)));
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).
