@@ -230,7 +230,11 @@ class ExoPlayerCore(private val activity: Activity) :
   private var hadSelectedTextTrack: Boolean = false
   private var httpDataSourceFactory: HttpDataSource.Factory? = null
   private var dataSourceFactory: DefaultDataSource.Factory? = null
+  /** The selector the player uses. In clip mode it comes from [RecordingTrackSelectorFactory]. */
   private var trackSelector: DefaultTrackSelector? = null
+
+  /** Clip mode: the preload manager's own selector, kept in step with [trackSelector]. */
+  private var preloadTrackSelector: DefaultTrackSelector? = null
   private var tunnelingUserEnabled: Boolean = true
   private var tunnelingDisabledForAudioCodec: Boolean = false
 
@@ -317,6 +321,9 @@ class ExoPlayerCore(private val activity: Activity) :
   private var decoderInitName: String? = null
   private var audioDecoderInitName: String? = null
   private var lastAudioTrackConfig: AudioSink.AudioTrackConfig? = null
+
+  /** AudioTracks this core has initialised: unchanged between two clips means the track was reused. */
+  private var audioTrackInits = 0
   private val directAudioOutputBlockedAfterFailure = mutableSetOf<String>()
   private val loggedDirectAudioRecoveryBlocks = mutableSetOf<String>()
   private var audioRecoveryAttempts: Int = 0
@@ -587,7 +594,10 @@ class ExoPlayerCore(private val activity: Activity) :
 
   @Volatile private var activeDoviMp4Wrapper: DoviExtractorWrapper? = null
 
-  private fun getConfiguredDvMode(): DvConversionMode {
+  // V2-18: a clip core never converts DV, whatever the display or the debug override says.
+  private fun getConfiguredDvMode(): DvConversionMode = ClipCorePolicy.dvMode(clipMode) { mainPlayerDvMode() }
+
+  private fun mainPlayerDvMode(): DvConversionMode {
     val override = debugDvModeOverride
     if (override != null) return override
 
@@ -595,6 +605,20 @@ class ExoPlayerCore(private val activity: Activity) :
     emitLog("info", "dv-auto", decision.logMessage())
     return decision.mode
   }
+
+  /** The parameters every selector this core builds starts from (main player and clip core alike). */
+  private fun configureTrackSelector(selector: DefaultTrackSelector) {
+    selector.setParameters(
+      selector.buildUponParameters()
+        // Recover passthrough when HDMI capabilities flap (Shield refresh-rate / AVR link drop):
+        // the sink temporarily falls back to PCM, and this flag lets the selector re-pick the
+        // encoded audio track when capabilities come back. See androidx/media#2258.
+        .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+    )
+  }
+
+  private fun identity(selector: Any?): String = selector?.let { "@" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
 
   fun initialize(
     tunnelingEnabled: Boolean = true,
@@ -701,16 +725,10 @@ class ExoPlayerCore(private val activity: Activity) :
 
       Log.d(TAG, "SurfaceView added to content view")
 
-      // Create track selector with text tracks enabled
-      trackSelector = DefaultTrackSelector(activity).apply {
-        setParameters(
-          buildUponParameters()
-            // Recover passthrough when HDMI capabilities flap (Shield refresh-rate / AVR link drop):
-            // the sink temporarily falls back to PCM, and this flag lets the selector re-pick the
-            // encoded audio track when capabilities come back. See androidx/media#2258.
-            .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-        )
+      // Create track selector with text tracks enabled. Clip mode builds its selectors inside
+      // the preload manager's factory instead (see below), with the same parameters.
+      if (!clipMode) {
+        trackSelector = DefaultTrackSelector(activity).apply(::configureTrackSelector)
       }
 
       // Create ExoPlayer with FFmpeg audio decoder fallback
@@ -880,7 +898,6 @@ class ExoPlayerCore(private val activity: Activity) :
       )
 
       val playerBuilder = ExoPlayer.Builder(activity)
-        .setTrackSelector(trackSelector!!)
         .setLoadControl(loadControl)
         .setAudioAttributes(audioAttributes, false) // We handle audio focus manually
         .setMediaSourceFactory(mediaSourceFactory)
@@ -895,17 +912,33 @@ class ExoPlayerCore(private val activity: Activity) :
         val statusControl = TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> {
           DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(LoadControlPolicy.CLIP_PRELOAD_MS)
         }
+        // buildExoPlayer replaces the ExoPlayer.Builder's track selector with one from the
+        // preload manager's factory, and build() makes a second one for preloading (media3
+        // 1.11.0). Supply the factory, so both carry our parameters and we hold the player's.
+        val selectorFactory = RecordingTrackSelectorFactory(::configureTrackSelector)
         val builder = DefaultPreloadManager.Builder(activity, statusControl)
           .setLoadControl(loadControl)
           .setRenderersFactory(wrappedRenderersFactory)
           .setMediaSourceFactory(mediaSourceFactory)
-        builder.buildExoPlayer(playerBuilder).also {
+          .setTrackSelectorFactory(selectorFactory)
+        // V2-18: a clip never asks the display for a new refresh rate.
+        playerBuilder.setVideoChangeFrameRateStrategy(ClipCorePolicy.VIDEO_CHANGE_FRAME_RATE_STRATEGY)
+        builder.buildExoPlayer(playerBuilder).also { player ->
+          trackSelector = selectorFactory.created.lastOrNull()
           preloadManager = builder.build()
-          it.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
+          preloadTrackSelector = selectorFactory.created.lastOrNull()?.takeIf { it !== trackSelector }
+          player.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
           emitLog("info", "init", "Clip mode: preload manager on, buffer ${bufferDurations.minBufferMs}-${bufferDurations.maxBufferMs}ms")
+          emitLog(
+            "info",
+            "ReelClip",
+            "selector player=${identity(trackSelector)} preload=${identity(preloadTrackSelector)} " +
+              "attached=${player.trackSelector === trackSelector} dv=${dvMode.name} " +
+              "frameRate=${ClipCorePolicy.frameRateStrategyName(player.videoChangeFrameRateStrategy)}"
+          )
         }
       } else {
-        playerBuilder.build()
+        playerBuilder.setTrackSelector(trackSelector!!).build()
       }
       coreSerial = PlayerCoreCounts.onCreated()
       emitLog("info", "ReelCore", "create core#$coreSerial clip=$clipMode ${PlayerCoreCounts.summary()}")
@@ -1779,6 +1812,10 @@ class ExoPlayerCore(private val activity: Activity) :
    */
   private fun retryWithDvConversion(reason: String): Boolean {
     if (dv7RetryAttempted) return false
+    if (clipMode) {
+      emitLog("debug", "dv-fallback", "Skipping DV conversion retry for $reason: clip core never converts DV")
+      return false
+    }
     if (debugDvModeOverride == DvConversionMode.DISABLED) {
       emitLog("debug", "dv-fallback", "Skipping DV conversion retry for $reason: native/disabled mode is forced")
       return false
@@ -2756,7 +2793,13 @@ class ExoPlayerCore(private val activity: Activity) :
     val shouldTunnel = calculateTunnelingEnabled() ?: return
     selectorChanged = updateCurrentTunnelingState(reason, shouldTunnel) || selectorChanged
     builder.setTunnelingEnabled(shouldTunnel)
-    if (selectorChanged) selector.parameters = builder.build()
+    if (selectorChanged) {
+      val parameters = builder.build()
+      selector.parameters = parameters
+      // Clip mode: the next card is preloaded with the preload manager's own selector. Keep it
+      // on the same parameters, so the preloaded tracks are the ones the player will select.
+      preloadTrackSelector?.parameters = ClipCorePolicy.preloadParameters(parameters)
+    }
   }
 
   private fun calculateTunnelingEnabled(): Boolean? {
@@ -3047,6 +3090,7 @@ class ExoPlayerCore(private val activity: Activity) :
       audioTrackConfig: AudioSink.AudioTrackConfig
     ) {
       lastAudioTrackConfig = audioTrackConfig
+      audioTrackInits++
       val audioFormat = selectedAudioFormat()
       persistRuntimePlaybackDiagnostics(audioFormat, audioDecoderInitName ?: "direct")
       emitLog(
@@ -3055,6 +3099,16 @@ class ExoPlayerCore(private val activity: Activity) :
         "AudioTrack initialized: input=${audioFormat?.let { formatAudioSummary(it) } ?: "unknown"}, " +
           "decoder=${audioDecoderInitName ?: "direct/bypass"}, ${describeAudioTrackConfig(audioTrackConfig)}"
       )
+      if (clipMode) {
+        // V2-18: the soundbar re-locks only when the AudioTrack changes; one line per change.
+        emitLog(
+          "info",
+          "ReelClip",
+          "audio gen=${mediaGenerationAt(eventTime) ?: -1} init#$audioTrackInits " +
+            "input=${audioFormat?.let { "ch=${it.channelCount} ${it.sampleRate}Hz" } ?: "unknown"} " +
+            "output=[${describeAudioTrackConfig(audioTrackConfig)}]"
+        )
+      }
       // A passthrough-type codec (AC3/EAC3/DTS/TrueHD…) force-decoded to PCM must not
       // stay on a tunneled AudioTrack: some Amlogic/AOSP boxes deliver the PCM frames
       // but render silence (#1458). Generalizes the original TrueHD-only guard to every
@@ -3111,6 +3165,7 @@ class ExoPlayerCore(private val activity: Activity) :
         emitLog("debug", "decoder-hang", "First frame rendered — decoder OK")
         logNativeDvFirstFrameIfNeeded()
         logDolbyVisionPlaybackPathIfNeeded()
+        if (clipMode) logClipFirstFrame(mediaGeneration)
       }
       // STATE_READY fires when the player has enough buffered to start, but
       // the first frame may not be on screen yet (decoder init + keyframe
@@ -4215,6 +4270,12 @@ class ExoPlayerCore(private val activity: Activity) :
     matchResolution: Boolean,
     onComplete: (switched: Boolean) -> Unit
   ) {
+    if (clipMode) {
+      // V2-18: a clip never switches the display mode, even if a caller asks.
+      emitLog("info", "ReelClip", "setVideoFrameRate($fps) refused: clip core keeps the display mode")
+      onComplete(false)
+      return
+    }
     val mgr = frameRateManager
     if (mgr == null) {
       onComplete(false)
@@ -4436,6 +4497,29 @@ class ExoPlayerCore(private val activity: Activity) :
     manager.invalidate()
   }
 
+  /**
+   * The `[ReelClip]` line for one clip's first frame: video range and frame-rate strategy (the
+   * HDR badge and refresh-rate checks), the audio input against the AudioTrack it is playing
+   * through (the 5.1 / stereo re-lock check), and whether the player's selector is ours.
+   */
+  private fun logClipFirstFrame(mediaGeneration: Int) {
+    val player = exoPlayer ?: return
+    emitLog(
+      "info",
+      "ReelClip",
+      ClipCorePolicy.describeClip(
+        generation = mediaGeneration,
+        video = currentVideoFormat,
+        audio = selectedAudioFormat(),
+        audioOutput = lastAudioTrackConfig?.let(::describeAudioTrackConfig) ?: "not yet",
+        audioTrackInits = audioTrackInits,
+        dvMode = dvMode,
+        frameRateStrategy = player.videoChangeFrameRateStrategy,
+        selectorAttached = trackSelector != null && player.trackSelector === trackSelector
+      )
+    )
+  }
+
   /** Clip mode: release every preloaded source except [keep]'s. */
   fun clearPreloads(keep: String? = null) {
     val manager = preloadManager ?: return
@@ -4537,6 +4621,7 @@ class ExoPlayerCore(private val activity: Activity) :
     exoPlayer = null
     renderersFactory = null
     trackSelector = null
+    preloadTrackSelector = null
     httpDataSourceFactory = null
     dataSourceFactory = null
     playbackMediaSourceFactory = null
