@@ -2718,6 +2718,33 @@ void main() {
       c.dispose();
     });
 
+    test('two quick presses move two decks on, and a press back returns', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+          _Deck('c', [_card('3')]),
+          _Deck('d', [_card('4')]),
+        ],
+      );
+      await c.start();
+      expect(c.current.card?.id, 't1');
+      // The second press lands while the first is still leaving its card.
+      await Future.wait([c.switchDeck(1), c.switchDeck(1)]);
+      expect(c.deck.id, 'c');
+      expect(c.current.card?.id, 't3');
+      expect(c.deckStrip.value?.current.id, 'c');
+
+      await Future.wait([c.switchDeck(1), c.switchDeck(1), c.switchDeck(-1)]);
+      expect(c.deck.id, 'd');
+      expect(c.current.card?.id, 't4');
+
+      await Future.wait([c.switchDeck(1), c.switchDeck(-1)]);
+      expect(c.deck.id, 'd', reason: 'forward then back is where it started');
+      expect(c.current.card?.id, 't4');
+      c.dispose();
+    });
+
     test('with two decks the strip shows only the next one', () async {
       final c = make(
         decks: [

@@ -1287,16 +1287,24 @@ class ReelController extends ChangeNotifier {
   ///
   /// Like [step], it bumps the generation first, so a card of the old deck
   /// still resolving never plays once the deck has changed.
+  ///
+  /// A press while an earlier one is still leaving its card counts on from
+  /// the deck that press is heading to, so two quick presses move two decks
+  /// on; the later press then shows its deck and the earlier one stops.
   Future<void> switchDeck(int dir) async {
     final shown = shownDecks;
     if (shown.length < 2) return;
-    var at = (shown.indexOf(deck) + dir) % shown.length;
+    var at = (shown.indexOf(_deckHeading ?? deck) + dir) % shown.length;
     if (at < 0) at += shown.length;
     final to = decks.indexOf(shown[at]);
+    final run = ++_switchRun;
+    _deckHeading = decks[to];
     _generation++;
     _arm();
     _clearPrefetch();
     await _leaveCard();
+    if (run != _switchRun) return;
+    _deckHeading = null;
     _deck = to;
     _remember();
     _showStrip();
@@ -1305,6 +1313,14 @@ class ReelController extends ChangeNotifier {
     await _ensureDeck(deck);
     await _show();
   }
+
+  /// The deck the latest [switchDeck] is heading to while it leaves its
+  /// card; null once it has arrived.
+  ReelDeck? _deckHeading;
+
+  /// Counts [switchDeck] presses: an earlier press still leaving its card
+  /// stops once a later one has started.
+  int _switchRun = 0;
 
   Future<void> openDeck(String id) => openAt(id);
 
