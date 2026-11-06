@@ -8602,6 +8602,15 @@ class Translations$reel$settings$en {
 
 	/// en: 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place'
 	String get showTabDescription => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place';
+
+	/// en: 'Developer'
+	String get developer => 'Developer';
+
+	/// en: 'Reel debug tools'
+	String get developerTools => 'Reel debug tools';
+
+	/// en: 'Timings overlay and measuring links. Shown while debug logging is on'
+	String get developerToolsDescription => 'Timings overlay and measuring links. Shown while debug logging is on';
 }
 
 // Path: reel.decks
@@ -11557,6 +11566,9 @@ extension on Translations {
 			'reel.settings.captionsDescription' => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles',
 			'reel.settings.showTab' => 'Show the Reel tab',
 			'reel.settings.showTabDescription' => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place',
+			'reel.settings.developer' => 'Developer',
+			'reel.settings.developerTools' => 'Reel debug tools',
+			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
 			'reel.decks.title' => 'Decks',
 			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
 			'reel.decks.startOn' => 'Start on',
@@ -11986,11 +11998,11 @@ extension on Translations {
 			'music.repeatOne' => 'Repeat one',
 			'music.instantMixNoServer' => 'No server is available for an instant mix',
 			'music.instantMixFailed' => 'Failed to load the instant mix',
+			_ => null,
+		} ?? switch (path) {
 			'music.instantMixEmpty' => 'The instant mix came back with no tracks',
 			'music.noAudioUrl' => ({required Object track}) => 'No audio URL is available for ${track}',
 			'music.discography.singlesAndEps' => 'Singles & EPs',
-			_ => null,
-		} ?? switch (path) {
 			'music.discography.live' => 'Live',
 			'music.discography.compilations' => 'Compilations',
 			'watchTogether.title' => 'Watch Together',
@@ -12500,11 +12512,11 @@ extension on Translations {
 			'metadataEdit.show' => 'Show',
 			'metadataEdit.hide' => 'Hide',
 			'metadataEdit.episodeOrdering' => 'Episode Ordering',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.tmdbAiring' => 'The Movie Database (Aired)',
 			'metadataEdit.tvdbAiring' => 'TheTVDB (Aired)',
 			'metadataEdit.tvdbAbsolute' => 'TheTVDB (Absolute)',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.metadataLanguage' => 'Metadata Language',
 			'metadataEdit.useOriginalTitle' => 'Use Original Title',
 			'metadataEdit.preferredAudioLanguage' => 'Preferred Audio Language',

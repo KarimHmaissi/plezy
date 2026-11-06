@@ -769,8 +769,9 @@ class SettingsService extends BaseSharedPreferencesService {
   static const showPerformanceOverlay = BoolPref('show_performance_overlay');
   static const autoHidePerformanceOverlay = BoolPref('auto_hide_performance_overlay', defaultValue: true);
 
-  /// Fork: the Reel's debug overlay and `[ReelPerf]` ring (plan V2-07). Off by
-  /// default; switched from the hidden developer setting (V2-62). Per-device
+  /// Fork: the Reel's hidden developer setting (plan V2-62): the debug
+  /// overlay, its `[ReelPerf]` ring (V2-07) and the measure-day links. Off by
+  /// default; counts only while its row shows (`ReelDeveloper`). Per-device
   /// runtime state, so it takes part in neither reset nor export.
   static const reelDebugOverlay = BoolPref('reel_debug_overlay');
 

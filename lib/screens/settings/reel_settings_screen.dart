@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../i18n/strings.g.dart';
+import '../../services/reel/reel_developer.dart';
 import '../../services/settings_service.dart';
 import '../../utils/platform_detector.dart';
 import '../../widgets/setting_tile.dart';
@@ -16,12 +18,16 @@ import 'settings_utils.dart';
 /// takes a change up at once (`ReelController.settingsChanged`), and Show
 /// the Reel tab brings the tab and rail item in or out like Explore's
 /// toggle. Decks (order, hidden decks, start deck; synced) have their own
-/// screen ([ReelDecksScreen]).
+/// screen ([ReelDecksScreen]). The hidden developer setting (V2-62) shows
+/// last, only in a debug build or while debug logging is on.
 class ReelSettingsScreen extends StatelessWidget {
-  const ReelSettingsScreen({super.key, this.tv});
+  const ReelSettingsScreen({super.key, this.tv, @visibleForTesting this.debugBuild = kDebugMode});
 
   /// The TV layout (OK button, no mobile data row). Defaults to this device.
   final bool? tv;
+
+  /// A debug build: the developer setting always shows.
+  final bool debugBuild;
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +72,18 @@ class ReelSettingsScreen extends StatelessWidget {
             ),
           ],
         ),
+        if (ReelDeveloper.visible(debugBuild: debugBuild))
+          SettingsGroup(
+            title: s.developer,
+            children: [
+              SettingSwitchTile(
+                pref: SettingsService.reelDebugOverlay,
+                icon: Symbols.developer_mode_rounded,
+                title: s.developerTools,
+                subtitle: s.developerToolsDescription,
+              ),
+            ],
+          ),
         const SizedBox(height: 24),
       ],
     );

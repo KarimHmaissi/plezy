@@ -16,6 +16,7 @@ import '../../providers/companion_remote_provider.dart';
 import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_developer.dart';
 import '../../services/reel/reel_perf.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/reel/reel_volume.dart';
@@ -138,9 +139,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool get _isTv => PlatformDetector.isTV();
 
   /// The debug overlay's tape (V2-07): records only under kDebugMode or
-  /// with the hidden developer setting on.
+  /// with the hidden developer setting on ([ReelDeveloper], V2-62).
   final ReelPerf _perf = ReelPerf.instance;
-  ValueNotifier<bool>? _overlayPref;
+  Listenable? _overlayPref;
   ReelFeedProbe? _feedProbe;
 
   @override
@@ -153,8 +154,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   }
 
   void _bindPerf() {
-    _overlayPref = SettingsService.instanceOrNull?.listenable(SettingsService.reelDebugOverlay)
-      ?..addListener(_onOverlayPref);
+    _overlayPref = SettingsService.instanceOrNull?.listenableOfAll(ReelDeveloper.prefs)?..addListener(_onOverlayPref);
     _onOverlayPref();
     _perf.ring ??= (read: ReelStore.instance.cached, write: ReelStore.instance.cache);
     _perf.liveDecoders = _liveDecoders;
@@ -169,7 +169,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   }
 
   void _onOverlayPref() {
-    final on = _overlayPref?.value ?? false;
+    final on = ReelDeveloper.on();
     _perf.overlay.value = on;
     _perf.recording = kDebugMode || on;
   }

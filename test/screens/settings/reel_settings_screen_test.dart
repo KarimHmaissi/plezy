@@ -17,7 +17,7 @@ void main() {
     LocaleSettings.setLocaleSync(AppLocale.en);
   });
 
-  Future<void> pump(WidgetTester tester, {required bool tv}) async {
+  Future<void> pump(WidgetTester tester, {required bool tv, bool debugBuild = false}) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1000, 2400);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -25,7 +25,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: monoTheme(MonoPalette.dark),
-        home: ReelSettingsScreen(tv: tv),
+        home: ReelSettingsScreen(tv: tv, debugBuild: debugBuild),
       ),
     );
     await tester.pumpAndSettle();
@@ -114,6 +114,39 @@ void main() {
     await tester.tap(find.widgetWithText(SwitchListTile, s.captions));
     await tester.pumpAndSettle();
     expect(settings.read(SettingsService.reelCaptions), isTrue);
+  });
+
+  group('hidden developer setting (V2-62)', () {
+    testWidgets('a release build hides it until debug logging is on', (tester) async {
+      for (final tv in [false, true]) {
+        await pump(tester, tv: tv);
+        expect(find.text(s.developer), findsNothing);
+        expect(find.text(s.developerTools), findsNothing);
+      }
+
+      await settings.write(SettingsService.enableDebugLogging, true);
+      for (final tv in [false, true]) {
+        await pump(tester, tv: tv);
+        expect(find.text(s.developerTools), findsOneWidget, reason: 'both devices, tv: $tv');
+      }
+    });
+
+    testWidgets('a debug build always shows it', (tester) async {
+      await pump(tester, tv: false, debugBuild: true);
+      expect(find.text(s.developerTools), findsOneWidget);
+    });
+
+    testWidgets('it starts off and its switch writes the overlay pref', (tester) async {
+      await settings.write(SettingsService.enableDebugLogging, true);
+      await pump(tester, tv: true);
+
+      final tile = find.widgetWithText(SwitchListTile, s.developerTools);
+      await tester.scrollUntilVisible(tile, 200);
+      expect(tester.widget<SwitchListTile>(tile).value, isFalse);
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(settings.read(SettingsService.reelDebugOverlay), isTrue);
+    });
   });
 
   test('every choice has its own label', () {
