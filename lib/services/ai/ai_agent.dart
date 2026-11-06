@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import '../../utils/app_logger.dart';
 import '../brain/history_brain.dart';
-import '../brain/history_profiles.dart';
 import '../library_index/index_database.dart';
 import '../library_index/library_index.dart';
 import '../trackers/trakt/trakt_client.dart';
@@ -10,6 +9,7 @@ import 'ai_history_tools.dart';
 import 'ai_key_store.dart';
 import 'ai_spend.dart';
 import 'ai_tools.dart';
+import 'ai_watch_state.dart';
 import 'claude_client.dart';
 
 /// Fork: what a running request is doing: a short step, or the answer's
@@ -138,7 +138,7 @@ How to work:
 - Ratings in the library are audience ratings (usually IMDb, 0-10). Brand-new titles often show 9-10 from a handful of votes; before calling a recent title top rated or popular, check a shortlist with get_ratings and prefer titles with many votes.
 - Only pick titles whose ids came back from the tools. Never invent ids or claim a title is available without a tool saying so.
 - Prefer one entry per title (the tools already merge 4K copies and the second server).
-- Recommendations are titles they haven't seen: leave out anything in their watching summary or marked watched, unless they ask for a rewatch or for titles they've seen.
+- Recommendations are titles they haven't seen: leave out anything in their watching summary or marked seen or watched, unless they ask for a rewatch or for titles they've seen.
 - Respect explicit limits: unwatched means unwatched; runtime limits; "not too long" means roughly under 2 hours.
 - Prefer films and shows from roughly the last 25 years unless the user asks for classics, a decade, or older titles; a few standout older picks are fine.
 - How many picks: let the request decide, up to 50. List-style asks ("every...", "all the X on my server", "a big list", a full franchise or filmography): 40-50. Broad or open-ended requests (a genre, a mood, an era, "something like X", "based on my history"): about 30-40; the library is big, so a broad request should normally fill a long row. Narrow requests (a specific title, a yes/no question, "a random X", tight constraints): only the titles that genuinely fit, even if that's one or two. Never pad a list with weak matches to reach a number.
@@ -177,6 +177,8 @@ Questions about the user's own watching:
       index: index,
       trakt: trakt,
       history: brain == null ? null : AiHistoryTools(brain: brain, index: index),
+      // Fork: the brain's watched state, loaded once for this ask.
+      watch: await WatchStates.load(brain),
     );
     final calls = <AiToolCall>[];
     var cost = 0.0;
@@ -374,22 +376,32 @@ Questions about the user's own watching:
       t == null ? unknown.add(p.id) : picks.add((title: t, reason: p.reason));
     }
     // A broad or list request that came back short is topped up from what
-    // the lookups already found (best first, as they ranked it), without
-    // another turn. Unwatched only, when the picks are.
+    // the model's own lookups found (find_titles and search_library, best
+    // first, as they ranked it), without another turn. Unwatched only, when
+    // the picks are. Whatever it leaves out is left out of this answer
+    // only: nothing is remembered for the next ask. A row that runs out
+    // stays short.
     final target = switch (tools.scope) {
       'broad' => 30,
       'list' => 40,
       _ => 0,
     };
     if (picks.isNotEmpty && picks.length < target) {
-      final unwatchedOnly = picks.where((p) => p.title.lastViewedAt == null).length >= picks.length * 0.8;
+      final watch = tools.watch;
+      final unwatchedOnly = picks.where((p) => watch.of(p.title).unwatched).length >= picks.length * 0.8;
+      // Kids' libraries only when the model chose from one itself.
+      final kidsOk = picks.any((p) => _isKids(p.title));
       final groups = {for (final p in picks) p.title.groupKey};
       final before = picks.length;
-      for (final id in tools.candidates) {
+      for (final id in tools.topUpCandidates) {
         if (picks.length >= target) break;
         final t = await (db.select(db.indexTitles)..where((r) => r.id.equals(id))).getSingleOrNull();
-        if (t == null || (t.audienceRating ?? 7) < 6.5) continue;
-        if ((unwatchedOnly && await _watched(t)) || !groups.add(t.groupKey)) continue;
+        if (t == null || (!kidsOk && _isKids(t))) continue;
+        // Unrated is unknown, not bad: many anime, new and niche titles
+        // have no audience rating.
+        final rating = t.audienceRating;
+        if (rating != null && rating < topUpRatingFloor) continue;
+        if ((unwatchedOnly && !watch.of(t).unwatched) || !groups.add(t.groupKey)) continue;
         picks.add((title: t, reason: ''));
       }
       appLogger.d('AI: topped up ${picks.length - before} picks from the lookups (${tools.scope})');
@@ -418,13 +430,10 @@ Questions about the user's own watching:
     );
   }
 
-  /// Watched here or (via the history brain) anywhere, e.g. on Trakt.
-  Future<bool> _watched(IndexedTitle t) async {
-    if (t.lastViewedAt != null) return true;
-    final brain = this.brain;
-    if (brain == null) return false;
-    return (await brain.store).profile(LibraryRef.of(t).titleId)?.watched ?? false;
-  }
+  /// A top-up adds no title rated below this (unrated titles pass).
+  static const double topUpRatingFloor = 6.5;
+
+  static bool _isKids(IndexedTitle t) => t.libraryTitle.toLowerCase().contains('kids');
 
   void close() => _client?.close();
 }

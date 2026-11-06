@@ -214,4 +214,60 @@ void main() {
     stalledNativeExit.complete({'response': 'exit'});
     await tester.pump();
   });
+
+  group('root Back', () {
+    const appExitChannel = MethodChannel('com.plezy/app_exit');
+    late List<String> nativeCalls;
+
+    setUp(() {
+      nativeCalls = [];
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(appExitChannel, (call) async {
+        nativeCalls.add(call.method);
+        return true;
+      });
+    });
+
+    tearDown(() => binding.defaultBinaryMessenger.setMockMethodCallHandler(appExitChannel, null));
+
+    test('on Android TV moves the task to the back instead of finishing it', () async {
+      var exits = 0;
+      final accepted = await AppExitService.exitFromRootBack(
+        isAndroidTvForTesting: true,
+        exitApplicationForTesting: (_, _) async {
+          exits++;
+          return ui.AppExitResponse.exit;
+        },
+      );
+      expect(accepted, isTrue);
+      expect(nativeCalls, ['moveToBack']);
+      expect(exits, 0);
+    });
+
+    test('everywhere else still exits', () async {
+      var exits = 0;
+      await AppExitService.exitFromRootBack(
+        isAndroidTvForTesting: false,
+        exitApplicationForTesting: (_, _) async {
+          exits++;
+          return ui.AppExitResponse.exit;
+        },
+      );
+      expect(nativeCalls, isNot(contains('moveToBack')));
+      expect(exits, 1);
+    });
+
+    test('a native side without moveToBack falls back to a real exit', () async {
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(appExitChannel, null);
+      var exits = 0;
+      PlatformDetector.debugSetIsDesktopOSOverride(true);
+      // requestExit's desktop leg stands in for the fallback; the injected
+      // exit is not threaded through moveToBack, so count the platform call.
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'System.exitApplication') exits++;
+        return {'response': 'exit'};
+      });
+      expect(await AppExitService.moveToBack(), isTrue);
+      expect(exits, 1);
+    });
+  });
 }

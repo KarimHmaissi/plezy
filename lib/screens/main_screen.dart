@@ -1703,10 +1703,12 @@ class _MainScreenState extends State<MainScreen>
       _lastBackPressAt = null;
       // AppExitService.requestExit is a required exit on desktop, which skips
       // the root exit observer's teardown; quit the way the close button does.
+      // Android TV keeps the process warm behind the launcher instead of
+      // finishing it; Settings has Quit Plezy for a real exit.
       if (PlatformDetector.isDesktopOS()) {
         _requestDesktopExit();
       } else {
-        unawaited(AppExitService.requestExit());
+        unawaited(AppExitService.exitFromRootBack());
       }
       return KeyEventResult.handled;
     }

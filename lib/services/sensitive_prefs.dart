@@ -13,6 +13,8 @@
 ///   AniList, Simkl, Trakt and MDBList live here in plaintext.
 /// * Seerr sessions — `SeerrSessionStore` persists a raw `connect.sid` cookie
 ///   alongside a vault-protected password.
+/// * [aiApiKeyPref] and [tmdbApiKeyPref] — the Anthropic and TMDB keys, each
+///   protected with `CredentialVault`.
 /// * [legacyPlexTokenPref] — the pre-connection-registry Plex token slot. It is
 ///   drained by the connection migration but can linger on old installs.
 ///
@@ -37,6 +39,9 @@ const String credentialVaultKeyPref = 'credential_vault_key_v1';
 
 /// The AI helper's Anthropic API key (`AiKeyStore`).
 const String aiApiKeyPref = 'ai_anthropic_api_key';
+
+/// The TMDB API key or Read Access Token (`TmdbKeyStore`).
+const String tmdbApiKeyPref = 'tmdb_api_key';
 
 /// Legacy single-slot Plex token, superseded by the connection registry.
 const String legacyPlexTokenPref = 'plex_token';
@@ -80,4 +85,5 @@ bool isSensitivePrefKey(String key) =>
     key == credentialVaultKeyPref ||
     key == legacyPlexTokenPref ||
     key == aiApiKeyPref ||
+    key == tmdbApiKeyPref ||
     profileScopedCredentialBaseKey(key) != null;

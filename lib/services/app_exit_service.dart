@@ -43,6 +43,30 @@ class AppExitService {
     return true;
   }
 
+  /// Sends Plezy's task behind the launcher without finishing it, so the next
+  /// launch (Arc, a `plezy://play` link, the remote's Home row) resumes the
+  /// warm process instead of a cold start. Android only: a host without the
+  /// method falls back to [requestExit].
+  static Future<bool> moveToBack() async {
+    try {
+      return await _channel.invokeMethod<bool>('moveToBack') ?? true;
+    } on MissingPluginException {
+      return requestExit();
+    } on PlatformException {
+      return requestExit();
+    }
+  }
+
+  /// What Back at the home root does: on Android TV the app stays warm behind
+  /// the launcher ([moveToBack]); everywhere else it exits ([requestExit]).
+  /// Explicit quits (Settings' Quit Plezy, startup repair, profile picker)
+  /// call [requestExit] directly.
+  static Future<bool> exitFromRootBack({bool? isAndroidTvForTesting, AppExitApplication? exitApplicationForTesting}) {
+    final androidTv = isAndroidTvForTesting ?? (Platform.isAndroid && PlatformDetector.isTVDevice());
+    if (androidTv) return moveToBack();
+    return requestExit(exitApplicationForTesting: exitApplicationForTesting);
+  }
+
   /// Awaits the app's exit observers before requesting native termination.
   ///
   /// A cancelable native request is not a teardown barrier: Windows returns

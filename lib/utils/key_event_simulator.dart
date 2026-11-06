@@ -54,6 +54,7 @@ class KeyEventSimulatorController {
   static const _maxFocusSettleFrames = 2;
 
   final Map<LogicalKeyboardKey, FocusNode> _heldFocusNodes = {};
+  LogicalKeyboardKey? _repeatingKey;
   Timer? _repeatTimer;
   bool _disposed = false;
 
@@ -63,7 +64,8 @@ class KeyEventSimulatorController {
     void Function(String)? log,
   }) : _log = log ?? _logKeySimulator;
 
-  bool get isRepeating => _repeatTimer != null;
+  /// Whether a key started by [startKeyRepeat] is still held.
+  bool get isRepeating => _repeatingKey != null;
 
   /// Simulates a full key press (down and up) in one frame.
   void simulateKeyPress(LogicalKeyboardKey logicalKey) {
@@ -118,20 +120,50 @@ class KeyEventSimulatorController {
     }, targetsPrimaryFocus: () => !keys.every(_heldFocusNodes.containsKey));
   }
 
-  /// Starts with an immediate press, then repeats after [initialDelay].
+  /// Holds [logicalKey] the way a hardware key does: one key down now, a
+  /// [KeyRepeatEvent] every [interval] once [initialDelay] has passed, and a
+  /// single key up from [stopKeyRepeat]. Each event goes to the primary focus
+  /// of its moment, so repeats walk a list as focus moves along it, and a
+  /// handler that commits on release (the player's coalesced seek) commits once.
   void startKeyRepeat(LogicalKeyboardKey logicalKey, {required Duration initialDelay, required Duration interval}) {
     if (_disposed) return;
     stopKeyRepeat();
-    simulateKeyPress(logicalKey);
+    if (TextInputDiagnostics.enabled) {
+      _log('startKeyRepeat scheduled logical=${logicalKey.keyLabel}/${logicalKey.keyId}');
+    }
+    _repeatingKey = logicalKey;
+    final physicalKey = _physicalKeyFor(logicalKey);
+    _schedule((focusNode) => _dispatchKeyEvent(focusNode, _keyDownEvent(logicalKey, physicalKey)));
     _repeatTimer = Timer(initialDelay, () {
       if (_disposed) return;
-      _repeatTimer = Timer.periodic(interval, (_) => simulateKeyPress(logicalKey));
+      _repeatTimer = Timer.periodic(interval, (_) {
+        _schedule((focusNode) => _dispatchKeyEvent(focusNode, _keyRepeatEvent(logicalKey, physicalKey)));
+      });
     });
   }
 
+  /// Releases the key held by [startKeyRepeat] with exactly one key up, sent to
+  /// the primary focus at release. A no-op when nothing is held.
   void stopKeyRepeat() {
     _repeatTimer?.cancel();
     _repeatTimer = null;
+    final logicalKey = _repeatingKey;
+    _repeatingKey = null;
+    if (logicalKey == null || _disposed) return;
+    if (TextInputDiagnostics.enabled) {
+      _log('stopKeyRepeat scheduled logical=${logicalKey.keyLabel}/${logicalKey.keyId}');
+    }
+    scheduleFrameIfIdle();
+    _afterFocusSettles(() {
+      final event = _keyUpEvent(logicalKey, _physicalKeyFor(logicalKey));
+      final focusNode = FocusManager.instance.primaryFocus;
+      if (focusNode == null) {
+        // Undelivered, but the release still happened.
+        observeSimulatedKeyEvent(event);
+        return;
+      }
+      _dispatchKeyEvent(focusNode, event);
+    });
   }
 
   void clearHeldKeys() {
@@ -207,6 +239,15 @@ class KeyEventSimulatorController {
 
   KeyDownEvent _keyDownEvent(LogicalKeyboardKey logicalKey, PhysicalKeyboardKey physicalKey) {
     return KeyDownEvent(
+      physicalKey: physicalKey,
+      logicalKey: logicalKey,
+      timeStamp: Duration(milliseconds: DateTime.now().millisecondsSinceEpoch),
+      deviceType: deviceType,
+    );
+  }
+
+  KeyRepeatEvent _keyRepeatEvent(LogicalKeyboardKey logicalKey, PhysicalKeyboardKey physicalKey) {
+    return KeyRepeatEvent(
       physicalKey: physicalKey,
       logicalKey: logicalKey,
       timeStamp: Duration(milliseconds: DateTime.now().millisecondsSinceEpoch),

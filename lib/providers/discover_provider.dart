@@ -6,6 +6,7 @@ import '../media/ids.dart';
 import '../media/media_hub.dart';
 import '../media/library_change_event.dart';
 import '../media/media_item.dart';
+import '../media/media_kind.dart';
 import '../media/media_server_client.dart';
 import '../mixins/disposable_change_notifier_mixin.dart';
 import '../mixins/event_aware.dart';
@@ -14,6 +15,7 @@ import '../services/data_aggregation_service.dart';
 import '../services/system_shelf_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/coalesced_load_coordinator.dart';
+import '../utils/continue_watching_logo_notifier.dart';
 import '../utils/deletion_notifier.dart';
 import '../utils/media_event_keys.dart';
 import '../utils/global_key_utils.dart';
@@ -86,6 +88,12 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// because nothing pushes library changes to the client (#1646).
   static const Duration staleAfter = Duration(minutes: 15);
 
+  /// How long a provisional next-episode row (see [_putProvisionalNextEpisode])
+  /// waits for the server's on-deck to name that show before it is dropped.
+  /// A safety net for a row the server never confirms; a refresh that names
+  /// the show settles it long before this.
+  static const Duration provisionalNextEpisodeTtl = Duration(hours: 6);
+
   DiscoverProvider(
     this._multiServer,
     this._hiddenLibraries,
@@ -122,14 +130,15 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     _hiddenLibraries.addListener(_onHiddenLibrariesChanged);
     _lastSeenLibraryOrderKeys = _libraryOrderKeys();
     _libraries.addListener(_onLibrariesChanged);
-    _watchStateSubscription = subscribeToHierarchicalEvents<WatchStateEvent>(
-      notifier: WatchStateNotifier(),
-      mounted: () => !isDisposed,
-      serverId: () => null,
-      globalKeys: () => _watchedGlobalKeys,
-      itemIds: () => _watchedIds,
-      onEvent: _onWatchStateChanged,
-    );
+    // The usual on-screen filter (see [_watchStateEventIsFiltered]), except
+    // that a watched event carrying the series' next episode always gets
+    // through: it is what puts a show with no row yet (started from its page,
+    // or a row the server lagged on) onto the row.
+    _watchStateSubscription = WatchStateNotifier().stream.listen((event) {
+      if (isDisposed) return;
+      if (_watchStateEventIsFiltered(event) && _provisionalNextEpisode(event) == null) return;
+      _onWatchStateChanged(event);
+    });
     _deletionSubscription = subscribeToHierarchicalEvents<DeletionEvent>(
       notifier: DeletionNotifier(),
       mounted: () => !isDisposed,
@@ -139,6 +148,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       onEvent: _onDeletion,
     );
     _libraryEventSubscription = LibraryContentNotifier().stream.listen(_onLibraryContentChanged);
+    _logoSubscription = ContinueWatchingLogoNotifier().stream.listen(_onContinueWatchingLogos);
   }
 
   final MultiServerProvider _multiServer;
@@ -222,8 +232,26 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   StreamSubscription<WatchStateEvent>? _watchStateSubscription;
   StreamSubscription<DeletionEvent>? _deletionSubscription;
+  StreamSubscription<ContinueWatchingLogoPatch>? _logoSubscription;
+
+  /// Show logos a server resolved after its Continue Watching rows returned
+  /// ([ContinueWatchingLogoPatch]), by [MediaItem.seriesGlobalKey]. Kept so
+  /// rows committed after their patch landed (another server's leg was still
+  /// in flight, or a later refresh) get the logo too instead of flashing the
+  /// title first.
+  final Map<String, String> _backfilledLogos = {};
 
   List<MediaItem> _onDeck = [];
+
+  /// Continue Watching rows put on screen from a watched event's next episode
+  /// before the server's on-deck has caught up, keyed by the row's global key.
+  /// A refresh keeps such a row until it names that show (or the row is
+  /// [provisionalNextEpisodeTtl] old); see [_withProvisionalRows].
+  final Map<String, ({String seriesKey, String watchedGlobalKey, DateTime addedAt})> _provisionalRows = {};
+
+  /// Whether [item]'s row is provisional: put there from the player's queue
+  /// and not yet confirmed by the server's on-deck.
+  bool isProvisionalContinueWatchingRow(MediaItem item) => _provisionalRows.containsKey(item.globalKey);
 
   /// [ContinueWatchingRows.copies] for the rows the last on-deck fetch
   /// returned, widened by [loadAllContinueWatching]. Lookups go through
@@ -672,7 +700,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
           limit: _continueWatchingProbeLimit,
         );
         if (isDisposed) return;
-        _applyOnDeck(mergedOnDeck.items, copies: mergedOnDeck.copies);
+        _applyOnDeck(mergedOnDeck.items, copies: mergedOnDeck.copies, freshRows: freshOnDeck.items);
         // The stored list is already trimmed, so the merge can't see old items
         // past the cap — a previously-true "more" affordance stays true.
         if (hadMore) _hasMoreContinueWatching = true;
@@ -912,10 +940,69 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     if (updatedHubs != null) _replaceHubs(updatedHubs);
   }
 
-  void _applyOnDeck(List<MediaItem> fetched, {required Map<String, List<MediaItem>> copies}) {
-    final hasMore = fetched.length > continueWatchingPreviewLimit;
+  /// [freshRows] are the rows the server actually returned, when [fetched]
+  /// also carries rows already on screen (the delta merge); only fresh rows
+  /// can confirm a provisional one.
+  void _applyOnDeck(
+    List<MediaItem> fetched, {
+    required Map<String, List<MediaItem>> copies,
+    List<MediaItem>? freshRows,
+  }) {
+    final rows = _withProvisionalRows(fetched, copies, freshRows ?? fetched);
+    final hasMore = rows.length > continueWatchingPreviewLimit;
     _continueWatchingCopies = copies;
-    _replaceOnDeck(hasMore ? fetched.take(continueWatchingPreviewLimit).toList() : fetched, hasMore: hasMore);
+    _replaceOnDeck(hasMore ? rows.take(continueWatchingPreviewLimit).toList() : rows, hasMore: hasMore);
+  }
+
+  /// [fetched] with the provisional rows the server hasn't confirmed yet put
+  /// back in their current places.
+  ///
+  /// A row is settled, and its record dropped, once a fresh row names its
+  /// show — the same episode (confirmed) or a different one (the server's
+  /// pick wins). Until then a refresh that leaves the show out is lagging the
+  /// server's on-deck, not contradicting it: dropping the row then would be
+  /// a remove-then-return flicker on the row and on the launcher shelf. The
+  /// just-watched episode coming back in such a refresh is the same lag and
+  /// is left out. A row something else took off screen (removal, deletion,
+  /// hidden library) is forgotten, and one older than
+  /// [provisionalNextEpisodeTtl] is dropped.
+  List<MediaItem> _withProvisionalRows(
+    List<MediaItem> fetched,
+    Map<String, List<MediaItem>> copies,
+    List<MediaItem> freshRows,
+  ) {
+    if (_provisionalRows.isEmpty) return fetched;
+    final now = _now();
+    final freshKeys = <String>{};
+    final freshSeriesEpisodes = <String, Set<String>>{};
+    for (final row in freshRows) {
+      for (final item in [row, ...?copies[row.globalKey]]) {
+        freshKeys.add(item.globalKey);
+        final series = item.seriesGlobalKey;
+        if (series != null) (freshSeriesEpisodes[series] ??= {}).add(item.globalKey);
+      }
+    }
+
+    final rows = List<MediaItem>.of(fetched);
+    for (final MapEntry(key: globalKey, value: record) in _provisionalRows.entries.toList()) {
+      final onScreenIndex = _onDeck.indexWhere((item) => item.globalKey == globalKey);
+      final named = (freshSeriesEpisodes[record.seriesKey] ?? const <String>{})
+          .where((key) => key != record.watchedGlobalKey)
+          .isNotEmpty;
+      final expired = now.difference(record.addedAt) >= provisionalNextEpisodeTtl;
+      if (onScreenIndex == -1 || named || expired) {
+        _provisionalRows.remove(globalKey);
+        if (!freshKeys.contains(globalKey)) rows.removeWhere((item) => item.globalKey == globalKey);
+        if (expired && !named && onScreenIndex != -1) {
+          appLogger.d('DiscoverProvider: dropping unconfirmed provisional next episode $globalKey');
+        }
+        continue;
+      }
+      rows.removeWhere((item) => item.globalKey == record.watchedGlobalKey);
+      if (rows.any((item) => item.globalKey == globalKey)) continue;
+      rows.insert(onScreenIndex.clamp(0, rows.length), _onDeck[onScreenIndex]);
+    }
+    return rows;
   }
 
   /// Drop copies failing [keep] from every row's copy group; a group left
@@ -953,7 +1040,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   }
 
   void _replaceOnDeck(List<MediaItem> onDeck, {required bool hasMore}) {
-    _onDeck = onDeck;
+    _onDeck = _withBackfilledLogos(onDeck) ?? onDeck;
     _hasMoreContinueWatching = hasMore;
     ++_commitRevision;
   }
@@ -963,7 +1050,42 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     ++_commitRevision;
   }
 
+  /// [items] with every logo-less row whose show is in [_backfilledLogos]
+  /// given that logo, in the same order; null when no row changes.
+  List<MediaItem>? _withBackfilledLogos(List<MediaItem> items) {
+    if (_backfilledLogos.isEmpty) return null;
+    List<MediaItem>? patched;
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item.clearLogoPath?.isNotEmpty ?? false) continue;
+      final logo = _backfilledLogos[item.seriesGlobalKey];
+      if (logo == null) continue;
+      (patched ??= List.of(items))[i] = item.copyWith(clearLogoPath: logo);
+    }
+    return patched;
+  }
+
   // --- Event reactions -----------------------------------------------------
+
+  /// Fill the logos a server resolved late into the visible row in place:
+  /// same rows, same order, same ids, so the hero and focus stay put. Not a
+  /// commit (no [_commitRevision] bump) — it lands while the load that
+  /// produced the rows may still be awaiting hubs, and must not make that
+  /// pass look superseded.
+  void _onContinueWatchingLogos(ContinueWatchingLogoPatch patch) {
+    if (isDisposed) return;
+    _backfilledLogos.addAll(patch.logosBySeriesGlobalKey);
+    final onDeck = _withBackfilledLogos(_onDeck);
+    Map<String, List<MediaItem>>? copies;
+    for (final MapEntry(:key, :value) in _continueWatchingCopies.entries) {
+      final patched = _withBackfilledLogos(value);
+      if (patched != null) (copies ??= Map.of(_continueWatchingCopies))[key] = patched;
+    }
+    if (copies != null) _continueWatchingCopies = copies;
+    if (onDeck == null) return;
+    _onDeck = onDeck;
+    safeNotifyListeners();
+  }
 
   /// Watch on-deck items and their parent shows/seasons (an episode's watch
   /// flip changes what Continue Watching should show for its series), plus
@@ -974,7 +1096,55 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   Iterable<MediaItem> get _continueWatchingCopyItems => _continueWatchingCopies.values.expand((copies) => copies);
 
+  /// Whether the hierarchical subscription drops [event] — it concerns no row
+  /// on screen. Mirrors [subscribeToHierarchicalEvents]' filter.
+  bool _watchStateEventIsFiltered(WatchStateEvent event) {
+    final globalKeys = _watchedGlobalKeys;
+    if (globalKeys != null) return !event.affectsAnyGlobalKey(globalKeys);
+    final ids = _watchedIds;
+    return ids != null && !event.affectsAnyOf(ids);
+  }
+
+  /// [event]'s next episode when it can stand in for the server's on-deck:
+  /// an unwatched episode of the watched episode's own show on the same
+  /// server. Anything else (a playlist's next title, an already watched
+  /// episode the server would skip) waits for the refresh.
+  MediaItem? _provisionalNextEpisode(WatchStateEvent event) {
+    final next = event.nextItem;
+    if (next == null || event.changeType != WatchStateChangeType.watched) return null;
+    if (next.kind != MediaKind.episode || next.isWatched || next.globalKey == event.globalKey) return null;
+    if (next.serverId != event.serverId.value || next.seriesGlobalKey == null) return null;
+    final showId = next.grandparentId;
+    if (showId == null || !event.parentChain.contains(showId)) return null;
+    return next;
+  }
+
+  /// Swap the just-watched episode's row for its show's next episode at the
+  /// head of the row (it is the show watched most recently), and publish the
+  /// shelf now, so the launcher's Watch Next leads with it when the viewer
+  /// presses Home. The background refresh that follows reconciles it; see
+  /// [_withProvisionalRows].
+  void _putProvisionalNextEpisode(WatchStateEvent event, MediaItem next, bool Function(MediaItem item) evicted) {
+    final seriesKey = next.seriesGlobalKey!;
+    bool replaced(MediaItem item) => evicted(item) || item.seriesGlobalKey == seriesKey;
+    _keepContinueWatchingCopies((item) => !replaced(item));
+    _provisionalRows.removeWhere((_, record) => record.seriesKey == seriesKey);
+    _provisionalRows[next.globalKey] = (seriesKey: seriesKey, watchedGlobalKey: event.globalKey, addedAt: _now());
+    final rows = [next, ..._onDeck.where((item) => !replaced(item))];
+    final hasMore = _hasMoreContinueWatching || rows.length > continueWatchingPreviewLimit;
+    _replaceOnDeck(rows.take(continueWatchingPreviewLimit).toList(), hasMore: hasMore);
+    appLogger.d('DiscoverProvider: provisional next episode ${next.globalKey} after ${event.globalKey}');
+    safeNotifyListeners();
+    unawaited(_syncSystemShelf(_onDeck));
+  }
+
   void _onWatchStateChanged(WatchStateEvent event) {
+    // The just-watched episode is unwatched again, or being rewatched: a
+    // refresh may show it once more.
+    if (event.changeType == WatchStateChangeType.unwatched ||
+        (event.changeType == WatchStateChangeType.progressUpdate && event.isNowWatched != true)) {
+      _provisionalRows.removeWhere((_, record) => record.watchedGlobalKey == event.globalKey);
+    }
     if (event.changeType == WatchStateChangeType.progressUpdate && event.isNowWatched != true) {
       final viewOffset = event.viewOffset;
       final index = _onDeck.indexWhere((item) => item.globalKey == event.globalKey);
@@ -1002,11 +1172,15 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       // it. Marking a season or show watched takes its on-deck episode with
       // it, matching the parent-aware filter this subscription uses — the
       // series' successor comes back from the refetch (#1812).
-      _evictFromOnDeck(
-        (item) =>
-            item.serverId == serverId &&
-            (item.id == event.itemId || item.parentId == event.itemId || item.grandparentId == event.itemId),
-      );
+      bool evicted(MediaItem item) =>
+          item.serverId == serverId &&
+          (item.id == event.itemId || item.parentId == event.itemId || item.grandparentId == event.itemId);
+      final next = _provisionalNextEpisode(event);
+      if (next != null) {
+        _putProvisionalNextEpisode(event, next, evicted);
+      } else {
+        _evictFromOnDeck(evicted);
+      }
     }
     unawaited(refreshContinueWatching());
   }
@@ -1185,6 +1359,8 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     _deletionSubscription = null;
     _libraryEventSubscription?.cancel();
     _libraryEventSubscription = null;
+    _logoSubscription?.cancel();
+    _logoSubscription = null;
     _libraryEventPacer.dispose();
     _loadCoordinator.dispose();
     _pendingSystemShelfItems = null;

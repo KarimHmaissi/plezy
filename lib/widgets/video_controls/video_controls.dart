@@ -573,6 +573,10 @@ class PlexVideoControls extends StatefulWidget {
   final bool serverSupportsTranscoding;
   final bool isTranscoding;
   final bool isOfflinePlayback;
+
+  /// The signal line ("23.976 matched · Direct Play · E-AC3 5.1") for the
+  /// performance overlay, read each time the overlay refreshes.
+  final String? Function()? signalLine;
   final List<MediaAudioTrack> sourceAudioTracks;
   final int? selectedAudioStreamId;
   final List<MediaSubtitleTrack> sourceSubtitleTracks;
@@ -715,6 +719,7 @@ class PlexVideoControls extends StatefulWidget {
     this.serverSupportsTranscoding = false,
     this.isTranscoding = false,
     this.isOfflinePlayback = false,
+    this.signalLine,
     this.sourceAudioTracks = const [],
     this.selectedAudioStreamId,
     this.sourceSubtitleTracks = const [],
@@ -1507,6 +1512,7 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
                               player: widget.player,
                               active: performanceOverlayVisible,
                               isTranscoding: widget.isLive || widget.isOfflinePlayback ? null : widget.isTranscoding,
+                              signalLine: widget.signalLine,
                             ),
                           ),
                         ),

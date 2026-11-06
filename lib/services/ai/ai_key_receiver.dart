@@ -6,10 +6,62 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import '../../utils/app_logger.dart';
+import '../tmdb/tmdb_key_store.dart';
 import 'ai_key_store.dart';
 
 /// How a key hand-over ended.
 enum AiKeyReceiveResult { saved, savedUnchecked, rejected, tooManyAttempts, timedOut, cancelled }
+
+/// Which key the page asks for: its wording, format check, and how the key
+/// is checked and saved.
+class KeyReceiverKind {
+  const KeyReceiverKind({
+    required this.service,
+    required this.pageTitle,
+    required this.fieldLabel,
+    required this.placeholder,
+    required this.formatError,
+    required this.looksValid,
+    required this.check,
+    required this.save,
+  });
+
+  /// Who checks the key, for "Anthropic rejected that key".
+  final String service;
+  final String pageTitle;
+  final String fieldLabel;
+  final String placeholder;
+  final String formatError;
+  final bool Function(String key) looksValid;
+  final Future<AiKeyCheck> Function(String key) check;
+  final Future<void> Function(String key) save;
+
+  static const KeyReceiverKind anthropic = KeyReceiverKind(
+    service: 'Anthropic',
+    pageTitle: 'AI key',
+    fieldLabel: 'Anthropic API key',
+    placeholder: 'sk-ant-…',
+    formatError: 'That doesn\'t look like an Anthropic key (they start with sk-ant-).',
+    looksValid: _looksLikeAnthropicKey,
+    check: AiKeyStore.check,
+    save: AiKeyStore.write,
+  );
+
+  static const KeyReceiverKind tmdb = KeyReceiverKind(
+    service: 'TMDB',
+    pageTitle: 'TMDB key',
+    fieldLabel: 'TMDB API key or Read Access Token',
+    placeholder: '32-character API key or eyJ… token',
+    formatError:
+        'That doesn\'t look like a TMDB key. Use the 32-character API key or the long API Read Access Token '
+        'from themoviedb.org ▸ Settings ▸ API.',
+    looksValid: TmdbKeyStore.looksValid,
+    check: TmdbKeyStore.check,
+    save: TmdbKeyStore.write,
+  );
+
+  static bool _looksLikeAnthropicKey(String key) => key.startsWith('sk-ant-');
+}
 
 /// A one-time page on the local network for typing or pasting the API key
 /// on another device (a phone or laptop browser) instead of on the TV.
@@ -19,12 +71,15 @@ enum AiKeyReceiveResult { saved, savedUnchecked, rejected, tooManyAttempts, time
 /// down after one successful hand-over, [maxAttempts] wrong codes, or
 /// [lifetime]. The key is never logged.
 class AiKeyReceiver {
-  AiKeyReceiver._(this._server, this.code, this.address, this._checkKey, this._saveKey);
+  AiKeyReceiver._(this._server, this.code, this.address, this.kind, this._checkKey, this._saveKey);
 
   static const int maxAttempts = 3;
   static const Duration lifetime = Duration(minutes: 5);
 
   final HttpServer _server;
+
+  /// Which key this page receives.
+  final KeyReceiverKind kind;
   final Future<AiKeyCheck> Function(String key) _checkKey;
   final Future<void> Function(String key) _saveKey;
 
@@ -41,6 +96,7 @@ class AiKeyReceiver {
 
   /// Start listening, or null when this device has no private LAN address.
   static Future<AiKeyReceiver?> start({
+    KeyReceiverKind kind = KeyReceiverKind.anthropic,
     @visibleForTesting InternetAddress? bindTo,
     @visibleForTesting Future<AiKeyCheck> Function(String key)? checkKey,
     @visibleForTesting Future<void> Function(String key)? saveKey,
@@ -53,8 +109,9 @@ class AiKeyReceiver {
       server,
       code,
       'http://${ip.address}:${server.port}',
-      checkKey ?? AiKeyStore.check,
-      saveKey ?? AiKeyStore.write,
+      kind,
+      checkKey ?? kind.check,
+      saveKey ?? kind.save,
     );
     receiver._listen();
     return receiver;
@@ -127,13 +184,13 @@ class AiKeyReceiver {
         return;
       }
       final key = (fields['key'] ?? '').trim();
-      if (!key.startsWith('sk-ant-')) {
-        _page(response, _formHtml(error: 'That doesn\'t look like an Anthropic key (they start with sk-ant-).'));
+      if (!kind.looksValid(key)) {
+        _page(response, _formHtml(error: kind.formatError));
         return;
       }
       final check = await _checkKey(key);
       if (check == AiKeyCheck.invalid) {
-        _page(response, _messageHtml('Anthropic rejected that key. Nothing was saved. Start again from Plezy.'));
+        _page(response, _messageHtml('${kind.service} rejected that key. Nothing was saved. Start again from Plezy.'));
         _finish(AiKeyReceiveResult.rejected);
         return;
       }
@@ -143,13 +200,13 @@ class AiKeyReceiver {
         _messageHtml(
           check == AiKeyCheck.ok
               ? 'Key saved on the TV and working. You can close this page.'
-              : 'Key saved on the TV. Plezy couldn\'t reach Anthropic to check it; it will be checked on first use.',
+              : 'Key saved on the TV. Plezy couldn\'t reach ${kind.service} to check it; it will be checked on first use.',
         ),
       );
       _finish(check == AiKeyCheck.ok ? AiKeyReceiveResult.saved : AiKeyReceiveResult.savedUnchecked);
     } catch (e) {
       // Never include the request in the log.
-      appLogger.w('AI key receiver: request failed (${e.runtimeType})');
+      appLogger.w('Key receiver (${kind.service}): request failed (${e.runtimeType})');
       response.statusCode = HttpStatus.internalServerError;
     } finally {
       await response.close();
@@ -167,22 +224,26 @@ class AiKeyReceiver {
   String _shell(String content) =>
       '<!doctype html><html><head><meta charset="utf-8">'
       '<meta name="viewport" content="width=device-width,initial-scale=1">'
-      '<title>Plezy · API key</title><style>'
+      '<title>Plezy · ${kind.pageTitle}</title><style>'
       'body{font-family:system-ui,sans-serif;background:#111;color:#eee;max-width:520px;margin:40px auto;padding:0 16px}'
       'input{width:100%;box-sizing:border-box;font-size:18px;padding:10px;margin:6px 0 16px;border-radius:8px;border:1px solid #555;background:#222;color:#eee}'
       'button{font-size:18px;padding:10px 20px;border-radius:8px;border:0;background:#e5a00d;color:#111}'
-      '.err{color:#ff8a80}</style></head><body><h2>Plezy · AI key</h2>$content</body></html>';
+      '.err{color:#ff8a80}</style></head><body><h2>Plezy · ${kind.pageTitle}</h2>$content</body></html>';
 
   String _formHtml({String? error}) => _shell(
     '${error == null ? '' : '<p class="err">${const HtmlEscape().convert(error)}</p>'}'
     '<form method="post" autocomplete="off">'
     '<label>Code shown on the TV<input name="code" inputmode="numeric" maxlength="6" required></label>'
-    '<label>Anthropic API key<input name="key" type="password" required placeholder="sk-ant-…"></label>'
+    '<label>${_escape(kind.fieldLabel)}<input name="key" type="password" required '
+    'placeholder="${_escapeAttribute(kind.placeholder)}"></label>'
     '<button type="submit">Send to Plezy</button></form>'
     '<p>The key goes straight to the TV over your home network and is stored encrypted there.</p>',
   );
 
-  String _messageHtml(String message) => _shell('<p>${const HtmlEscape().convert(message)}</p>');
+  String _messageHtml(String message) => _shell('<p>${_escape(message)}</p>');
+
+  static String _escape(String text) => const HtmlEscape().convert(text);
+  static String _escapeAttribute(String text) => const HtmlEscape(HtmlEscapeMode.attribute).convert(text);
 
   void cancel() => _finish(AiKeyReceiveResult.cancelled);
 

@@ -399,3 +399,38 @@ internal class PreviousExitReportStore(
     return report.toMap()
   }
 }
+
+/**
+ * Counts this package's low-memory kills in the platform's exit history
+ * (ApplicationExitInfo keeps a bounded number of recent records per package).
+ * Only Plezy's own exits are visible here: reading another package's history
+ * needs the DUMP permission, so other apps' kill counts come from
+ * `adb shell dumpsys activity exit-info`.
+ *
+ * "Background" is any importance below perceptible (230), the same line the
+ * Dart previous-exit report draws. [sinceTimestamp] is the newest exit the
+ * previous summary saw, so `...New` counts what happened since that launch.
+ */
+internal object LowMemoryKillCounter {
+  private const val REASON_LOW_MEMORY = 3
+  private const val IMPORTANCE_PERCEPTIBLE = 230
+
+  fun summarize(records: List<HistoricalExitRecord>, sinceTimestamp: Long?): Map<String, Any> {
+    val background = records.filter { it.importance > IMPORTANCE_PERCEPTIBLE }
+    val lowMemoryBackground = background.filter { it.reason == REASON_LOW_MEMORY }
+    val isNew = { record: HistoricalExitRecord -> sinceTimestamp == null || record.timestamp > sinceTimestamp }
+    return buildMap {
+      put("exitsInHistory", records.size)
+      put("lowMemoryBackground", lowMemoryBackground.size)
+      put("lowMemoryBackgroundNew", lowMemoryBackground.count(isNew))
+      put(
+        "lowMemoryForeground",
+        records.count { it.reason == REASON_LOW_MEMORY && it.importance <= IMPORTANCE_PERCEPTIBLE }
+      )
+      put("otherBackground", background.size - lowMemoryBackground.size)
+      put("firstSummary", sinceTimestamp == null)
+      records.minOfOrNull { it.timestamp }?.let { put("oldestTimestamp", it) }
+      records.maxOfOrNull { it.timestamp }?.let { put("newestTimestamp", it) }
+    }
+  }
+}

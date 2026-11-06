@@ -61,6 +61,7 @@ import 'general_settings_screen.dart';
 import 'keyboard_shortcuts_screen.dart';
 import 'logs_screen.dart';
 import 'playback_settings_screen.dart';
+import 'quit_app_settings_tile.dart';
 import '../profile/profile_switch_screen.dart';
 import 'services_settings_screen.dart';
 import 'settings_utils.dart';
@@ -121,6 +122,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
   static const _kCheckForUpdates = 'check_for_updates';
   static const _kAutoCheckUpdatesOnStartup = 'auto_check_updates_on_startup';
   static const _kAbout = 'about';
+  static const _kQuitApp = 'quit_app';
   static const _kWatchTogetherRelay = 'watch_together_relay';
   static const _kExportSettings = 'export_settings';
   static const _kImportSettings = 'import_settings';
@@ -269,6 +271,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
                         subtitle: t.settings.aboutDescription,
                         destinationBuilder: (context) => const AboutScreen(),
                       ),
+                      if (QuitAppSettingsTile.isAvailable) QuitAppSettingsTile(focusNode: _focusTracker.get(_kQuitApp)),
                     ],
                   ),
                   const SizedBox(height: 24),

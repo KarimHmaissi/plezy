@@ -50,7 +50,51 @@ void main() {
     expect(events.map((event) => event.physicalKey), everyElement(PhysicalKeyboardKey.gameButtonA));
   });
 
-  testWidgets('key repeat waits for the initial delay and then uses the repeat interval', (tester) async {
+  testWidgets('a held Right is one key down, a key repeat per interval, and one key up', (tester) async {
+    final events = await _pumpKeyEventRecorder(tester);
+    final simulator = KeyEventSimulatorController();
+    addTearDown(simulator.dispose);
+
+    simulator.startKeyRepeat(
+      LogicalKeyboardKey.arrowRight,
+      initialDelay: const Duration(milliseconds: 400),
+      interval: const Duration(milliseconds: 80),
+    );
+    await tester.pump();
+
+    expect(events.map((event) => event.runtimeType), [KeyDownEvent]);
+    expect(simulator.isRepeating, isTrue);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(events, hasLength(1), reason: 'nothing repeats inside the initial delay');
+
+    await tester.pump(const Duration(milliseconds: 79));
+    expect(events, hasLength(1));
+
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(events.map((event) => event.runtimeType), [KeyDownEvent, KeyRepeatEvent]);
+
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 80));
+    }
+    expect(events.whereType<KeyRepeatEvent>(), hasLength(5));
+
+    simulator.stopKeyRepeat();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(simulator.isRepeating, isFalse);
+
+    expect(events.map((event) => event.runtimeType), [
+      KeyDownEvent,
+      for (var i = 0; i < 5; i++) KeyRepeatEvent,
+      KeyUpEvent,
+    ]);
+    expect(events.map((event) => event.logicalKey), everyElement(LogicalKeyboardKey.arrowRight));
+    expect(events.map((event) => event.physicalKey), everyElement(PhysicalKeyboardKey.arrowRight));
+    expect(events.map((event) => event.deviceType), everyElement(ui.KeyEventDeviceType.directionalPad));
+  });
+
+  testWidgets('a hold released before the initial delay is one key down and one key up', (tester) async {
     final events = await _pumpKeyEventRecorder(tester);
     final simulator = KeyEventSimulatorController();
     addTearDown(simulator.dispose);
@@ -60,24 +104,96 @@ void main() {
       initialDelay: const Duration(milliseconds: 400),
       interval: const Duration(milliseconds: 80),
     );
-    await tester.pump();
-
-    expect(events, hasLength(2));
-    expect(simulator.isRepeating, isTrue);
-
+    await tester.pump(const Duration(milliseconds: 200));
+    simulator.stopKeyRepeat();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(events, hasLength(2));
 
-    await tester.pump(const Duration(milliseconds: 79));
-    expect(events, hasLength(2));
+    expect(events.map((event) => event.runtimeType), [KeyDownEvent, KeyUpEvent]);
+  });
 
-    await tester.pump(const Duration(milliseconds: 1));
-    expect(events, hasLength(4));
+  testWidgets('stopKeyRepeat with nothing held sends nothing, and a new hold releases the old one', (tester) async {
+    final events = await _pumpKeyEventRecorder(tester);
+    final simulator = KeyEventSimulatorController();
+    addTearDown(simulator.dispose);
 
     simulator.stopKeyRepeat();
-    await tester.pump(const Duration(milliseconds: 160));
-    expect(events, hasLength(4));
-    expect(simulator.isRepeating, isFalse);
+    await tester.pump();
+    expect(events, isEmpty);
+
+    simulator.startKeyRepeat(
+      LogicalKeyboardKey.arrowRight,
+      initialDelay: const Duration(milliseconds: 400),
+      interval: const Duration(milliseconds: 80),
+    );
+    // Rolling the stick from right to down: right is released before down is held.
+    simulator.startKeyRepeat(
+      LogicalKeyboardKey.arrowDown,
+      initialDelay: const Duration(milliseconds: 400),
+      interval: const Duration(milliseconds: 80),
+    );
+    simulator.stopKeyRepeat();
+    simulator.stopKeyRepeat();
+    await tester.pump();
+
+    expect(events.map((event) => (event.runtimeType, event.logicalKey)), [
+      (KeyDownEvent, LogicalKeyboardKey.arrowRight),
+      (KeyUpEvent, LogicalKeyboardKey.arrowRight),
+      (KeyDownEvent, LogicalKeyboardKey.arrowDown),
+      (KeyUpEvent, LogicalKeyboardKey.arrowDown),
+    ]);
+  });
+
+  testWidgets('held-direction repeats walk focus down a list, and the release lands on the last item', (tester) async {
+    final nodes = List.generate(8, (i) => FocusNode(debugLabel: 'item$i'));
+    for (final node in nodes) {
+      addTearDown(node.dispose);
+    }
+    final lastItemEvents = <KeyEvent>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListView(
+          children: [
+            for (var i = 0; i < nodes.length; i++)
+              Focus(
+                focusNode: nodes[i],
+                onKeyEvent: i == 4
+                    ? (_, event) {
+                        lastItemEvents.add(event);
+                        return KeyEventResult.ignored;
+                      }
+                    : null,
+                child: SizedBox(height: 40, child: Text('item $i')),
+              ),
+          ],
+        ),
+      ),
+    );
+    nodes.first.requestFocus();
+    await tester.pump();
+
+    final simulator = KeyEventSimulatorController();
+    addTearDown(simulator.dispose);
+    simulator.startKeyRepeat(
+      LogicalKeyboardKey.arrowDown,
+      initialDelay: const Duration(milliseconds: 400),
+      interval: const Duration(milliseconds: 80),
+    );
+    await tester.pump();
+    expect(nodes[1].hasPrimaryFocus, isTrue, reason: 'the key down moves focus once');
+
+    await tester.pump(const Duration(milliseconds: 400));
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(milliseconds: 80));
+    }
+    expect(nodes[4].hasPrimaryFocus, isTrue, reason: 'each key repeat moves focus one more item');
+
+    simulator.stopKeyRepeat();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(nodes[4].hasPrimaryFocus, isTrue, reason: 'the release moves nothing');
+    expect(lastItemEvents.map((event) => event.runtimeType), [KeyUpEvent]);
   });
 
   testWidgets('releaseKeys dispatches a held-key release burst after pending downs', (tester) async {

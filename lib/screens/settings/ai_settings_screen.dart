@@ -18,14 +18,16 @@ import '../../services/catalog/trakt_catalog_source.dart';
 import '../../services/library_index/library_index.dart';
 import 'ai_try_screen.dart';
 import '../../services/ai/ai_key_store.dart';
+import '../../services/tmdb/tmdb_key_store.dart';
 import '../../utils/dialogs.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 
-/// Settings ▸ AI: the Anthropic API key (pasted in, checked, stored
-/// encrypted on this device) and which models the helper uses.
+/// Settings ▸ AI: the Anthropic API key and the TMDB key (each pasted in or
+/// sent from another device, checked, stored encrypted on this device) and
+/// which models the helper uses.
 class AiSettingsScreen extends StatefulWidget {
   const AiSettingsScreen({super.key});
 
@@ -35,6 +37,10 @@ class AiSettingsScreen extends StatefulWidget {
 
 class _AiSettingsScreenState extends State<AiSettingsScreen> {
   String? _keyHint;
+  String? _tmdbHint;
+
+  /// The last TMDB check on this screen, shown next to the key.
+  AiKeyCheck? _tmdbCheck;
   bool _loaded = false;
   bool _busy = false;
   bool _autoRefresh = true;
@@ -48,10 +54,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
 
   Future<void> _load() async {
     final key = await AiKeyStore.read();
+    final tmdbKey = await TmdbKeyStore.read();
     final autoRefresh = await AiHomeRefresher.enabled();
     if (!mounted) return;
     setState(() {
       _keyHint = key == null ? null : AiKeyStore.hint(key);
+      _tmdbHint = tmdbKey == null ? null : TmdbKeyStore.hint(tmdbKey);
       _autoRefresh = autoRefresh;
       _loaded = true;
     });
@@ -61,6 +69,18 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     AiKeyCheck.ok => t.ai.keyWorks,
     AiKeyCheck.invalid => t.ai.keyRejected,
     AiKeyCheck.unreachable => t.ai.keyUnreachable,
+  };
+
+  String _tmdbMessage(AiKeyCheck check) => switch (check) {
+    AiKeyCheck.ok => t.ai.tmdbKeyWorks,
+    AiKeyCheck.invalid => t.ai.tmdbKeyRejected,
+    AiKeyCheck.unreachable => t.ai.tmdbKeyUnreachable,
+  };
+
+  String _tmdbStatus(AiKeyCheck check) => switch (check) {
+    AiKeyCheck.ok => t.ai.tmdbKeyStatusWorks,
+    AiKeyCheck.invalid => t.ai.tmdbKeyStatusRejected,
+    AiKeyCheck.unreachable => t.ai.tmdbKeyStatusUnreachable,
   };
 
   Future<void> _paste() async {
@@ -97,8 +117,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
 
   /// Open a one-time page on the local network so the key can be pasted on
   /// a phone or laptop instead of typed with the remote.
-  Future<void> _receive() async {
-    final receiver = await AiKeyReceiver.start();
+  Future<void> _receive({KeyReceiverKind kind = KeyReceiverKind.anthropic}) async {
+    final isTmdb = identical(kind, KeyReceiverKind.tmdb);
+    final receiver = await AiKeyReceiver.start(kind: kind);
     if (!mounted) return;
     if (receiver == null) {
       showErrorSnackBar(context, t.ai.receiveNoNetwork);
@@ -141,13 +162,19 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     await dialog;
     await _load();
     if (!mounted) return;
+    // A rejected key isn't saved, so the stored key's status stays as it was.
+    if (isTmdb && result == AiKeyReceiveResult.saved) setState(() => _tmdbCheck = AiKeyCheck.ok);
+    if (isTmdb && result == AiKeyReceiveResult.savedUnchecked) {
+      setState(() => _tmdbCheck = AiKeyCheck.unreachable);
+    }
+    final message = isTmdb ? _tmdbMessage : _message;
     switch (result) {
       case AiKeyReceiveResult.saved:
-        showSuccessSnackBar(context, t.ai.keyWorks);
+        showSuccessSnackBar(context, message(AiKeyCheck.ok));
       case AiKeyReceiveResult.savedUnchecked:
-        showErrorSnackBar(context, t.ai.keyUnreachable);
+        showErrorSnackBar(context, message(AiKeyCheck.unreachable));
       case AiKeyReceiveResult.rejected:
-        showErrorSnackBar(context, t.ai.keyRejected);
+        showErrorSnackBar(context, message(AiKeyCheck.invalid));
       case AiKeyReceiveResult.tooManyAttempts:
         showErrorSnackBar(context, t.ai.receiveTooManyAttempts);
       case AiKeyReceiveResult.timedOut:
@@ -214,6 +241,69 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     await _load();
   }
 
+  Future<void> _pasteTmdb() async {
+    final key = await showTextInputDialog(
+      context,
+      title: t.ai.tmdbPasteKey,
+      labelText: t.ai.tmdbKeyLabel,
+      confirmText: t.common.save,
+      obscureText: true,
+      validator: (v) => TmdbKeyStore.looksValid(v) ? null : t.ai.tmdbKeyFormat,
+    );
+    if (key == null || !mounted) return;
+    setState(() => _busy = true);
+    final check = await TmdbKeyStore.check(key);
+    if (check == AiKeyCheck.invalid) {
+      if (mounted) {
+        setState(() => _busy = false);
+        showErrorSnackBar(context, _tmdbMessage(check));
+      }
+      return;
+    }
+    // Saved even when TMDB can't be reached right now; it's checked again on
+    // first use.
+    await TmdbKeyStore.write(key);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _tmdbCheck = check;
+    });
+    await _load();
+    if (!mounted) return;
+    check == AiKeyCheck.ok
+        ? showSuccessSnackBar(context, _tmdbMessage(check))
+        : showErrorSnackBar(context, _tmdbMessage(check));
+  }
+
+  Future<void> _testTmdb() async {
+    final key = await TmdbKeyStore.read();
+    if (key == null) return;
+    setState(() => _busy = true);
+    final check = await TmdbKeyStore.check(key);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _tmdbCheck = check;
+    });
+    check == AiKeyCheck.ok
+        ? showSuccessSnackBar(context, _tmdbMessage(check))
+        : showErrorSnackBar(context, _tmdbMessage(check));
+  }
+
+  Future<void> _removeTmdb() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: t.ai.tmdbRemoveKeyTitle,
+      message: t.ai.tmdbRemoveKeyMessage,
+      confirmText: t.ai.tmdbRemoveKey,
+      isDestructive: true,
+    );
+    if (!confirmed) return;
+    await TmdbKeyStore.remove();
+    if (mounted) setState(() => _tmdbCheck = null);
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final hint = _keyHint;
@@ -244,6 +334,49 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         ),
       ],
     );
+  }
+
+  /// The TMDB key: paste, send from another device, test, remove.
+  List<Widget> _tmdbTiles() {
+    final hint = _tmdbHint;
+    final check = _tmdbCheck;
+    return [
+      ListTile(
+        title: Text(t.ai.tmdbTitle, style: Theme.of(context).textTheme.titleMedium),
+        subtitle: Text(t.ai.tmdbExplainer),
+      ),
+      FocusableListTile(
+        key: const ValueKey('tmdb-key'),
+        leading: const AppIcon(Symbols.key_rounded, fill: 1),
+        title: Text(hint == null ? t.ai.tmdbPasteKey : t.ai.tmdbReplaceKey),
+        subtitle: Text(
+          !_loaded
+              ? '…'
+              : hint == null
+              ? t.ai.tmdbNoKey
+              : [t.ai.tmdbKeySet(hint: hint), if (check != null) _tmdbStatus(check)].join(' · '),
+        ),
+        onTap: _busy ? null : () => unawaited(_pasteTmdb()),
+      ),
+      FocusableListTile(
+        leading: const AppIcon(Symbols.devices_rounded, fill: 1),
+        title: Text(t.ai.tmdbReceiveKey),
+        subtitle: Text(t.ai.receiveKeyDescription),
+        onTap: _busy ? null : () => unawaited(_receive(kind: KeyReceiverKind.tmdb)),
+      ),
+      if (hint != null) ...[
+        FocusableListTile(
+          leading: const AppIcon(Symbols.check_circle_rounded, fill: 1),
+          title: Text(t.ai.tmdbTestKey),
+          onTap: _busy ? null : () => unawaited(_testTmdb()),
+        ),
+        FocusableListTile(
+          leading: const AppIcon(Symbols.delete_rounded, fill: 1),
+          title: Text(t.ai.tmdbRemoveKey),
+          onTap: _busy ? null : () => unawaited(_removeTmdb()),
+        ),
+      ],
+    ];
   }
 
   /// Key, spend and the rest: for a device that runs its own AI.
@@ -281,6 +414,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
           onTap: _busy ? null : () => unawaited(_remove()),
         ),
       ],
+      ..._tmdbTiles(),
       if (hint != null)
         FocusableListTile(
           leading: const AppIcon(Symbols.auto_awesome_rounded, fill: 1),
