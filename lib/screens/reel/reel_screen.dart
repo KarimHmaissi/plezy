@@ -49,6 +49,11 @@ class ReelScreen extends StatefulWidget {
   /// taken by the screen when it next shows.
   static final ValueNotifier<String?> requestedDeck = ValueNotifier(null);
 
+  /// The phone feed is immersive (V2-31): its controls and the system bars
+  /// are hidden, and Back brings them back, so the shell's Back must not
+  /// also step to Home.
+  static final ValueNotifier<bool> immersive = ValueNotifier(false);
+
   /// Opens the Reel tab, on [deck] when given: closes pages above the shell
   /// first so the tab is what shows.
   /// The Reel screen that is showing, for On TV mode's commands.
@@ -160,6 +165,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (identical(ReelScreen._live, this)) ReelScreen._live = null;
     ReelScreen.requestedDeck.removeListener(_takeRequest);
     ReelScreen.showing.value = false;
+    ReelScreen.immersive.value = false;
     _overlayPref?.removeListener(_onOverlayPref);
     _feedProbe?.dispose();
     _perf.detachFrames();
@@ -446,6 +452,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onRemote: remote,
       // V2-65: a Fold screen switch is timed to the picture moving again.
       onResize: () => _feedProbe?.screenChanged(),
+      // V2-31: Back in the immersive feed is the feed's, not the shell's.
+      onImmersive: (on) => ReelScreen.immersive.value = on,
       // V2-08: on mobile data with no Wi-Fi the feed parks only the next card.
       metered: context.select<OfflineModeProvider?, bool>((p) => p?.isCellularOnly ?? false),
     );

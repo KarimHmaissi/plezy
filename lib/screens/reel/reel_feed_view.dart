@@ -9,12 +9,18 @@ import '../../providers/theme_provider.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/settings_service.dart';
 import '../../theme/fork_motion.dart';
 import '../../theme/mono_theme.dart';
 import '../../theme/mono_tokens.dart';
+import '../../utils/app_logger.dart';
+import '../../utils/immersive_mode_guard.dart';
 import '../../utils/media_image_helper.dart';
+import '../../utils/orientation_helper.dart';
 import '../../utils/provider_extensions.dart';
+import '../../utils/snackbar_helper.dart';
 import '../../widgets/optimized_media_image.dart';
+import '../../widgets/overlay_sheet.dart';
 import '../../widgets/pressable.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
@@ -44,6 +50,14 @@ class ReelFeedTheme extends StatelessWidget {
 /// ([ReelFeedPlayers]). Swipe right to hide everything and just watch; swipe
 /// left to bring it back. The deck is picked from the button at the top.
 ///
+/// Immersive (V2-31): swiping right hides the controls and the system bars
+/// (`immersiveSticky`, kept through a screen switch by [ImmersiveModeGuard]),
+/// darkens the art behind the picture (to black on an OLED ground) and
+/// leaves only the hairline of progress. Swiping left or Back brings it all
+/// back; Back never leaves the tab from there. The first time, a snackbar
+/// says how. The feed leaves immersive by itself when it is put away (a tab
+/// switch, a page over it, the app in the background).
+///
 /// A swipe (V2-02): past the middle, the incoming card plays and the one
 /// leaving pauses on its frame; the step is committed to the controller and
 /// the cards off screen rewound only once the page settles, so a wobble or a
@@ -71,6 +85,7 @@ class ReelFeedView extends StatefulWidget {
     required this.onDecks,
     this.onRemote,
     this.onResize,
+    this.onImmersive,
     this.metered = false,
   });
 
@@ -89,6 +104,11 @@ class ReelFeedView extends StatefulWidget {
   /// The window changed size under the feed (V2-65), told after the feed has
   /// re-synced its players (the `[ReelPerf]` fold sample starts here).
   final VoidCallback? onResize;
+
+  /// The feed entered (true) or left (false) its immersive view (V2-31). The
+  /// shell reads it so that Back, which the feed takes to bring its controls
+  /// back, doesn't also step to Home.
+  final ValueChanged<bool>? onImmersive;
 
   /// On a metered link (mobile data with no Wi-Fi) the window holds only the
   /// card on screen and the next (V2-08).
@@ -112,6 +132,9 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   late int _page = widget.controller.index;
   String? _deck;
   bool _immersive = false;
+
+  /// The feed asked for the system bars to hide and has not given them back.
+  bool _ownsBars = false;
   bool _burst = false;
 
   /// Counts bursts, so each one grows in afresh.
@@ -171,11 +194,16 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   void dispose() {
     _c.removeListener(_onController);
     _pages.dispose();
+    _showBars();
+    if (_immersive) widget.onImmersive?.call(false);
     super.dispose();
   }
 
   void _onController() {
     if (!mounted) return;
+    // Put away (another tab, a page over it, the background): the bars come
+    // back for whatever shows next, and the feed returns with its controls.
+    if (!_c.active && _immersive) _setImmersive(false);
     // A new deck starts at its own cursor; a card dropped (Not for me) or
     // a step from the TV moves the page to match.
     if (_deck != _c.deck.id) {
@@ -235,6 +263,57 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     );
   }
 
+  /// Into or out of the immersive view (V2-31).
+  void _setImmersive(bool on) {
+    if (on == _immersive) return;
+    setState(() => _immersive = on);
+    if (on) {
+      _hideBars();
+      _hintOnce();
+    } else {
+      _showBars();
+    }
+    widget.onImmersive?.call(on);
+  }
+
+  /// The system bars hide, sticky, the way the player hides them; the guard
+  /// hides them again if a screen switch brings them back.
+  void _hideBars() {
+    _ownsBars = true;
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky));
+    ImmersiveModeGuard.acquire(this);
+  }
+
+  /// The bars come back as the player gives them back
+  /// ([OrientationHelper.restoreSystemUI]). The guard lets go first, or the
+  /// re-show that follows would hide them again.
+  void _showBars() {
+    if (!_ownsBars) return;
+    _ownsBars = false;
+    ImmersiveModeGuard.release(this);
+    unawaited(
+      OrientationHelper.restoreSystemUI().catchError((Object e) {
+        appLogger.w('Reel: failed to restore system UI', error: e);
+      }),
+    );
+  }
+
+  /// The first time only, on this device: how to get the controls back.
+  void _hintOnce() {
+    final settings = SettingsService.instanceOrNull;
+    if (settings == null || settings.read(SettingsService.reelImmersiveHintSeen)) return;
+    unawaited(settings.write(SettingsService.reelImmersiveHintSeen, true));
+    showAppSnackBar(context, 'Swipe left to bring the controls back');
+  }
+
+  /// Back while immersive brings the controls back. A sheet open over the
+  /// feed takes that Back to close itself, so the feed stays as it is.
+  void _onPop(bool didPop, Object? _) {
+    if (didPop || !_immersive) return;
+    if (OverlaySheetController.maybeOf(context)?.isOpen ?? false) return;
+    _setImmersive(false);
+  }
+
   /// Save from the button or a double-tap (V2-29). The filled bookmark and
   /// the burst confirm it, so the controller says nothing (a toast would
   /// float over the buttons); a card already saved neither bursts nor saves
@@ -257,36 +336,40 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   Widget build(BuildContext context) {
     final list = _c.cards;
     final count = list == null ? 1 : list.length + 1;
-    return ColoredBox(
-      color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          NotificationListener<ScrollEndNotification>(
-            onNotification: _onScrollEnd,
-            child: PageView.builder(
-              controller: _pages,
-              scrollDirection: Axis.vertical,
-              // The page either side is built before the drag reaches it.
-              allowImplicitScrolling: true,
-              itemCount: count,
-              onPageChanged: _onPageChanged,
-              itemBuilder: (context, i) => _pageFor(_c.slotAt(i)),
+    return PopScope<Object?>(
+      canPop: !_immersive,
+      onPopInvokedWithResult: _onPop,
+      child: ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            NotificationListener<ScrollEndNotification>(
+              onNotification: _onScrollEnd,
+              child: PageView.builder(
+                controller: _pages,
+                scrollDirection: Axis.vertical,
+                // The page either side is built before the drag reaches it.
+                allowImplicitScrolling: true,
+                itemCount: count,
+                onPageChanged: _onPageChanged,
+                itemBuilder: (context, i) => _pageFor(_c.slotAt(i)),
+              ),
             ),
-          ),
-          ListenableBuilder(
-            listenable: widget.players,
-            builder: (context, _) => _TopBar(
-              hidden: _immersive,
-              deckName: _c.deck.name,
-              muted: widget.players.muted,
-              onDecks: widget.onDecks,
-              onMute: () => unawaited(widget.players.setMuted(!widget.players.muted)),
-              onRemote: widget.onRemote,
+            ListenableBuilder(
+              listenable: widget.players,
+              builder: (context, _) => _TopBar(
+                hidden: _immersive,
+                deckName: _c.deck.name,
+                muted: widget.players.muted,
+                onDecks: widget.onDecks,
+                onMute: () => unawaited(widget.players.setMuted(!widget.players.muted)),
+                onRemote: widget.onRemote,
+              ),
             ),
-          ),
-          _SaveBurst(shown: _burst, count: _bursts),
-        ],
+            _SaveBurst(shown: _burst, count: _bursts),
+          ],
+        ),
       ),
     );
   }
@@ -349,9 +432,9 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       behavior: HitTestBehavior.translucent,
       onHorizontalDragEnd: (d) {
         final v = d.primaryVelocity ?? 0;
-        if (v.abs() < 250) return;
+        if (v.abs() < 250 || (v > 0) == _immersive) return;
         HapticFeedback.selectionClick();
-        setState(() => _immersive = v > 0);
+        _setImmersive(v > 0);
       },
       child: ValueListenableBuilder<FeedCardState>(
         valueListenable: widget.players.card(card.id),
@@ -370,7 +453,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    _Backdrop(slot: slot, dim: _immersive ? 0.9 : 0.55),
+                    _Backdrop(slot: slot, dim: _immersive ? _immersiveDim(context) : 0.55),
                     AnimatedAlign(
                       duration: const Duration(milliseconds: 280),
                       curve: Curves.easeOutCubic,
@@ -391,6 +474,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     );
   }
 }
+
+/// How dark the art behind the picture goes in the immersive view (V2-31):
+/// all the way to black on an OLED ground (a palette whose background is
+/// pure black), so only the picture is lit.
+double _immersiveDim(BuildContext context) =>
+    Theme.of(context).extension<MonoTokens>()?.bg == MonoPalette.oled.bg ? 1.0 : 0.9;
 
 /// The Save burst (V2-29): the filled bookmark grows in with the app's
 /// release spring and leaves by fading only, so it never shrinks back over

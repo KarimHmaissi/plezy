@@ -19,10 +19,14 @@ import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:plezy/theme/mono_tokens.dart';
 import 'package:plezy/theme/palette_contrast.dart';
+import 'package:plezy/utils/immersive_mode_guard.dart';
+import 'package:plezy/widgets/overlay_sheet.dart';
 
+import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 class _Servers implements ReelServers {
@@ -162,6 +166,7 @@ void main() {
   late ReelStore store;
   late List<MediaItem> opened;
   late int decksOpened, watched, sheets, resized;
+  late List<bool> immersiveReports;
   late ValueNotifier<int> restored;
   late _Deck first;
 
@@ -171,6 +176,7 @@ void main() {
     store = ReelStore(database: () async => db, settings: () async => settings);
     opened = [];
     decksOpened = watched = sheets = resized = 0;
+    immersiveReports = [];
     restored = ValueNotifier(0);
     c = ReelController(
       decks: [
@@ -212,6 +218,7 @@ void main() {
     onSheet: () => sheets++,
     onDecks: () => decksOpened++,
     onResize: () => resized++,
+    onImmersive: immersiveReports.add,
   );
 
   Future<void> pump(
@@ -220,6 +227,7 @@ void main() {
     MonoPalette? palette,
     bool themed = false,
     bool watchOnTv = false,
+    Widget Function(Widget feed)? wrap,
   }) async {
     tester.view.physicalSize = const Size(420, 860);
     tester.view.devicePixelRatio = 1;
@@ -229,12 +237,14 @@ void main() {
       MaterialApp(
         theme: appTheme ?? ThemeData.dark(),
         home: Scaffold(
-          body: themed
-              ? ReelFeedTheme(
-                  palette: palette,
-                  child: feed(watchOnTv: watchOnTv),
-                )
-              : feed(watchOnTv: watchOnTv),
+          body: (wrap ?? (f) => f)(
+            themed
+                ? ReelFeedTheme(
+                    palette: palette,
+                    child: feed(watchOnTv: watchOnTv),
+                  )
+                : feed(watchOnTv: watchOnTv),
+          ),
         ),
       ),
     );
@@ -582,6 +592,221 @@ void main() {
     await tester.pumpAndSettle();
     expect(hidden(tester, 'Details'), isFalse);
     expect(c.deck.id, 'a', reason: 'a sideways swipe never changes the deck');
+  });
+
+  group('V2-31: immersive mode done properly', () {
+    late List<MethodCall> platformCalls;
+
+    setUp(() {
+      platformCalls = [];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          platformCalls.add(call);
+          return null;
+        },
+      );
+    });
+
+    tearDown(() {
+      ImmersiveModeGuard.resetForTesting();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    List<Object?> uiModes() => [
+      for (final call in platformCalls)
+        if (call.method == 'SystemChrome.setEnabledSystemUIMode') call.arguments,
+    ];
+
+    Future<void> swipeRight(WidgetTester tester) async {
+      await tester.fling(find.text('Title 1'), const Offset(300, 0), 1500);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> systemShowsBars() =>
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.platform.name,
+          SystemChannels.platform.codec.encodeMethodCall(const MethodCall('SystemChrome.systemUIChange', [true])),
+          (_) {},
+        );
+
+    testWidgets('swipe right hides the system bars, sticky; swipe left gives them back as the player does', (
+      tester,
+    ) async {
+      await pump(tester);
+      await swipeRight(tester);
+      expect(uiModes(), ['SystemUiMode.immersiveSticky']);
+      expect(immersiveReports, [true]);
+
+      await tester.fling(find.byType(PageView), const Offset(-300, 0), 1500);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Details'), isFalse);
+      // OrientationHelper.restoreSystemUI: both overlays shown, then edge to edge.
+      expect(platformCalls.map((c) => c.method), contains('SystemChrome.setEnabledSystemUIOverlays'));
+      expect(uiModes(), ['SystemUiMode.immersiveSticky', 'SystemUiMode.edgeToEdge']);
+      expect(immersiveReports, [true, false]);
+    });
+
+    testWidgets('a second swipe the same way changes nothing', (tester) async {
+      await pump(tester);
+      await swipeRight(tester);
+      await swipeRight(tester);
+      expect(uiModes(), ['SystemUiMode.immersiveSticky']);
+      expect(immersiveReports, [true]);
+    });
+
+    testWidgets('bars a screen switch brings back are hidden again, until the controls come back', (tester) async {
+      await pump(tester);
+      await swipeRight(tester);
+      await systemShowsBars();
+      expect(uiModes(), ['SystemUiMode.immersiveSticky', 'SystemUiMode.immersiveSticky']);
+
+      await tester.fling(find.byType(PageView), const Offset(-300, 0), 1500);
+      await tester.pumpAndSettle();
+      platformCalls.clear();
+      await systemShowsBars();
+      expect(uiModes(), isEmpty, reason: 'the guard let go before the bars came back');
+    });
+
+    testWidgets('Back while immersive brings the controls back and stays on the feed', (tester) async {
+      await pump(tester);
+      await swipeRight(tester);
+      expect(hidden(tester, 'Details'), isTrue);
+
+      final handled = await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(handled, isTrue);
+      expect(find.byType(ReelFeedView), findsOneWidget);
+      expect(hidden(tester, 'Details'), isFalse);
+      expect(hidden(tester, 'Deck a'), isFalse);
+      expect(uiModes().last, 'SystemUiMode.edgeToEdge');
+      expect(immersiveReports, [true, false]);
+    });
+
+    testWidgets("in the shell, Back while immersive is the feed's alone", (tester) async {
+      // The mobile shell: its host can't pop and steps to Home on Back
+      // unless the Reel says it is immersive (main_screen.dart).
+      var immersive = false;
+      var shellBacks = 0;
+      final reports = immersiveReports;
+      await pump(
+        tester,
+        wrap: (feed) => OverlaySheetHost(
+          canPop: false,
+          onSystemBack: () {
+            if (immersive) return;
+            shellBacks++;
+          },
+          child: feed,
+        ),
+      );
+      void track() => immersive = reports.isNotEmpty && reports.last;
+
+      await swipeRight(tester);
+      track();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      track();
+      expect(shellBacks, 0, reason: 'the shell heard the feed was immersive before the feed left it');
+      expect(hidden(tester, 'Details'), isFalse);
+      expect(immersive, isFalse);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(shellBacks, 1, reason: 'with the controls showing, Back is the shell again');
+    });
+
+    testWidgets('put away while immersive, the feed gives the bars back and returns with its controls', (tester) async {
+      await pump(tester);
+      await swipeRight(tester);
+      await tester.runAsync(c.suspend);
+      await tester.pump();
+      expect(hidden(tester, 'Details'), isFalse);
+      expect(uiModes().last, 'SystemUiMode.edgeToEdge');
+      expect(immersiveReports, [true, false]);
+    });
+
+    testWidgets('disposed while immersive, the feed gives the bars back', (tester) async {
+      await pump(tester);
+      await swipeRight(tester);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(uiModes().last, 'SystemUiMode.edgeToEdge');
+      expect(immersiveReports, [true, false]);
+    });
+
+    testWidgets('only the progress hairline stays over the picture', (tester) async {
+      await pump(tester);
+      await swipeRight(tester);
+      expect(hidden(tester, 'Details'), isTrue);
+      expect(hidden(tester, 'Deck a'), isTrue);
+      final bar = find.byType(LinearProgressIndicator);
+      expect(bar, findsOneWidget);
+      expect(
+        tester
+            .widgetList<IgnorePointer>(find.ancestor(of: bar, matching: find.byType(IgnorePointer)))
+            .any((w) => w.ignoring),
+        isFalse,
+      );
+      expect(
+        tester
+            .widgetList<AnimatedOpacity>(find.ancestor(of: bar, matching: find.byType(AnimatedOpacity)))
+            .every((w) => w.opacity == 1),
+        isTrue,
+      );
+    });
+
+    group('the art behind the picture', () {
+      double dim(WidgetTester tester) {
+        final box = tester.widget<AnimatedContainer>(
+          find.descendant(of: find.byType(PageView), matching: find.byType(AnimatedContainer)).first,
+        );
+        return (box.decoration! as BoxDecoration).color!.a;
+      }
+
+      testWidgets('goes to black on an OLED ground', (tester) async {
+        await pump(tester, themed: true, palette: MonoPalette.oled);
+        expect(dim(tester), closeTo(0.55, 0.01));
+        await swipeRight(tester);
+        expect(dim(tester), 1.0);
+      });
+
+      testWidgets('keeps a trace of the art on any other ground', (tester) async {
+        await pump(tester, themed: true, palette: MonoPalette.dark);
+        await swipeRight(tester);
+        expect(dim(tester), closeTo(0.9, 0.01));
+      });
+    });
+
+    group('the one-time hint', () {
+      const hint = 'Swipe left to bring the controls back';
+
+      setUp(resetSharedPreferencesForTest);
+
+      testWidgets('shows the first time only, on this device', (tester) async {
+        final settings = (await tester.runAsync(SettingsService.getInstance))!;
+        await pump(tester);
+        await swipeRight(tester);
+        expect(find.text(hint), findsOneWidget);
+        expect(settings.read(SettingsService.reelImmersiveHintSeen), isTrue);
+
+        ScaffoldMessenger.of(tester.element(find.byType(ReelFeedView))).removeCurrentSnackBar();
+        await tester.fling(find.byType(PageView), const Offset(-300, 0), 1500);
+        await tester.pumpAndSettle();
+        await swipeRight(tester);
+        expect(find.text(hint), findsNothing);
+      });
+
+      testWidgets('stays away once seen', (tester) async {
+        final settings = (await tester.runAsync(SettingsService.getInstance))!;
+        await tester.runAsync(() => settings.write(SettingsService.reelImmersiveHintSeen, true));
+        await pump(tester);
+        await swipeRight(tester);
+        expect(find.text(hint), findsNothing);
+      });
+    });
   });
 
   testWidgets('the deck is picked from its own button', (tester) async {

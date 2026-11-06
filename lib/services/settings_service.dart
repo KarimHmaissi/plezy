@@ -820,6 +820,10 @@ class SettingsService extends BaseSharedPreferencesService {
   /// not exported, as it belongs to this device.
   static const reelIntroSeen = BoolPref('reel_intro_seen');
 
+  /// Set once the phone feed has shown its one-time hint for leaving the
+  /// immersive view (V2-31). Per device, like [reelIntroSeen].
+  static const reelImmersiveHintSeen = BoolPref('reel_immersive_hint_seen');
+
   /// Show the Reel tab, which takes Explore's slot (D14). Works like
   /// [showExploreTab]. Today: shown.
   static const showReelTab = BoolPref('show_reel_tab', defaultValue: true);
@@ -1777,6 +1781,7 @@ class SettingsService extends BaseSharedPreferencesService {
     audioOutputDevice,
     reelMuted,
     reelIntroSeen,
+    reelImmersiveHintSeen,
   ];
 
   /// Settings that "Reset All Settings" actually resets.

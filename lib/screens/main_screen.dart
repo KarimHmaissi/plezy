@@ -2419,6 +2419,9 @@ class _MainScreenState extends State<MainScreen>
       canPop: false,
       onSystemBack: () {
         if (BackKeyCoordinator.consumeIfHandled()) return;
+        // Fork: the immersive Reel feed takes this Back to bring its
+        // controls back (its own PopScope, which runs after this one).
+        if (_currentTab == NavigationTabId.reel && ReelScreen.immersive.value) return;
         _handleMainBack();
       },
       child: ScaffoldMessenger(
