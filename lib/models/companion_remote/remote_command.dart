@@ -121,6 +121,27 @@ enum RemoteCommandType {
   /// Fork, catch-up sync: the host's data changed while a phone is
   /// connected; the phone answers with a new [catchUpOffer].
   catchUpNudge,
+
+  /// Fork, The Reel (On TV mode): show the host's Reel tab.
+  tabReel,
+
+  /// Fork, The Reel: open a deck on the host (`deck`, optional); the host
+  /// answers with a [reelState].
+  reelOpen,
+
+  /// Fork, The Reel: next or previous card on the host (`dir`: 1 / -1), or
+  /// another deck (`deckDir`: 1 / -1).
+  reelStep,
+
+  /// Fork, The Reel: act on the host's current card (`action`: watch / save /
+  /// notForMe / pause / replay).
+  reelAction,
+
+  /// Fork, The Reel: the host's card on every change. Data: `active`, `deck`,
+  /// `deckName`, `decks` (`{id, name}`), `index`, `groupKey`, `card` and
+  /// `next` (each `{id, title, year, server, art, thumb}`, image paths only),
+  /// `playing`, `poolEnd`.
+  reelState,
 }
 
 class _RemoteCommandTypeConverter extends IndexedEnumConverter<RemoteCommandType> {

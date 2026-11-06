@@ -56,6 +56,8 @@ import '../services/catalog/trakt_catalog_source.dart';
 import '../services/catalog/trakt_lists_catalog_source.dart';
 import '../services/comfort/comfort_shows_controller.dart';
 import '../services/continue_watching/continue_watching_classifier.dart';
+import '../services/reel/reel_store.dart';
+import 'reel/reel_screen.dart';
 import '../services/settings_service.dart';
 import '../widgets/settings_builder.dart';
 import '../widgets/fitting_title_text.dart';
@@ -349,6 +351,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     unawaited(_loadRows(refreshIds: {rowId}));
   }
 
+  /// Fork: a Reel Save or removal. The row hides when no pick is fresh.
+  void _onReelPicksChanged() {
+    if (!mounted || !_homePins.contains(HomeRowIds.reelPicks)) return;
+    setState(() => _fetchedRows = {..._fetchedRows}..remove(HomeRowIds.reelPicks));
+    unawaited(_loadRows(refreshIds: {HomeRowIds.reelPicks}));
+  }
+
   void _onHomePinsChanged() {
     if (!mounted) return;
     setState(() {});
@@ -429,7 +438,17 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   /// curation off) and "Manage Home", leading each Home row's menu.
   List<MediaMenuExtraEntry> _rowMenuEntriesFor(MediaHub hub) {
     final row = _rowForHubId[hub.id];
-    return row == null ? const [] : homeRowMenuEntries(context, row);
+    if (row == null) return const [];
+    return [
+      ...homeRowMenuEntries(context, row),
+      // Fork: a saved AI answer on Home opens as a Reel deck.
+      if (Platform.isAndroid && row.id.startsWith('ai:'))
+        MediaMenuExtraEntry(
+          icon: Symbols.movie_rounded,
+          label: t.aiTab.reelIt,
+          onSelected: () => ReelScreen.open(context, deck: row.id),
+        ),
+    ];
   }
 
   /// Comfort's Carry on watching, when added to Home.
@@ -620,6 +639,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _catalogSources = context.read<CatalogSourcesProvider?>()?..addListener(_onCatalogSourcesChanged);
     _homePins.addListener(_onHomePinsChanged);
     AiHistory.replaced.addListener(_onAiRowReplaced);
+    ReelStore.picksChanged.addListener(_onReelPicksChanged);
     homeRowLoadStates.addListener(_onRowLoadStates);
     _revealTimer = Timer(_revealWait, () {
       if (mounted) setState(() => _revealAll = true);
@@ -827,6 +847,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _catalogSources?.removeListener(_onCatalogSourcesChanged);
     _homePins.removeListener(_onHomePinsChanged);
     AiHistory.replaced.removeListener(_onAiRowReplaced);
+    ReelStore.picksChanged.removeListener(_onReelPicksChanged);
     homeRowLoadStates.removeListener(_onRowLoadStates);
     _revealTimer?.cancel();
     _rowRetryTimer?.cancel();

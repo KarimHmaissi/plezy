@@ -105,6 +105,52 @@ Details of each are in the dated entries below.
 
 ## 2026-11-06
 
+### The Reel v1: a feed of trailers and anime openings (Android)
+- New **Reel** tab (Android only): one title per card, trailers from the
+  servers' own extras and first openings from AnimeThemes. No episode
+  footage and no recaps of any kind. On the Shield it sits under Home in the
+  rail; on phones it takes Explore's bottom-bar slot (Explore moves to the
+  drawer).
+- Decks, like channels: **For You** (one daily Sonnet build over the taste
+  pool, code order meanwhile, which keeps to titles the public rates 6+;
+  the build itself is told to leave poorly rated titles out), **Anime openings**, **Most Watched** (the
+  Trakt charts, raw; offered only while Trakt is connected), and every saved AI answer (**Reel it** on the answer's
+  menu, on the AI tab or on Home).
+- TV: Up/Down next or previous card, Left/Right another deck, OK = Watch,
+  long OK or ≡ (or a gamepad's X) = Save / Not for me / Spoiled me / Seen it
+  and the deck list, in the app's own menu sheet. The TV card is Home's
+  spotlight (logo, ratings line, summary) over the playing clip, with the
+  app's chips, buttons and snackbars: no look of its own.
+  Phone: a feed you thumb through, the TikTok way. Each card plays in its
+  own page (the clip is drawn into the page by `video_player`, so it slides
+  with your thumb), and the cards around it are already open and parked on
+  their first frame, so a swipe brings a live picture in with no flash.
+  Swipe right hides everything to just watch, swipe left brings it back.
+  **Watch** and **Details** (the title's own page) are the two primary
+  buttons; Save and More sit beside them; tap pauses, double-tap Saves. The
+  deck is picked from its own button at the top.
+- **Save** is one action: the title waits in a new Home row, "From the
+  Reel" (seated once at the top, 3 days, at most 3), and goes to the Plex
+  watchlist.
+- **On TV mode** (Fold): the phone drives the Shield's Reel (current card and
+  the next three, swipe the card to step, Watch / Save / Not for me / Pause) and
+  plays nothing. Five new companion commands, appended so older peers ignore
+  them.
+- Clips play on one ExoPlayer core in clip mode (`DefaultPreloadManager`,
+  the next card's first 3 s preloaded, PCM, no tunnelling or frame-rate
+  switching). They never report anything: no timeline, scrobble, tracker,
+  history or now-playing updates. `test/reel/no_reporting_guard_test.dart`
+  keeps it that way.
+- `plezy://reel[?deck=<id>]` opens the Reel (adb testing now, Arc later).
+- Memory: while the Reel plays the brain's indexer rests and its ONNX session
+  is released; memory pressure first drops the preload, then shows stills.
+  Each new visit starts with clips again.
+- `plezy://reel?probe=coverage|watchstate` (debug): the measure-day probes
+  (clip coverage across 50 shows, and a card's Plex watch state) write
+  counts to the log, never titles or addresses.
+- Fork database schema 3: `ReelEvents` and `ReelCache`. Picks and vetoes are
+  synced settings (`reel.picks`, `reel.vetoes`).
+
 ### Straight Facts: honest per-title facts and one trustworthy seen state (recommender v2 §3)
 - New `lib/services/ai/facts/`: the frozen interfaces the Reel and the
   recommender read. `TitleFacts` (scores with their real source, certificate,

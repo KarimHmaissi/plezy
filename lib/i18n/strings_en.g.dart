@@ -3384,6 +3384,9 @@ class Translations$aiTab$en {
 	/// en: 'Find more (add titles)'
 	String get findMore => 'Find more (add titles)';
 
+	/// en: 'Reel it'
+	String get reelIt => 'Reel it';
+
 	/// en: 'more: ${request}'
 	String findingMore({required Object request}) => 'more: ${request}';
 
@@ -4471,6 +4474,9 @@ class Translations$navigation$en {
 
 	/// en: 'Comfort'
 	String get comfort => 'Comfort';
+
+	/// en: 'Reel'
+	String get reel => 'Reel';
 
 	/// en: 'History'
 	String get history => 'History';
@@ -10648,6 +10654,7 @@ extension on Translations {
 			'aiTab.moreLikeThis' => 'More like this',
 			'aiTab.moreLike' => ({required Object title}) => 'more like ${title}',
 			'aiTab.findMore' => 'Find more (add titles)',
+			'aiTab.reelIt' => 'Reel it',
 			'aiTab.findingMore' => ({required Object request}) => 'more: ${request}',
 			'aiTab.noMoreMatches' => ({required Object request}) => 'No more matches for ${request}',
 			'aiTab.addedMore' => ({required Object count, required Object request}) => '${count} more picks added: ${request}',
@@ -11042,6 +11049,7 @@ extension on Translations {
 			'navigation.explore' => 'Explore',
 			'navigation.watchlist' => 'Watchlist',
 			'navigation.comfort' => 'Comfort',
+			'navigation.reel' => 'Reel',
 			'navigation.history' => 'History',
 			'history.title' => 'History',
 			'history.allTime' => 'All time',
@@ -11052,10 +11060,10 @@ extension on Translations {
 			'history.streak' => 'Day streak',
 			'history.bestStreak' => ({required Object n}) => 'Best ${n}',
 			'history.byMonth' => 'Month by month',
-			'history.timeline' => 'Timeline',
-			'history.topGenres' => 'Top genres',
 			_ => null,
 		} ?? switch (path) {
+			'history.timeline' => 'Timeline',
+			'history.topGenres' => 'Top genres',
 			'history.directors' => 'Directors',
 			'history.actors' => 'Actors',
 			'history.rewatches' => 'Watched again',
@@ -11566,10 +11574,10 @@ extension on Translations {
 			'watchTogether.notices.playbackStarted' => 'Playback started',
 			'watchTogether.notices.paused' => ({required Object name}) => '${name} paused',
 			'watchTogether.notices.playbackPaused' => 'Playback paused',
-			'watchTogether.notices.jumpedTo' => ({required Object name, required Object position}) => '${name} jumped to ${position}',
-			'watchTogether.notices.roomJumpedTo' => ({required Object position}) => 'Jumped to ${position}',
 			_ => null,
 		} ?? switch (path) {
+			'watchTogether.notices.jumpedTo' => ({required Object name, required Object position}) => '${name} jumped to ${position}',
+			'watchTogether.notices.roomJumpedTo' => ({required Object position}) => 'Jumped to ${position}',
 			'watchTogether.notices.changedSpeed' => ({required Object name, required Object speed}) => '${name} set the speed to ${speed}',
 			'watchTogether.notices.speedChanged' => ({required Object speed}) => 'Speed set to ${speed}',
 			'watchTogether.notices.startedMedia' => ({required Object name, required Object title}) => '${name} started ${title}',
@@ -12080,10 +12088,10 @@ extension on Translations {
 			'services.names.seerr' => 'Seerr',
 			'services.names.mdblist' => 'MDBList',
 			'services.simklReconnect.title' => 'Reconnect Simkl',
-			'services.simklReconnect.subtitle' => 'Simkl is retiring the sign-in method this connection uses. Reconnecting opens simkl.com to approve Plezy — Plezy never sees your password. Your watch history stays on Simkl.',
-			'services.deviceCode.title' => ({required Object service}) => 'Activate Plezy on ${service}',
 			_ => null,
 		} ?? switch (path) {
+			'services.simklReconnect.subtitle' => 'Simkl is retiring the sign-in method this connection uses. Reconnecting opens simkl.com to approve Plezy — Plezy never sees your password. Your watch history stays on Simkl.',
+			'services.deviceCode.title' => ({required Object service}) => 'Activate Plezy on ${service}',
 			'services.deviceCode.instructions' => 'Scan the QR code, or visit the address below and enter this code:',
 			'services.deviceCode.openToActivate' => ({required Object service}) => 'Open ${service} to activate',
 			'services.deviceCode.copyCode' => 'Copy activation code',

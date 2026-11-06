@@ -61,6 +61,12 @@ class CompanionRemoteReceiver {
   void Function(Map<String, dynamic> data)? onCatchUpOffer;
   void Function(Map<String, dynamic> data)? onCatchUpPush;
 
+  /// Fork, The Reel (host side): the phone's On TV mode.
+  VoidCallback? onTabReel;
+  void Function(Map<String, dynamic> data)? onReelOpen;
+  void Function(Map<String, dynamic> data)? onReelStep;
+  void Function(String action)? onReelAction;
+
   /// Skip the intro / credits marker the player is in; set by the controls.
   VoidCallback? onSkipMarker;
 
@@ -168,6 +174,16 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.aiAsk:
         onAiAsk?.call(command.data ?? const {});
 
+      case RemoteCommandType.tabReel:
+        onTabReel?.call();
+      case RemoteCommandType.reelOpen:
+        onReelOpen?.call(command.data ?? const {});
+      case RemoteCommandType.reelStep:
+        onReelStep?.call(command.data ?? const {});
+      case RemoteCommandType.reelAction:
+        final action = command.data?['action'];
+        if (action is String) onReelAction?.call(action);
+
       case RemoteCommandType.stop:
         onStop?.call();
       case RemoteCommandType.nextTrack:
@@ -200,6 +216,7 @@ class CompanionRemoteReceiver {
       case RemoteCommandType.aiActivity:
       case RemoteCommandType.catchUpReply:
       case RemoteCommandType.catchUpNudge:
+      case RemoteCommandType.reelState:
         break;
 
       default:
@@ -240,7 +257,8 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.catchUpOffer ||
   RemoteCommandType.catchUpReply ||
   RemoteCommandType.catchUpPush ||
-  RemoteCommandType.catchUpNudge => false,
+  RemoteCommandType.catchUpNudge ||
+  RemoteCommandType.reelState => false,
   RemoteCommandType.dpadUp ||
   RemoteCommandType.dpadDown ||
   RemoteCommandType.dpadLeft ||
@@ -279,5 +297,9 @@ bool _isViewerInput(RemoteCommandType type) => switch (type) {
   RemoteCommandType.subtitles ||
   RemoteCommandType.audioTracks ||
   RemoteCommandType.qualitySettings ||
-  RemoteCommandType.fullscreen => true,
+  RemoteCommandType.fullscreen ||
+  RemoteCommandType.tabReel ||
+  RemoteCommandType.reelOpen ||
+  RemoteCommandType.reelStep ||
+  RemoteCommandType.reelAction => true,
 };

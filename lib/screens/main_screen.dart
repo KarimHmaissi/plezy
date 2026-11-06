@@ -89,6 +89,8 @@ import 'search_screen.dart';
 import 'ai_screen.dart';
 import 'history_screen.dart';
 import 'comfort_screen.dart';
+import 'reel/reel_screen.dart';
+import '../services/reel_app.dart';
 import 'watchlist_screen.dart';
 import 'downloads/downloads_screen.dart';
 import 'settings/settings_screen.dart';
@@ -286,10 +288,15 @@ List<NavigationTab> mainScreenBottomNavigationTabs({
     // (Home stays highlighted while it's open).
     if (tab.id == NavigationTabId.history) return false;
     if (tab.id == NavigationTabId.downloads) return isOffline || currentTab == tab.id;
+    // Fork: the Reel takes Explore's slot; Explore moves to the drawer.
+    if (tab.id == NavigationTabId.explore && visibleTabs.any((t) => t.id == NavigationTabId.reel)) {
+      return currentTab == tab.id;
+    }
     if (tab.id != NavigationTabId.settings) return true;
     return isOffline || currentTab == NavigationTabId.settings;
   }).toList();
-  // Home, Comfort, Explore, Watchlist, AI: Comfort sits next to Home.
+  // Home, Comfort, Explore (or the Reel), Watchlist, AI: Comfort sits next
+  // to Home, and the Reel takes the middle slot.
   final comfort = tabs.indexWhere((tab) => tab.id == NavigationTabId.comfort);
   if (comfort > 1 && tabs.first.id == NavigationTabId.discover) tabs.insert(1, tabs.removeAt(comfort));
   return tabs;
@@ -1055,6 +1062,18 @@ class _MainScreenState extends State<MainScreen>
     receiver.onTabSearch = () => _selectTab(NavigationTabId.search);
     receiver.onTabDownloads = () => _selectTab(NavigationTabId.downloads);
     receiver.onTabSettings = () => _selectTab(NavigationTabId.settings);
+    // Fork: The Reel's On TV mode, driven from the phone.
+    receiver.onTabReel = () {
+      if (_hasReel && mounted) ReelScreen.open(context);
+    };
+    receiver.onReelOpen = (data) {
+      if (!_hasReel || !mounted) return;
+      final deck = data['deck'];
+      ReelScreen.open(context, deck: deck is String && deck.isNotEmpty ? deck : null);
+      ReelApp.republish?.call();
+    };
+    receiver.onReelStep = ReelScreen.remoteStep;
+    receiver.onReelAction = ReelScreen.remoteAction;
     receiver.onHome = () {
       final tabs = _getVisibleTabs(_isOffline);
       if (tabs.isEmpty) return;
@@ -1225,6 +1244,10 @@ class _MainScreenState extends State<MainScreen>
         receiver.onTabSearch = null;
         receiver.onTabDownloads = null;
         receiver.onTabSettings = null;
+        receiver.onTabReel = null;
+        receiver.onReelOpen = null;
+        receiver.onReelStep = null;
+        receiver.onReelAction = null;
         receiver.onHome = null;
         receiver.onSearchAction = null;
         receiver.onPlayMedia = null;
@@ -1369,6 +1392,7 @@ class _MainScreenState extends State<MainScreen>
       NavigationTabId.explore => ExploreScreen(key: _screenKeys[tab]),
       NavigationTabId.watchlist => WatchlistScreen(key: _screenKeys[tab]),
       NavigationTabId.comfort => ComfortScreen(key: _screenKeys[tab]),
+      NavigationTabId.reel => ReelScreen(key: _screenKeys[tab], create: ReelApp.controller),
       NavigationTabId.ai => AiScreen(key: _screenKeys[tab]),
       NavigationTabId.history => HistoryScreen(key: _screenKeys[tab]),
       NavigationTabId.libraries => LibrariesScreen(
@@ -1397,6 +1421,7 @@ class _MainScreenState extends State<MainScreen>
     hasExplore: _lastHasExplore,
     hasWatchlist: _lastHasWatchlist,
     hasComfort: _lastHasComfort,
+    hasReel: _hasReel,
     preferredStartup: SettingsService.instanceOrNull?.read(SettingsService.startupSection),
   );
 
@@ -1861,8 +1886,8 @@ class _MainScreenState extends State<MainScreen>
     // the true (safe-area) bottom while it's hidden.
     _miniPlayerInsets?.setNavBarSuspended(true);
     // Called when a child route is pushed on top (e.g., video player)
-    if (_currentTab == NavigationTabId.discover) {
-      _onScreen<TabVisibilityAware>(NavigationTabId.discover, (screen) => screen.onTabHidden());
+    if (_currentTab == NavigationTabId.discover || _currentTab == NavigationTabId.reel) {
+      _onScreen<TabVisibilityAware>(_currentTab, (screen) => screen.onTabHidden());
     }
   }
 
@@ -1883,6 +1908,9 @@ class _MainScreenState extends State<MainScreen>
     if (_currentTab == NavigationTabId.discover) {
       _onScreen<TabVisibilityAware>(NavigationTabId.discover, (screen) => screen.onTabShown());
       _onDiscoverBecameVisible();
+    } else if (_currentTab == NavigationTabId.reel) {
+      // Back from the player (or a page) returns to the same card.
+      _onScreen<TabVisibilityAware>(NavigationTabId.reel, (screen) => screen.onTabShown());
     }
   }
 
@@ -2099,8 +2127,12 @@ class _MainScreenState extends State<MainScreen>
       hasExplore: _lastHasExplore,
       hasWatchlist: _lastHasWatchlist,
       hasComfort: _lastHasComfort,
+      hasReel: _hasReel,
     );
   }
+
+  /// Fork: The Reel's clip core is ExoPlayer, so Android only.
+  bool get _hasReel => Platform.isAndroid;
 
   List<NavigationTab> _getBottomNavigationTabs(BuildContext context) {
     return mainScreenBottomNavigationTabs(
@@ -2279,7 +2311,16 @@ class _MainScreenState extends State<MainScreen>
                       child: Stack(
                         clipBehavior: Clip.hardEdge,
                         children: [
-                          Positioned.fill(child: ColoredBox(color: Theme.of(context).scaffoldBackgroundColor)),
+                          // Fork: see-through while the Reel plays (its video
+                          // is a native surface behind Flutter).
+                          Positioned.fill(
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: ReelScreen.showing,
+                              builder: (context, reel, _) => ColoredBox(
+                                color: reel ? Colors.transparent : Theme.of(context).scaffoldBackgroundColor,
+                              ),
+                            ),
+                          ),
                           Positioned(
                             top: 0,
                             bottom: 0,
@@ -2323,31 +2364,39 @@ class _MainScreenState extends State<MainScreen>
                             top: 0,
                             bottom: 0,
                             left: 0,
-                            child: FocusScope(
-                              node: _sidebarFocusScope,
-                              child: SideNavigationRail(
-                                key: _sideNavKey,
-                                selectedTab: _currentTab,
-                                selectedLibraryKey: _selectedLibraryGlobalKey,
-                                isOfflineMode: _isOffline,
-                                isSidebarFocused: _isSidebarFocused,
-                                alwaysExpanded: alwaysExpanded,
-                                isReconnecting: _isReconnecting,
-                                onDestinationSelected: (tab) {
-                                  final restorePreviousFocus = tab == _currentTab;
-                                  _selectTab(tab);
-                                  _focusContent(restorePreviousFocus: restorePreviousFocus);
-                                },
-                                onLibrarySelected: (key) {
-                                  _selectLibrary(key);
-                                  _focusContent(restorePreviousFocus: false);
-                                },
-                                onNavigateToContent: _focusContent,
-                                onFloatingPanelChanged: (floating) {
-                                  if (_isSidebarFloatingPanel == floating) return;
-                                  setState(() => _isSidebarFloatingPanel = floating);
-                                },
-                                onReconnect: _triggerReconnect,
+                            // Fork: the rail paints its own ground while the
+                            // Reel's video shows through the shell.
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: ReelScreen.showing,
+                              builder: (context, reel, rail) => reel
+                                  ? ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: rail)
+                                  : rail!,
+                              child: FocusScope(
+                                node: _sidebarFocusScope,
+                                child: SideNavigationRail(
+                                  key: _sideNavKey,
+                                  selectedTab: _currentTab,
+                                  selectedLibraryKey: _selectedLibraryGlobalKey,
+                                  isOfflineMode: _isOffline,
+                                  isSidebarFocused: _isSidebarFocused,
+                                  alwaysExpanded: alwaysExpanded,
+                                  isReconnecting: _isReconnecting,
+                                  onDestinationSelected: (tab) {
+                                    final restorePreviousFocus = tab == _currentTab;
+                                    _selectTab(tab);
+                                    _focusContent(restorePreviousFocus: restorePreviousFocus);
+                                  },
+                                  onLibrarySelected: (key) {
+                                    _selectLibrary(key);
+                                    _focusContent(restorePreviousFocus: false);
+                                  },
+                                  onNavigateToContent: _focusContent,
+                                  onFloatingPanelChanged: (floating) {
+                                    if (_isSidebarFloatingPanel == floating) return;
+                                    setState(() => _isSidebarFloatingPanel = floating);
+                                  },
+                                  onReconnect: _triggerReconnect,
+                                ),
                               ),
                             ),
                           ),
@@ -2386,6 +2435,8 @@ class _MainScreenState extends State<MainScreen>
   /// the content must not indent for it a second time.
   Widget _buildLandscapeShell(BuildContext context) {
     return Scaffold(
+      // Fork: see-through on the Reel (its video is a native surface).
+      backgroundColor: _currentTab == NavigationTabId.reel ? Colors.transparent : null,
       // Fork: the shell never moves for the keyboard (screens with fields
       // have their own Scaffolds that do). A stale IME inset after an app
       // switch on Samsung pushed the bottom bar halfway up the screen.
@@ -2429,6 +2480,8 @@ class _MainScreenState extends State<MainScreen>
 
   Widget _buildPortraitShell(BuildContext context) {
     return Scaffold(
+      // Fork: see-through on the Reel (its video is a native surface).
+      backgroundColor: _currentTab == NavigationTabId.reel ? Colors.transparent : null,
       // Fork: the shell never moves for the keyboard (screens with fields
       // have their own Scaffolds that do). A stale IME inset after an app
       // switch on Samsung pushed the bottom bar halfway up the screen.

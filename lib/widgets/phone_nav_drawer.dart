@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -67,7 +69,9 @@ List<FocusableAction> phoneTabActions(
     FocusableAction(
       tooltip: t.profiles.sectionTitle,
       onPressed: () => showPhoneNavDrawer(context, onRefresh: onRefresh, extras: extras),
-      child: _AvatarButton(onPressed: () => showPhoneNavDrawer(context, onRefresh: onRefresh, extras: extras)),
+      child: _AvatarButton(
+        onPressed: () => showPhoneNavDrawer(context, onRefresh: onRefresh, extras: extras),
+      ),
     ),
   ];
 }
@@ -93,7 +97,11 @@ class _RemoteIcon extends StatelessWidget {
         isLabelVisible: connected,
         smallSize: 8,
         backgroundColor: scheme.primary,
-        child: AppIcon(Symbols.phone_android_rounded, fill: connected ? 1 : 0, color: connected ? scheme.primary : color),
+        child: AppIcon(
+          Symbols.phone_android_rounded,
+          fill: connected ? 1 : 0,
+          color: connected ? scheme.primary : color,
+        ),
       ),
     );
   }
@@ -143,7 +151,11 @@ Future<void> showPhoneNavDrawer(
         hostContext: context,
       ),
       transitionsBuilder: (context, animation, _, child) {
-        final curved = CurvedAnimation(parent: animation, curve: ForkMotion.enterCurve, reverseCurve: ForkMotion.exitCurve);
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: ForkMotion.enterCurve,
+          reverseCurve: ForkMotion.exitCurve,
+        );
         return SlideTransition(
           position: Tween(begin: const Offset(1, 0), end: Offset.zero).animate(curved),
           child: child,
@@ -194,7 +206,14 @@ class _PhoneNavDrawerState extends State<_PhoneNavDrawer> {
 
     final rows = <PhoneDrawerItem>[
       ...widget.extras,
-      (Symbols.video_library_rounded, t.navigation.libraries, () => MainTabSwitcher.select?.call(NavigationTabId.libraries)),
+      // Fork: the Reel takes Explore's bottom-bar slot on Android.
+      if (Platform.isAndroid)
+        (Symbols.explore_rounded, t.navigation.explore, () => MainTabSwitcher.select?.call(NavigationTabId.explore)),
+      (
+        Symbols.video_library_rounded,
+        t.navigation.libraries,
+        () => MainTabSwitcher.select?.call(NavigationTabId.libraries),
+      ),
       (Symbols.history_rounded, t.navigation.history, () => MainTabSwitcher.select?.call(NavigationTabId.history)),
       (Symbols.download_rounded, t.navigation.downloads, () => MainTabSwitcher.select?.call(NavigationTabId.downloads)),
       (

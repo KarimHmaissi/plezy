@@ -34,6 +34,7 @@ import 'profiles/plex_home_service.dart';
 import 'screens/auth_screen.dart';
 import 'screens/profile/pin_entry_dialog.dart';
 import 'screens/profile/profile_switch_screen.dart';
+import 'screens/reel/reel_screen.dart';
 import 'services/storage_service.dart';
 import 'services/assistive_technology_service.dart';
 import 'services/device_performance.dart';
@@ -1526,6 +1527,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     // MemoryPressureBreadcrumbs has already halved the image cache budget;
     // clearing live images here would blank artwork still on screen.
     appLogger.w('System memory pressure, image cache budget halved');
+    // Fork: The Reel's degrade ladder (drop the preload, then stills only).
+    ReelScreen.trimMemory();
   }
 
   /// RSS-based image-cache trimming (MemoryTrimPolicy). Desktop keeps its fixed 1.5GB bar;
@@ -1558,6 +1561,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       // restores the tier size once RSS has stayed under for its cooldown.
       final trim = MemoryTrimPolicy.instance.onWatchdogTick(overThreshold: rss > threshold);
       if (trim == WatchdogTrim.none) return;
+      // Fork: past the threshold the Reel releases its clip core.
+      ReelScreen.trimMemory(severe: true);
       appLogger.w('RSS high (${rss >> 20}MB > ${threshold >> 20}MB), image cache ${trim.name} (cache $before)');
     });
   }

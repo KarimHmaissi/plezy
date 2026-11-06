@@ -24,6 +24,7 @@ import '../media/media_person.dart';
 import '../media/media_playlist.dart';
 import '../media/ids.dart';
 import '../media/media_server_client.dart';
+import 'reel/clip_filter.dart';
 import '../media/playback_report_metadata.dart';
 import '../media/server_capabilities.dart';
 import '../media/library_change_event.dart';
@@ -1905,6 +1906,28 @@ class PlexClient
         ) ??
         [];
   }
+
+  /// Fork (Reel): a title's extras as lean clip rows for the Reel's ladder.
+  /// One request, no cache fallback (a stale part key is useless), and a
+  /// caller-chosen [timeout] because some servers' extras calls hang.
+  Future<List<PlexExtraClip>> fetchExtraClips(
+    String ratingKey, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final response = await _http.get('/library/metadata/$ratingKey/extras', timeout: timeout);
+    final rows = _getMediaContainer(response)?['Metadata'];
+    if (rows is! List) return const [];
+    return [
+      for (var i = 0; i < rows.length; i++)
+        if (rows[i] is Map<String, dynamic>) ?PlexExtraClip.fromJson(rows[i] as Map<String, dynamic>, i),
+    ];
+  }
+
+  /// Fork (Reel): the direct-play URL of a clip part. The token rides in
+  /// the URL so the clip core sends no headers at all (its headers are
+  /// shared with AnimeThemes requests). IVA parts redirect to the CDN, which
+  /// never sees the token.
+  String clipUrl(String partKey) => '${config.baseUrl}$partKey'.withPlexToken(config.token);
 
   String getThumbnailUrl(String? thumbPath) {
     if (thumbPath == null || thumbPath.isEmpty) return '';

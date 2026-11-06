@@ -55,7 +55,10 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
+import androidx.media3.exoplayer.source.preload.TargetPreloadStatusControl
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
@@ -387,6 +390,17 @@ class ExoPlayerCore(private val activity: Activity) :
   private val externalSubtitleUris = mutableListOf<String>()
   private val externalSubtitleContainerUris = mutableListOf<String>()
   private var playbackMediaSourceFactory: DefaultMediaSourceFactory? = null
+
+  /**
+   * The Reel's clip mode (opt-in at initialize): a short-buffer load control and a player built
+   * through media3's [DefaultPreloadManager], so the next card's first seconds are already
+   * buffered on this one core. No second decoder, no second surface.
+   */
+  var clipMode = false
+    private set
+  private var preloadManager: DefaultPreloadManager? = null
+  private val preloadItems = LinkedHashMap<String, MediaItem>()
+  private var preloadRank = 0
   private var currentMediaUri: String? = null
   private var currentHeaders: Map<String, String>? = null
   private var currentMediaIsLive: Boolean = false
@@ -580,15 +594,18 @@ class ExoPlayerCore(private val activity: Activity) :
     // Read-ahead depth, as the wire name Dart sends. Kept a String because `LoadControlPolicy`
     // is internal and this function is not; unrecognised names resolve to Auto, which is also
     // the default (#1816).
-    bufferTier: String = "auto"
+    bufferTier: String = "auto",
+    clipMode: Boolean = false
   ): Boolean {
     if (isInitialized) {
       Log.d(TAG, "Already initialized")
       return true
     }
 
-    tunnelingUserEnabled = tunnelingEnabled
-    this.audioPassthroughEnabled = audioPassthroughEnabled
+    this.clipMode = clipMode
+    // Clips: PCM out and no tunneling, so the TV and soundbar never re-lock between cards.
+    tunnelingUserEnabled = tunnelingEnabled && !clipMode
+    this.audioPassthroughEnabled = audioPassthroughEnabled && !clipMode
     this.dvMode = getConfiguredDvMode()
     displayHdrSupported = DoviBridge.displaySupportsHdr(activity)
     DoviBridge.logSupportSummary(activity)
@@ -801,11 +818,27 @@ class ExoPlayerCore(private val activity: Activity) :
       val targetBufferBytes = LoadControlPolicy.autoTargetBufferBytes(largeHeapMB, availableMB)
 
       val resolvedTier = LoadControlPolicy.BufferTier.fromWire(bufferTier)
-      val bufferDurations = LoadControlPolicy.bufferDurations(resolvedTier, availableMB)
+      val bufferDurations = if (clipMode) {
+        LoadControlPolicy.clipBufferDurations()
+      } else {
+        LoadControlPolicy.bufferDurations(resolvedTier, availableMB)
+      }
       resolvedTargetBufferBytes = targetBufferBytes
       resolvedBufferDurations = bufferDurations
 
-      val loadControl = DefaultLoadControl.Builder().apply {
+      val loadControl = if (clipMode) {
+        DefaultLoadControl.Builder()
+          .setTargetBufferBytes(LoadControlPolicy.CLIP_TARGET_BYTES)
+          .setPrioritizeTimeOverSizeThresholds(false)
+          .setBufferDurationsMs(
+            bufferDurations.minBufferMs,
+            bufferDurations.maxBufferMs,
+            LoadControlPolicy.CLIP_BUFFER_FOR_PLAYBACK_MS,
+            LoadControlPolicy.CLIP_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+          )
+          .build()
+          .let { ObservingLoadControl(it).also { observing -> observingLoadControl = observing } }
+      } else DefaultLoadControl.Builder().apply {
         setTargetBufferBytes(targetBufferBytes)
         setPrioritizeTimeOverSizeThresholds(false)
         // Generic setter only. media3 1.9 added ...ForStreaming/...ForLocalPlayback variants and a
@@ -828,7 +861,7 @@ class ExoPlayerCore(private val activity: Activity) :
           "tunneling=$tunnelingUserEnabled, dataSource=$dataSourceLabel"
       )
 
-      exoPlayer = ExoPlayer.Builder(activity)
+      val playerBuilder = ExoPlayer.Builder(activity)
         .setTrackSelector(trackSelector!!)
         .setLoadControl(loadControl)
         .setAudioAttributes(audioAttributes, false) // We handle audio focus manually
@@ -837,7 +870,25 @@ class ExoPlayerCore(private val activity: Activity) :
         // Cut the wait before media3 reports a player that runs past its duration
         // without ending (#1673) — see EndOfStreamPolicy.STALL_TIMEOUT_MS.
         .setStuckPlayingNotEndingTimeoutMs(EndOfStreamPolicy.STALL_TIMEOUT_MS)
-        .build()
+      exoPlayer = if (clipMode) {
+        // The preload manager and the player share the playback thread, load control,
+        // renderers and bandwidth meter, so a preloaded source plays without re-preparing.
+        // Every item it holds is the next card: keep its first seconds in memory.
+        val statusControl = TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> {
+          DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(LoadControlPolicy.CLIP_PRELOAD_MS)
+        }
+        val builder = DefaultPreloadManager.Builder(activity, statusControl)
+          .setLoadControl(loadControl)
+          .setRenderersFactory(wrappedRenderersFactory)
+          .setMediaSourceFactory(mediaSourceFactory)
+        builder.buildExoPlayer(playerBuilder).also {
+          preloadManager = builder.build()
+          it.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
+          emitLog("info", "init", "Clip mode: preload manager on, buffer ${bufferDurations.minBufferMs}-${bufferDurations.maxBufferMs}ms")
+        }
+      } else {
+        playerBuilder.build()
+      }
 
       // Add ASS overlay view to the full-screen surfaceContainer (NOT the zoom-scaled
       // videoAspectContainer): the libass frame = screen, and mpv-style ass_set_margins
@@ -2785,6 +2836,19 @@ class ExoPlayerCore(private val activity: Activity) :
   }
 
   private fun setCurrentMediaSource(player: ExoPlayer, uri: String, positionMs: Long) {
+    if (clipMode) {
+      val item = preloadItems[uri]
+      val preloaded = item?.let { preloadManager?.getMediaSource(it) }
+      emitLog("info", "clip", "Open clip: preloaded=${preloaded != null}")
+      if (item != null && preloaded != null) {
+        // The preloaded item was built before this open, so its mediaId is "clip:N", not the
+        // generation; map it, or every generation-gated event (first frame, decoder checks) for
+        // it is dropped.
+        clipGenerations[item.mediaId] = currentMediaGeneration
+        player.setMediaSource(preloaded, positionMs)
+        return
+      }
+    }
     val mediaSource = buildPlaybackMediaSource(uri)
     if (mediaSource == null) {
       player.setMediaItem(buildMediaItem(uri), positionMs)
@@ -2841,7 +2905,8 @@ class ExoPlayerCore(private val activity: Activity) :
     val timeline = eventTime.timeline
     val windowIndex = eventTime.windowIndex
     if (windowIndex !in 0 until timeline.windowCount) return null
-    return timeline.getWindow(windowIndex, Timeline.Window()).mediaItem.mediaId.toIntOrNull()
+    val mediaId = timeline.getWindow(windowIndex, Timeline.Window()).mediaItem.mediaId
+    return mediaId.toIntOrNull() ?: clipGenerations[mediaId]
   }
 
   private fun requestFallbackForUnsupportedTracks(tracks: Tracks, mediaGeneration: Int) {
@@ -4331,11 +4396,46 @@ class ExoPlayerCore(private val activity: Activity) :
 
   // Cleanup
 
+  /**
+   * Clip mode: buffer the first seconds of [uri] for the next card, dropping any older
+   * preload (only the next card is ever held). No-op outside clip mode.
+   */
+  /** Clip mode: the generation each preloaded item was opened under (its mediaId is "clip:N"). */
+  private val clipGenerations = HashMap<String, Int>()
+
+  fun preloadClip(uri: String) {
+    val manager = preloadManager ?: return
+    if (!clipMode || preloadItems.containsKey(uri)) return
+    clearPreloads(keep = currentMediaUri)
+    // No headers: clips carry no request headers at all (they are shared across every source
+    // on this core, and an AnimeThemes request must never see a Plex header).
+    val item = MediaItem.Builder().setUri(uri).setMediaId("clip:${++preloadRank}").build()
+    preloadItems[uri] = item
+    manager.add(item, preloadRank)
+    manager.setCurrentPlayingIndex(preloadRank - 1)
+    manager.invalidate()
+  }
+
+  /** Clip mode: release every preloaded source except [keep]'s. */
+  fun clearPreloads(keep: String? = null) {
+    val manager = preloadManager ?: return
+    val drop = preloadItems.keys.filter { it != keep }
+    for (u in drop) {
+      preloadItems.remove(u)?.let {
+        manager.remove(it)
+        clipGenerations.remove(it.mediaId)
+      }
+    }
+  }
+
   fun dispose() {
     if (disposing) return
     disposing = true
     check(Looper.myLooper() == Looper.getMainLooper())
     Log.d(TAG, "Disposing")
+    preloadItems.clear()
+    preloadManager?.release()
+    preloadManager = null
 
     surfaceContainer?.let { container ->
       container.visibility = View.INVISIBLE
