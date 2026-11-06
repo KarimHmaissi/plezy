@@ -140,6 +140,11 @@ enum ReelFeedLayout {
 /// [ReelController.leanBackIdle] passes with no touch; then it holds too,
 /// so the screen can sleep.
 ///
+/// Behind a playing clip (V2-67): the card's art (the ambient backdrop and the
+/// still under the picture) shows until the clip's first frame, then fades
+/// out so the clip plays on black. A pause or a held last frame keeps it
+/// black; an AI card, a card still opening and a clip that broke keep the art.
+///
 /// With a screen reader (`MediaQuery.accessibleNavigationOf`, V2-54) each
 /// card is one node with Save, More and Hide/Show controls as custom
 /// actions, the Reel starts muted so the clip doesn't talk over it, and the
@@ -746,7 +751,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
           final video = state.video;
           final isCurrent = state.current;
           final glide = _motion(context, const Duration(milliseconds: 280));
-          final backdrop = _Backdrop(slot: slot, dim: _immersive ? _immersiveDim(context) : 0.55);
+          final backdrop = _Backdrop(slot: slot, video: video, dim: _immersive ? _immersiveDim(context) : 0.55);
           final held = state.held && !_rolling;
           final picture = RepaintBoundary(
             child: _Picture(slot: slot, video: video, paused: state.paused, held: held, onReplay: _replay),
@@ -951,11 +956,15 @@ class _SaveBurst extends StatelessWidget {
   }
 }
 
-/// The card's own art, full-bleed and dimmed, behind the picture.
+/// The card's own art, full-bleed and dimmed, behind the picture, until the
+/// card's clip shows its first frame (V2-67): then the art fades out and the
+/// clip plays on black. An AI card, a card before its first frame and a clip
+/// that failed keep it.
 class _Backdrop extends StatelessWidget {
-  const _Backdrop({required this.slot, required this.dim});
+  const _Backdrop({required this.slot, required this.video, required this.dim});
 
   final ReelSlot slot;
+  final FeedVideo? video;
   final double dim;
 
   @override
@@ -967,16 +976,23 @@ class _Backdrop extends StatelessWidget {
         // Ambient light from the card's own art: fetched tiny and scaled up,
         // it reads as a soft blur without a blur pass on every scroll frame.
         if (item != null)
-          OptimizedMediaImage(
-            client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
-            imagePath: _artPath(item),
-            width: _ambientSize.width,
-            height: _ambientSize.height,
-            fit: BoxFit.cover,
-            imageType: ImageType.art,
-            onImageProvider: ReelArt.track,
-            placeholder: (_, _) => const SizedBox.shrink(),
-            errorWidget: (_, _, _) => const SizedBox.shrink(),
+          _ClipShowing(
+            video: video,
+            builder: (context, showing) => _ArtFade(
+              key: ValueKey(('reel-ambient-art', slot.card!.id)),
+              out: showing,
+              child: OptimizedMediaImage(
+                client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
+                imagePath: _artPath(item),
+                width: _ambientSize.width,
+                height: _ambientSize.height,
+                fit: BoxFit.cover,
+                imageType: ImageType.art,
+                onImageProvider: ReelArt.track,
+                placeholder: (_, _) => const SizedBox.shrink(),
+                errorWidget: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
           ),
         AnimatedContainer(
           duration: _motion(context, const Duration(milliseconds: 280)),
@@ -989,6 +1005,9 @@ class _Backdrop extends StatelessWidget {
 
 /// The clip, at its own shape, over the card's art in the same frame: the
 /// art is the still until the first frame, and stays for a card with no clip.
+/// Once the first frame shows, the art under it fades out too (V2-67), so the
+/// frame's edges never show the poster while it glides to the clip's shape;
+/// a clip that breaks gives the still back.
 /// The frame starts 16:9 and glides to the clip's own shape once it opens
 /// (V2-30), on the app's slow token and emphasized curve; with reduce motion
 /// on, or on the reduced effects tier, it takes the new shape at once.
@@ -1022,62 +1041,138 @@ class _Picture extends StatelessWidget {
       duration: _motion(context, slow),
       curve: MonoMotion.emphasized,
       builder: (context, aspect, child) => AspectRatio(aspectRatio: aspect, child: child),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (item != null)
-            OptimizedMediaImage(
-              client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
-              imagePath: _artPath(item),
-              // No explicit size: it sizes from the card's own frame, so the
-              // decode matches what is shown (plan V2-05).
-              fit: BoxFit.cover,
-              imageType: ImageType.art,
-              onImageProvider: ReelArt.track,
-              placeholder: (_, _) => const ColoredBox(color: Colors.black26),
-              errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
+      child: _ClipShowing(
+        video: v,
+        builder: (context, showing) => Stack(
+          fit: StackFit.expand,
+          children: [
+            if (item != null)
+              _ArtFade(
+                key: ValueKey(('reel-still-art', slot.card!.id)),
+                out: showing,
+                child: OptimizedMediaImage(
+                  client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
+                  imagePath: _artPath(item),
+                  // No explicit size: it sizes from the card's own frame, so
+                  // the decode matches what is shown (plan V2-05).
+                  fit: BoxFit.cover,
+                  imageType: ImageType.art,
+                  onImageProvider: ReelArt.track,
+                  placeholder: (_, _) => const ColoredBox(color: Colors.black26),
+                  errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
+                ),
+              ),
+            AnimatedOpacity(
+              opacity: showing ? 1 : 0,
+              duration: _motion(context, const Duration(milliseconds: 160)),
+              child: v == null ? const SizedBox.shrink() : v.view(),
             ),
-          AnimatedOpacity(
-            opacity: v == null ? 0 : 1,
-            duration: _motion(context, const Duration(milliseconds: 160)),
-            child: v == null ? const SizedBox.shrink() : v.view(),
-          ),
-          AnimatedOpacity(
-            opacity: paused ? 1 : 0,
-            duration: _motion(context, const Duration(milliseconds: 150)),
-            child: Center(
-              child: DecoratedBox(
-                decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Icon(
-                    Symbols.play_arrow_rounded,
-                    fill: 1,
-                    size: 44,
-                    color: Theme.of(context).colorScheme.onSurface,
+            AnimatedOpacity(
+              opacity: paused ? 1 : 0,
+              duration: _motion(context, const Duration(milliseconds: 150)),
+              child: Center(
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Icon(
+                      Symbols.play_arrow_rounded,
+                      fill: 1,
+                      size: 44,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          AnimatedOpacity(
-            opacity: held ? 1 : 0,
-            duration: _motion(context, const Duration(milliseconds: 150)),
-            child: IgnorePointer(
-              ignoring: !held,
-              child: Center(
-                child: FilledButton.icon(
-                  onPressed: onReplay,
-                  icon: const Icon(Symbols.replay_rounded),
-                  label: Text(t.reel.card.replay),
+            AnimatedOpacity(
+              opacity: held ? 1 : 0,
+              duration: _motion(context, const Duration(milliseconds: 150)),
+              child: IgnorePointer(
+                ignoring: !held,
+                child: Center(
+                  child: FilledButton.icon(
+                    onPressed: onReplay,
+                    icon: const Icon(Symbols.replay_rounded),
+                    label: Text(t.reel.card.replay),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
+}
+
+/// Whether [video]'s picture is up (V2-67): open, its first frame ready, and
+/// not broken. It follows the player itself, so a clip that breaks mid-play
+/// gives the art back, and it rebuilds only when that answer changes, not at
+/// every position report. A pause or a held last frame keeps the picture up.
+class _ClipShowing extends StatefulWidget {
+  const _ClipShowing({required this.video, required this.builder});
+
+  final FeedVideo? video;
+  final Widget Function(BuildContext context, bool showing) builder;
+
+  @override
+  State<_ClipShowing> createState() => _ClipShowingState();
+}
+
+class _ClipShowingState extends State<_ClipShowing> {
+  late bool _showing = _of(widget.video);
+
+  static bool _of(FeedVideo? v) => v != null && v.ready && !v.failed;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.video?.addListener(_onVideo);
+  }
+
+  @override
+  void didUpdateWidget(_ClipShowing old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.video, widget.video)) {
+      old.video?.removeListener(_onVideo);
+      widget.video?.addListener(_onVideo);
+      _showing = _of(widget.video);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.video?.removeListener(_onVideo);
+    super.dispose();
+  }
+
+  void _onVideo() {
+    final showing = _of(widget.video);
+    if (showing != _showing) setState(() => _showing = showing);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _showing);
+}
+
+/// The card's art fading out once its clip is up (V2-67), on the app's slow
+/// token and standard curve; with reduce motion on, or on the reduced effects
+/// tier, it goes at once. It stays built while out, so it comes back without
+/// a fetch if the clip breaks.
+class _ArtFade extends StatelessWidget {
+  const _ArtFade({super.key, required this.out, required this.child});
+
+  final bool out;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => AnimatedOpacity(
+    opacity: out ? 0 : 1,
+    duration: _motion(context, Theme.of(context).extension<MonoTokens>()?.slow ?? const Duration(milliseconds: 300)),
+    curve: MonoMotion.standard,
+    child: child,
+  );
 }
 
 /// The deck button, mute and On TV, over a soft top scrim.

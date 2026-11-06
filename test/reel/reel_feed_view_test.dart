@@ -167,10 +167,16 @@ class _Video extends ChangeNotifier implements FeedVideo {
 
   /// The clip's own shape.
   double ratio = 16 / 9;
+
+  /// When set, the open waits for it: no first frame until it completes.
+  Completer<void>? opening;
+
+  /// The clip broke mid-play.
+  bool broken = false;
   @override
   bool get ready => _ready;
   @override
-  bool get failed => false;
+  bool get failed => broken;
   @override
   double get aspectRatio => ratio;
   @override
@@ -184,7 +190,17 @@ class _Video extends ChangeNotifier implements FeedVideo {
   @override
   Duration get buffered => _ready ? duration : Duration.zero;
   @override
-  Future<void> initialize() async => _ready = true;
+  Future<void> initialize() async {
+    await opening?.future;
+    _ready = true;
+  }
+
+  /// The clip breaks mid-play.
+  void breakDown() {
+    broken = true;
+    notifyListeners();
+  }
+
   @override
   Future<void> play() async {
     // As the plugin does: a play from the end starts at the top.
@@ -239,6 +255,9 @@ void main() {
 
   /// Clip shapes by card, for clips that aren't 16:9.
   late Map<String, double> ratios;
+
+  /// When set, every clip's open waits for it (V2-67: before the first frame).
+  Completer<void>? opening;
   late ReelStore store;
   late List<MediaItem> opened;
   late int decksOpened, watched, sheets, resized;
@@ -313,10 +332,13 @@ void main() {
     );
     videos = {};
     ratios = {};
+    opening = null;
     players = ReelFeedPlayers(
       create: (uri) {
         final id = uri.pathSegments.last.split('.').first;
-        return videos[id] = _Video()..ratio = ratios[id] ?? 16 / 9;
+        return videos[id] = _Video()
+          ..ratio = ratios[id] ?? 16 / 9
+          ..opening = opening;
       },
       // Full volume at once: the rise (V2-19) is covered in
       // feed_players_test.dart and would leave a timer behind here.
@@ -1114,6 +1136,128 @@ void main() {
     expect(c.artPrecache, isNotNull);
     await tester.pumpWidget(const SizedBox.shrink());
     expect(c.artPrecache, isNull, reason: 'a feed that has gone builds no art');
+  });
+
+  group('V2-67: black behind a playing clip', () {
+    /// The card's art behind the picture (the ambient backdrop) and under
+    /// it (the still), as their fades stand.
+    AnimatedOpacity fadeOf(WidgetTester tester, String slot, String id) => tester.widget<AnimatedOpacity>(
+      find.descendant(of: find.byKey(ValueKey((slot, id))), matching: find.byType(AnimatedOpacity)).first,
+    );
+    double ambient(WidgetTester tester, String id) => fadeOf(tester, 'reel-ambient-art', id).opacity;
+    double still(WidgetTester tester, String id) => fadeOf(tester, 'reel-still-art', id).opacity;
+
+    /// [id]'s own clip picture in its frame.
+    double clip(WidgetTester tester, String id) {
+      final frame = find.ancestor(of: find.byKey(ValueKey(('reel-still-art', id))), matching: find.byType(Stack)).first;
+      final picture = find.descendant(
+        of: frame,
+        matching: find.byWidgetPredicate((w) => w is ColoredBox && w.color == Colors.teal),
+      );
+      return tester
+          .widget<AnimatedOpacity>(find.ancestor(of: picture, matching: find.byType(AnimatedOpacity)).first)
+          .opacity;
+    }
+
+    Future<void> firstFrame(WidgetTester tester) async {
+      await tester.runAsync(() async {
+        opening!.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the art shows until the first frame, then fades out and the clip plays on black', (tester) async {
+      opening = Completer<void>();
+      await pump(tester);
+      expect(players.videoFor('t1'), isNull, reason: 'no first frame yet');
+      expect(ambient(tester, 't1'), 1);
+      expect(still(tester, 't1'), 1);
+
+      await firstFrame(tester);
+      expect(players.videoFor('t1'), isNotNull);
+      expect(ambient(tester, 't1'), 0);
+      expect(still(tester, 't1'), 0);
+      expect(clip(tester, 't1'), 1);
+      // What is left behind the picture is the feed's own black ground.
+      expect(
+        tester
+            .widget<ColoredBox>(find.ancestor(of: find.byType(PageView), matching: find.byType(ColoredBox)).first)
+            .color,
+        Colors.black,
+      );
+    });
+
+    testWidgets('the art fades on the slow token, not at a cut', (tester) async {
+      opening = Completer<void>();
+      await pump(tester, themed: true, palette: MonoPalette.dark);
+      await tester.runAsync(() async {
+        opening!.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      final fade = fadeOf(tester, 'reel-ambient-art', 't1');
+      final slow = Theme.of(tester.element(find.byType(PageView))).extension<MonoTokens>()!.slow;
+      expect(fade.opacity, 0);
+      expect(fade.duration, slow);
+      expect(fade.curve, MonoMotion.standard);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a pause or a held last frame keeps it black', (tester) async {
+      await pump(tester);
+      expect(ambient(tester, 't1'), 0);
+
+      await tester.runAsync(players.togglePause);
+      await tester.pumpAndSettle();
+      expect(players.paused, isTrue);
+      expect(ambient(tester, 't1'), 0);
+      expect(still(tester, 't1'), 0);
+      await tester.runAsync(players.togglePause);
+      await tester.pumpAndSettle();
+
+      // Twice then hold: the last play stops on its final frame (V2-47).
+      final v = videos['1']!
+        ..tick(const Duration(seconds: 5))
+        ..tick(const Duration(seconds: 55))
+        ..tick(const Duration(milliseconds: 200))
+        ..tick(const Duration(seconds: 5))
+        ..end();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(v.completed, isTrue);
+      expect(players.card('t1').value.held, isTrue, reason: 'held for Replay');
+      expect(ambient(tester, 't1'), 0);
+      expect(still(tester, 't1'), 0);
+    });
+
+    testWidgets('a clip that breaks gives the art back', (tester) async {
+      await pump(tester);
+      expect(ambient(tester, 't1'), 0);
+      videos['1']!.breakDown();
+      await tester.pumpAndSettle();
+      expect(ambient(tester, 't1'), 1);
+      expect(still(tester, 't1'), 1);
+      expect(clip(tester, 't1'), 0, reason: 'the broken picture no longer covers the still');
+    });
+
+    testWidgets('an AI card keeps its art', (tester) async {
+      servers.bare.add('1');
+      await pump(tester);
+      expect(c.current.isAiCard, isTrue);
+      await tester.pumpAndSettle();
+      expect(players.videoFor('t1'), isNull);
+      expect(ambient(tester, 't1'), 1);
+      expect(still(tester, 't1'), 1);
+    });
+
+    testWidgets('a position report alone does not rebuild the art', (tester) async {
+      await pump(tester);
+      final before = tester.widget(find.byKey(const ValueKey(('reel-ambient-art', 't1'))));
+      videos['1']!.tick(const Duration(seconds: 3));
+      await tester.pump();
+      expect(identical(tester.widget(find.byKey(const ValueKey(('reel-ambient-art', 't1')))), before), isTrue);
+    });
   });
 
   group('TV card art', () {

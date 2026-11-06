@@ -9,6 +9,7 @@ import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/mpv/models.dart' show PlayerError;
 import 'package:plezy/screens/reel/reel_card_view.dart';
 import 'package:plezy/screens/reel/reel_lean_back.dart';
 import 'package:plezy/screens/reel/reel_sheet.dart';
@@ -447,6 +448,35 @@ void main() {
       engine.firstFrameCtl.add(null);
       await tester.pump();
       expect(artOpacity(tester), 0);
+    });
+
+    testWidgets('V2-67: once the first frame is up the art stays out through a pause and a held frame, '
+        'and a failure brings it back', (tester) async {
+      await pump(tester);
+      engine.firstFrameCtl.add(null);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(artOpacity(tester), 0, reason: 'a clip that does not fill the screen plays on black');
+
+      await tester.runAsync(c.clips.pause);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(c.clips.phase.value, ClipPhase.paused);
+      expect(artOpacity(tester), 0);
+      await tester.runAsync(c.clips.resume);
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // Twice, then it holds its last frame.
+      engine.completedCtl.add(true);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+      engine.completedCtl.add(true);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(c.clips.phase.value, ClipPhase.held);
+      expect(artOpacity(tester), 0);
+
+      engine.errorCtl.add(const PlayerError('decoder lost'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(c.clips.phase.value, ClipPhase.failed);
+      expect(artOpacity(tester), 1);
     });
   });
 
