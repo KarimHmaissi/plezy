@@ -263,8 +263,17 @@ TitleProfile _profile(
   if (row != null && !isMovie && (row.watchedEpisodeCount ?? 0) > episodesWatched) {
     episodesWatched = row.watchedEpisodeCount!;
   }
+  // Where the undated plays were logged: a Trakt import, or a Plex play
+  // with no real date (a bulk-dated mark).
+  final bulkVia = <String>{
+    for (final p in plays)
+      if (p.bulk) p.sources.contains(HistorySource.trakt) ? 'trakt' : 'plexUndated',
+  };
   // Plex counts plays it has no dates for; keep them as undated.
-  if (row != null && isMovie && (row.viewCount ?? 0) > plays.length) bulk += row.viewCount! - plays.length;
+  if (row != null && isMovie && (row.viewCount ?? 0) > plays.length) {
+    bulk += row.viewCount! - plays.length;
+    bulkVia.add('plexUndated');
+  }
 
   final imdb = row?.imdb ?? first?.imdb;
   final tmdb = row?.tmdb ?? first?.tmdb;
@@ -310,6 +319,7 @@ TitleProfile _profile(
     inLibrary: row != null,
     watches: real,
     bulkPlays: bulk,
+    bulkVia: bulkVia,
     episodesWatched: episodesWatched,
     episodesRewatched: perEpisode.values.where((n) => n > 1).length,
     episodeCount: isMovie ? null : (details?.airedEpisodes ?? row?.episodeCount),

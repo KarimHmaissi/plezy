@@ -62,6 +62,7 @@ class TitleProfile {
     this.inLibrary = false,
     List<DateTime> watches = const [],
     this.bulkPlays = 0,
+    this.bulkVia = const {},
     this.episodesWatched = 0,
     this.episodesRewatched = 0,
     this.episodeCount,
@@ -116,6 +117,10 @@ class TitleProfile {
   /// watch of a show. Imports and "mark as watched" are in [bulkPlays].
   final List<DateTime> watches;
   final int bulkPlays;
+
+  /// Where the [bulkPlays] were logged: `trakt` (an import) and/or
+  /// `plexUndated` (a Plex play count or mark with no real date).
+  final Set<String> bulkVia;
 
   /// Shows: distinct episodes watched, and how many of those were watched
   /// more than once.
@@ -198,6 +203,7 @@ class TitleProfile {
     if (inLibrary) 'lib': true,
     if (watches.isNotEmpty) 'w': [for (final w in watches) w.millisecondsSinceEpoch],
     if (bulkPlays > 0) 'bp': bulkPlays,
+    if (bulkVia.isNotEmpty) 'bv': [...bulkVia],
     if (episodesWatched > 0) 'ew': episodesWatched,
     if (episodesRewatched > 0) 'er': episodesRewatched,
     'ec': ?episodeCount,
@@ -237,6 +243,7 @@ class TitleProfile {
         for (final w in (j['w'] as List? ?? const [])) DateTime.fromMillisecondsSinceEpoch(w as int, isUtc: true),
       ],
       bulkPlays: j['bp'] as int? ?? 0,
+      bulkVia: {for (final v in (j['bv'] as List? ?? const [])) '$v'},
       episodesWatched: j['ew'] as int? ?? 0,
       episodesRewatched: j['er'] as int? ?? 0,
       episodeCount: j['ec'] as int?,
