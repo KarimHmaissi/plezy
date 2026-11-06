@@ -150,6 +150,11 @@ abstract final class ReelApp {
       externalClips: !PlatformDetector.isTV(),
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
+      // While the Reel plays, the brain's indexer rests and its ONNX session
+      // (about 66 MB) is released; it reopens on the next embed. The hook
+      // also fires when the Reel is disposed while playing (V2-60), so the
+      // indexer never stays parked.
+      onActive: (on) => unawaited(HistoryBrain.instance.yieldTo(on)),
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
@@ -162,14 +167,6 @@ abstract final class ReelApp {
     );
     if (remote != null) _publish(controller, remote);
     _sweepLater(store);
-    // While the Reel plays, the brain's indexer rests and its ONNX session
-    // (about 66 MB) is released; it reopens on the next embed.
-    var yielded = false;
-    controller.addListener(() {
-      if (controller.active == yielded) return;
-      yielded = controller.active;
-      unawaited(HistoryBrain.instance.yieldTo(yielded));
-    });
     return controller;
   }
 
