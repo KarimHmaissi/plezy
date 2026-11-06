@@ -37,6 +37,7 @@ import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
 import 'reel/reel_decks.dart';
+import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
@@ -137,7 +138,9 @@ abstract final class ReelApp {
         if (plex == null) return false;
         return mutateWatchlistMembership(item.kind, plex, add: true);
       },
-      onSaved: _seatHomeRow,
+      // The TV seats "From the Reel" on its Home; a phone's Save writes
+      // only the pick (see ReelHomeRow).
+      onSaved: () => ReelHomeRow.seat(),
       // A phone on its own data reaches the TV by catching up while
       // connected; a mirroring phone writes to the TV (or can't write).
       reachesTvNow: () =>
@@ -200,26 +203,6 @@ abstract final class ReelApp {
     c.clips.phase.addListener(publish);
     c.cardChanged.addListener(publish);
     republish = () => publish(force: true);
-  }
-
-  /// Synced: set once the Reel's Home row has been seated, so removing it in
-  /// Manage Home sticks.
-  static const String homeRowSeatedKey = 'reel.homeRowSeated';
-
-  /// The first Save puts "From the Reel" at the top of Home, once.
-  static Future<void> _seatHomeRow() async {
-    final settings = await Customisation.store;
-    if (await settings.readSetting(homeRowSeatedKey) != null) {
-      appLogger.i('[ReelSave] Home row seated before; left where the user keeps it');
-      return;
-    }
-    final added = await HomePinsController.instance.insertFirst((
-      id: HomeRowIds.reelPicks,
-      title: 'From the Reel',
-      sources: const <String>[],
-    ));
-    await settings.writeSetting(homeRowSeatedKey, '1');
-    appLogger.i('[ReelSave] Home row ${added ? 'seated first' : 'already on Home'}');
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).

@@ -320,11 +320,15 @@ abstract final class SyncUnits {
       unit.startsWith(_settingPrefix) ? unit.substring(_settingPrefix.length) : null;
 
   /// Settings that belong to this device only: Home's own bookkeeping (part of
-  /// [home]), the AI answer order (rebuilt from the answers after a sync),
-  /// this device's AI spend, one-off migrations and caches of Trakt data.
+  /// [home]), whether the Reel's Home row was seated here (only the TV seats
+  /// it, `ReelHomeRow`), the AI answer order (rebuilt from the answers after a
+  /// sync), this device's AI spend, one-off migrations and caches of Trakt
+  /// data.
   static bool syncsSetting(String key) =>
       key != 'home.curated' &&
       key != 'home.revision' &&
+      key != 'reel.homeRowSeated' &&
+      key != 'reel.homeRowRechecked' &&
       key != 'ai.history.index' &&
       !key.startsWith('ai.spend.') &&
       key != 'comfort.pausedMigrated' &&
