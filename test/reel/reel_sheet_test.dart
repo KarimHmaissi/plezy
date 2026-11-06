@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/media_item.dart';
+import 'package:plezy/services/ai/facts/title_facts.dart';
+import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/screens/reel/reel_sheet.dart';
 import 'package:plezy/services/customisation/mirror_store.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
@@ -34,9 +36,9 @@ class _Media implements ReelMedia {
   String? imageUrl(String serverId, String? path, {required int width}) => null;
 }
 
-/// An empty deck: the pickers only need its id and name.
+/// A deck: the pickers only need its id and name; "Watch here" needs a card.
 class _Deck extends ReelDeck {
-  _Deck(this.id, this.name);
+  _Deck(this.id, this.name, [this.cards = const []]);
 
   @override
   final String id;
@@ -46,9 +48,43 @@ class _Deck extends ReelDeck {
   bool get keepsSeen => true;
   @override
   bool get raw => true;
+  final List<ReelCardData> cards;
+
   @override
-  Future<List<ReelCardData>> load() async => const [];
+  Future<List<ReelCardData>> load() async => cards;
 }
+
+ReelCardData _card(String id, String title) => ReelCardData(
+  title: ReelTitle(
+    titleId: 't$id',
+    groupKey: 'g$id',
+    title: title,
+    isShow: false,
+    copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+  ),
+  facts: TitleFacts(
+    ref: TitleRef(id: 't$id', groupKey: 'g$id'),
+    seen: SeenState.unseen,
+  ),
+  best: IndexedTitle(
+    id: 's1:$id',
+    serverId: 's1',
+    serverName: 'Server A',
+    libraryKey: '1',
+    libraryTitle: 'Films',
+    ratingKey: id,
+    type: 'movie',
+    title: title,
+    genres: '',
+    countries: '',
+    directors: '',
+    writers: '',
+    cast: '',
+    collections: '',
+    groupKey: 'g$id',
+    summary: '',
+  ),
+);
 
 /// Both deck pickers (V2-52): the user's order, hidden decks left out, and
 /// each deck's second action (move, pin to the top, hide).
@@ -73,7 +109,7 @@ void main() {
     await store.writeDeckPrefs(prefs, was: ReelDeckPrefs.none);
     c = ReelController(
       decks: [
-        _Deck('for-you', 'For You'),
+        _Deck('for-you', 'For You', [_card('1', 'Harbor Lights')]),
         _Deck('anime-openings', 'Anime openings'),
         _Deck('ai:7', 'Harbor Lights and friends'),
       ],
@@ -173,5 +209,30 @@ void main() {
     await tester.tap(find.text(s.arrange));
     await tester.pumpAndSettle();
     expect(await result.future, ReelSheetAction.arrangeDecks);
+  });
+
+  group('Watch here (V2-48)', () {
+    testWidgets('phone connected to a TV: "Watch here" is the first item and asks to watch on the phone', (
+      tester,
+    ) async {
+      final context = await pump(tester);
+      final result = Completer<ReelSheetAction?>();
+      unawaited(showReelSheet(context, c, isTv: false, watchHere: true).then(result.complete));
+      await tester.pumpAndSettle();
+      final watch = item(t.reel.sheet.watchHere);
+      expect(watch, findsOneWidget);
+      expect(tester.getTopLeft(watch).dy, lessThan(tester.getTopLeft(item(t.reel.sheet.saveForTv)).dy));
+      await tester.tap(watch);
+      await tester.pumpAndSettle();
+      expect(await result.future, ReelSheetAction.watchHere);
+    });
+
+    testWidgets('not connected: no "Watch here", Watch already plays on the phone', (tester) async {
+      final context = await pump(tester);
+      unawaited(showReelSheet(context, c, isTv: false));
+      await tester.pumpAndSettle();
+      expect(find.text(t.reel.sheet.saveForTv), findsOneWidget);
+      expect(find.text(t.reel.sheet.watchHere), findsNothing);
+    });
   });
 }

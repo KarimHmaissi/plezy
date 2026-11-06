@@ -370,6 +370,62 @@ void main() {
     c.dispose();
   });
 
+  group('On TV mode opens on the Fold\'s card (V2-48)', () {
+    List<ReelDeck> two() => [
+      _Deck('a', [_card('1'), _card('2'), _card('3')]),
+      _Deck('b', [_card('4'), _card('5'), _card('6')]),
+    ];
+
+    test('a first start opens the deck on the card for the title', () async {
+      final c = make(decks: two());
+      await c.start(deckId: 'b', groupKey: 'g5');
+      expect(c.deck.id, 'b');
+      expect(c.current.card?.id, 't5');
+      c.dispose();
+    });
+
+    test('a title the deck does not have leaves the deck on its own cursor', () async {
+      final c = make(decks: two());
+      await c.start();
+      await c.openAt('b', 'g-not-here');
+      expect(c.deck.id, 'b');
+      expect(c.current.card?.id, 't4');
+      await c.step(1);
+      await c.openAt('a');
+      await c.openAt('b', 'g-still-not-here');
+      expect(c.current.card?.id, 't5', reason: 'the deck kept its place');
+      c.dispose();
+    });
+
+    test('while playing: another deck opens on the card; the same deck moves to it', () async {
+      final c = make(decks: two());
+      await c.start();
+      expect(c.current.card?.id, 't1');
+      await c.openAt('b', 'g6');
+      expect(c.deck.id, 'b');
+      expect(c.current.card?.id, 't6');
+
+      await c.openAt('b', 'g4');
+      expect(c.current.card?.id, 't4');
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/4/video.mp4'));
+
+      final changed = c.cardChanged.value;
+      await c.openAt('b', 'g4');
+      expect(c.cardChanged.value, changed, reason: 'already on it: nothing reopens');
+      c.dispose();
+    });
+
+    test('openDeck on the deck already playing stays where it is', () async {
+      final c = make(decks: two());
+      await c.start();
+      await c.step(1);
+      await c.openDeck('a');
+      expect(c.current.card?.id, 't2');
+      c.dispose();
+    });
+  });
+
   test('memory pressure drops the preload, then releases the core for stills', () async {
     final c = make();
     await c.start();

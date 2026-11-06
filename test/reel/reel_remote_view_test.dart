@@ -34,7 +34,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(resetSharedPreferencesForTest);
 
-  Future<_Recorder> pump(WidgetTester tester, {Size size = const Size(400, 640)}) async {
+  Future<_Recorder> pump(
+    WidgetTester tester, {
+    Size size = const Size(400, 640),
+    ReelRemoteView view = const ReelRemoteView(),
+  }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -43,7 +47,7 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider<CompanionRemoteProvider>.value(
         value: remote,
-        child: const MaterialApp(home: ReelRemoteView()),
+        child: MaterialApp(home: view),
       ),
     );
     remote.reelState.value = _state();
@@ -90,5 +94,21 @@ void main() {
     await tester.pump();
     expect(remote.sent.single.$1, RemoteCommandType.reelAction);
     expect(remote.sent.single.$2, {'action': 'save'});
+  });
+
+  testWidgets('the TV opens on the deck and the card the phone was on; another deck opens on its own cursor', (
+    tester,
+  ) async {
+    final remote = await pump(
+      tester,
+      view: const ReelRemoteView(deck: 'for-you', groupKey: 'g-harbor'),
+    );
+    expect(remote.sent.last.$1, RemoteCommandType.reelOpen);
+    expect(remote.sent.last.$2, {'deck': 'for-you', 'groupKey': 'g-harbor'});
+    remote.sent.clear();
+    await tester.tap(find.text('Anime openings'));
+    await tester.pump();
+    expect(remote.sent.last.$1, RemoteCommandType.reelOpen);
+    expect(remote.sent.last.$2, {'deck': 'anime-openings'});
   });
 }

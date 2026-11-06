@@ -49,6 +49,10 @@ class ReelScreen extends StatefulWidget {
   /// taken by the screen when it next shows.
   static final ValueNotifier<String?> requestedDeck = ValueNotifier(null);
 
+  /// The title the Fold was on when it asked for [requestedDeck] (its
+  /// `groupKey`), so the TV opens on that card.
+  static String? _requestedCard;
+
   /// The Reel screen that is showing, for On TV mode's commands.
   static ReelScreenState? _live;
 
@@ -84,10 +88,12 @@ class ReelScreen extends StatefulWidget {
   /// Opens the Reel tab, on [deck] when given: closes pages above the shell
   /// first so the tab is what shows. Does nothing while the Reel is turned
   /// off ([enabled]). [fromRemote]: the Fold's On TV mode asked for it, so
-  /// the first-run intro waits (see [_introDeferred]).
-  static void open(BuildContext context, {String? deck, bool fromRemote = false}) {
+  /// the first-run intro waits (see [_introDeferred]). [groupKey]: the
+  /// title to open [deck] on, when this device's list of it has it.
+  static void open(BuildContext context, {String? deck, String? groupKey, bool fromRemote = false}) {
     if (!enabled) return;
     if (fromRemote) _introDeferred = true;
+    if (deck != null) _requestedCard = groupKey;
     requestedDeck.value = deck ?? requestedDeck.value ?? '';
     Navigator.of(context).popUntil((r) => r.isFirst);
     MainTabSwitcher.select?.call(NavigationTabId.reel);
@@ -110,6 +116,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   Future<ReelController>? _creating;
   bool _shown = false;
   String? _pendingDeck;
+  String? _pendingCard;
   final FocusNode _focus = FocusNode(debugLabel: 'reel');
   final DpadSelectLongPressController _longPress = DpadSelectLongPressController();
   bool _sheetOpen = false;
@@ -174,9 +181,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void _takeRequest() {
     final deck = ReelScreen.requestedDeck.value;
     if (deck == null) return;
+    final card = ReelScreen._requestedCard;
+    ReelScreen._requestedCard = null;
     ReelScreen.requestedDeck.value = null;
     if (deck.isNotEmpty) {
-      unawaited(openDeck(deck));
+      unawaited(openDeck(deck, groupKey: card));
     } else if (_introUnseen && _shown) {
       // An On TV open may have just deferred the intro: start what it held.
       unawaited(_start());
@@ -238,9 +247,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted) setState(() {});
   }
 
-  /// Opens a deck (deep link `plezy://reel?deck=…`, Reel it, On TV mode).
-  Future<void> openDeck(String deckId) async {
+  /// Opens a deck (deep link `plezy://reel?deck=…`, Reel it, On TV mode),
+  /// on the card for [groupKey] when given and in the deck.
+  Future<void> openDeck(String deckId, {String? groupKey}) async {
     _pendingDeck = deckId;
+    _pendingCard = groupKey;
     if (_shown) await _start();
   }
 
@@ -251,12 +262,13 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Under the intro the session is ready but waits; a requested deck is
     // kept for when it ends.
     if (!mounted || !_shown || _intro) return;
-    final deck = _pendingDeck;
+    final deck = _pendingDeck, card = _pendingCard;
     _pendingDeck = null;
+    _pendingCard = null;
     if (deck != null && c.active) {
-      await c.openDeck(deck);
+      await c.openAt(deck, card);
     } else {
-      await c.start(deckId: deck);
+      await c.start(deckId: deck, groupKey: card);
     }
   }
 
@@ -334,12 +346,21 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted && _shown && (onTv || !ok)) ReelScreen.showing.value = true;
   }
 
-  /// Fold: On TV mode, offered while connected to a TV as its remote.
-  VoidCallback? _remoteMode() {
-    final remote = context.read<CompanionRemoteProvider?>();
-    if (remote == null || !remote.isRemote || !remote.isConnected) return null;
-    return () => unawaited(
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ReelRemoteView(deck: _controller?.deck.id))),
+  /// Fold: connected to a TV as its remote. Watched from build, so On TV
+  /// mode and Watch on TV come and go with the connection.
+  bool _connectedToTv(BuildContext context) => context.select<CompanionRemoteProvider?, bool>(_connected);
+
+  static bool _connected(CompanionRemoteProvider? r) => r != null && r.isRemote && r.isConnected;
+
+  /// Fold: On TV mode, opened on the deck and the card the phone is on.
+  void _remoteMode() {
+    final c = _controller;
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ReelRemoteView(deck: c?.deck.id, groupKey: c?.current.card?.title.groupKey),
+        ),
+      ),
     );
   }
 
@@ -347,10 +368,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final c = _controller;
     if (c == null || _sheetOpen) return;
     _sheetOpen = true;
-    final action = await showReelSheet(context, c, isTv: _isTv);
+    // Fold, while Watch goes to the TV: "Watch here" plays it on the phone.
+    final watchHere = !_isTv && _connected(context.read<CompanionRemoteProvider?>());
+    final action = await showReelSheet(context, c, isTv: _isTv, watchHere: watchHere);
     _sheetOpen = false;
     if (!mounted) return;
     switch (action) {
+      case ReelSheetAction.watchHere:
+        await _watch();
       case ReelSheetAction.save:
         await c.save();
       case ReelSheetAction.notForMe:
@@ -486,7 +511,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   );
 
   Widget _phone(ReelController c) {
-    final onTv = _remoteMode() != null;
+    final onTv = _connectedToTv(context);
     return ReelFeedView(
       controller: c,
       players: _players,
@@ -494,7 +519,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onWatch: () => unawaited(_watch(onTv: onTv)),
       onSheet: () => unawaited(_openSheet()),
       onDecks: () => unawaited(showReelDeckPicker(context, c)),
-      onRemote: _remoteMode(),
+      onRemote: onTv ? _remoteMode : null,
     );
   }
 }

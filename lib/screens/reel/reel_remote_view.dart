@@ -18,10 +18,14 @@ import '../../widgets/stat_chip.dart';
 /// card and the next three and sends `reelStep` / `reelAction`. The phone
 /// plays nothing. Built from the app's own theme and widgets.
 class ReelRemoteView extends StatefulWidget {
-  const ReelRemoteView({super.key, this.deck});
+  const ReelRemoteView({super.key, this.deck, this.groupKey});
 
   /// The deck the phone was on, opened on the TV.
   final String? deck;
+
+  /// The title the phone was on (its `groupKey`): the TV opens [deck] on
+  /// it when its own list of the deck has it, else on the deck's cursor.
+  final String? groupKey;
 
   @override
   State<ReelRemoteView> createState() => _ReelRemoteViewState();
@@ -35,7 +39,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
   @override
   void initState() {
     super.initState();
-    _open(deck: widget.deck);
+    _open(deck: widget.deck, groupKey: widget.groupKey);
   }
 
   @override
@@ -44,9 +48,9 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
     super.dispose();
   }
 
-  void _open({String? deck}) {
+  void _open({String? deck, String? groupKey}) {
     _remote.sendCommand(RemoteCommandType.tabReel);
-    _remote.sendCommand(RemoteCommandType.reelOpen, data: {'deck': ?deck});
+    _remote.sendCommand(RemoteCommandType.reelOpen, data: {'deck': ?deck, 'groupKey': ?groupKey});
     _waitTimer?.cancel();
     if (mounted) setState(() => _waitedLong = false);
     _waitTimer = Timer(const Duration(seconds: 5), () {
@@ -93,7 +97,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
               ? _Waiting(
                   long: _waitedLong,
                   tv: tv,
-                  onRetry: () => _open(deck: widget.deck),
+                  onRetry: () => _open(deck: widget.deck, groupKey: widget.groupKey),
                 )
               : _body(context, state),
         );

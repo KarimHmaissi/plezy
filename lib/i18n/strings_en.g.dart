@@ -8387,6 +8387,9 @@ class Translations$reel$sheet$en {
 
 	// Translations
 
+	/// en: 'Watch here'
+	String get watchHere => 'Watch here';
+
 	/// en: 'Save for the TV'
 	String get saveForTv => 'Save for the TV';
 
@@ -11493,6 +11496,7 @@ extension on Translations {
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
 			'reel.card.showControls' => 'Show controls',
+			'reel.sheet.watchHere' => 'Watch here',
 			'reel.sheet.saveForTv' => 'Save for the TV',
 			'reel.sheet.details' => 'Details',
 			'reel.sheet.notForMe' => 'Not for me',
@@ -11985,9 +11989,9 @@ extension on Translations {
 			'music.instantMixEmpty' => 'The instant mix came back with no tracks',
 			'music.noAudioUrl' => ({required Object track}) => 'No audio URL is available for ${track}',
 			'music.discography.singlesAndEps' => 'Singles & EPs',
-			'music.discography.live' => 'Live',
 			_ => null,
 		} ?? switch (path) {
+			'music.discography.live' => 'Live',
 			'music.discography.compilations' => 'Compilations',
 			'watchTogether.title' => 'Watch Together',
 			'watchTogether.description' => 'Watch content in sync with friends and family',
@@ -12499,9 +12503,9 @@ extension on Translations {
 			'metadataEdit.tmdbAiring' => 'The Movie Database (Aired)',
 			'metadataEdit.tvdbAiring' => 'TheTVDB (Aired)',
 			'metadataEdit.tvdbAbsolute' => 'TheTVDB (Absolute)',
-			'metadataEdit.metadataLanguage' => 'Metadata Language',
 			_ => null,
 		} ?? switch (path) {
+			'metadataEdit.metadataLanguage' => 'Metadata Language',
 			'metadataEdit.useOriginalTitle' => 'Use Original Title',
 			'metadataEdit.preferredAudioLanguage' => 'Preferred Audio Language',
 			'metadataEdit.preferredSubtitleLanguage' => 'Preferred Subtitle Language',

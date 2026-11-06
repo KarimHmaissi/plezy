@@ -6,16 +6,24 @@ import '../../services/reel/reel_controller.dart';
 import '../../widgets/app_menu.dart';
 import '../settings/reel_decks_screen.dart';
 
-enum ReelSheetAction { save, details, notForMe, spoiled, seenIt, settings, deck, arrangeDecks }
+enum ReelSheetAction { watchHere, save, details, notForMe, spoiled, seenIt, settings, deck, arrangeDecks }
 
 /// Long-press OK (or the menu key) on the TV, long-press on the Fold: the
 /// app's own menu sheet, Save first and focused, then the rarer choices, the
 /// Reel's settings and every shown deck. Never prompted after a skip;
 /// swiping past is the normal "no".
 ///
+/// [watchHere]: the Fold is connected to a TV, so its Watch goes there;
+/// "Watch here" comes first and plays the title on the phone instead.
+///
 /// A deck's second action (hold OK or the menu key on it) opens its own
 /// menu: move, pin to the top, hide (V2-52).
-Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {required bool isTv}) async {
+Future<ReelSheetAction?> showReelSheet(
+  BuildContext context,
+  ReelController c, {
+  required bool isTv,
+  bool watchHere = false,
+}) async {
   final card = c.current.card;
   final picked = await showAdaptiveAppMenu<String>(
     context,
@@ -25,6 +33,8 @@ Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {
     anchorRect: _centre(context),
     anchorAlignment: AppMenuAnchorAlignment.center,
     entries: [
+      if (watchHere && card != null)
+        AppMenuItem(value: 'watchHere', icon: Symbols.smartphone_rounded, label: t.reel.sheet.watchHere),
       AppMenuItem(value: 'save', icon: Symbols.bookmark_add_rounded, label: t.reel.sheet.saveForTv),
       // The phone has Details on the card itself.
       if (isTv) AppMenuItem(value: 'details', icon: Symbols.info_rounded, label: t.reel.sheet.details),

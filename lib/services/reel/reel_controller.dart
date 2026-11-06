@@ -343,7 +343,9 @@ class ReelController extends ChangeNotifier {
   /// Opens the Reel (or comes back to it): loads the deck and plays. The
   /// first start opens [deckId] when given, else the start deck
   /// ([ReelDeckPrefs.start]); later starts keep the deck that was playing.
-  Future<void> start({String? deckId}) async {
+  /// With [groupKey] (On TV mode), [deckId] opens on that title's card when
+  /// its list has it, as [openAt].
+  Future<void> start({String? deckId, String? groupKey}) async {
     _active = true;
     // The degrade ladder carries over: coming back from Watch or another tab
     // says nothing about memory. Only the policy's restore resets it.
@@ -367,8 +369,9 @@ class ReelController extends ChangeNotifier {
         _cursor.remove(d.id);
       }
     }
-    await _ensureDeck(deck);
+    final list = await _ensureDeck(deck);
     if (!_active) return;
+    if (deckId != null && deck.id == deckId) _seek(list, groupKey);
     await _show();
   }
 
@@ -538,15 +541,47 @@ class ReelController extends ChangeNotifier {
     await _show();
   }
 
-  Future<void> openDeck(String id) async {
+  Future<void> openDeck(String id) => openAt(id);
+
+  /// Opens deck [id] on the card for [groupKey] (On TV mode: the TV opens
+  /// on the card the Fold was showing). A title that isn't in this device's
+  /// list of the deck, or no [groupKey], leaves the deck on its own cursor.
+  Future<void> openAt(String id, [String? groupKey]) async {
     final i = await _deckIndex(id);
-    if (i < 0 || i == _deck) return;
+    if (i < 0) return;
+    if (i == _deck) {
+      if (groupKey == null) return;
+      final d = deck;
+      final at = _indexOf(await _ensureDeck(d), groupKey);
+      // A deck change while the list loaded wins.
+      if (at == null || at == index || !identical(d, deck)) return;
+      // As [step]: the cursor moves first, under the generation counter.
+      _cursor[deck.id] = at;
+      final gen = ++_generation;
+      await _leaveCard();
+      if (gen != _generation) return;
+      await _show();
+      return;
+    }
     await _leaveCard();
     _deck = i;
     _remember();
     _showStrip();
-    await _ensureDeck(deck);
+    _seek(await _ensureDeck(deck), groupKey);
     await _show();
+  }
+
+  /// The card for [groupKey] in [list], or null.
+  static int? _indexOf(List<ReelCardData> list, String? groupKey) {
+    if (groupKey == null) return null;
+    final at = list.indexWhere((c) => c.title.groupKey == groupKey);
+    return at < 0 ? null : at;
+  }
+
+  /// Puts the deck playing on the card for [groupKey], when it has one.
+  void _seek(List<ReelCardData> list, String? groupKey) {
+    final at = _indexOf(list, groupKey);
+    if (at != null && identical(list, cards)) _cursor[deck.id] = at;
   }
 
   void _showStrip() {
