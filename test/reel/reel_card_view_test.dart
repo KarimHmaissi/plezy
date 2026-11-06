@@ -1,5 +1,7 @@
 // The fake engine's controllers belong to the engine for the whole test.
 // ignore_for_file: close_sinks
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
@@ -19,6 +21,8 @@ import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/utils/layout_constants.dart';
+import 'package:plezy/widgets/fork_motion_widgets.dart';
 import 'package:plezy/widgets/stat_chip.dart';
 import 'package:plezy/widgets/tv_spotlight_background.dart';
 
@@ -53,6 +57,36 @@ class _Media implements ReelMedia {
     year: 2020,
     summary: 'A lighthouse keeper finds a map in the fog and follows it out along the coast.',
   );
+
+  @override
+  String? imageUrl(String serverId, String? path, {required int width}) => null;
+}
+
+/// Holds every item until [land] (V2-26); a long summary fills the
+/// spotlight's four lines, and [missing] answers null (the request failed).
+class _GatedMedia implements ReelMedia {
+  final Completer<void> _gate = Completer<void>();
+  bool missing = false;
+
+  void land() => _gate.complete();
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) async {
+    await _gate.future;
+    if (missing) return null;
+    return MediaItem(
+      id: ratingKey,
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: _titles[ratingKey],
+      year: 2020,
+      contentRating: 'PG',
+      summary: List.filled(
+        6,
+        'A lighthouse keeper finds a map in the fog and follows it out along the coast.',
+      ).join(' '),
+    );
+  }
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
@@ -153,7 +187,7 @@ Future<Map<int, Map<String, dynamic>>> _animeThemes(List<int> ids) async => {
 const _a = ClipSource(uri: 'https://cdn.example/a.mp4', origin: ClipOrigin.plexExtra);
 const _b = ClipSource(uri: 'https://cdn.example/b.mp4', origin: ClipOrigin.plexExtra);
 
-ReelController _controller(ForkDatabase db, ReelDeck deck, void Function(FakeClipEngine) onEngine) {
+ReelController _controller(ForkDatabase db, ReelDeck deck, void Function(FakeClipEngine) onEngine, {ReelMedia? media}) {
   resetSharedPreferencesForTest();
   SettingsService.resetForTesting();
   LocaleSettings.setLocaleSync(AppLocale.en);
@@ -175,7 +209,7 @@ ReelController _controller(ForkDatabase db, ReelDeck deck, void Function(FakeCli
       },
     ),
     store: store,
-    media: _Media(),
+    media: media ?? _Media(),
     onWatch: (_, {required onTv}) async => true,
     addToWatchlist: (_) async => true,
   );
@@ -460,6 +494,127 @@ void main() {
       await tester.pump();
       expect(extras('1'), findsNothing);
       expect(extras('2'), findsOneWidget);
+    });
+  });
+  group('TV title before the metadata lands (V2-26)', () {
+    late ForkDatabase db;
+    late ReelController c;
+    late FakeClipEngine engine;
+    late _GatedMedia media;
+
+    setUp(() async {
+      db = ForkDatabase.memory();
+      media = _GatedMedia();
+      c = _controller(db, _Deck(['1', '2']), (e) => engine = e, media: media);
+    });
+
+    tearDown(() async {
+      c.dispose();
+      await db.close();
+    });
+
+    Finder inSpotlight(Finder f) => find.descendant(of: find.byType(TvSpotlightBackground), matching: f);
+    Finder title() => inSpotlight(find.text('Harbor Lights'));
+    final skeleton = find.byKey(const ValueKey('spotlight-pending-skeleton'));
+
+    /// Starts the Reel with the item held back (start waits for the first
+    /// card's resolve, so it is left running).
+    Future<void> pumpPending(WidgetTester tester) async {
+      await tester.runAsync(SettingsService.getInstance);
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.runAsync(() async {
+        unawaited(c.start());
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpWidget(
+        TranslationProvider(
+          child: MaterialApp(
+            theme: ThemeData.dark(),
+            home: Scaffold(
+              body: ListenableBuilder(
+                listenable: c,
+                builder: (context, _) => ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(c.current.kind, ReelSlotKind.card);
+      expect(c.current.item, isNull);
+    }
+
+    Future<void> land(WidgetTester tester) async {
+      media.land();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      expect(c.current.resolved, isTrue);
+      await tester.pump();
+    }
+
+    testWidgets("the title waits in the spotlight's own logo slot over a shimmering skeleton", (tester) async {
+      await pumpPending(tester);
+      final spot = tester.widget<TvSpotlightBackground>(find.byType(TvSpotlightBackground));
+      expect(spot.pendingTitle, 'Harbor Lights');
+      expect(spot.pendingSkeleton, isTrue);
+      expect(title(), findsOneWidget);
+      expect(skeleton, findsOneWidget);
+      expect(
+        tester.widget<ForkShimmer>(find.ancestor(of: skeleton, matching: find.byType(ForkShimmer))).active,
+        isTrue,
+      );
+      // The title's frame is the spotlight's logo slot, inside its info region.
+      final slot = tester.getRect(find.ancestor(of: title(), matching: find.byType(SizedBox)).first);
+      expect(
+        slot.height,
+        closeTo(TvLayoutConstants.heroLogoHeight * TvLayoutConstants.scaleOf(tester.element(title())), 0.5),
+      );
+      expect(slot.left, closeTo(TvLayoutConstants.horizontalInset, 0.5));
+    });
+
+    testWidgets('the metadata lands in place: the title does not move, one cross-fade', (tester) async {
+      await pumpPending(tester);
+      final before = tester.getRect(title());
+
+      await land(tester);
+      await tester.pump(const Duration(milliseconds: 100));
+      // Mid cross-fade, the skeleton block and the item's block share the frame.
+      expect(title(), findsNWidgets(2));
+      expect(skeleton, findsOneWidget);
+      for (final e in title().evaluate()) {
+        final r = tester.getRect(find.byWidget(e.widget));
+        expect(r.topLeft.dx, closeTo(before.left, 0.5));
+        expect(r.topLeft.dy, closeTo(before.top, 0.5));
+      }
+      expect(find.text('PG'), findsOneWidget);
+
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(title(), findsOneWidget);
+      expect(skeleton, findsNothing);
+      expect(tester.getRect(title()).topLeft, offsetMoreOrLessEquals(before.topLeft, epsilon: 0.5));
+    });
+
+    testWidgets('an item that never lands keeps the title and drops the skeleton', (tester) async {
+      media.missing = true;
+      await pumpPending(tester);
+      await land(tester);
+      await tester.pumpAndSettle();
+      expect(c.current.item, isNull);
+      expect(title(), findsOneWidget);
+      expect(skeleton, findsNothing);
+      expect(tester.widget<TvSpotlightBackground>(find.byType(TvSpotlightBackground)).pendingSkeleton, isFalse);
+    });
+
+    testWidgets('no placeholder title outside the spotlight', (tester) async {
+      await pumpPending(tester);
+      expect(find.text('Harbor Lights'), findsOneWidget);
+      await land(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('Harbor Lights'), findsOneWidget);
+      expect(title(), findsOneWidget);
+      engine.firstFrameCtl.add(null);
+      await tester.pumpAndSettle();
     });
   });
 }

@@ -17,6 +17,7 @@ import '../utils/tone_mapped_logo_image.dart';
 import 'cycling_media_backdrop.dart';
 import 'fitting_title_text.dart';
 import 'fitted_metadata_line.dart';
+import 'fork_motion_widgets.dart';
 import 'settings_builder.dart';
 import 'media_rating_badge.dart';
 import 'optimized_media_image.dart' show ClearLogoImage, blurArtwork;
@@ -53,6 +54,16 @@ class TvSpotlightBackground extends StatelessWidget {
   /// Fork (The Reel): the curve of the [showArtwork] fade (linear for Home).
   final Curve artworkCurve;
 
+  /// Fork (The Reel): while [item] is still null, the title to show in the
+  /// info block's own logo slot, over a shimmering skeleton of the metadata
+  /// line and summary. The block keeps the frame the item will fill, and the
+  /// item's info replaces it with the usual in-place cross-fade.
+  final String? pendingTitle;
+
+  /// Fork (The Reel): false keeps [pendingTitle] but drops the skeleton, for
+  /// an item that will not land (its request failed).
+  final bool pendingSkeleton;
+
   const TvSpotlightBackground({
     super.key,
     required this.item,
@@ -69,6 +80,8 @@ class TvSpotlightBackground extends StatelessWidget {
     this.metadataTrailing,
     this.showArtwork = true,
     this.artworkCurve = Curves.linear,
+    this.pendingTitle,
+    this.pendingSkeleton = true,
   });
 
   double _scale(BuildContext context) => TvLayoutConstants.scaleOf(context);
@@ -152,7 +165,7 @@ class TvSpotlightBackground extends StatelessWidget {
                     )
                   : const SizedBox.shrink(),
             ),
-            if (media != null && showInfo)
+            if (showInfo && (media != null || pendingTitle != null))
               AnimatedPositioned(
                 duration: DevicePerformance.reducedDuration(const Duration(milliseconds: 280)),
                 curve: Curves.easeOutCubic,
@@ -171,11 +184,15 @@ class TvSpotlightBackground extends StatelessWidget {
                   layoutBuilder: (currentChild, previousChildren) =>
                       Stack(fit: StackFit.expand, children: [...previousChildren, ?currentChild]),
                   child: KeyedSubtree(
-                    key: ValueKey(media.globalKey),
+                    key: media != null
+                        ? ValueKey(media.globalKey)
+                        : ValueKey(('pending', pendingTitle, pendingSkeleton)),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
+                        Widget info(double width) =>
+                            media != null ? _buildInfo(context, media, width) : _buildPendingInfo(context, width);
                         if (!constraints.hasBoundedHeight || constraints.maxHeight <= 0 || constraints.maxWidth <= 0) {
-                          return Align(alignment: .bottomLeft, child: _buildInfo(context, media, constraints.maxWidth));
+                          return Align(alignment: .bottomLeft, child: info(constraints.maxWidth));
                         }
 
                         return Align(
@@ -183,10 +200,7 @@ class TvSpotlightBackground extends StatelessWidget {
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: .bottomLeft,
-                            child: SizedBox(
-                              width: constraints.maxWidth,
-                              child: _buildInfo(context, media, constraints.maxWidth),
-                            ),
+                            child: SizedBox(width: constraints.maxWidth, child: info(constraints.maxWidth)),
                           ),
                         );
                       },
@@ -264,7 +278,7 @@ class TvSpotlightBackground extends StatelessWidget {
           SizedBox(height: _sectionGap(scale)),
           Text(
             summary,
-            maxLines: condensed ? 2 : (compact ? 3 : 4),
+            maxLines: _summaryMaxLines,
             overflow: .ellipsis,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colorScheme.onSurface.withValues(alpha: 0.78),
@@ -288,6 +302,69 @@ class TvSpotlightBackground extends StatelessWidget {
       ],
     );
   }
+
+  /// Fork (The Reel): [pendingTitle] in the logo slot's frame, then the
+  /// metadata line and the summary as skeleton bars at their own line
+  /// heights (the summary at its most lines), so the title sits where the
+  /// item's own block will put it.
+  Widget _buildPendingInfo(BuildContext context, double width) {
+    final scale = _scale(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    final logoWidth = math.min(_logoWidth(scale), width);
+    final titleWidth = ClearLogoImage.fallbackWidthFor(logoWidth: logoWidth, available: width);
+    final title = SizedBox(width: titleWidth, height: _logoHeight(scale), child: _buildTitle(context, pendingTitle!));
+    if (!pendingSkeleton) return Column(crossAxisAlignment: .start, mainAxisSize: .min, children: [title]);
+    final summaryStyle = Theme.of(
+      context,
+    ).textTheme.bodyLarge?.copyWith(fontSize: _summaryFontSize(scale), height: compact ? 1.34 : 1.45);
+    final summaryLines = _summaryMaxLines;
+    return Column(
+      crossAxisAlignment: .start,
+      mainAxisSize: .min,
+      children: [
+        title,
+        ForkShimmer(
+          child: Column(
+            key: const ValueKey('spotlight-pending-skeleton'),
+            crossAxisAlignment: .start,
+            mainAxisSize: .min,
+            children: [
+              SizedBox(height: _sectionGap(scale)),
+              _skeletonLine(metadataTextStyle(context, compact: compact), width * 0.42, colorScheme),
+              SizedBox(height: _sectionGap(scale)),
+              for (var i = 0; i < summaryLines; i++)
+                _skeletonLine(summaryStyle, width * (i == summaryLines - 1 ? 0.6 : 1), colorScheme),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// A rounded bar as tall as one line of [style] would be, so the skeleton
+  /// takes the room the text will.
+  static Widget _skeletonLine(TextStyle? style, double width, ColorScheme colorScheme) => SizedBox(
+    width: width,
+    child: Stack(
+      children: [
+        Text('\u00a0', maxLines: 1, style: style),
+        Positioned.fill(
+          child: FractionallySizedBox(
+            alignment: .centerLeft,
+            heightFactor: 0.6,
+            child: DecoratedBox(
+              decoration: ShapeDecoration(
+                shape: const StadiumBorder(),
+                color: colorScheme.onSurface.withValues(alpha: 0.1),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  int get _summaryMaxLines => condensed ? 2 : (compact ? 3 : 4);
 
   /// The logo is contained within its slot; the title fallback gets
   /// [ClearLogoImage.fallbackWidthFor] of the info block's [availableWidth]

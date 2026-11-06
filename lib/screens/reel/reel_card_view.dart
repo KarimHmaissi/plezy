@@ -142,9 +142,13 @@ class ReelCardView extends StatelessWidget {
           metadataTrailing: _clipKind(context, scale),
           contentBottom: extrasTop + 20 * scale,
           contentTop: 120 * scale,
+          // V2-26: until the metadata lands, the title sits in the info
+          // block's own logo slot over a skeleton, and the item's info
+          // cross-fades in over it in place.
+          pendingTitle: slot.card!.title.title,
+          pendingSkeleton: !slot.resolved,
         ),
         if (showInfo) ...[
-          if (slot.item == null) _titleOnly(context, scale, bottom: extrasTop),
           Positioned(
             left: TvLayoutConstants.horizontalInset,
             right: right,
@@ -194,26 +198,6 @@ class ReelCardView extends StatelessWidget {
         SizedBox(width: 4 * scale),
         Text(clip.label, maxLines: 1, style: style),
       ],
-    );
-  }
-
-  /// Until the card's metadata lands: the title in the spotlight's style.
-  Widget _titleOnly(BuildContext context, double scale, {required double bottom}) {
-    final theme = Theme.of(context);
-    return Positioned(
-      left: TvLayoutConstants.horizontalInset,
-      right: MediaQuery.sizeOf(context).width * 0.43,
-      bottom: bottom,
-      child: Text(
-        slot.card!.title.title,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.displaySmall?.copyWith(
-          color: theme.colorScheme.onSurface,
-          fontSize: 54 * scale,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
     );
   }
 
@@ -286,7 +270,8 @@ class _ReelArtCoverState extends State<ReelArtCover> {
 }
 
 /// The spotlight's metadata line (ratings with their badges, certificate,
-/// length, year) for the phone card, where there is no spotlight.
+/// length, year) for the phone card, where there is no spotlight. It is
+/// always one line tall, even before anything is known.
 class ReelMetadataLine extends StatelessWidget {
   const ReelMetadataLine({super.key, required this.item, this.year, required this.fontSize});
 
@@ -309,8 +294,16 @@ class ReelMetadataLine extends StatelessWidget {
       if (m?.durationMs case final d?) MetadataLineText(formatDurationTextual(d), dropPriority: 1),
       if ((m?.year ?? year) case final y?) MetadataLineText('$y', dropPriority: 0),
     ];
-    if (parts.isEmpty) return const SizedBox.shrink();
-    return FittedMetadataLine(textStyle: style, parts: parts, ratingIconSize: fontSize, ratingSpacing: 4);
+    // V2-26: the line takes its height before the metadata lands, so the
+    // title above it stays put when the facts arrive.
+    return Stack(
+      alignment: AlignmentDirectional.centerStart,
+      children: [
+        Text('\u00a0', maxLines: 1, style: style),
+        if (parts.isNotEmpty)
+          FittedMetadataLine(textStyle: style, parts: parts, ratingIconSize: fontSize, ratingSpacing: 4),
+      ],
+    );
   }
 }
 

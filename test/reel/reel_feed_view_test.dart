@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/screens/reel/reel_card_view.dart';
 import 'package:plezy/screens/reel/reel_feed_view.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
@@ -17,6 +20,7 @@ import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/theme/mono_motion.dart';
 
 import 'clip_player_test.dart' show FakeClipEngine;
 
@@ -37,14 +41,21 @@ class _Servers implements ReelServers {
 }
 
 class _Media implements ReelMedia {
+  /// When set, items wait for it (V2-26: metadata that lands late).
+  Completer<void>? gate;
+
   @override
-  Future<MediaItem?> item(String serverId, String ratingKey) async => MediaItem(
-    id: ratingKey,
-    backend: MediaBackend.plex,
-    kind: MediaKind.movie,
-    title: 'Title $ratingKey',
-    year: 2020,
-  );
+  Future<MediaItem?> item(String serverId, String ratingKey) async {
+    await gate?.future;
+    return MediaItem(
+      id: ratingKey,
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: 'Title $ratingKey',
+      year: 2020,
+      contentRating: 'PG',
+    );
+  }
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
@@ -143,6 +154,7 @@ void main() {
   late int decksOpened, watched, sheets;
   late ValueNotifier<int> restored;
   late _Deck first;
+  late _Media media;
 
   setUp(() {
     db = ForkDatabase.memory();
@@ -164,7 +176,7 @@ void main() {
       ),
       clips: ClipPlayer(engine: FakeClipEngine.new),
       store: store,
-      media: _Media(),
+      media: media = _Media(),
       onWatch: (_, {required onTv}) async => true,
       addToWatchlist: (_) async => true,
       externalClips: true,
@@ -308,5 +320,105 @@ void main() {
     expect(opened.single.id, '1');
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
+  });
+  group('metadata landing late (V2-26)', () {
+    /// The feed with every item held back until the gate opens.
+    Future<void> pumpGated(WidgetTester tester, {bool reduceMotion = false}) async {
+      media.gate = Completer<void>();
+      tester.view.physicalSize = const Size(420, 860);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.runAsync(() async {
+        unawaited(c.start());
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: reduceMotion),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: ReelFeedView(
+              controller: c,
+              players: players,
+              watchOnTv: false,
+              onWatch: () => watched++,
+              onSheet: () => sheets++,
+              onDecks: () => decksOpened++,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(c.current.kind, ReelSlotKind.card);
+      expect(c.current.item, isNull);
+    }
+
+    Future<void> land(WidgetTester tester) async {
+      media.gate!.complete();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      expect(c.current.item, isNotNull);
+      await tester.pump();
+    }
+
+    Finder line() => find.byType(ReelMetadataLine).first;
+
+    testWidgets('the title stays put: the facts line keeps its height and the block grows by gliding', (tester) async {
+      await pumpGated(tester);
+      Finder block() => find.ancestor(of: find.text('Title 1'), matching: find.byType(AnimatedSize)).first;
+      final lineHeight = tester.getSize(line()).height;
+      expect(lineHeight, greaterThan(0), reason: 'the line is reserved before anything is known');
+      expect(find.text('PG'), findsNothing);
+      final title = tester.getRect(find.text('Title 1'));
+      final blockTop = tester.getRect(block()).top;
+
+      final grow = tester.widget<AnimatedSize>(block());
+      expect(grow.alignment, Alignment.bottomLeft);
+      expect(grow.duration, const Duration(milliseconds: 200));
+      expect(grow.curve, MonoMotion.standard);
+
+      await land(tester);
+      expect(find.text('PG'), findsOneWidget);
+      expect(tester.getRect(find.text('Title 1')).topLeft, title.topLeft);
+      // The clip chip arrives above the title: the block's top glides up.
+      await tester.pump(const Duration(milliseconds: 80));
+      final mid = tester.getRect(block()).top;
+      expect(tester.getRect(find.text('Title 1')).topLeft, title.topLeft);
+      await tester.pumpAndSettle();
+      final settled = tester.getRect(block()).top;
+      expect(settled, lessThan(blockTop));
+      expect(mid, lessThan(blockTop));
+      expect(mid, greaterThan(settled), reason: 'part of the way, not a jump');
+      expect(tester.getRect(find.text('Title 1')).topLeft, title.topLeft);
+      expect(tester.getSize(line()).height, closeTo(lineHeight, 0.5));
+    });
+
+    testWidgets('with animations off the block changes at once', (tester) async {
+      await pumpGated(tester, reduceMotion: true);
+      expect(find.ancestor(of: find.text('Title 1'), matching: find.byType(AnimatedSize)), findsNothing);
+      await land(tester);
+      await tester.pump();
+      expect(find.text('PG'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('ReelMetadataLine is one line tall before anything is known (V2-26)', (tester) async {
+    Future<double> heightOf(Widget line) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Align(alignment: Alignment.topLeft, child: line),
+        ),
+      );
+      return tester.getSize(find.byType(ReelMetadataLine)).height;
+    }
+
+    final empty = await heightOf(const ReelMetadataLine(item: null, fontSize: 14));
+    final year = await heightOf(const ReelMetadataLine(item: null, year: 2020, fontSize: 14));
+    expect(empty, greaterThan(0));
+    expect(empty, closeTo(year, 0.5));
   });
 }
