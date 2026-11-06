@@ -3,8 +3,10 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
+import '../../services/device_performance.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../theme/fork_motion.dart';
 import '../../utils/content_utils.dart';
 import '../../utils/formatters.dart';
 import '../../utils/layout_constants.dart';
@@ -308,7 +310,10 @@ class ReelDeckStrip extends StatelessWidget {
         top: 36,
         right: 40,
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
+          // V2-32: at once with reduce motion on or on the reduced tier.
+          duration: ForkMotion.reduceMotion(context)
+              ? Duration.zero
+              : DevicePerformance.reducedDuration(const Duration(milliseconds: 220)),
           child: name == null
               ? const SizedBox.shrink()
               : Container(

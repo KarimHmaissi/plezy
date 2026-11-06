@@ -8,6 +8,7 @@ import '../../media/ids.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
+import '../../services/device_performance.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/settings_service.dart';
 import '../../theme/fork_motion.dart';
@@ -326,6 +327,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       _burst = true;
       _bursts++;
     });
+    // How long the burst holds, not a motion: reduce motion keeps it (V2-32).
     Future<void>.delayed(const Duration(milliseconds: 700), () {
       if (mounted) setState(() => _burst = false);
     });
@@ -408,7 +410,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     // redraws the picture and not the title and buttons.
     final info = AnimatedOpacity(
       opacity: _immersive ? 0 : 1,
-      duration: const Duration(milliseconds: 220),
+      duration: _motion(context, const Duration(milliseconds: 220)),
       child: IgnorePointer(
         ignoring: _immersive,
         child: RepaintBoundary(
@@ -433,7 +435,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       onHorizontalDragEnd: (d) {
         final v = d.primaryVelocity ?? 0;
         if (v.abs() < 250 || (v > 0) == _immersive) return;
-        HapticFeedback.selectionClick();
+        ForkMotion.selection();
         _setImmersive(v > 0);
       },
       child: ValueListenableBuilder<FeedCardState>(
@@ -455,7 +457,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
                   children: [
                     _Backdrop(slot: slot, dim: _immersive ? _immersiveDim(context) : 0.55),
                     AnimatedAlign(
-                      duration: const Duration(milliseconds: 280),
+                      duration: _motion(context, const Duration(milliseconds: 280)),
                       curve: Curves.easeOutCubic,
                       alignment: _immersive ? Alignment.center : const Alignment(0, -0.16),
                       child: RepaintBoundary(
@@ -481,9 +483,17 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 double _immersiveDim(BuildContext context) =>
     Theme.of(context).extension<MonoTokens>()?.bg == MonoPalette.oled.bg ? 1.0 : 0.9;
 
+/// How long one of the feed's motions runs (V2-32), through the app's own
+/// gates: none with reduce motion on ([ForkMotion.reduceMotion]) or on the
+/// reduced effects tier ([DevicePerformance.reducedDuration]), otherwise
+/// [full]. Clip playback and autoplay don't go through it.
+Duration _motion(BuildContext context, Duration full) =>
+    ForkMotion.reduceMotion(context) ? Duration.zero : DevicePerformance.reducedDuration(full);
+
 /// The Save burst (V2-29): the filled bookmark grows in with the app's
 /// release spring and leaves by fading only, so it never shrinks back over
-/// the picture. With reduce motion on it fades without growing.
+/// the picture. With reduce motion on it fades without growing; on the
+/// reduced effects tier it shows and goes at once.
 class _SaveBurst extends StatelessWidget {
   const _SaveBurst({required this.shown, required this.count});
 
@@ -498,13 +508,13 @@ class _SaveBurst extends StatelessWidget {
     return IgnorePointer(
       child: AnimatedOpacity(
         opacity: shown ? 1 : 0,
-        duration: shown ? ForkMotion.release : ForkMotion.sheetOut,
+        duration: DevicePerformance.reducedDuration(shown ? ForkMotion.release : ForkMotion.sheetOut),
         curve: shown ? ForkMotion.enterCurve : ForkMotion.exitCurve,
         child: Center(
           child: TweenAnimationBuilder<double>(
             key: ValueKey(count),
             tween: Tween(begin: still ? 1 : 0.6, end: 1),
-            duration: ForkMotion.release,
+            duration: _motion(context, ForkMotion.release),
             curve: ForkMotion.releaseCurve,
             builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
             child: Icon(
@@ -547,7 +557,7 @@ class _Backdrop extends StatelessWidget {
             errorWidget: (_, _, _) => const SizedBox.shrink(),
           ),
         AnimatedContainer(
-          duration: const Duration(milliseconds: 280),
+          duration: _motion(context, const Duration(milliseconds: 280)),
           color: Colors.black.withValues(alpha: dim),
         ),
       ],
@@ -587,12 +597,12 @@ class _Picture extends StatelessWidget {
             ),
           AnimatedOpacity(
             opacity: v == null ? 0 : 1,
-            duration: const Duration(milliseconds: 160),
+            duration: _motion(context, const Duration(milliseconds: 160)),
             child: v == null ? const SizedBox.shrink() : v.view(),
           ),
           AnimatedOpacity(
             opacity: paused ? 1 : 0,
-            duration: const Duration(milliseconds: 150),
+            duration: _motion(context, const Duration(milliseconds: 150)),
             child: Center(
               child: DecoratedBox(
                 decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
@@ -642,7 +652,7 @@ class _TopBar extends StatelessWidget {
       right: 0,
       child: AnimatedOpacity(
         opacity: hidden ? 0 : 1,
-        duration: const Duration(milliseconds: 220),
+        duration: _motion(context, const Duration(milliseconds: 220)),
         child: IgnorePointer(
           ignoring: hidden,
           child: DecoratedBox(
@@ -854,7 +864,8 @@ class _Info extends StatelessWidget {
 /// reports its position only every 100 ms or so, so between reports the bar
 /// runs on at play speed (V2-02); each report puts it back on the truth. It
 /// runs ahead at most [_ahead], so a stalled clip doesn't race the bar on.
-/// With reduce motion on, it steps with the reports.
+/// With reduce motion on, or on the reduced effects tier, it steps with the
+/// reports.
 class _Progress extends StatefulWidget {
   const _Progress({required this.video});
 
@@ -879,7 +890,7 @@ class _ProgressState extends State<_Progress> with SingleTickerProviderStateMixi
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _still = ForkMotion.reduceMotion(context);
+    _still = _motion(context, _ahead) == Duration.zero;
     _onVideo();
   }
 

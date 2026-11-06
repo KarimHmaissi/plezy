@@ -91,4 +91,18 @@ void main() {
     expect(remote.sent.single.$1, RemoteCommandType.reelAction);
     expect(remote.sent.single.$2, {'action': 'save'});
   });
+
+  testWidgets('V2-32: the card changes at once with reduce motion on', (tester) async {
+    Duration change() => tester
+        .widget<AnimatedSwitcher>(
+          find.ancestor(of: find.text('Playing on TV'), matching: find.byType(AnimatedSwitcher)).first,
+        )
+        .duration;
+    await pump(tester);
+    expect(change(), greaterThan(Duration.zero));
+    tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pump();
+    expect(change(), Duration.zero);
+  });
 }

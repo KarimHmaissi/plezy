@@ -9,6 +9,7 @@ import 'package:plezy/screens/reel/reel_card_view.dart';
 import 'package:plezy/screens/reel/reel_feed_view.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
+import 'package:plezy/services/device_performance.dart';
 import 'package:plezy/services/memory_trim_policy.dart';
 import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
@@ -25,6 +26,7 @@ import 'package:plezy/theme/mono_tokens.dart';
 import 'package:plezy/theme/palette_contrast.dart';
 import 'package:plezy/utils/immersive_mode_guard.dart';
 import 'package:plezy/widgets/overlay_sheet.dart';
+import 'package:plezy/widgets/pressable.dart';
 
 import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
@@ -995,6 +997,113 @@ void main() {
         find.ancestor(of: find.byType(CircularProgressIndicator), matching: find.byType(ColoredBox)).first,
       );
       expect(box.color.computeLuminance(), lessThan(0.1));
+    });
+  });
+
+  group('V2-32: reduced motion goes through the app gates', () {
+    tearDown(DevicePerformance.debugReset);
+
+    void reduceMotion(WidgetTester tester) {
+      tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+        disableAnimations: true,
+      );
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    }
+
+    /// The feed's own motions: the info and the picture's fades, the
+    /// picture gliding to centre, the art dimming, and the top bar.
+    List<Duration> motions(WidgetTester tester) {
+      final page = find.byType(PageView);
+      // Pressable's press wash is the app's own, gated where it starts.
+      final pressable = tester
+          .widgetList(find.descendant(of: find.byType(Pressable), matching: find.byType(AnimatedOpacity)))
+          .toSet();
+      Iterable<Duration> under<T extends ImplicitlyAnimatedWidget>(Finder of) => tester
+          .widgetList<T>(find.descendant(of: of, matching: find.byType(T)))
+          .where((w) => !pressable.contains(w))
+          .map((w) => w.duration);
+      return [
+        ...under<AnimatedOpacity>(page),
+        ...under<AnimatedAlign>(page),
+        ...under<AnimatedContainer>(page),
+        tester
+            .widget<AnimatedOpacity>(find.ancestor(of: find.text('Deck a'), matching: find.byType(AnimatedOpacity)))
+            .duration,
+      ];
+    }
+
+    final burst = find.ancestor(
+      of: find.byWidgetPredicate((w) => w is Icon && w.size == 96),
+      matching: find.byType(AnimatedOpacity),
+    );
+    Duration burstGrow(WidgetTester tester) => tester
+        .widget<TweenAnimationBuilder<double>>(
+          find.descendant(of: burst, matching: find.byType(TweenAnimationBuilder<double>)),
+        )
+        .duration;
+
+    testWidgets('at full motion every one of them runs', (tester) async {
+      await pump(tester);
+      final all = motions(tester);
+      expect(all.length, greaterThanOrEqualTo(6));
+      expect(all, everyElement(greaterThan(Duration.zero)));
+      expect(burstGrow(tester), greaterThan(Duration.zero));
+    });
+
+    testWidgets('with reduce motion on they all happen at once; the Save burst only fades', (tester) async {
+      reduceMotion(tester);
+      await pump(tester);
+      expect(motions(tester), everyElement(Duration.zero));
+      expect(burstGrow(tester), Duration.zero);
+      expect(tester.widget<AnimatedOpacity>(burst).duration, greaterThan(Duration.zero));
+
+      // Swiping right hides the controls on the next frame, with no fade.
+      await tester.fling(find.text('Title 1'), const Offset(300, 0), 1500);
+      await tester.pump();
+      await tester.pump();
+      final info = tester.widget<AnimatedOpacity>(
+        find.ancestor(of: find.text('Details'), matching: find.byType(AnimatedOpacity)).first,
+      );
+      expect(info.opacity, 0);
+      expect(
+        tester
+            .widget<FadeTransition>(
+              find.ancestor(of: find.text('Details'), matching: find.byType(FadeTransition)).first,
+            )
+            .opacity
+            .value,
+        0,
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('on the reduced effects tier they all happen at once, the burst too', (tester) async {
+      DevicePerformance.debugReset(autoReduced: true);
+      await pump(tester);
+      expect(motions(tester), everyElement(Duration.zero));
+      expect(burstGrow(tester), Duration.zero);
+      expect(tester.widget<AnimatedOpacity>(burst).duration, Duration.zero);
+    });
+
+    testWidgets('on the reduced effects tier the hairline steps with the reports', (tester) async {
+      DevicePerformance.debugReset(autoReduced: true);
+      await pump(tester);
+      videos['1']!.tick(const Duration(seconds: 30));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, closeTo(0.5, 0.0001));
+    });
+
+    testWidgets('the deck strip shows and goes at once with reduce motion on', (tester) async {
+      Duration strip() => tester.widget<AnimatedSwitcher>(find.byType(AnimatedSwitcher)).duration;
+      Widget host() => MaterialApp(
+        home: Stack(children: [ReelDeckStrip(controller: c)]),
+      );
+      await tester.pumpWidget(host());
+      expect(strip(), greaterThan(Duration.zero));
+      reduceMotion(tester);
+      await tester.pumpWidget(host());
+      expect(strip(), Duration.zero);
     });
   });
 }
