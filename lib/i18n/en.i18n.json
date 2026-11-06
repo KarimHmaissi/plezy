@@ -334,6 +334,8 @@
     "resetShortcutsConfirm": "This will replace your custom shortcuts with the defaults. Continue?",
     "about": "About",
     "aboutDescription": "App information and licenses",
+    "quitApp": "Quit Plezy",
+    "quitAppDescription": "Back keeps Plezy ready behind the home screen. This closes it completely",
     "updates": "Updates",
     "updateAvailable": "Update Available",
     "checkForUpdates": "Check for Updates",

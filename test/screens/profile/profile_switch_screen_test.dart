@@ -90,6 +90,42 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('Back on a required picker quits for real, never parks the task', (tester) async {
+    PlatformDetector.debugSetIsDesktopOSOverride(false);
+    addTearDown(() => PlatformDetector.debugSetIsDesktopOSOverride(null));
+    final calls = <String>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(const MethodChannel('com.plezy/app_exit'), (call) async {
+      calls.add('app_exit.${call.method}');
+      return true;
+    });
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'SystemNavigator.pop') calls.add(call.method);
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(const MethodChannel('com.plezy/app_exit'), null);
+      messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    await _pumpPicker(
+      tester,
+      profiles: [Profile.local(id: 'local-owner', displayName: 'Owner', createdAt: DateTime(2026, 1, 1))],
+      connections: const [],
+      requireSelection: true,
+    );
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+
+    // requestExit: the Android channel's requestExit, or SystemNavigator.pop
+    // on this host. moveToBack is root-Back-on-TV only.
+    expect(calls, isNotEmpty);
+    expect(calls, isNot(contains('app_exit.moveToBack')));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('orders profiles by recent usage from storage', (tester) async {
     await _pumpPicker(
       tester,
@@ -584,6 +620,7 @@ Future<void> _pumpPicker(
   String? activeProfileId,
   Map<String, DateTime> lastUsedAt = const {},
   bool settle = true,
+  bool requireSelection = false,
 }) async {
   final db = AppDatabase.forTesting(NativeDatabase.memory());
   final profileRegistry = _FakeProfileRegistry(db, profiles);
@@ -633,7 +670,10 @@ Future<void> _pumpPicker(
           Provider<PlexHomeService>.value(value: plexHome),
           ChangeNotifierProvider<ActiveProfileProvider>.value(value: activeProfile),
         ],
-        child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const ProfileSwitchScreen()),
+        child: MaterialApp(
+          theme: monoTheme(MonoPalette.dark),
+          home: ProfileSwitchScreen(requireSelection: requireSelection),
+        ),
       ),
     ),
   );

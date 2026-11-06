@@ -69,8 +69,10 @@ class DevicePerformance {
   /// a shell arg because FlutterLoader appends its own threshold after it; a
   /// flutter/skia override sticks. Impeller ignores it.
   static void _capSkiaResourceCache() {
-    SystemChannels.skia.invokeMethod<void>('Skia.setResourceCacheMaxBytes', 48 << 20).ignore();
+    SystemChannels.skia.invokeMethod<void>('Skia.setResourceCacheMaxBytes', _lowEndSkiaResourceCacheBytes).ignore();
   }
+
+  static const int _lowEndSkiaResourceCacheBytes = 48 << 20;
 
   /// Total device RAM as reported by the platform, or null off-Android /
   /// before init. Used to scale memory-watchdog thresholds to the device.
@@ -160,25 +162,51 @@ class DevicePerformance {
   /// headroom for Skia decode buffers.
   static void applyImageCacheBudget() {
     _detectDisplayBudget();
-    final cache = PaintingBinding.instance.imageCache;
-    if (PlatformDetector.isDesktopOS()) {
-      cache.maximumSize = 1000;
-      cache.maximumSizeBytes = 150 << 20; // 150MB
-    } else if (isReduced) {
-      // Tiles decode at full TV DPR even on this tier (#2020), so the byte
-      // budget matches the TV baseline. The display budget factor is pinned
-      // to 1.0 here, keeping the ceiling fixed.
-      cache.maximumSize = 400;
-      cache.maximumSizeBytes = 64 << 20; // 64MB
-    } else if (PlatformDetector.isTV()) {
-      // TV boxes share limited RAM with 4K video decode buffers. The byte
-      // budget follows the display budget: 4K-surface artwork carries up to
-      // 2× the pixels per entry (64MB baseline → 128MB at 4K).
-      cache.maximumSize = 500;
-      cache.maximumSizeBytes = ((64 << 20) * displayBudgetFactor()).round();
-    } else {
-      cache.maximumSize = 800;
-      cache.maximumSizeBytes = 100 << 20; // 100MB
+    PaintingBinding.instance.imageCache
+      ..maximumSize = _imageCacheTierEntries()
+      ..maximumSizeBytes = imageCacheTierBytes();
+  }
+
+  static int _imageCacheTierEntries() {
+    if (PlatformDetector.isDesktopOS()) return 1000;
+    if (isReduced) return 400;
+    if (PlatformDetector.isTV()) return 500;
+    return 800;
+  }
+
+  /// The image-cache byte budget [applyImageCacheBudget] sets for this
+  /// platform/tier, from the display budget it latched. MemoryTrimPolicy
+  /// restores this after a trim, so a trim never outlives its cause.
+  static int imageCacheTierBytes() {
+    if (PlatformDetector.isDesktopOS()) return 150 << 20; // 150MB
+    // Tiles decode at full TV DPR even on the reduced tier (#2020), so the
+    // byte budget matches the TV baseline. The display budget factor is pinned
+    // to 1.0 there, keeping the ceiling fixed.
+    if (isReduced) return 64 << 20; // 64MB
+    // TV boxes share limited RAM with 4K video decode buffers. The byte
+    // budget follows the display budget: 4K-surface artwork carries up to
+    // 2× the pixels per entry (64MB baseline → 128MB at 4K).
+    if (PlatformDetector.isTV()) return ((64 << 20) * displayBudgetFactor()).round();
+    return 100 << 20; // 100MB
+  }
+
+  /// The Skia GPU resource-cache budget this device runs with: the 48MB cap
+  /// on low-end hardware ([_capSkiaResourceCache]), otherwise the engine's own
+  /// surface-sized default (physical width × height × 12 × 4 bytes, the
+  /// Android HWUI formula shell.cc uses). Once Dart sets the cache over
+  /// `flutter/skia` the engine stops re-deriving it, so a restore must write
+  /// this value back rather than hope the engine does. Null off Android or
+  /// before the engine reports metrics. Impeller ignores the channel.
+  static int? skiaResourceCacheTierBytes() {
+    if (!Platform.isAndroid) return null;
+    if (isLowEndHardware) return _lowEndSkiaResourceCacheBytes;
+    try {
+      final size = PlatformDispatcher.instance.implicitView?.physicalSize;
+      if (size == null || size.isEmpty) return null;
+      // The channel takes a 32-bit int.
+      return (size.width * size.height * 12 * 4).round().clamp(0, 0x7fffffff);
+    } catch (_) {
+      return null;
     }
   }
 

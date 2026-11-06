@@ -37,6 +37,7 @@ import 'screens/profile/profile_switch_screen.dart';
 import 'services/storage_service.dart';
 import 'services/assistive_technology_service.dart';
 import 'services/device_performance.dart';
+import 'services/memory_trim_policy.dart';
 import 'services/video_decode_capabilities.dart';
 import 'services/macos_window_service.dart';
 import 'services/native_window_service.dart';
@@ -1072,6 +1073,8 @@ void _startNonessentialInitialization(SettingsService settings) {
   if (settings.read(SettingsService.crashReporting)) {
     unawaited(AndroidExitDiagnostics.logPreviousExit());
   }
+  // Local log only: has Back-keeps-warm cost Plezy its process to LMK?
+  unawaited(AndroidExitDiagnostics.logLowMemoryKills());
 
   // The startup-gate application can precede the engine's first metrics
   // report, which reads as a 1.0 display budget; re-derive it now that the
@@ -1378,11 +1381,6 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   /// Periodic RSS watchdog timer (desktop + Android).
   Timer? _memoryCheckTimer;
 
-  /// Last watchdog eviction, for the cooldown; RSS at that moment so a
-  /// still-climbing RSS can re-evict inside the cooldown window.
-  DateTime _lastRssEviction = DateTime(0);
-  int _lastEvictionRss = 0;
-
   @override
   void initState() {
     super.initState();
@@ -1393,6 +1391,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _startRssWatchdog();
     });
+    // PlezyActivity forwards onTrimMemory levels (UI hidden, complete).
+    if (Platform.isAndroid) MemoryTrimPolicy.instance.attachChannel();
 
     _serverManager = MultiServerManager();
     _aggregationService = DataAggregationService(_serverManager);
@@ -1523,11 +1523,12 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   @override
   void didHaveMemoryPressure() {
     super.didHaveMemoryPressure();
-    appLogger.w('System memory pressure, evicting image caches');
-    _evictImageCaches();
+    // MemoryPressureBreadcrumbs has already halved the image cache budget;
+    // clearing live images here would blank artwork still on screen.
+    appLogger.w('System memory pressure, image cache budget halved');
   }
 
-  /// RSS-based image-cache eviction. Desktop keeps its fixed 1.5GB bar;
+  /// RSS-based image-cache trimming (MemoryTrimPolicy). Desktop keeps its fixed 1.5GB bar;
   /// Android scales to the device because LMK on a 2GB TV box kills well
   /// below any fixed desktop threshold — and Android trim callbacks
   /// ([didHaveMemoryPressure]) are best-effort, LMK can kill without ever
@@ -1550,25 +1551,18 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
 
     _memoryCheckTimer = Timer.periodic(period, (_) {
       final rss = ProcessInfo.currentRss;
-      if (rss <= threshold) return;
       final cache = PaintingBinding.instance.imageCache;
-      // Floor + cooldown: clearing an already-small cache buys nothing, and
-      // refetch churn is its own memory-spike and jank source. Inside the
-      // cooldown, re-evict only if RSS kept climbing past the last eviction.
-      if (cache.currentSizeBytes < (8 << 20)) return;
-      final now = DateTime.now();
-      final inCooldown = now.difference(_lastRssEviction) < const Duration(seconds: 60);
-      if (inCooldown && rss <= _lastEvictionRss) return;
-      _lastRssEviction = now;
-      _lastEvictionRss = rss;
-      appLogger.w(
-        'RSS high (${rss >> 20}MB > ${threshold >> 20}MB), evicting image caches '
-        '(cache ${cache.currentSizeBytes >> 20}MB/${cache.currentSize} images, ${cache.liveImageCount} live)',
-      );
-      _evictImageCaches();
+      final before = '${cache.currentSizeBytes >> 20}MB/${cache.currentSize} images, ${cache.liveImageCount} live';
+      // First over-threshold tick halves the budget; a second consecutive one
+      // clears the keep-alive cache. Live images always stay. The policy
+      // restores the tier size once RSS has stayed under for its cooldown.
+      final trim = MemoryTrimPolicy.instance.onWatchdogTick(overThreshold: rss > threshold);
+      if (trim == WatchdogTrim.none) return;
+      appLogger.w('RSS high (${rss >> 20}MB > ${threshold >> 20}MB), image cache ${trim.name} (cache $before)');
     });
   }
 
+  /// Desktop's background shed only; Android trims through MemoryTrimPolicy.
   void _evictImageCaches() {
     PaintingBinding.instance.imageCache.clear();
     PaintingBinding.instance.imageCache.clearLiveImages();
@@ -1680,6 +1674,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
+        // Back to the device tier's cache sizes after any background trim.
+        if (Platform.isAndroid) MemoryTrimPolicy.instance.onResumed();
         // App came back to foreground - trigger sync check
         _offlineWatchSyncService.onAppResumed();
         unawaited(TrackerCoordinator.instance.flushWriteQueue());
@@ -1721,14 +1717,13 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             _evictImageCaches();
           }
         } else if (Platform.isAndroid) {
-          // A backgrounded app is LMK's first candidate; shed the image
-          // caches at a lower bar than the foreground watchdog to survive
-          // the HOME press on low-RAM boxes.
+          // A backgrounded app is LMK's first candidate; over a lower bar than
+          // the foreground watchdog, trim now rather than wait on a
+          // best-effort TRIM_MEMORY_UI_HIDDEN. Halving, not clearing, keeps
+          // the warm return (Back on TV) showing its artwork.
           final totalMem = DevicePerformance.totalMemBytes;
           final bar = totalMem != null ? (totalMem * 0.35).round() : 768 << 20;
-          if (ProcessInfo.currentRss > bar) {
-            _evictImageCaches();
-          }
+          MemoryTrimPolicy.instance.onBackgrounded(rssOverBackgroundBar: ProcessInfo.currentRss > bar);
         }
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:

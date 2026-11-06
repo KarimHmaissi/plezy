@@ -128,6 +128,23 @@ Details of each are in the dated entries below.
   and the audio. It appears at the top of the performance overlay and
   under the title on the phone's now-playing screen. Nothing is added to
   the TV picture.
+### Back keeps Plezy warm on the Shield, and memory is trimmed, not wiped
+- Back at the home screen (pressed twice, as before) now sends Plezy
+  **behind the launcher instead of closing it**, so opening it again from
+  Arc or a Watch Next card is a hot resume, not a cold start. Phones still
+  exit. **Settings > Quit Plezy** (Android TV only) closes it for real.
+- When Android asks for memory, Plezy **halves** its image cache instead
+  of emptying it, so the artwork you come back to is still there. Going
+  behind the launcher halves the image and Skia caches once; after about
+  30 minutes in the background both drop to their minimum, giving memory
+  back to whatever the family is watching. Coming back restores the
+  device's normal sizes (`MemoryTrimPolicy`).
+- The memory watchdog halves the cache first and only clears cached
+  (off-screen) images if memory is still high on its next check. It no
+  longer clears on-screen images, which could blank the art in view.
+- The startup log now counts how often Android killed Plezy for memory
+  while it was in the background (`[LmkCounter]`), to check that staying
+  warm is not costing it.
 
 ## 2026-11-03
 

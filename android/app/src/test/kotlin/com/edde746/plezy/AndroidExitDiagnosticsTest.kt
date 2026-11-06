@@ -12,6 +12,40 @@ import org.junit.Test
 class AndroidExitDiagnosticsTest {
 
   @Test
+  fun countsBackgroundLowMemoryKillsAndOnlyNewOnesSinceTheWatermark() {
+    val lowMemory = ApplicationExitInfo.REASON_LOW_MEMORY
+    val cached = 400 // IMPORTANCE_CACHED: behind the launcher
+    val foreground = 100
+    fun exit(reason: Int, importance: Int, timestamp: Long) =
+      HistoricalExitRecord(reason = reason, status = 0, importance = importance, timestamp = timestamp)
+    val records = listOf(
+      exit(lowMemory, cached, 100),
+      exit(lowMemory, cached, 300),
+      exit(lowMemory, foreground, 200),
+      exit(ApplicationExitInfo.REASON_OTHER, cached, 250),
+      exit(ApplicationExitInfo.REASON_USER_REQUESTED, foreground, 50)
+    )
+
+    val summary = LowMemoryKillCounter.summarize(records, sinceTimestamp = 200)
+    assertEquals(5, summary["exitsInHistory"])
+    assertEquals(2, summary["lowMemoryBackground"])
+    assertEquals(1, summary["lowMemoryBackgroundNew"])
+    assertEquals(1, summary["lowMemoryForeground"])
+    assertEquals(1, summary["otherBackground"])
+    assertEquals(false, summary["firstSummary"])
+    assertEquals(50L, summary["oldestTimestamp"])
+    assertEquals(300L, summary["newestTimestamp"])
+
+    val first = LowMemoryKillCounter.summarize(records, sinceTimestamp = null)
+    assertEquals(2, first["lowMemoryBackgroundNew"])
+    assertEquals(true, first["firstSummary"])
+
+    val empty = LowMemoryKillCounter.summarize(emptyList(), sinceTimestamp = null)
+    assertEquals(0, empty["lowMemoryBackground"])
+    assertFalse(empty.containsKey("oldestTimestamp"))
+  }
+
+  @Test
   fun mapsExitReasonsDeterministically() {
     mapOf(
       ApplicationExitInfo.REASON_EXIT_SELF to "exit_self",

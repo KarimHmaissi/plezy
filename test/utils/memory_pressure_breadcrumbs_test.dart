@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/mpv/mpv.dart';
+import 'package:plezy/services/memory_trim_policy.dart';
 import 'package:plezy/services/playback_coordinator.dart';
 import 'package:plezy/utils/memory_pressure_breadcrumbs.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -17,18 +18,13 @@ class _MemoryPressureTestBinding extends AutomatedTestWidgetsFlutterBinding with
   void warnInCurrentZone() => handleMemoryPressure();
 }
 
-/// Evicts the way `_MainAppState.didHaveMemoryPressure` does, and records what
-/// an observer gets to see of the cache.
-class _EvictingObserver with WidgetsBindingObserver {
+/// Records what an observer gets to see of the cache.
+class _RecordingObserver with WidgetsBindingObserver {
   int? keepAliveBytesSeen;
 
   @override
   void didHaveMemoryPressure() {
-    final cache = PaintingBinding.instance.imageCache;
-    keepAliveBytesSeen = cache.currentSizeBytes;
-    cache
-      ..clear()
-      ..clearLiveImages();
+    keepAliveBytesSeen = PaintingBinding.instance.imageCache.currentSizeBytes;
   }
 }
 
@@ -40,10 +36,19 @@ class _LoadedImageCompleter extends ImageStreamCompleter {
 
 void main() {
   final binding = _MemoryPressureTestBinding();
+  const tierBytes = 100 << 20;
   late List<Breadcrumb> breadcrumbs;
 
   setUp(() async {
     binding.debugResetMemoryPressureBreadcrumbs();
+    binding.imageCache.maximumSizeBytes = tierBytes;
+    MemoryTrimPolicy.debugInstance = MemoryTrimPolicy(
+      imageCache: () => binding.imageCache,
+      imageCacheTierBytes: () => tierBytes,
+      skiaCacheTierBytes: () => null,
+      setSkiaCacheBytes: (_) {},
+    );
+    addTearDown(() => MemoryTrimPolicy.debugInstance = null);
     breadcrumbs = [];
     await Sentry.init((options) {
       options
@@ -70,7 +75,7 @@ void main() {
 
   void warnAt(DateTime at) => withClock(Clock.fixed(at), binding.warnInCurrentZone);
 
-  test('records the image cache from before the framework cleared it and after the app evicted', () async {
+  test('halves the image cache budget instead of letting the framework wipe it', () async {
     final cache = binding.imageCache;
     final keepAliveImage = await createTestImage(width: 1024, height: 1024); // 4 MB
     final shownImage = await createTestImage(width: 1024, height: 512); // 2 MB
@@ -80,7 +85,7 @@ void main() {
     addTearDown(() => shown.removeListener(shownListener));
     expect((cache.currentSize, cache.liveImageCount), (2, 1));
 
-    final observer = _EvictingObserver();
+    final observer = _RecordingObserver();
     binding.addObserver(observer);
     addTearDown(() => binding.removeObserver(observer));
     registerVideoSession(
@@ -93,7 +98,8 @@ void main() {
       (_) {},
     );
 
-    expect(observer.keepAliveBytesSeen, 0, reason: 'the framework empties the cache before observers run');
+    expect(observer.keepAliveBytesSeen, 6 << 20, reason: 'observers still run, and see the cache intact');
+    expect(cache.maximumSizeBytes, tierBytes ~/ 2);
     final breadcrumb = breadcrumbs.single;
     expect(breadcrumb.message, 'Memory pressure');
     expect(breadcrumb.level, SentryLevel.warning);
@@ -109,9 +115,9 @@ void main() {
       'videoSession': true,
       'playbackActive': true,
       'bufferAheadMs': 35000,
-      'imageCacheMbAfter': 0,
-      'imageCacheImagesAfter': 0,
-      'liveImagesAfter': 0,
+      'imageCacheMbAfter': 6,
+      'imageCacheImagesAfter': 2,
+      'liveImagesAfter': 1,
     });
   });
 
@@ -125,6 +131,9 @@ void main() {
     warnAt(start.add(const Duration(seconds: 29)));
     expect(breadcrumbs, hasLength(1));
     expect(breadcrumbs.single.data, isNot(contains('suppressed')));
+    // 100 -> 50 -> 25 -> 12.5 -> the floor: folded warnings still halve, and
+    // nothing empties the cache.
+    expect(binding.imageCache.maximumSizeBytes, MemoryTrimPolicy.minImageCacheBytes);
 
     warnAt(start.add(MemoryPressureBreadcrumbs.breadcrumbInterval));
     expect(breadcrumbs, hasLength(2));
