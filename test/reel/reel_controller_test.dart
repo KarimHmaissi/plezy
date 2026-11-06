@@ -41,6 +41,31 @@ class _Servers implements ReelServers {
   String? clipUrl(String serverId, String partKey) => 'https://$serverId.example$partKey';
 }
 
+/// Two trailers per title, on servers that can be taken offline.
+class _FlakyServers implements ReelServers {
+  final Set<String> offline = {};
+  int reads = 0;
+
+  PlexExtraClip _x(String rk, String title, int i) => PlexExtraClip(
+    ratingKey: rk,
+    title: title,
+    partKey: '/services/iva/assets/$rk/video.mp4',
+    subtype: 'trailer',
+    index: i,
+  );
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
+    if (offline.contains(serverId)) throw ReelServerUnavailable(serverId);
+    reads++;
+    return [_x('a$ratingKey', 'Official Trailer', 0), _x('b$ratingKey', 'Trailer 2', 1)];
+  }
+
+  @override
+  String? clipUrl(String serverId, String partKey) =>
+      offline.contains(serverId) ? null : 'https://$serverId.example$partKey';
+}
+
 class _Media implements ReelMedia {
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async => MediaItem(
@@ -200,6 +225,7 @@ void main() {
     ReelWatchlist? addToWatchlist,
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
+    ReelServers? servers,
   }) => ReelController(
     decks:
         decks ??
@@ -207,7 +233,7 @@ void main() {
           _Deck('a', [_card('1'), _card('2'), _card('3')]),
         ],
     resolver: ClipResolver(
-      servers: _Servers(),
+      servers: servers ?? _Servers(),
       store: store,
       aniList: (_) async => null,
       animeThemes: (_) async => const {},
@@ -628,7 +654,7 @@ void main() {
       final c = make(externalClips: true, clock: clock);
       await c.start();
       c.clipStarted('t1');
-      c.clipFailed('t1');
+      await c.clipFailed('t1');
       now = now.add(const Duration(milliseconds: 300));
       await c.step(1);
       expect(await actions(), [ReelAction.unplayed.name]);
@@ -828,6 +854,78 @@ void main() {
       await c.start();
       expect(loads, 1);
       expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
+  });
+
+  group('a failed clip looks again, and unknown answers come back (V2-56)', () {
+    test('a TV clip that fails clears its cached answer and plays the next trailer', () async {
+      final c = make(servers: _FlakyServers());
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/a1/video.mp4'));
+
+      engine.errorCtl.add(const PlayerError('source gone'));
+      await pumpEventQueue();
+      expect(c.current.clip?.assetId, 'plex:b1');
+      // The outgoing clip fades out (250 ms) before the new one opens.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/b1/video.mp4'));
+      expect(await store.cached('src:g1'), contains('plex:b1'));
+      c.dispose();
+    });
+
+    test('a phone clip that fails is looked up once more, without the failed asset', () async {
+      final servers = _FlakyServers();
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+
+      await c.clipFailed('t1');
+      expect(c.current.clip?.assetId, 'plex:b1');
+      final reads = servers.reads;
+
+      // The second clip failing too leaves the card as it is: once only.
+      await c.clipFailed('t1');
+      expect(servers.reads, reads);
+      expect(c.current.clip?.assetId, 'plex:b1');
+      c.dispose();
+    });
+
+    test('a failure on a card that is not on screen does nothing', () async {
+      final servers = _FlakyServers();
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      final reads = servers.reads;
+      await c.clipFailed('t2');
+      expect(servers.reads, reads);
+      c.dispose();
+    });
+
+    test('a card whose server was offline is looked up again on resume', () async {
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      expect(c.current.isAiCard, isTrue);
+      expect(await store.cached('src:g1'), isNull, reason: 'unknown is never a cached miss');
+
+      await c.suspend();
+      servers.offline.clear();
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+      c.dispose();
+    });
+
+    test('a definitive answer is not looked up again on resume', () async {
+      final servers = _FlakyServers();
+      final c = make(servers: servers, externalClips: true);
+      await c.start();
+      await pumpEventQueue();
+      final reads = servers.reads;
+      await c.suspend();
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, reads);
       c.dispose();
     });
   });

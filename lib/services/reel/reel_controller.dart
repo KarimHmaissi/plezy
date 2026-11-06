@@ -146,6 +146,15 @@ class ReelController extends ChangeNotifier {
   final Set<String> _resolved = {};
   final Map<String, MediaItem?> _item = {};
   final Map<String, Future<void>> _resolving = {};
+
+  /// Cards whose clip answer was unknown (a server offline, a failed read):
+  /// looked up again when the Reel comes back, never cached as a miss.
+  final Set<String> _unknown = {};
+
+  /// Per card, the assets that failed to play this session, and the cards
+  /// already looked up again after a failure (once each).
+  final Map<String, Set<String>> _excluded = {};
+  final Set<String> _retried = {};
   bool _active = false;
   bool _firstClip = true;
   bool _clipEnded = false;
@@ -209,6 +218,7 @@ class ReelController extends ChangeNotifier {
 
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
+    if (!_active) _comeBack();
     _active = true;
     // The degrade ladder carries over: coming back from Watch or another tab
     // says nothing about memory. Only the policy's restore resets it.
@@ -229,6 +239,19 @@ class ReelController extends ChangeNotifier {
     await _ensureDeck(deck);
     if (!_active) return;
     await _show();
+  }
+
+  /// Coming back (first open, resume or tab show): servers that weren't
+  /// connected are waited for again, and cards whose answer was unknown
+  /// are looked up again when next needed.
+  void _comeBack() {
+    resolver.resumed();
+    for (final id in _unknown) {
+      unawaited(_resolving.remove(id));
+      _resolved.remove(id);
+      _clip.remove(id);
+    }
+    _unknown.clear();
   }
 
   /// Tab hidden, Home pressed or the app paused: stop and release the
@@ -380,15 +403,17 @@ class ReelController extends ChangeNotifier {
   /// Resolves (metadata + clip) a card once; the views redraw when it lands.
   Future<void> _resolve(ReelCardData c) => _resolving[c.id] ??= () async {
     try {
-      final (item, clip) = await (
+      final (item, found) = await (
         media.item(c.best.serverId, c.best.ratingKey).catchError((Object _) => null),
-        resolver.resolve(c.title),
+        resolver.lookup(c.title, exclude: _excluded[c.id] ?? const {}),
       ).wait;
       _item[c.id] = item;
-      _clip[c.id] = clip;
+      _clip[c.id] = found.clip;
+      found.answer == ClipAnswer.unknown ? _unknown.add(c.id) : _unknown.remove(c.id);
     } catch (e) {
       appLogger.d('Reel: card resolve failed', error: e);
       _clip[c.id] = null;
+      _unknown.add(c.id);
     } finally {
       _resolved.add(c.id);
       notifyListeners();
@@ -469,7 +494,7 @@ class ReelController extends ChangeNotifier {
     final uri = _cardClip;
     if (externalClips || _cardShown == null || uri == null || clips.current?.uri != uri) return;
     if (now == ClipPhase.failed) {
-      _cardFailed = true;
+      unawaited(clipFailed(_cardShown!));
     } else if (was == ClipPhase.loading && now == ClipPhase.playing && _cardSince == null && !_cardFailed) {
       _cardSince = _clock();
     }
@@ -485,9 +510,41 @@ class ReelController extends ChangeNotifier {
     }
   }
 
-  /// Phone feed: [cardId]'s player failed to open or broke mid-play.
-  void clipFailed(String cardId) {
-    if (externalClips && cardId == _cardShown) _cardFailed = true;
+  /// [cardId]'s clip failed to open or broke mid-play (the phone feed's
+  /// player, or the TV's clip core). How the card is left then says nothing
+  /// about the title. Its cached answer is cleared and it is looked up once
+  /// more without the failed asset: the next rung plays, or an AI card.
+  Future<void> clipFailed(String cardId) async {
+    if (cardId != _cardShown) return;
+    _cardFailed = true;
+    final failed = _clip[cardId];
+    final c = cards?.where((x) => x.id == cardId).firstOrNull;
+    if (c == null || failed == null || !_retried.add(cardId)) return;
+    appLogger.i('Reel: a clip failed to play; looking for another');
+    (_excluded[cardId] ??= {}).add(failed.assetId);
+    await resolver.forget(c.title);
+    unawaited(_resolving.remove(cardId));
+    _resolved.remove(cardId);
+    _clip.remove(cardId);
+    notifyListeners();
+    await _resolve(c);
+    if (_disposed || !_active || _cardShown != cardId) return;
+    final clip = _clip[cardId];
+    if (clip == null) {
+      // An AI card now: a still, seen whole from here; still neutral.
+      if (!externalClips) {
+        _sinceAiCard = 0;
+        await clips.pause();
+      }
+      return;
+    }
+    // The new clip's first frame starts the clock.
+    _cardFailed = false;
+    _cardSince = null;
+    if (externalClips || memoryLevel >= 2) return;
+    _cardClip = clip.source.uri;
+    await clips.play(clip.source, first: _firstClip);
+    _firstClip = false;
   }
 
   /// Records how the card was left, timed from its first frame: a quick

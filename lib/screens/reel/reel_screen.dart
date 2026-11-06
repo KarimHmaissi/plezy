@@ -96,7 +96,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   late final ReelFeedPlayers _players = ReelFeedPlayers(
     onLooped: (_) => _controller?.clipEnded(),
     onStarted: (id) => _controller?.clipStarted(id),
-    onFailed: (id) => _controller?.clipFailed(id),
+    onFailed: (id) => unawaited(_controller?.clipFailed(id)),
   );
 
   bool get _isTv => PlatformDetector.isTV();

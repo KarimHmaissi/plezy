@@ -14,15 +14,20 @@ class PlexReelServers implements ReelServers {
 
   final MultiServerManager _servers;
 
+  /// A connected Plex client for [serverId]: online, as deep links judge it.
   PlexClient? _client(String serverId) {
-    final c = _servers.getClient(ServerId(serverId));
-    return c is PlexClient ? c : null;
+    final id = ServerId(serverId);
+    final c = _servers.getClient(id);
+    return c is PlexClient && _servers.isServerOnline(id) ? c : null;
   }
+
+  /// Whether [serverId] can answer now (what the resume wait waits for).
+  bool connected(String serverId) => _client(serverId) != null;
 
   @override
   Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
     final c = _client(serverId);
-    if (c == null) return const [];
+    if (c == null) throw ReelServerUnavailable(serverId);
     return c.fetchExtraClips(ratingKey, timeout: timeout).timeout(timeout + const Duration(seconds: 1));
   }
 

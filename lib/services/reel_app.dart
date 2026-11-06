@@ -30,6 +30,7 @@ import 'catalog/library_watchlist_candidates.dart';
 import 'catalog/trakt_lists_catalog_source.dart';
 import 'companion_remote/phone_mode.dart';
 import 'customisation/customisation_store.dart';
+import 'deep_links/deep_link_launcher.dart' show deepLinkServerWait, waitForServers;
 import 'library_index/library_index.dart';
 import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
@@ -59,7 +60,7 @@ abstract final class ReelApp {
     final store = ReelStore.instance;
     final facts = IndexTitleFactsSource.app();
     final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
-    final resolver = resolverFor(servers, store);
+    final resolver = resolverFor(servers, store, serversChanged: multi);
     final pool = ReelPool(store: store, library: library, model: _sonnet);
     final media = _AppReelMedia(servers);
     final resolverRows = catalog == null
@@ -223,8 +224,20 @@ abstract final class ReelApp {
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).
-  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store) =>
-      ClipResolver(servers: PlexReelServers(servers), store: store, aniList: _aniList);
+  /// With [serversChanged], a server that isn't connected yet is waited for
+  /// as long as a deep link waits ([deepLinkServerWait]), once per start or
+  /// resume: after a wake the Reel opens before the servers reconnect.
+  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store, {Listenable? serversChanged}) {
+    final plex = PlexReelServers(servers);
+    return ClipResolver(
+      servers: plex,
+      store: store,
+      aniList: _aniList,
+      waitForServer: serversChanged == null
+          ? null
+          : (id) => waitForServers(serversChanged, () => plex.connected(id), timeout: deepLinkServerWait),
+    );
+  }
 
   /// Answers worth a deck: the user's own asks, not Tonight or the briefing.
   static Future<List<AiHistoryEntry>> _answers() async {
@@ -258,14 +271,14 @@ abstract final class ReelApp {
   }
 
   /// Season 1's AniList id through the Fribb mapping (tvdb, then tmdb).
+  /// Throws when the mapping itself couldn't be read, so the resolver
+  /// counts the title as unknown rather than caching a miss.
   static Future<int?> _aniList(ReelTitle t) async {
-    try {
-      final rows = await FribbMappingStore.instance.lookup(movie: !t.isShow, tvdbId: t.tvdbId, tmdbId: t.tmdbId);
-      final s1 = rows.where((r) => r.tvdbSeason == 1 || r.tmdbSeason == 1).firstOrNull ?? rows.firstOrNull;
-      return s1?.anilistId;
-    } catch (_) {
-      return null;
-    }
+    final fribb = FribbMappingStore.instance;
+    final rows = await fribb.lookup(movie: !t.isShow, tvdbId: t.tvdbId, tmdbId: t.tmdbId);
+    if (rows.isEmpty && !await fribb.available()) throw StateError('Fribb mapping unavailable');
+    final s1 = rows.where((r) => r.tvdbSeason == 1 || r.tmdbSeason == 1).firstOrNull ?? rows.firstOrNull;
+    return s1?.anilistId;
   }
 
   /// The daily build's one Sonnet call (spend recorded like every AI call).

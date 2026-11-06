@@ -1915,6 +1915,9 @@ class PlexClient
     Duration timeout = const Duration(seconds: 30),
   }) async {
     final response = await _http.get('/library/metadata/$ratingKey/extras', timeout: timeout);
+    // A 401 or 5xx is a failed read, not "no extras": the Reel must not
+    // cache it as a miss.
+    throwIfHttpError(response);
     final rows = _getMediaContainer(response)?['Metadata'];
     if (rows is! List) return const [];
     return [
