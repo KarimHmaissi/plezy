@@ -137,8 +137,8 @@ Details of each are in the dated entries below.
   without turning anything on: "Companion Remote Server" defaults to on for
   TVs as well as desktops (it was desktop-only, so the Shield never
   advertised itself). An explicit off in Settings still wins.
-- Plezy now runs on the real Shield as a profile build (Wi-Fi adb at
-  192.168.1.153:5555); startup about 3.4 s vs about 7.6 s for a debug build.
+- Plezy now runs on the real Shield as a profile build (over Wi-Fi
+  adb); startup about 3.4 s vs about 7.6 s for a debug build.
 
 ## 2026-11-03
 

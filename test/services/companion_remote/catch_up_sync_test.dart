@@ -68,7 +68,7 @@ void main() {
 
   test('the newer edit of a piece wins, in both directions', () async {
     await tv.writeSetting('watchlist.source', 'plex');
-    await tv.writeComfortPaused({1: 'Friends'});
+    await tv.writeComfortPaused({1: 'Sitcom A'});
     await Future<void>.delayed(const Duration(milliseconds: 5));
     await phone.writeSetting('watchlist.source', 'trakt');
     await phone.writeSetting('ai.suggestions', '["phone list"]');
@@ -78,7 +78,7 @@ void main() {
     expect(moved, (toPhone: 1, toTv: 2));
     expect(await tv.readSetting('watchlist.source'), 'trakt');
     expect(await tv.readSetting('ai.suggestions'), '["phone list"]');
-    expect(await phone.readComfortPaused(), {1: 'Friends'});
+    expect(await phone.readComfortPaused(), {1: 'Sitcom A'});
     // Both sides now agree, so a second round moves nothing.
     expect(await _round(phone, tv), (toPhone: 0, toTv: 0));
   });
