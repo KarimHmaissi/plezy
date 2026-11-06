@@ -406,26 +406,37 @@ abstract final class ReelApp {
 
   /// The TMDB trailer rung (plan V2-63, D16): Android phones only (the
   /// feed plays it in a WebView; the TV has none, so its clip-less titles
-  /// stay AI cards with a premise). It runs on Wi-Fi, or on mobile data with
-  /// the Normal pref; Data saver and Stills only turn it off (V2-53). The
-  /// TMDB key is the one in Settings ▸ AI; with none set the rung is skipped.
+  /// stay AI cards with a premise). It runs while [tmdbRungMayRun] says so.
+  /// The TMDB key is the one in Settings ▸ AI; with none set the rung is
+  /// skipped.
   static ReelTmdbRung? _tmdbRung(ValueListenable<ReelPlaybackProfile> profile) {
     if (PlatformDetector.isTV() || !Platform.isAndroid) return null;
     final client = TmdbVideosClient();
     unawaited(client.prime());
     return ReelTmdbRung(
       fetch: client.fetch,
-      on: () =>
-          client.mayHaveKey &&
-          ReelDataBudget.of(
-                SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
-                    SettingsService.reelCellular.resolvedDefault,
-                metered: profile.value.link == ReelLink.cellular,
-              ) ==
-              ReelDataBudget.full,
+      on: () => tmdbRungMayRun(
+        mayHaveKey: client.mayHaveKey,
+        profile: profile.value,
+        cellular:
+            SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
+            SettingsService.reelCellular.resolvedDefault,
+      ),
       language: () => LocaleSettings.currentLocale.languageCode,
     );
   }
+
+  /// Whether the TMDB rung may run now: a key may be set, and the data
+  /// budget is full (Wi-Fi, or mobile data on Normal; Data saver and Stills
+  /// only turn it off, V2-53). The link is the playback [profile]'s, the one
+  /// source the controller's data budget and the clip picks read too, so the
+  /// rung never disagrees with them while the network changes.
+  @visibleForTesting
+  static bool tmdbRungMayRun({
+    required bool mayHaveKey,
+    required ReelPlaybackProfile profile,
+    required ReelCellular cellular,
+  }) => mayHaveKey && ReelDataBudget.of(cellular, metered: profile.link == ReelLink.cellular) == ReelDataBudget.full;
 
   /// The cards' metadata and art over the app's servers, for the run-time
   /// seam test (V2-62).
