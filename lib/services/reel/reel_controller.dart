@@ -84,6 +84,7 @@ class ReelController extends ChangeNotifier {
     this.onOpen,
     this.externalClips = false,
     this.memoryRestored,
+    this.saveMuted,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
@@ -122,6 +123,10 @@ class ReelController extends ChangeNotifier {
   /// tier (`MemoryTrimPolicy.restores`): the only thing that brings the
   /// degrade ladder back to 0.
   final Listenable? memoryRestored;
+
+  /// Keeps the mute across launches (`reel_muted`, V2-22); the saved value
+  /// is handed to [clips] when it is built.
+  final Future<void> Function(bool muted)? saveMuted;
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -739,6 +744,7 @@ class ReelController extends ChangeNotifier {
     if (!muted && c != null) await store.record(c.id, ReelAction.unmute, deck: deck.id);
     await clips.setMuted(muted);
     notifyListeners();
+    await saveMuted?.call(muted);
   }
 
   /// How hard the system has asked for memory back (the degrade ladder):

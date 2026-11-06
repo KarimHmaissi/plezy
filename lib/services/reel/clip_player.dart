@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../mpv/models.dart';
 import '../../mpv/player/platform/player_android.dart';
 import '../../mpv/player/player.dart';
+import '../../screens/video_player/wakelock_controller.dart';
 import '../../utils/app_logger.dart';
 import 'reel_perf.dart';
 
@@ -57,6 +58,19 @@ abstract interface class ClipEngine {
   Stream<Duration> get positions;
   Stream<Duration> get durations;
   Duration get duration;
+
+  /// Whether the core is playing (ExoPlayer's `isPlaying`): false while
+  /// paused, buffering or ended, so a pause the Reel didn't ask for (a lost
+  /// audio focus) shows here only (V2-22).
+  Stream<bool> get playing;
+
+  /// Whether the core is waiting on data (a seek, a stall, an open).
+  Stream<bool> get buffering;
+
+  /// Takes the system's audio focus for the clip's sound (V2-22): music
+  /// playing elsewhere pauses, and a call or another app pauses the clip.
+  Future<bool> requestAudioFocus();
+  Future<void> abandonAudioFocus();
   Future<void> dispose();
 }
 
@@ -118,6 +132,18 @@ class ExoClipEngine implements ClipEngine {
   Duration get duration => _p.state.duration;
 
   @override
+  Stream<bool> get playing => _p.streams.playing;
+
+  @override
+  Stream<bool> get buffering => _p.streams.buffering;
+
+  @override
+  Future<bool> requestAudioFocus() => _p.requestAudioFocus();
+
+  @override
+  Future<void> abandonAudioFocus() => _p.abandonAudioFocus();
+
+  @override
   Future<void> dispose() => _p.dispose();
 }
 
@@ -151,10 +177,27 @@ class ClipProgress {
 /// clip twice and then holds on its last frame, and ramps the sound between
 /// cards. It never reports a timeline, a scrobble or a media session: it
 /// imports none of that code (test/reel/no_reporting_guard_test.dart).
+///
+/// Sound and screen (V2-22): the first audible clip of a session takes the
+/// system's audio focus, and [release] gives it back, so the main player
+/// takes its own focus after Watch. A pause the system makes (a call,
+/// another app's sound) reads as [ClipPhase.paused]. The screen is kept on
+/// only while a clip opens or plays, so the screensaver still comes in over
+/// a paused or held card.
 class ClipPlayer {
-  ClipPlayer({ClipEngine Function()? engine, this.loops = 2, ReelPerf? perf})
-    : _create = engine ?? ExoClipEngine.new,
-      _perf = perf ?? ReelPerf.instance;
+  /// [wakelock] defaults to the platform's for the real core, and to none
+  /// for an injected test engine. [muted] is the saved mute (`reel_muted`).
+  ClipPlayer({
+    ClipEngine Function()? engine,
+    this.loops = 2,
+    ReelPerf? perf,
+    WakelockController? wakelock,
+    this._muted = false,
+  }) : _create = engine ?? ExoClipEngine.new,
+       _perf = perf ?? ReelPerf.instance,
+       _wakelock = wakelock ?? (engine == null ? WakelockController() : null) {
+    phase.addListener(_syncWakelock);
+  }
 
   /// The outgoing clip's ramp to silence. It runs alongside the next open
   /// rather than before it (V2-01), so a card change never waits on it. One
@@ -171,6 +214,11 @@ class ClipPlayer {
   /// A key press older than this when a clip opens is from another visit.
   static const Duration staleKey = Duration(seconds: 30);
 
+  /// How long the core must stay stopped, while the Reel wants it playing
+  /// and it isn't buffering or at the end, before that reads as a pause the
+  /// system made. It rides over the stop an error or a loop sends first.
+  static const Duration externalPauseGrace = Duration(milliseconds: 250);
+
   final ClipEngine Function() _create;
 
   /// The debug overlay's tape (it records nothing unless switched on).
@@ -179,11 +227,37 @@ class ClipPlayer {
   /// Plays before holding on the last frame.
   final int loops;
 
+  /// Keeps the screen on while a clip opens or plays (null in tests).
+  final WakelockController? _wakelock;
+  bool _wakeOn = false;
+
   ClipEngine? _engine;
   final List<StreamSubscription<Object?>> _subs = [];
   ClipSource? _current;
   int _played = 0;
-  bool _muted = false;
+  bool _muted;
+
+  /// This session's core holds (or has asked for) the audio focus.
+  bool _focus = false;
+
+  /// The focus was asked for at least once on this core: [release] gives it
+  /// back.
+  bool _focusAsked = false;
+
+  /// The Reel wants the core playing: set by every open, resume, replay and
+  /// loop; cleared by a pause, a hold and [release].
+  bool _wantPlaying = false;
+
+  /// What the core last said about itself ([ClipEngine.playing],
+  /// [ClipEngine.buffering]); [_ended] from its end until it plays again.
+  bool _enginePlaying = false;
+  bool _engineBuffering = false;
+  bool _ended = false;
+
+  /// The system paused the clip (a lost audio focus): a focus that comes
+  /// back may play it again; a pause of the Reel's own may not.
+  bool _pausedExternally = false;
+  Timer? _externalPause;
 
   /// The volume last sent to the core (0–100): every ramp starts here.
   double _level = 0;
@@ -226,6 +300,10 @@ class ClipPlayer {
   @visibleForTesting
   double get level => _level;
 
+  /// Whether the screen is being kept on.
+  @visibleForTesting
+  bool get keepsScreenOn => _wakeOn;
+
   ClipEngine _ensure() {
     final existing = _engine;
     if (existing != null) return existing;
@@ -241,6 +319,8 @@ class ClipPlayer {
         }),
       )
       ..add(e.logs.listen(_onLog))
+      ..add(e.playing.listen(_onEnginePlaying))
+      ..add(e.buffering.listen((b) => _engineBuffering = b))
       ..add(e.positions.listen(_onPosition))
       ..add(
         e.durations.listen((d) {
@@ -277,6 +357,12 @@ class ClipPlayer {
     final outgoing = _current != null && !first;
     _current = source;
     _played = 0;
+    _wantPlaying = true;
+    _pausedExternally = false;
+    _ended = false;
+    _cancelExternalPause();
+    // Asked for before the open starts the sound (the audio-focus guide).
+    _takeFocus();
     _length = source.length ?? Duration.zero;
     progress.value = ClipProgress.zero;
     onScreen.value = null;
@@ -319,12 +405,20 @@ class ClipPlayer {
     // A press that led to no clip (an AI card, the end of a deck) times
     // nothing.
     _key = null;
+    _wantPlaying = false;
+    _pausedExternally = false;
+    _cancelExternalPause();
     await _engine?.pause();
     if (phase.value == ClipPhase.playing || phase.value == ClipPhase.loading) phase.value = ClipPhase.paused;
   }
 
   Future<void> resume() async {
     if (phase.value == ClipPhase.held) return replay();
+    if (_engine != null && _current != null) _wantPlaying = true;
+    _pausedExternally = false;
+    // After a lost focus the system keeps the clip silent until the focus
+    // is asked for again.
+    _takeFocus();
     await _engine?.play();
     if (phase.value == ClipPhase.paused) phase.value = ClipPhase.playing;
   }
@@ -335,6 +429,9 @@ class ClipPlayer {
     final e = _engine;
     if (e == null || _current == null) return;
     _played = 0;
+    _wantPlaying = true;
+    _pausedExternally = false;
+    _takeFocus();
     await e.seek(Duration.zero);
     await e.play();
     if (onScreen.value != null) progress.value = ClipProgress(Duration.zero, _length);
@@ -353,6 +450,8 @@ class ClipPlayer {
     _muted = muted;
     _cancelFade();
     _setLevel(muted ? 0 : 100);
+    // A muted session takes no focus, so the first unmute does.
+    if (!muted && _wantPlaying) _takeFocus();
   }
 
   /// Hide the native surface while a card is dragged (it can't slide).
@@ -362,7 +461,16 @@ class ClipPlayer {
   /// right after (two decoders never run at once on the 3 GB Shield).
   Future<void> release() async {
     _cancelFade();
+    _cancelExternalPause();
     final e = _engine;
+    final focusAsked = _focusAsked;
+    _focus = false;
+    _focusAsked = false;
+    _wantPlaying = false;
+    _pausedExternally = false;
+    _enginePlaying = false;
+    _engineBuffering = false;
+    _ended = false;
     _engine = null;
     _current = null;
     _preloaded = null;
@@ -379,6 +487,16 @@ class ClipPlayer {
     _subs.clear();
     onScreen.value = null;
     phase.value = ClipPhase.idle;
+    // Both are let go before the core goes, so the main player's own focus
+    // and wakelock (after Watch) start from a clean slate.
+    await _wakelock?.setEnabled(false);
+    if (e != null && focusAsked) {
+      try {
+        await e.abandonAudioFocus();
+      } catch (err) {
+        appLogger.w('Reel: abandoning audio focus failed', error: err);
+      }
+    }
     if (e != null) await e.dispose();
   }
 
@@ -425,15 +543,93 @@ class ClipPlayer {
   void _onCompleted() {
     final e = _engine;
     if (e == null) return;
+    _ended = true;
+    _cancelExternalPause();
     _played++;
     if (_played < loops) {
       unawaited(e.seek(Duration.zero).then((_) => e.play()));
     } else {
       // Hold on the last frame; Replay is focused by the view.
+      _wantPlaying = false;
       unawaited(e.pause());
       if (onScreen.value != null) progress.value = ClipProgress(_length, _length);
       phase.value = ClipPhase.held;
     }
+  }
+
+  /// Asks for the audio focus once per session, for an audible clip only:
+  /// a muted Reel never pauses music playing elsewhere.
+  void _takeFocus() {
+    final e = _engine;
+    if (e == null || _muted || _focus) return;
+    _focus = true;
+    _focusAsked = true;
+    unawaited(_askFocus(e));
+  }
+
+  Future<void> _askFocus(ClipEngine e) async {
+    var granted = false;
+    try {
+      granted = await e.requestAudioFocus();
+    } catch (err) {
+      appLogger.w('Reel: audio focus request failed', error: err);
+    }
+    if (granted || !identical(_engine, e)) return;
+    // Refused (a call holds it): the next resume, replay or card asks again.
+    appLogger.i('Reel: audio focus not granted');
+    _focus = false;
+  }
+
+  /// The core started or stopped. A stop the Reel didn't ask for, that
+  /// isn't a stall or the clip's end, is the system's pause (a lost audio
+  /// focus): after [externalPauseGrace] it shows as [ClipPhase.paused]. A
+  /// start the Reel didn't ask for is the focus coming back: it plays on
+  /// only if the system was the one that paused it.
+  void _onEnginePlaying(bool playing) {
+    _enginePlaying = playing;
+    if (playing) {
+      _ended = false;
+      _cancelExternalPause();
+      if (_wantPlaying) return;
+      if (_pausedExternally) {
+        _pausedExternally = false;
+        _wantPlaying = true;
+        _focus = true;
+        if (phase.value == ClipPhase.paused) phase.value = ClipPhase.playing;
+      } else if (phase.value == ClipPhase.paused || phase.value == ClipPhase.held) {
+        // Paused by the viewer, or holding: the returning focus doesn't
+        // override that.
+        unawaited(_engine?.pause());
+      }
+      return;
+    }
+    if (!_wantPlaying || phase.value != ClipPhase.playing) return;
+    _cancelExternalPause();
+    _externalPause = Timer(externalPauseGrace, _checkExternalPause);
+  }
+
+  void _checkExternalPause() {
+    _externalPause = null;
+    if (_enginePlaying || _engineBuffering || _ended || !_wantPlaying || phase.value != ClipPhase.playing) return;
+    appLogger.i('[Reel] clip paused by the system (audio focus)');
+    _wantPlaying = false;
+    _pausedExternally = true;
+    // A permanent loss never hands the focus back: the viewer's resume asks.
+    _focus = false;
+    phase.value = ClipPhase.paused;
+  }
+
+  void _cancelExternalPause() {
+    _externalPause?.cancel();
+    _externalPause = null;
+  }
+
+  /// The screen stays on while a clip opens or plays, and only then.
+  void _syncWakelock() {
+    final on = phase.value == ClipPhase.playing || phase.value == ClipPhase.loading;
+    if (on == _wakeOn) return;
+    _wakeOn = on;
+    unawaited(_wakelock?.setEnabled(on));
   }
 
   void _setLevel(double v) {

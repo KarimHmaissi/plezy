@@ -219,6 +219,7 @@ void main() {
     ReelWatchlist? addToWatchlist,
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
+    Future<void> Function(bool muted)? saveMuted,
   }) => ReelController(
     decks:
         decks ??
@@ -245,6 +246,7 @@ void main() {
     reachesTvNow: reachesTvNow,
     externalClips: externalClips,
     memoryRestored: memoryRestored,
+    saveMuted: saveMuted,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -273,6 +275,20 @@ void main() {
     expect(c.current.card?.id, 't1');
     expect(engine.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
+    c.dispose();
+  });
+
+  test('the mute is kept: each toggle is saved, and an unmute is recorded (V2-22)', () async {
+    final saved = <bool>[];
+    final c = make(saveMuted: (m) async => saved.add(m));
+    await c.start();
+    await c.setMuted(true);
+    expect(c.clips.muted, isTrue);
+    await c.setMuted(false);
+    expect(c.clips.muted, isFalse);
+    expect(saved, [true, false]);
+    final events = await store.events(since: DateTime(2000));
+    expect(events.map((e) => e.action), contains(ReelAction.unmute.name));
     c.dispose();
   });
 

@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/mpv/models.dart';
 import 'package:plezy/mpv/player/player.dart';
 import 'package:plezy/services/reel/clip_player.dart';
+import 'package:plezy/screens/video_player/wakelock_controller.dart';
 import 'package:plezy/services/reel/reel_perf.dart';
 import 'package:plezy/utils/app_logger.dart';
 
@@ -18,7 +19,12 @@ class FakeClipEngine implements ClipEngine {
   final logCtl = StreamController<PlayerLog>.broadcast(sync: true);
   final positionCtl = StreamController<Duration>.broadcast(sync: true);
   final durationCtl = StreamController<Duration>.broadcast(sync: true);
+  final playingCtl = StreamController<bool>.broadcast(sync: true);
+  final bufferingCtl = StreamController<bool>.broadcast(sync: true);
   final volumes = <double>[];
+
+  /// What [requestAudioFocus] answers.
+  bool grantFocus = true;
   bool disposed = false;
   Completer<void>? disposeGate;
 
@@ -80,6 +86,21 @@ class FakeClipEngine implements ClipEngine {
   Duration duration = Duration.zero;
 
   @override
+  Stream<bool> get playing => playingCtl.stream;
+
+  @override
+  Stream<bool> get buffering => bufferingCtl.stream;
+
+  @override
+  Future<bool> requestAudioFocus() async {
+    calls.add('requestAudioFocus');
+    return grantFocus;
+  }
+
+  @override
+  Future<void> abandonAudioFocus() async => calls.add('abandonAudioFocus');
+
+  @override
   Future<void> dispose() async {
     calls.add('dispose');
     await disposeGate?.future;
@@ -101,6 +122,8 @@ void main() {
     await engine.logCtl.close();
     await engine.positionCtl.close();
     await engine.durationCtl.close();
+    await engine.playingCtl.close();
+    await engine.bufferingCtl.close();
   });
 
   setUp(() {
@@ -430,6 +453,194 @@ void main() {
       await clips.release();
       perf.markFirstFrame();
       expect(perf.samples, isEmpty);
+    });
+  });
+
+  group('audio focus and keep-screen-on (V2-22)', () {
+    late List<bool> wake;
+
+    setUp(() {
+      wake = [];
+      clips = ClipPlayer(
+        engine: () => engine,
+        wakelock: WakelockController(platformToggle: (on) async => wake.add(on)),
+      );
+    });
+
+    int count(String call) => engine.calls.where((c) => c == call).length;
+
+    test('takes the focus once per session and gives it back on release, before the core goes', () async {
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      await clips.play(_b);
+      await clips.pause();
+      await clips.resume();
+      await clips.replay();
+      expect(count('requestAudioFocus'), 1);
+      expect(engine.calls.indexOf('requestAudioFocus'), lessThan(engine.calls.indexOf('open ${_a.uri}')));
+
+      await clips.release();
+      final abandon = engine.calls.indexOf('abandonAudioFocus');
+      expect(abandon, greaterThanOrEqualTo(0));
+      expect(abandon, lessThan(engine.calls.indexOf('dispose')));
+
+      // The next session asks again.
+      await clips.play(_a, first: true);
+      expect(count('requestAudioFocus'), 2);
+    });
+
+    test('a muted session takes no focus until the first unmute', () async {
+      clips = ClipPlayer(engine: () => engine, muted: true);
+      expect(clips.muted, isTrue);
+      await clips.play(_a, first: true);
+      engine.firstFrameCtl.add(null);
+      expect(count('requestAudioFocus'), 0);
+      expect(clips.level, 0);
+
+      await clips.setMuted(false);
+      expect(count('requestAudioFocus'), 1);
+
+      // Nothing was asked of a session that never took it.
+      final quiet = FakeClipEngine();
+      final muted = ClipPlayer(engine: () => quiet, muted: true);
+      await muted.play(_b, first: true);
+      await muted.release();
+      expect(quiet.calls, isNot(contains('abandonAudioFocus')));
+    });
+
+    test('a refused focus is asked for again on the next resume', () async {
+      engine.grantFocus = false;
+      await clips.play(_a, first: true);
+      await Future<void>.delayed(Duration.zero);
+      engine.firstFrameCtl.add(null);
+      engine.grantFocus = true;
+      await clips.pause();
+      await clips.resume();
+      expect(count('requestAudioFocus'), 2);
+    });
+
+    test('a stop the Reel did not ask for reads as paused; the focus coming back plays on', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        engine.playingCtl.add(true);
+        expect(clips.phase.value, ClipPhase.playing);
+
+        // A call takes the focus: the core stops by itself.
+        engine.playingCtl.add(false);
+        async.elapse(ClipPlayer.externalPauseGrace ~/ 2);
+        expect(clips.phase.value, ClipPhase.playing);
+        async.elapse(ClipPlayer.externalPauseGrace);
+        expect(clips.phase.value, ClipPhase.paused);
+        expect(clips.keepsScreenOn, isFalse);
+
+        // The call ends and the system hands the focus back.
+        engine.playingCtl.add(true);
+        expect(clips.phase.value, ClipPhase.playing);
+        expect(clips.keepsScreenOn, isTrue);
+        expect(engine.calls.last, isNot('pause'));
+      });
+    });
+
+    test('after a system pause, OK resumes and asks for the focus again', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        engine.playingCtl.add(true);
+        engine.playingCtl.add(false);
+        async.elapse(ClipPlayer.externalPauseGrace * 2);
+        expect(clips.phase.value, ClipPhase.paused);
+
+        clips.togglePause();
+        async.flushMicrotasks();
+        expect(clips.phase.value, ClipPhase.playing);
+        expect(count('requestAudioFocus'), 2);
+      });
+    });
+
+    test('a stall, a loop, an error and the viewer\'s own pause are not system pauses', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        engine.playingCtl.add(true);
+
+        // A stall.
+        engine.bufferingCtl.add(true);
+        engine.playingCtl.add(false);
+        async.elapse(ClipPlayer.externalPauseGrace * 2);
+        expect(clips.phase.value, ClipPhase.playing);
+        engine.bufferingCtl.add(false);
+        engine.playingCtl.add(true);
+
+        // The end of the first loop, before the seek back plays.
+        engine.completedCtl.add(true);
+        engine.playingCtl.add(false);
+        async.elapse(ClipPlayer.externalPauseGrace * 2);
+        expect(clips.phase.value, ClipPhase.playing);
+        engine.playingCtl.add(true);
+
+        // An error stops the core just before it says why.
+        engine.playingCtl.add(false);
+        engine.errorCtl.add(const PlayerError('decode failed'));
+        async.elapse(ClipPlayer.externalPauseGrace * 2);
+        expect(clips.phase.value, ClipPhase.failed);
+      });
+    });
+
+    test('a returning focus does not override the viewer\'s pause or a hold', () {
+      fakeAsync((async) {
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        engine.playingCtl.add(true);
+        clips.pause();
+        async.flushMicrotasks();
+        engine.playingCtl.add(false);
+        async.elapse(ClipPlayer.externalPauseGrace * 2);
+        expect(clips.phase.value, ClipPhase.paused);
+
+        engine.calls.clear();
+        engine.playingCtl.add(true);
+        async.flushMicrotasks();
+        expect(engine.calls, ['pause']);
+        expect(clips.phase.value, ClipPhase.paused);
+      });
+    });
+
+    test('keeps the screen on only while a clip opens or plays', () async {
+      await clips.play(_a, first: true);
+      expect(clips.keepsScreenOn, isTrue);
+      engine.firstFrameCtl.add(null);
+      expect(clips.keepsScreenOn, isTrue);
+
+      await clips.pause();
+      expect(clips.keepsScreenOn, isFalse);
+      await clips.resume();
+      expect(clips.keepsScreenOn, isTrue);
+
+      // Held on the last frame: the screensaver may come in.
+      engine.completedCtl.add(true);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(clips.phase.value, ClipPhase.held);
+      expect(clips.keepsScreenOn, isFalse);
+
+      await clips.replay();
+      expect(clips.keepsScreenOn, isTrue);
+      engine.errorCtl.add(const PlayerError('decode failed'));
+      expect(clips.keepsScreenOn, isFalse);
+
+      await clips.play(_b);
+      await clips.release();
+      expect(clips.keepsScreenOn, isFalse);
+      await Future<void>.delayed(Duration.zero);
+      // The platform sees the requests coalesced (WakelockController), on
+      // first and off last.
+      expect(wake.first, isTrue);
+      expect(wake.last, isFalse);
     });
   });
 }
