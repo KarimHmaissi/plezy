@@ -380,7 +380,9 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         widget.launchObserver?.mark('failed', failure: e.reason.name);
       }
       appLogger.w('Playback initialization failed', error: e, stackTrace: st);
-      if (attempt.isCurrent && mounted) _reportStartFailure(e.message, primaryMediaOpened: primaryMediaOpened);
+      if (attempt.isCurrent && mounted) {
+        _reportStartFailure(e.message, primaryMediaOpened: primaryMediaOpened, copyFallback: true);
+      }
     } catch (e, st) {
       if (attempt.isCurrent) widget.launchObserver?.mark('failed', failure: 'playbackFailed');
       appLogger.e('Failed to start playback', error: e, stackTrace: st);
@@ -391,6 +393,8 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
               ? t.messages.playbackFailed
               : t.messages.playbackFailedDetail(error: _redactPlayerError(e.toString())),
           primaryMediaOpened: primaryMediaOpened,
+          // A core that never started fails every copy alike.
+          copyFallback: e is! PlayerInitializationException,
         );
       }
     } finally {
@@ -410,10 +414,22 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
   /// services) the picture may well be playing, so the error is only
   /// reported. A backend verdict that already raised the view keeps its
   /// more specific message.
-  void _reportStartFailure(String message, {required bool primaryMediaOpened}) {
+  ///
+  /// Fork: with [copyFallback], a start that failed before the file opened
+  /// (the server would not hand it over) moves on to the title's next copy
+  /// first, when there is one.
+  void _reportStartFailure(String message, {required bool primaryMediaOpened, bool copyFallback = false}) {
     if (primaryMediaOpened) {
       _firstFrame.forceUiReadyOnFailure();
       showErrorSnackBar(context, message);
+      return;
+    }
+    if (copyFallback &&
+        _tryCopyFallback(
+          reason: CopyFallbackReason.openFailed,
+          action: PlaybackFailureAction.fatal,
+          message: message,
+        )) {
       return;
     }
     _hasFatalPlaybackError = true;

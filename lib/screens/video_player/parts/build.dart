@@ -102,7 +102,9 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
   /// the screen-level [Focus] claims the scope while the loading spinner is
   /// up and Flutter drops a later autofocus request once the scope already
   /// has a focused child. See [VideoPlayerScreenState._initializationErrorFocusNode].
-  Widget _buildPlaybackFailure(String message, {required VoidCallback onRetry}) {
+  ///
+  /// Fork: [onChooseCopy] adds "Choose another copy" between the two.
+  Widget _buildPlaybackFailure(String message, {required VoidCallback onRetry, VoidCallback? onChooseCopy}) {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Center(
@@ -121,15 +123,23 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
                   style: const TextStyle(color: Colors.white, fontSize: 16),
                 ),
                 const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: .center,
+                // A Wrap, so a third button drops to its own line on a phone
+                // instead of overflowing.
+                Wrap(
+                  alignment: .center,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: [
                     FocusableButton(
                       focusNode: _initializationErrorFocusNode,
                       onPressed: onRetry,
                       child: FilledButton(onPressed: onRetry, child: Text(t.common.retry)),
                     ),
-                    const SizedBox(width: 12),
+                    if (onChooseCopy != null)
+                      FocusableButton(
+                        onPressed: onChooseCopy,
+                        child: OutlinedButton(onPressed: onChooseCopy, child: Text(t.copies.chooseAnother)),
+                      ),
                     FocusableButton(
                       onPressed: () => unawaited(_handleBackButton()),
                       child: OutlinedButton(

@@ -103,6 +103,28 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-06
+
+### A copy that won't open no longer stops playback (branch `fix/plex-direct-play-503`)
+- When a Plex film or episode fails **before its first frame** (the server
+  answers 503 for the whole 20 s open window, 404 or 410, the open stalls,
+  the decoder won't start, or the server hands over nothing), Plezy now
+  **tries the title's next copy** instead of showing the error: the same
+  quality on another server or library first, then the next lower
+  quality, then the rest. At most 3 extra tries, from the same position,
+  with the same audio and subtitle languages and quality preset. A notice
+  says what it's doing ("That copy wouldn't play — trying the 1080p copy
+  on Server B").
+- The server's own quiet switch away from a version its file check marks
+  missing now counts as one of those tries and shows the same notice.
+- Only when every copy fails does the "Stream unavailable" / "File
+  unavailable" dialog appear, now with **Choose another copy** beside
+  Close (Close keeps the focus). The failure view gets the same button.
+- Not for live TV, downloads, Watch Together rooms, other backends, or
+  after the film has started playing.
+- Each try logs one `[CopyFallback]` line (reason, quality and server
+  number; no names, addresses or tokens).
+
 ## 2026-11-05
 
 ### Watch Next row on the Shield's home works again (A1)

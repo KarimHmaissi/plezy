@@ -255,48 +255,66 @@ Future<void> showServerLimitDialog(BuildContext context) async {
 }
 
 /// Shows the server-side 404 modal: the item exists but the server cannot read
-/// the file behind it, so nothing client-side can recover the playback.
-Future<void> showMediaUnreadableDialog(BuildContext context) async {
-  await showScopedDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (ctx) => AlertDialog(
-      title: Text(t.messages.mediaUnreadableTitle),
-      content: Text(t.messages.mediaUnreadableBody),
-      actions: [
-        DialogActionButton(
-          autofocus: true,
-          onPressed: () => Navigator.of(ctx).pop(),
-          label: t.common.close,
-          isPrimary: true,
-          style: FilledButton.styleFrom(padding: _buttonPadding, shape: _buttonShape),
-        ),
-      ],
-    ),
-  );
-}
+/// the file behind it, so nothing client-side can recover this copy.
+///
+/// Fork: with [offerChooseCopy] it also offers "Choose another copy"; returns
+/// true only when the viewer picks that. Close keeps the focus.
+Future<bool> showMediaUnreadableDialog(BuildContext context, {bool offerChooseCopy = false}) => _showCopyFailureDialog(
+  context,
+  title: t.messages.mediaUnreadableTitle,
+  body: t.messages.mediaUnreadableBody,
+  offerChooseCopy: offerChooseCopy,
+);
 
 /// Shows the server-side 503 modal: the server kept refusing to serve the
 /// stream for the whole open-phase watchdog window, so the reconnect loop is
 /// not going to start this playback (#1830).
-Future<void> showServerBusyDialog(BuildContext context) async {
-  await showScopedDialog<void>(
+///
+/// Fork: with [offerChooseCopy] it also offers "Choose another copy"; returns
+/// true only when the viewer picks that. Close keeps the focus.
+Future<bool> showServerBusyDialog(BuildContext context, {bool offerChooseCopy = false}) => _showCopyFailureDialog(
+  context,
+  title: t.messages.serverBusyTitle,
+  body: t.messages.serverBusyBody,
+  offerChooseCopy: offerChooseCopy,
+);
+
+/// The 404 and 503 modals: Close, plus "Choose another copy" when offered.
+/// Close keeps the autofocus either way, so a remote's OK never changes
+/// anything the viewer did not choose.
+Future<bool> _showCopyFailureDialog(
+  BuildContext context, {
+  required String title,
+  required String body,
+  required bool offerChooseCopy,
+}) async {
+  final choose = await showScopedDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) => AlertDialog(
-      title: Text(t.messages.serverBusyTitle),
-      content: Text(t.messages.serverBusyBody),
+      title: Text(title),
+      content: Text(body),
       actions: [
         DialogActionButton(
           autofocus: true,
-          onPressed: () => Navigator.of(ctx).pop(),
+          onPressed: () => Navigator.of(ctx).pop(false),
           label: t.common.close,
-          isPrimary: true,
-          style: FilledButton.styleFrom(padding: _buttonPadding, shape: _buttonShape),
+          isPrimary: !offerChooseCopy,
+          style: offerChooseCopy
+              ? TextButton.styleFrom(padding: _buttonPadding, shape: _buttonShape)
+              : FilledButton.styleFrom(padding: _buttonPadding, shape: _buttonShape),
         ),
+        if (offerChooseCopy)
+          DialogActionButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            label: t.copies.chooseAnother,
+            isPrimary: true,
+            style: FilledButton.styleFrom(padding: _buttonPadding, shape: _buttonShape),
+          ),
       ],
     ),
   );
+  return choose ?? false;
 }
 
 /// Shows a delete confirmation dialog.

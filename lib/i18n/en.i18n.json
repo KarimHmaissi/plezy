@@ -3021,5 +3021,12 @@
     "notPlex": "Only titles from Plex servers can be cast",
     "noStream": "The Plex server couldn't prepare this title for Cast",
     "loadFailed": "${name} couldn't play this title"
+  },
+  "copies": {
+    "trying": "That copy wouldn't play — trying the ${quality} copy on ${location}",
+    "tryingAnother": "That copy wouldn't play — trying another copy on ${location}",
+    "chooseAnother": "Choose another copy",
+    "pickerTitle": "Choose a copy",
+    "didNotPlayMark": "Didn't play recently"
   }
 }
