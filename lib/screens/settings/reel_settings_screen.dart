@@ -42,7 +42,7 @@ class ReelSettingsScreen extends StatelessWidget {
         SettingsGroup(
           title: s.playing,
           children: [
-            _startSound(),
+            _startSound(tv: isTv),
             _clipEnd(),
             if (isTv) _okAction() else _cellular(),
             SettingSwitchTile(
@@ -98,6 +98,7 @@ class ReelSettingsScreen extends StatelessWidget {
   static String startSoundLabel(ReelStartSound v) => switch (v) {
     ReelStartSound.sound => t.reel.settings.startSoundOn,
     ReelStartSound.mutedIfOtherAudio => t.reel.settings.startSoundMutedIfOtherAudio,
+    ReelStartSound.muted => t.reel.settings.startSoundMuted,
   };
 
   static String clipEndLabel(ReelClipEnd v) => switch (v) {
@@ -116,20 +117,32 @@ class ReelSettingsScreen extends StatelessWidget {
   static String cellularSubtitle(ReelCellular v) =>
       v == ReelCellular.dataSaver ? t.reel.settings.cellularDataSaverSubtitle : cellularLabel(v);
 
-  Widget _startSound() {
+  /// How a visit's sound starts. The TV starts muted unless changed (it
+  /// can't tell other audio apart, so it offers only the two); the phone
+  /// starts with sound and offers all three.
+  Widget _startSound({required bool tv}) {
     final s = t.reel.settings;
+    final muted = DialogOption(
+      value: ReelStartSound.muted,
+      title: s.startSoundMuted,
+      subtitle: s.startSoundMutedDescription,
+    );
     return SettingSelectionTile<ReelStartSound>(
       pref: SettingsService.reelStartSound,
       icon: Symbols.volume_up_rounded,
       title: s.startSound,
       subtitleBuilder: startSoundLabel,
       options: [
+        if (tv) muted,
         DialogOption(value: ReelStartSound.sound, title: s.startSoundOn),
-        DialogOption(
-          value: ReelStartSound.mutedIfOtherAudio,
-          title: s.startSoundMutedIfOtherAudio,
-          subtitle: s.startSoundMutedIfOtherAudioDescription,
-        ),
+        if (!tv) ...[
+          DialogOption(
+            value: ReelStartSound.mutedIfOtherAudio,
+            title: s.startSoundMutedIfOtherAudio,
+            subtitle: s.startSoundMutedIfOtherAudioDescription,
+          ),
+          muted,
+        ],
       ],
     );
   }

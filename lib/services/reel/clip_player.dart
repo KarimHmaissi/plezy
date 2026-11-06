@@ -232,6 +232,10 @@ class ClipPlayer {
 
   /// Later cards rise from at most [dipLevel] over this.
   static const Duration fadeIn = Duration(milliseconds: 300);
+
+  /// Sound turned on rises from silence over this, never straight to full.
+  /// (Kept short and on its own: the loudness work of V2-19 may retune it.)
+  static const Duration unmuteRamp = Duration(milliseconds: 300);
   static const double dipLevel = 30;
 
   /// A key press older than this when a clip opens is from another visit.
@@ -517,12 +521,22 @@ class ClipPlayer {
     await _bounded(e.seek(to < Duration.zero ? Duration.zero : to), 'seek');
   }
 
+  /// Mute goes to silence at once; unmute rises from silence over
+  /// [unmuteRamp] rather than jumping to full. Every step is scaled by
+  /// [ReelVolume] in the core ([ExoClipEngine.setVolume]), so the rise ends
+  /// at the viewer's Reel level. Unmuting a clip that already has its sound
+  /// changes nothing.
   Future<void> setMuted(bool muted) async {
+    if (!muted && !_muted) return;
     _muted = muted;
     _cancelFade();
-    _setLevel(muted ? 0 : 100);
+    if (muted) {
+      _setLevel(0);
+      return;
+    }
+    unawaited(_fadeTo(100, unmuteRamp));
     // A muted session takes no focus, so the first unmute does.
-    if (!muted && _wantPlaying) _takeFocus();
+    if (_wantPlaying) _takeFocus();
   }
 
   /// Hide the native surface while a card is dragged (it can't slide).

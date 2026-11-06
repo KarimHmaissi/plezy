@@ -8418,6 +8418,18 @@ class Translations$reel$card$en {
 	/// en: 'Sound on'
 	String get soundOn => 'Sound on';
 
+	/// en: 'Sound off'
+	String get soundOffBadge => 'Sound off';
+
+	/// en: 'press ≡ for sound'
+	String get soundOffKey => 'press ≡ for sound';
+
+	/// en: 'Sound off. Press the Menu button for sound.'
+	String get soundOffAnnounce => 'Sound off. Press the Menu button for sound.';
+
+	/// en: 'Sound on'
+	String get soundOnAnnounce => 'Sound on';
+
 	/// en: 'Mute'
 	String get mute => 'Mute';
 
@@ -8747,6 +8759,12 @@ class Translations$reel$settings$en {
 
 	/// en: 'Starts muted while music or another app is playing'
 	String get startSoundMutedIfOtherAudioDescription => 'Starts muted while music or another app is playing';
+
+	/// en: 'Start muted'
+	String get startSoundMuted => 'Start muted';
+
+	/// en: 'Every visit starts silent, until you turn the sound on'
+	String get startSoundMutedDescription => 'Every visit starts silent, until you turn the sound on';
 
 	/// en: 'When a clip ends'
 	String get clipEnd => 'When a clip ends';
@@ -11722,6 +11740,10 @@ extension on Translations {
 			'reel.card.more' => 'More',
 			'reel.card.onTv' => 'On TV',
 			'reel.card.soundOn' => 'Sound on',
+			'reel.card.soundOffBadge' => 'Sound off',
+			'reel.card.soundOffKey' => 'press ≡ for sound',
+			'reel.card.soundOffAnnounce' => 'Sound off. Press the Menu button for sound.',
+			'reel.card.soundOnAnnounce' => 'Sound on',
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
 			'reel.card.showControls' => 'Show controls',
@@ -11809,6 +11831,8 @@ extension on Translations {
 			'reel.settings.startSoundOn' => 'With sound',
 			'reel.settings.startSoundMutedIfOtherAudio' => 'Muted if other audio is playing',
 			'reel.settings.startSoundMutedIfOtherAudioDescription' => 'Starts muted while music or another app is playing',
+			'reel.settings.startSoundMuted' => 'Start muted',
+			'reel.settings.startSoundMutedDescription' => 'Every visit starts silent, until you turn the sound on',
 			'reel.settings.clipEnd' => 'When a clip ends',
 			'reel.settings.clipEndLoop' => 'Loop',
 			'reel.settings.clipEndTwiceThenHold' => 'Play twice, then hold',
@@ -12200,14 +12224,14 @@ extension on Translations {
 			'collections.deleted' => 'Collection deleted',
 			'collections.deleteFailed' => 'Failed to delete collection',
 			'collections.deleteFailedWithError' => ({required Object error}) => 'Failed to delete collection: ${error}',
+			_ => null,
+		} ?? switch (path) {
 			'collections.selectCollection' => 'Select Collection',
 			'collections.collectionName' => 'Collection Name',
 			'collections.enterCollectionName' => 'Enter collection name',
 			'collections.addedToCollection' => 'Added to collection',
 			'collections.errorAddingToCollection' => 'Failed to add to collection',
 			'collections.created' => 'Collection created',
-			_ => null,
-		} ?? switch (path) {
 			'collections.removeFromCollection' => 'Remove from collection',
 			'collections.removeFromCollectionConfirm' => ({required Object title}) => 'Remove "${title}" from this collection?',
 			'collections.removedFromCollection' => 'Removed from collection',
@@ -12714,14 +12738,14 @@ extension on Translations {
 			'externalPlayer.systemDefault' => 'System Default',
 			'externalPlayer.addCustomPlayer' => 'Add Custom Player',
 			'externalPlayer.playerName' => 'Player Name',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.playerNameHint' => 'My Player',
 			'externalPlayer.playerCommand' => 'Command',
 			'externalPlayer.playerPackage' => 'Package Name',
 			'externalPlayer.playerUrlScheme' => 'URL Scheme',
 			'externalPlayer.off' => 'Off',
 			'externalPlayer.launchFailed' => 'Failed to open external player',
-			_ => null,
-		} ?? switch (path) {
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} is not installed',
 			'externalPlayer.playInExternalPlayer' => 'Play in External Player',
 			'metadataEdit.editMetadata' => 'Edit...',

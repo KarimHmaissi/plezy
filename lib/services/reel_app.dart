@@ -159,9 +159,11 @@ abstract final class ReelApp {
       decks: decks,
       resolver: resolver,
       // The mute is kept across launches (V2-22), and the TV's clip plays
-      // as often as the clip-end pref says (V2-47).
+      // as often as the clip-end pref says (V2-47). The TV's player is built
+      // muted: each visit settles its sound before the first card plays
+      // (ReelScreen._visit), so nothing is ever heard before that.
       clips: ClipPlayer(
-        muted: SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false,
+        muted: PlatformDetector.isTV() || (SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false),
         plays: () => ReelController.clipEndPref().plays,
       ),
       store: store,

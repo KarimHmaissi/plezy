@@ -251,6 +251,12 @@ void main() {
     testWidgets('the menu key opens it too, and Not for me moves on from the card', (tester) async {
       await showTv(tester);
 
+      // The TV starts muted, and ≡ on a muted card is the sound key first.
+      expect(c.clips.muted, isTrue);
+      expect(await press(tester, LogicalKeyboardKey.contextMenu), isTrue);
+      expect(c.clips.muted, isFalse);
+      expect(find.text(t.reel.sheet.details), findsNothing);
+
       expect(await press(tester, LogicalKeyboardKey.contextMenu), isTrue);
       expect(find.text(t.reel.sheet.details), findsOneWidget);
 

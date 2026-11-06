@@ -7,6 +7,13 @@ void main() {
     test('the players take audio focus unless the pref says to mix', () {
       expect(ReelSound.mixWithOthers(ReelStartSound.sound), isFalse);
       expect(ReelSound.mixWithOthers(ReelStartSound.mutedIfOtherAudio), isTrue);
+      expect(ReelSound.mixWithOthers(ReelStartSound.muted), isTrue, reason: 'a muted start leaves the music alone');
+    });
+
+    test('start muted: every visit, whatever was kept', () {
+      const pref = ReelStartSound.muted;
+      expect(ReelSound.startMuted(saved: false, pref: pref), isTrue);
+      expect(ReelSound.startMuted(saved: true, pref: pref), isTrue);
     });
 
     test('with sound, a visit starts muted only when the mute was kept or the TV is playing', () {
@@ -33,6 +40,30 @@ void main() {
     test('other audio is never reported where it cannot be told', () async {
       // The test host is not Android.
       expect(await ReelSound.otherAudioPlaying(), isFalse);
+    });
+  });
+
+  group('how a TV visit starts its sound', () {
+    test('start muted (the TV default): muted even when the sound was left on last time', () {
+      final start = ReelSound.tvVisitStart(pref: ReelStartSound.muted, saved: false);
+      expect(start.muted, isTrue);
+      expect(start.why, contains('start muted'));
+    });
+
+    test("a phone's muted-if-other-audio, imported onto the TV, reads as muted", () {
+      expect(ReelSound.tvVisitStart(pref: ReelStartSound.mutedIfOtherAudio, saved: false).muted, isTrue);
+    });
+
+    test('with sound: sound on, unless the mute was kept or a screen reader is on', () {
+      expect(ReelSound.tvVisitStart(pref: ReelStartSound.sound, saved: false).muted, isFalse);
+      expect(ReelSound.tvVisitStart(pref: ReelStartSound.sound, saved: true).muted, isTrue);
+      expect(ReelSound.tvVisitStart(pref: ReelStartSound.sound, saved: false, screenReader: true).muted, isTrue);
+    });
+
+    test('back from a page the Reel opened leaves the sound as it was', () {
+      for (final pref in ReelStartSound.values) {
+        expect(ReelSound.tvVisitStart(pref: pref, saved: false, backFromPage: true).muted, isNull);
+      }
     });
   });
 }

@@ -109,8 +109,10 @@ enum EpisodeAction { play, details }
 
 /// Fork: how a Reel card's sound starts (plan D5). [sound] plays it and, on
 /// the phone, takes audio focus, so music pauses (V2-22). [mutedIfOtherAudio]
-/// starts muted while other audio is playing and mixes with it.
-enum ReelStartSound { sound, mutedIfOtherAudio }
+/// starts muted while other audio is playing and mixes with it. [muted]
+/// starts every visit muted, whatever was chosen last time: the TV's
+/// default, so the Reel never comes up loud.
+enum ReelStartSound { sound, mutedIfOtherAudio, muted }
 
 /// Fork: what a Reel clip does when it ends (plan D6, V2-47).
 enum ReelClipEnd {
@@ -782,11 +784,15 @@ class SettingsService extends BaseSharedPreferencesService {
   // Data saver). The settings page (V2-46) shows them; each lane wires up
   // its own reader.
 
-  /// How a card's sound starts (D5). Today: with sound.
+  /// How a card's sound starts (D5): start muted on the TV, with sound on
+  /// the phone. The default is this device's, never stored: like every pref
+  /// here it stays on the device (an export carries only a stored choice).
+  static ReelStartSound _tvAwareReelStartSoundDefault() =>
+      PlatformDetector.isTV() ? ReelStartSound.muted : ReelStartSound.sound;
   static const reelStartSound = EnumPref<ReelStartSound>(
     'reel_start_sound',
     values: ReelStartSound.values,
-    defaultValue: ReelStartSound.sound,
+    defaultValueProvider: _tvAwareReelStartSoundDefault,
   );
 
   /// What a clip does when it ends (D6, V2-47): twice then hold on both
