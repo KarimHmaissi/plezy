@@ -1,3 +1,4 @@
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -110,6 +111,46 @@ void main() {
         await tester.pumpWidget(const SizedBox.shrink());
       });
     }
+  });
+
+  testWidgets("the spotlight hands over its clear logo too, so it counts as the card's art", (tester) async {
+    resetSharedPreferencesForTest();
+    await tester.runAsync(SettingsService.getInstance);
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final withLogo = testMediaItem(
+      id: 'harbor-lights',
+      kind: MediaKind.movie,
+      title: 'Harbor Lights',
+      artPath: '/library/metadata/7/art/1',
+      clearLogoPath: '/library/metadata/7/clearLogo/1',
+    );
+    final built = <ImageProvider>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        // Dark: the logo is not tone-mapped, so its provider is the plain one.
+        theme: ThemeData.dark(),
+        home: TvSpotlightBackground(
+          item: withLogo,
+          client: client,
+          lightArt: true,
+          contentTop: 120,
+          contentBottom: 80,
+          onArtProvider: built.add,
+        ),
+      ),
+    );
+    await tester.pump();
+    String? urlOf(ImageProvider p) {
+      final inner = p is ResizeImage ? p.imageProvider : p;
+      return inner is CachedNetworkImageProvider ? inner.url : null;
+    }
+
+    final urls = [for (final p in built) ?urlOf(p)];
+    expect(urls.any((u) => u.contains('/clearLogo/')), isTrue, reason: 'the logo');
+    expect(urls.any((u) => u.contains('/art/')), isTrue, reason: 'the backdrop');
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   group('phone feed', () {

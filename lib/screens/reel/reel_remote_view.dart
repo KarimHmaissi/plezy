@@ -10,6 +10,7 @@ import '../../media/ids.dart';
 import '../../models/companion_remote/remote_command.dart';
 import '../../providers/companion_remote_provider.dart';
 import '../../services/device_performance.dart';
+import '../../services/reel/reel_art.dart';
 import '../../theme/fork_motion.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
@@ -371,7 +372,7 @@ class _NowCard extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                _Art(server: c['server'] as String?, path: (c['art'] ?? c['thumb']) as String?, width: 720),
+                _Art(server: c['server'] as String?, path: (c['art'] ?? c['thumb']) as String?),
                 Positioned(
                   right: 10,
                   bottom: 10,
@@ -442,7 +443,6 @@ class _DecideCard extends StatelessWidget {
                           child: _Art(
                             server: p['server'] as String?,
                             path: (p['thumb'] ?? p['art']) as String?,
-                            width: 240,
                             imageType: ImageType.poster,
                           ),
                         ),
@@ -502,12 +502,15 @@ class _NextRow extends StatelessWidget {
   );
 }
 
+/// Art decoded at the size it is shown (plan V2-05): at [width] when the
+/// tile is a fixed size, else at the frame it fills. Tracked as the Reel's,
+/// so the art budget and suspend let it go.
 class _Art extends StatelessWidget {
-  const _Art({required this.server, required this.path, required this.width, this.imageType = ImageType.art});
+  const _Art({required this.server, required this.path, this.width, this.imageType = ImageType.art});
 
   final String? server;
   final String? path;
-  final double width;
+  final double? width;
   final ImageType imageType;
 
   @override
@@ -517,9 +520,13 @@ class _Art extends StatelessWidget {
       client: context.tryGetMediaClientWithFallback(serverIdOrNull(server)),
       imagePath: path,
       width: width,
-      height: imageType == ImageType.poster ? width * 3 / 2 : width * 9 / 16,
+      height: switch (width) {
+        null => null,
+        final w => imageType == ImageType.poster ? w * 3 / 2 : w * 9 / 16,
+      },
       fit: BoxFit.cover,
       imageType: imageType,
+      onImageProvider: ReelArt.track,
     ),
   );
 }

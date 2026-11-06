@@ -538,6 +538,12 @@ class ReelController extends ChangeNotifier {
   /// there to build it.
   ReelArtPrecache? artPrecache;
 
+  /// Told the cards whose art the Reel keeps in the image cache on each step,
+  /// nearest first (its window, the card on screen first), so the art
+  /// budget (`ReelArt.keep`, plan §6) trims around them; null while no view
+  /// is there to build art.
+  void Function(List<String> cards)? artWindow;
+
   /// Cards whose art is warm (`id/clip`), so a card is precached once per
   /// visit. Forgotten on suspend and under memory pressure, which evict it.
   final Set<String> _artWarm = {};
@@ -1615,10 +1621,12 @@ class ReelController extends ChangeNotifier {
     final lean = memoryLevel >= 1 || resolver.playback.link != ReelLink.unmetered;
     final tasks = <ReelPrefetchTask>[];
     final answered = <ReelCardData>[];
+    final window = <String>[];
     for (final offset in lean ? ReelPrefetcher.leanOffsets : ReelPrefetcher.offsets) {
       final j = index + offset * _direction;
       if (j < 0 || j >= list.length) continue;
       final c = list[j];
+      window.add(c.id);
       if (!_resolved.contains(c.id)) {
         tasks.add(
           ReelPrefetchTask(
@@ -1656,6 +1664,9 @@ class ReelController extends ChangeNotifier {
       }
     }
     _prefetch.schedule(gen, tasks);
+    // The art budget keeps the same window: on a lean step (memory
+    // pressure, a metered link) only this card and the next.
+    if (_active) artWindow?.call(window);
     // Cards ahead already answered: checked once this step has settled.
     if (externalClips && answered.isNotEmpty) scheduleMicrotask(() => answered.forEach(_holdBackAhead));
   }

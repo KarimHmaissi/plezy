@@ -10,6 +10,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../utils/app_logger.dart';
 import 'feed_players.dart';
+import 'reel_art.dart';
 
 /// What started a card change, for the `[ReelPerf]` line's first field.
 enum ReelPerfTrigger {
@@ -459,6 +460,17 @@ class ReelPerf extends ChangeNotifier {
   static double? imageMb() {
     try {
       return PaintingBinding.instance.imageCache.currentSizeBytes / (1024 * 1024);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The Reel's own art in the image cache against its budget (plan §6),
+  /// e.g. `9.6/12.0 MB`.
+  static String? reelArtMb() {
+    try {
+      String mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
+      return '${mb(ReelArt.heldBytes)}/${mb(ReelArt.budgetBytes())} MB';
     } catch (_) {
       return null;
     }

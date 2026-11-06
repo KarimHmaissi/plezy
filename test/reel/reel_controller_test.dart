@@ -529,6 +529,27 @@ void main() {
     c.dispose();
   });
 
+  test("the art budget hears the window on each step, nearest first, and nothing once suspended", () async {
+    final c = make(
+      decks: [
+        _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+      ],
+    );
+    final windows = <List<String>>[];
+    c.artWindow = windows.add;
+    await c.start();
+    await pumpEventQueue();
+    expect(windows.last, ['t1', 't2', 't3'], reason: 'on screen, +1, then +2: nothing behind the first card');
+    await c.step(1);
+    await pumpEventQueue();
+    expect(windows.last, ['t2', 't3', 't1', 't4'], reason: 'on screen, +1, -1, +2');
+    await c.suspend();
+    final heard = windows.length;
+    await pumpEventQueue();
+    expect(windows.length, heard);
+    c.dispose();
+  });
+
   test('the mute is kept: each toggle is saved, and an unmute is recorded (V2-22)', () async {
     final saved = <bool>[];
     final c = make(saveMuted: (m) async => saved.add(m));

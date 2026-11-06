@@ -59,7 +59,7 @@ class ReelCardView extends StatelessWidget {
   static Future<void> precacheArt(BuildContext context, ReelCardData card, MediaItem item, {required bool clip}) async {
     final client = context.tryGetMediaClientWithFallback(serverIdOrNull(card.best.serverId));
     final provider = TvSpotlightBackground.artProviderFor(context, item, client, lightArt: clip);
-    if (provider != null) await ReelArt.precache(provider, context);
+    if (provider != null) await ReelArt.precache(provider, context, card: card.id);
   }
 
   final ReelController controller;
@@ -239,7 +239,9 @@ class ReelCardView extends StatelessWidget {
           // covers it, so it decodes at the thumbnail cap (plan V2-05). AI
           // cards and cards still resolving keep the full backdrop.
           lightArt: slot.clip != null,
-          onArtProvider: ReelArt.track,
+          // The backdrop and the logo, tracked as this card's for the
+          // Reel's art budget and suspend.
+          onArtProvider: (provider) => ReelArt.track(provider, card: slot.card!.id),
           metadataTrailing: _clipKind(context, scale),
           contentBottom: extrasTop + 20 * scale,
           contentTop: 120 * scale,

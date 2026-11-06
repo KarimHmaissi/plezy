@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -1116,25 +1117,50 @@ void main() {
     expect(watched, 1);
   });
 
-  testWidgets('the still under the clip sizes from its frame, not a fixed 960 px', (tester) async {
+  testWidgets('the still decodes at the frame it is shown in, not a fixed 960 px', (tester) async {
     await pump(tester);
+    final page = tester.getSize(find.byType(ReelFeedView));
     final stills = [
       for (final a in tester.widgetList<OptimizedMediaImage>(find.byType(OptimizedMediaImage)))
         if (a.width != 36) a,
     ];
     expect(stills, isNotEmpty);
     for (final still in stills) {
-      // No explicit size: OptimizedMediaImage decodes at its constraints,
-      // the card's 16:9 frame, where 960 x DPR hit the 1920x1080 cap.
-      expect((still.width, still.height), (null, null));
-      expect(still.imageType, ImageType.art);
-      expect(still.onImageProvider, ReelArt.track, reason: "the Reel's art is let go on suspend");
+      // The card's 16:9 frame, where 960 x DPR hit the 1920x1080 cap; set
+      // rather than read from the frame, so a glide never decodes it again.
       final size = tester.getSize(find.byWidget(still));
       expect(size.width, lessThanOrEqualTo(420));
       expect(size.height, moreOrLessEquals(size.width * 9 / 16, epsilon: 1));
-      // The frame the next cards' art is warmed at (V2-13).
-      expect(size, reelStillFrame(tester.getSize(find.byType(ReelFeedView)), 16 / 9));
+      expect(Size(still.width!, still.height!), size);
+      expect(still.imageType, ImageType.art);
+      // The size the next cards' art is warmed at (V2-13).
+      expect(size, reelStillDecode(page, ReelFeedLayout.of(page), 16 / 9));
     }
+  });
+
+  testWidgets("the feed's art is tracked as its card's, for the Reel's art budget", (tester) async {
+    await pump(tester);
+    final art = [
+      for (final a in tester.widgetList<OptimizedMediaImage>(find.byType(OptimizedMediaImage)))
+        if (a.onImageProvider != null) a,
+    ];
+    // The ambient backdrop and the still of the card on screen and the one
+    // built ahead.
+    expect(art.length, greaterThanOrEqualTo(2));
+    final provider = _PendingArt('harbor-lights-art');
+    art.first.onImageProvider!(provider);
+    expect(ReelArt.cardOf(provider), 't1');
+  });
+
+  test("a still's decode: its frame in the picture's area, all the page in immersive two panes", () {
+    const phone = Size(400, 800);
+    expect(reelStillDecode(phone, ReelFeedLayout.phone, 16 / 9), const Size(400, 225));
+    // A clip's own shape, once known; wider than 16:9 stays page-wide.
+    expect(reelStillDecode(phone, ReelFeedLayout.phone, 2.0), const Size(400, 200));
+    const inner = Size(1000, 700);
+    final pane = reelStillDecode(inner, ReelFeedLayout.twoPane, 16 / 9);
+    expect(pane.width, moreOrLessEquals(1000 * ReelFeedLayout.pictureShare));
+    expect(reelStillDecode(inner, ReelFeedLayout.twoPane, 16 / 9, immersive: true), const Size(1000, 562.5));
   });
 
   testWidgets('the feed warms the next cards\' art while it is mounted (V2-13)', (tester) async {
@@ -1304,7 +1330,11 @@ void main() {
       expect(c.current.clip, isNotNull);
       expect(spotlight(tester).lightArt, isTrue);
       expect(tester.widget<CyclingMediaBackdrop>(find.byType(CyclingMediaBackdrop)).imageType, ImageType.thumb);
-      expect(spotlight(tester).onArtProvider, ReelArt.track);
+      // The backdrop and logo it builds count as this card's in the Reel's
+      // art budget, and suspend lets them go.
+      final art = _PendingArt('harbor-lights-thumb');
+      spotlight(tester).onArtProvider!(art);
+      expect(ReelArt.cardOf(art), c.current.card!.id);
     });
 
     testWidgets('an AI card keeps the full backdrop', (tester) async {
@@ -2211,4 +2241,25 @@ void main() {
       expect(players.muted, isFalse);
     });
   });
+}
+
+/// A provider keyed by its name whose image never arrives: enough to see
+/// how the Reel tracks it.
+class _PendingArt extends ImageProvider<_PendingArt> {
+  _PendingArt(this.name);
+
+  final String name;
+
+  @override
+  Future<_PendingArt> obtainKey(ImageConfiguration configuration) => SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(_PendingArt key, ImageDecoderCallback decode) =>
+      OneFrameImageStreamCompleter(Completer<ImageInfo>().future);
+
+  @override
+  bool operator ==(Object other) => other is _PendingArt && other.name == name;
+
+  @override
+  int get hashCode => name.hashCode;
 }

@@ -58,7 +58,8 @@ class TvSpotlightBackground extends StatelessWidget {
   /// that Home's artwork shares.
   final bool lightArt;
 
-  /// Fork (The Reel): called with each artwork provider the backdrop builds.
+  /// Fork (The Reel): called with each artwork provider the backdrop and the
+  /// clear logo build.
   final ValueChanged<ImageProvider>? onArtProvider;
 
   /// Fork (The Reel): the curve of the [showArtwork] fade (linear for Home).
@@ -498,6 +499,10 @@ class TvSpotlightBackground extends StatelessWidget {
         memWidth: logoMemWidth,
         memHeight: logoMemHeight,
       );
+      final logo = logoToneTarget == null
+          ? bounded
+          : ToneMappedLogoImage(bounded, target: logoToneTarget, remapMixed: false);
+      onArtProvider?.call(logo);
       return SizedBox(
         width: width,
         height: logoHeight,
@@ -505,9 +510,7 @@ class TvSpotlightBackground extends StatelessWidget {
           alignment: .centerLeft,
           child: blurArtwork(
             Image(
-              image: logoToneTarget == null
-                  ? bounded
-                  : ToneMappedLogoImage(bounded, target: logoToneTarget, remapMixed: false),
+              image: logo,
               width: logoWidth,
               height: logoHeight,
               fit: BoxFit.contain,
@@ -533,6 +536,7 @@ class TvSpotlightBackground extends StatelessWidget {
       fadeInDuration: DevicePerformance.reducedDuration(const Duration(milliseconds: 200)),
       logoToneTarget: logoToneTarget,
       fallbackBuilder: (context) => _buildTitle(context, title),
+      onImageProvider: onArtProvider,
     );
   }
 

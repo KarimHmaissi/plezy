@@ -127,11 +127,17 @@ void main() {
 
   testWidgets('up-next tiles decode their art at the 96 px they are shown at', (tester) async {
     await pump(tester);
+    // The card on screen decodes at the frame it fills (no fixed 720 px),
+    // tracked as the Reel's art.
+    final hero = tester.widget<OptimizedMediaImage>(find.byType(OptimizedMediaImage).first);
+    expect((hero.width, hero.height), (null, null));
+    expect(hero.onImageProvider, isNotNull);
+    expect(tester.getSize(find.byWidget(hero)).width, lessThanOrEqualTo(400));
     // Below the transport and volume rows (V2-49).
     await _reveal(tester, find.text('Up next'));
     final arts = tester.widgetList<OptimizedMediaImage>(find.byType(OptimizedMediaImage));
-    // The card on screen, at the phone's width, and the up-next tiles.
-    final tiles = arts.where((a) => a.width != 720).toList();
+    // The card on screen, at its frame, and the up-next tiles.
+    final tiles = arts.where((a) => a.width != null).toList();
     expect(tiles, isNotEmpty);
     for (final tile in tiles) {
       expect((tile.width, tile.height), (96, 54));

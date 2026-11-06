@@ -378,6 +378,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       _createFailed = false;
     });
     c.toast.addListener(_onToast);
+    // The Reel's art stays within its image-cache budget around the cards
+    // the controller keeps (plan §6); [_release] turns the budget off.
+    c.artWindow = ReelArt.keep;
     // TV: the next two cards' spotlight art is warmed ahead (plan V2-13);
     // the phone feed registers its own, sized to its pages.
     if (_isTv) {

@@ -137,6 +137,17 @@ class MemoryTrimPolicy {
     appLogger.i('$_tag $reason: image cache budget ${before >> 20}MB -> ${after >> 20}MB');
   }
 
+  /// [bytes] of the image cache that one surface keeps for itself (the
+  /// Reel's art, plan §6), scaled by how far a trim has the cache below its
+  /// tier now: the share halves with every halving and comes back with the
+  /// restore, so it never outlives the trim's cause either.
+  int scaledShare(int bytes) {
+    final tier = _imageCacheTierBytes();
+    final now = _imageCache().maximumSizeBytes;
+    if (tier <= 0 || now >= tier) return bytes;
+    return (bytes * now) ~/ tier;
+  }
+
   /// One RSS watchdog sample.
   WatchdogTrim onWatchdogTick({required bool overThreshold}) {
     if (!overThreshold) {

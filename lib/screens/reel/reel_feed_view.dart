@@ -209,6 +209,10 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   /// The layout the feed last laid out in (V2-30).
   ReelFeedLayout? _layout;
 
+  /// The size the feed last laid out at: the page the stills are decoded
+  /// for ([reelStillDecode]).
+  Size? _feedSize;
+
   /// The feed went immersive by itself because it was turned on its side
   /// ([ReelFeedLayout.fullBleed]), so turning it upright brings it back.
   bool _sideways = false;
@@ -324,13 +328,11 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   /// Decodes [card]'s ambient backdrop and still into the image cache
   /// exactly as its page will build them (plan V2-13): the same path, and
-  /// the still at the frame it gets in a page of this feed (its parked
-  /// clip's shape when that is known, else 16:9).
+  /// the still at the size its page decodes it ([reelStillDecode]: its
+  /// parked clip's shape when that is known, else 16:9).
   Future<void> _precacheArt(ReelCardData card, MediaItem item, {required bool clip}) async {
     if (!mounted) return;
-    final box = context.findRenderObject();
-    final page = box is RenderBox && box.hasSize ? box.size : MediaQuery.sizeOf(context);
-    final still = reelStillFrame(page, widget.players.videoFor(card.id)?.aspectRatio ?? _stillAspect);
+    final still = _stillDecode(widget.players.videoFor(card.id)?.aspectRatio ?? _stillAspect);
     final client = context.tryGetMediaClientWithFallback(serverIdOrNull(card.best.serverId));
     final providers = [
       for (final slot in [_ambientSize, still])
@@ -343,7 +345,13 @@ class _ReelFeedViewState extends State<ReelFeedView> {
           imageType: ImageType.art,
         )?.provider,
     ];
-    await Future.wait([for (final p in providers) ReelArt.precache(p, context)]);
+    await Future.wait([for (final p in providers) ReelArt.precache(p, context, card: card.id)]);
+  }
+
+  /// The size this feed decodes a still at, for a clip of [aspect].
+  Size _stillDecode(double aspect) {
+    final page = _feedSize ?? MediaQuery.sizeOf(context);
+    return reelStillDecode(page, _layout ?? ReelFeedLayout.of(page), aspect, immersive: _immersive);
   }
 
   void _onController() {
@@ -575,6 +583,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
           color: Colors.black,
           child: LayoutBuilder(
             builder: (context, box) {
+              _feedSize = box.biggest;
               final layout = ReelFeedLayout.of(box.biggest);
               if (layout != _layout) {
                 _layout = layout;
@@ -754,7 +763,14 @@ class _ReelFeedViewState extends State<ReelFeedView> {
           final backdrop = _Backdrop(slot: slot, video: video, dim: _immersive ? _immersiveDim(context) : 0.55);
           final held = state.held && !_rolling;
           final picture = RepaintBoundary(
-            child: _Picture(slot: slot, video: video, paused: state.paused, held: held, onReplay: _replay),
+            child: _Picture(
+              slot: slot,
+              video: video,
+              decode: _stillDecode(video?.aspectRatio ?? _stillAspect),
+              paused: state.paused,
+              held: held,
+              onReplay: _replay,
+            ),
           );
           Widget tappable(Widget child) => GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -839,6 +855,19 @@ Size reelStillFrame(Size page, double aspect) {
   }
   return Size(width, height);
 }
+
+/// The size a card's still is decoded at (plan V2-05): its frame at [aspect]
+/// (the clip's own shape once known, else 16:9) in the area [layout] gives
+/// the picture in a [page]: the whole page, or its picture share beside the
+/// info in two panes (all of it in the immersive view). It is set rather
+/// than read from the frame as it lays out, so the frame's glide to the
+/// clip's shape never decodes the art again at each step of it, and the
+/// warm (V2-13) decodes the very entry the page then reads.
+@visibleForTesting
+Size reelStillDecode(Size page, ReelFeedLayout layout, double aspect, {bool immersive = false}) => reelStillFrame(
+  layout == ReelFeedLayout.twoPane && !immersive ? Size(page.width * ReelFeedLayout.pictureShare, page.height) : page,
+  aspect,
+);
 
 /// The height the top bar takes: the status bar, then one row of buttons.
 double _barSpace(BuildContext context) => MediaQuery.paddingOf(context).top + 56;
@@ -988,7 +1017,7 @@ class _Backdrop extends StatelessWidget {
                 height: _ambientSize.height,
                 fit: BoxFit.cover,
                 imageType: ImageType.art,
-                onImageProvider: ReelArt.track,
+                onImageProvider: (provider) => ReelArt.track(provider, card: slot.card!.id),
                 placeholder: (_, _) => const SizedBox.shrink(),
                 errorWidget: (_, _, _) => const SizedBox.shrink(),
               ),
@@ -1018,6 +1047,7 @@ class _Picture extends StatelessWidget {
   const _Picture({
     required this.slot,
     required this.video,
+    required this.decode,
     required this.paused,
     required this.held,
     required this.onReplay,
@@ -1025,6 +1055,9 @@ class _Picture extends StatelessWidget {
 
   final ReelSlot slot;
   final FeedVideo? video;
+
+  /// The size the still decodes at ([reelStillDecode]).
+  final Size decode;
   final bool paused;
   final bool held;
   final VoidCallback onReplay;
@@ -1053,11 +1086,14 @@ class _Picture extends StatelessWidget {
                 child: OptimizedMediaImage(
                   client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
                   imagePath: _artPath(item),
-                  // No explicit size: it sizes from the card's own frame, so
-                  // the decode matches what is shown (plan V2-05).
+                  // Decoded at the frame it is shown in (plan V2-05), set
+                  // rather than read from the frame as it glides; it still
+                  // fills whatever the frame is.
+                  width: decode.width,
+                  height: decode.height,
                   fit: BoxFit.cover,
                   imageType: ImageType.art,
-                  onImageProvider: ReelArt.track,
+                  onImageProvider: (provider) => ReelArt.track(provider, card: slot.card!.id),
                   placeholder: (_, _) => const ColoredBox(color: Colors.black26),
                   errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
                 ),
@@ -1602,10 +1638,12 @@ class _UpNextRow extends StatelessWidget {
                         : OptimizedMediaImage(
                             client: context.tryGetMediaClientWithFallback(serverIdOrNull(card.best.serverId)),
                             imagePath: item.artPath ?? item.thumbPath,
-                            width: 192,
-                            height: 108,
+                            // The tile it is shown in (plan V2-05).
+                            width: 96,
+                            height: 54,
                             fit: BoxFit.cover,
                             imageType: ImageType.art,
+                            onImageProvider: (provider) => ReelArt.track(provider, card: card.id),
                             placeholder: (_, _) => blank,
                             errorWidget: (_, _, _) => blank,
                           ),

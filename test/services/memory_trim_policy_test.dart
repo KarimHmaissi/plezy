@@ -289,4 +289,30 @@ void main() {
       });
     });
   });
+
+  group("a surface's share of the cache (the Reel's art budget)", () {
+    test('follows every halving down to the floor and comes back with the restore', () {
+      fakeAsync((async) {
+        final policy = newPolicy();
+        const share = 12 << 20;
+        expect(policy.scaledShare(share), share);
+        policy.onMemoryPressure();
+        expect(policy.scaledShare(share), share ~/ 2);
+        policy.onMemoryPressure();
+        expect(policy.scaledShare(share), share ~/ 4);
+        policy.onTrimMemory(MemoryTrimPolicy.trimMemoryComplete);
+        expect(policy.scaledShare(share), share * MemoryTrimPolicy.minImageCacheBytes ~/ imageTier);
+        policy.restoreTierSizes('test');
+        expect(policy.scaledShare(share), share);
+        policy.dispose();
+      });
+    });
+
+    test('never grows past the share when the cache is over its tier', () {
+      final policy = newPolicy();
+      cache.maximumSizeBytes = imageTier * 2;
+      expect(policy.scaledShare(12 << 20), 12 << 20);
+      policy.dispose();
+    });
+  });
 }

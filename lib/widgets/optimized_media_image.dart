@@ -474,6 +474,7 @@ class ClearLogoImage extends StatelessWidget {
     this.alignment = Alignment.centerLeft,
     this.fadeInDuration = const Duration(milliseconds: 300),
     this.logoToneTarget,
+    this.onImageProvider,
   });
 
   final MediaServerClient? client;
@@ -504,6 +505,9 @@ class ClearLogoImage extends StatelessWidget {
   /// backdrop behind the logo is scrimmed toward a light background.
   final Color? logoToneTarget;
 
+  /// Fork (The Reel): see [OptimizedMediaImage.onImageProvider].
+  final ValueChanged<ImageProvider>? onImageProvider;
+
   @override
   Widget build(BuildContext context) {
     final path = logoPath;
@@ -527,6 +531,7 @@ class ClearLogoImage extends StatelessWidget {
                 // Clear logos render on heroes where a mark's color is part of
                 // its identity: mixed-tone marks stay untouched.
                 logoToneRemapMixed: false,
+                onImageProvider: onImageProvider,
                 placeholder: (context, _) => const SizedBox.shrink(),
                 // Replaces the image under Align's loose constraints, so it can
                 // take the whole title slot rather than the logo's.

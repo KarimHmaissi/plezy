@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../i18n/strings.g.dart';
 import '../../focus/focus_theme.dart';
 import '../../media/ids.dart';
+import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../theme/fork_motion.dart';
 import '../../utils/layout_constants.dart';
@@ -70,6 +71,8 @@ class ReelDecideView extends StatelessWidget {
           client: client,
           contentBottom: footHeight + 44 * scale,
           contentTop: 150 * scale,
+          // The Reel's art: the budget and suspend let it go.
+          onArtProvider: ReelArt.track,
         ),
         if (chosen.item == null)
           Positioned(
@@ -338,6 +341,7 @@ class _Poster extends StatelessWidget {
                           height: height,
                           fit: BoxFit.cover,
                           imageType: ImageType.poster,
+                          onImageProvider: ReelArt.track,
                           placeholder: (_, _) => fallback,
                           errorWidget: (_, _, _) => fallback,
                         ),
