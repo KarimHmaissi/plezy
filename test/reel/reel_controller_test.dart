@@ -602,6 +602,244 @@ void main() {
     c.dispose();
   });
 
+  group("Tonight's picks", () {
+    Future<void> saved(String id, {Duration ago = Duration.zero}) => store.savePick(
+      ReelPick(
+        titleId: 't$id',
+        groupKey: 'g$id',
+        serverId: 's1',
+        ratingKey: id,
+        title: 'Title $id',
+        at: DateTime.now().toUtc().subtract(ago),
+      ),
+    );
+
+    List<String> pages(ReelController c) => [
+      for (var i = 0; i < c.slotCount; i++)
+        switch (c.slotAt(i)) {
+          ReelSlot(kind: ReelSlotKind.card, :final card?) => card.id,
+          ReelSlot(:final kind) => kind.name,
+        },
+    ];
+
+    test('after the second Save it comes up next; the page on screen stays put', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+      );
+      await c.start();
+      expect(pages(c), ['t1', 't2', 't3', 't4', 'poolEnd'], reason: 'no fresh picks: the end as before');
+      await c.save();
+      expect(pages(c), [
+        't1',
+        't2',
+        't3',
+        't4',
+        'decide',
+        'poolEnd',
+      ], reason: 'one Save: it waits at the end of the deck');
+      await c.step(1);
+      await c.save();
+      expect(pages(c), ['t1', 't2', 'decide', 't3', 't4', 'poolEnd']);
+      expect(c.page, 1);
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't2');
+
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      expect(c.current.picks.map((p) => p.pick.titleId), ['t2', 't1'], reason: 'newest first');
+      expect(c.current.chosen?.pick.titleId, 't2');
+      await pumpEventQueue();
+      expect(c.current.picks.map((p) => p.item?.id), ['2', '1'], reason: "the picks' metadata is read");
+      expect(c.upNext.first.card?.id, 't3');
+
+      await c.step(1);
+      expect(c.current.card?.id, 't3', reason: 'swiping on goes to the next card');
+      expect(c.page, 3);
+      await c.step(-1);
+      expect(c.current.kind, ReelSlotKind.decide, reason: 'it stays where it was, so the pages hold');
+      c.dispose();
+    });
+
+    test('at most once a session: a third Save after it was seen places nothing new', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4'), _card('5')]),
+        ],
+      );
+      await c.start();
+      await c.save();
+      await c.step(1);
+      await c.save();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      await c.step(1);
+      await c.save();
+      await c.step(1);
+      await c.save();
+      expect(pages(c).where((p) => p == 'decide'), hasLength(1));
+      expect(pages(c).indexOf('decide'), 2);
+      c.dispose();
+    });
+
+    test('at the end of a deck it comes before the end card when there are fresh picks', () async {
+      await saved('8');
+      await saved('9', ago: const Duration(days: 4));
+      final c = make();
+      await c.start();
+      expect(pages(c), ['t1', 't2', 't3', 'decide', 'poolEnd']);
+      await c.step(1);
+      await c.step(1);
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      expect(c.current.picks.map((p) => p.pick.titleId), ['t8'], reason: 'only fresh Saves');
+      expect(engine.calls.last, 'pause', reason: 'nothing plays under it');
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      c.dispose();
+    });
+
+    test('once seen in one deck, the end of the others is as before', () async {
+      await saved('8');
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+        ],
+      );
+      await c.start();
+      expect(pages(c), ['t1', 'decide', 'poolEnd']);
+      await c.step(1);
+      await c.switchDeck(1);
+      expect(pages(c), ['t2', 'poolEnd']);
+      await c.switchDeck(1);
+      expect(pages(c), ['t1', 'decide', 'poolEnd']);
+      expect(c.current.kind, ReelSlotKind.decide, reason: "the deck's own cursor stays on it");
+      c.dispose();
+    });
+
+    test('left and right choose a pick, stopping at either end; Watch hands the chosen one over', () async {
+      await saved('7', ago: const Duration(hours: 2));
+      await saved('8', ago: const Duration(hours: 1));
+      await saved('9');
+      final handed = <String>[];
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+        ],
+        onWatch: (item, {required onTv}) async {
+          handed.add('${item.id}${onTv ? ' on TV' : ''}');
+          return true;
+        },
+      );
+      await c.start();
+      await c.step(1);
+      expect(c.current.pick, 0);
+      c.movePick(-1);
+      expect(c.current.pick, 0);
+      c.movePick(1);
+      c.movePick(1);
+      c.movePick(1);
+      expect(c.current.pick, 2);
+      expect(c.remoteState()['decide'], {
+        'pick': 2,
+        'picks': [
+          for (final id in ['9', '8', '7'])
+            {'id': 't$id', 'title': 'Title $id', 'year': null, 'server': 's1', 'art': null, 'thumb': null},
+        ],
+      });
+      expect(c.remoteState()['card'], isNull);
+      c.selectPick(1);
+      expect(await c.watch(), isTrue);
+      expect(await c.watch(onTv: true), isTrue);
+      expect(handed, ['8', '8 on TV']);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.where((e) => e.action == ReelAction.watch.name).map((e) => e.titleId), ['t8']);
+      c.dispose();
+    });
+
+    test('card actions do nothing on it', () async {
+      await saved('8');
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')])..keeps = false,
+        ],
+        moreLike: (seed, {required skip}) async => [_card('7')],
+      );
+      await c.start();
+      await c.step(1);
+      expect(c.canMoreLike, isFalse);
+      await c.notForMe();
+      await c.seenIt();
+      expect(pages(c), ['t1', 'decide', 'poolEnd']);
+      expect(c.current.kind, ReelSlotKind.decide);
+      c.dispose();
+    });
+
+    test('Not for me on the card before it: it slides in, on the same page', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await c.save();
+      await c.save();
+      expect(pages(c), ['t1', 'decide', 't2', 't3', 'poolEnd']);
+      await c.notForMe();
+      expect(pages(c), ['decide', 't2', 't3', 'poolEnd']);
+      expect(c.page, 0);
+      expect(c.current.kind, ReelSlotKind.decide);
+      c.dispose();
+    });
+
+    test('More like this pressed before it: the new cards come first, then it', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+        moreLike: (seed, {required skip}) async => [_card('2'), _card('7')],
+      );
+      await c.start();
+      await c.save();
+      await c.save();
+      expect(pages(c), ['t1', 'decide', 't2', 't3', 'poolEnd']);
+      await c.moreLikeThis();
+      expect(pages(c), ['t1', 't2', 't7', 'decide', 't3', 'poolEnd']);
+      expect(c.page, 0);
+      c.dispose();
+    });
+
+    test("today's build landing while it waits ahead keeps it next", () async {
+      final fy = _DailyDeck('fy', [_card('1'), _card('2'), _card('3')]);
+      final c = make(decks: [fy]);
+      await c.start();
+      await c.save();
+      await c.save();
+      expect(pages(c), ['t1', 'decide', 't2', 't3', 'poolEnd']);
+      fy.land([_card('5'), _card('6')]);
+      await pumpEventQueue();
+      expect(pages(c), ['t1', 'decide', 't5', 't6', 'poolEnd']);
+      expect(c.page, 0);
+      c.dispose();
+    });
+
+    test("today's build landing on it at the end of the deck: it stays put and the new cards follow", () async {
+      await saved('8');
+      final fy = _DailyDeck('fy', [_card('1')]);
+      final c = make(decks: [fy]);
+      await c.start();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      fy.land([_card('5')]);
+      await pumpEventQueue();
+      expect(pages(c), ['t1', 'decide', 't5', 'poolEnd']);
+      expect(c.current.kind, ReelSlotKind.decide);
+      c.dispose();
+    });
+  });
+
   group('More like this', () {
     test('the chosen cards come straight after the card on screen, and the cursor stays', () async {
       ReelCardData? seedAsked;

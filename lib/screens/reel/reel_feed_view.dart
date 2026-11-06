@@ -17,6 +17,7 @@ import '../../widgets/fork_motion_widgets.dart';
 import '../../widgets/optimized_media_image.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
+import 'reel_decide_view.dart';
 
 /// The phone Reel, a feed you thumb through: each card plays in its own
 /// page (the clip is drawn into the page, so it slides with your thumb), and
@@ -52,7 +53,7 @@ class ReelFeedView extends StatefulWidget {
 }
 
 class _ReelFeedViewState extends State<ReelFeedView> {
-  late final PageController _pages = PageController(initialPage: widget.controller.index);
+  late final PageController _pages = PageController(initialPage: widget.controller.page);
   String? _deck;
   bool _immersive = false;
   bool _burst = false;
@@ -89,20 +90,21 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     // a step from the TV moves the page to match.
     if (_deck != _c.deck.id) {
       _deck = _c.deck.id;
-      if (_pages.hasClients) _pages.jumpToPage(_c.index);
+      if (_pages.hasClients) _pages.jumpToPage(_c.page);
     } else if (_pages.hasClients && !_pages.position.isScrollingNotifier.value) {
       final page = _pages.page?.round();
-      if (page != null && page != _c.index) _pages.jumpToPage(_c.index);
+      if (page != null && page != _c.page) _pages.jumpToPage(_c.page);
     }
     _sync();
     setState(() {});
   }
 
-  /// The card on screen, the next two, then the one behind.
+  /// The card on screen, the next two, then the one behind (by page, so
+  /// the decision card holds a place and plays nothing).
   void _sync() {
     // Hidden, paused or handing over to real playback: nothing plays.
     if (!_c.active) return;
-    final i = _c.index;
+    final i = _c.page;
     final window = <FeedClip>[
       for (final j in [i, i + 1, i + 2, i - 1])
         if (j >= 0)
@@ -123,8 +125,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   @override
   Widget build(BuildContext context) {
-    final list = _c.cards;
-    final count = list == null ? 1 : list.length + 1;
+    final count = _c.slotCount;
     return ColoredBox(
       color: Colors.black,
       child: Stack(
@@ -134,7 +135,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             controller: _pages,
             scrollDirection: Axis.vertical,
             itemCount: count,
-            onPageChanged: (i) => unawaited(_c.step(i - _c.index)),
+            onPageChanged: (i) => unawaited(_c.step(i - _c.page)),
             itemBuilder: (context, i) => _page(_c.slotAt(i)),
           ),
           _TopBar(
@@ -194,6 +195,14 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             icon: const Icon(Symbols.video_library_rounded),
             label: const Text('Decks'),
           ),
+        );
+      case ReelSlotKind.decide:
+        return ReelDecideView(
+          controller: _c,
+          slot: slot,
+          tv: false,
+          onWatch: widget.onWatch,
+          watchOnTv: widget.watchOnTv,
         );
       case ReelSlotKind.card:
         break;

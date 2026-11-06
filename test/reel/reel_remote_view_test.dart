@@ -91,4 +91,33 @@ void main() {
     expect(remote.sent.single.$1, RemoteCommandType.reelAction);
     expect(remote.sent.single.$2, {'action': 'save'});
   });
+
+  testWidgets("Tonight's picks on the TV: its posters, a tap chooses one, Watch on TV plays it", (tester) async {
+    final remote = await pump(tester);
+    remote.reelState.value = {
+      ..._state(),
+      'card': null,
+      'decide': {
+        'pick': 0,
+        'picks': [
+          {'id': 't8', 'title': 'Harbor Lights', 'server': 's1'},
+          {'id': 't9', 'title': 'Quiet Orchard', 'server': 's1'},
+        ],
+      },
+    };
+    await tester.pumpAndSettle();
+    expect(find.text("Tonight's picks"), findsOneWidget);
+    expect(find.text('Harbor Lights'), findsOneWidget, reason: 'the chosen one is named');
+    expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Save')).onPressed, isNull);
+
+    remote.sent.clear();
+    await tester.tap(find.bySemanticsLabel('Quiet Orchard'));
+    await tester.pump();
+    expect(remote.sent.single.$2, {'action': 'pick:1'});
+
+    remote.sent.clear();
+    await tester.tap(find.text('Watch on TV'));
+    await tester.pump();
+    expect(remote.sent.single.$2, {'action': 'watch'});
+  });
 }

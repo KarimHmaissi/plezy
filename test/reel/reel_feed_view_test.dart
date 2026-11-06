@@ -328,6 +328,46 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
   });
 
+  testWidgets("Tonight's picks after the second Save: the page stays, then a swipe brings it up", (tester) async {
+    Future<void> fling() async {
+      await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+    }
+
+    await pump(tester);
+    await tester.runAsync(c.save);
+    await fling();
+    expect(c.current.card?.id, 't2');
+    await tester.runAsync(c.save);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.page, 1, reason: 'placing it ahead never moves the page on screen');
+    expect(find.text('Title 2'), findsWidgets);
+    expect(players.current, 't2');
+
+    await fling();
+    expect(c.current.kind, ReelSlotKind.decide);
+    expect(find.text("Tonight's picks"), findsOneWidget);
+    expect(find.text('One for tonight?'), findsOneWidget);
+    expect(players.current, isNull, reason: 'nothing plays under it');
+    final chosen = find.byKey(const ValueKey('decide:chosen'));
+    expect(tester.widget<Text>(chosen).data, 'Title 2', reason: 'the newest Save is chosen first');
+
+    await tester.tap(find.byKey(const ValueKey('decide:t1')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(chosen).data, 'Title 1');
+    expect(c.current.chosen?.pick.titleId, 't1');
+    await tester.tap(find.widgetWithText(FilledButton, 'Watch'));
+    expect(watched, 1);
+
+    await fling();
+    expect(c.current.card?.id, 't3');
+    expect(players.current, 't3');
+    // The confirmations' own timers run out.
+    await tester.pump(const Duration(seconds: 4));
+  });
+
   testWidgets('swipe right hides the controls to watch; swipe left brings them back', (tester) async {
     await pump(tester);
     expect(hidden(tester, 'Details'), isFalse);

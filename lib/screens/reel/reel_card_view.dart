@@ -13,6 +13,7 @@ import '../../widgets/fitted_metadata_line.dart';
 import '../../widgets/media_rating_badge.dart';
 import '../../widgets/stat_chip.dart';
 import '../../widgets/tv_spotlight_background.dart';
+import 'reel_decide_view.dart';
 
 /// One card, in the app's own look. On the TV it is Home's spotlight (logo or
 /// title, the metadata line with rating badges, the summary, the same scrims)
@@ -56,6 +57,8 @@ class ReelCardView extends StatelessWidget {
           title: controller.deck.id == 'for-you' ? "That's today's For You" : "That's all of ${controller.deck.name}",
           body: tv ? 'Press → for ${_nextDeckName()}.' : 'Swipe sideways for ${_nextDeckName()}.',
         );
+      case ReelSlotKind.decide:
+        return ReelDecideView(controller: controller, slot: slot, tv: tv, onWatch: onWatch);
       case ReelSlotKind.card:
         break;
     }
