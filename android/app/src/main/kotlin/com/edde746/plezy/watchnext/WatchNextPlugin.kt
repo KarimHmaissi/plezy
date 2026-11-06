@@ -184,6 +184,8 @@ class WatchNextPlugin() :
     val title = data["title"] as? String ?: return null
     val type = when ((data["type"] as? String)?.lowercase()) {
       "episode" -> TvContractCompat.WatchNextPrograms.TYPE_TV_EPISODE
+      // A saved show (a Reel Save on Play Next) is a series, not a film.
+      "show" -> TvContractCompat.WatchNextPrograms.TYPE_TV_SERIES
       else -> TvContractCompat.WatchNextPrograms.TYPE_MOVIE
     }
     return WatchNextProvider.WatchNextItem(
@@ -198,7 +200,8 @@ class WatchNextPlugin() :
       lastEngagementTime = (data["lastEngagementTime"] as? Number)?.toLong() ?: System.currentTimeMillis(),
       seriesTitle = data["seriesTitle"] as? String,
       seasonNumber = (data["seasonNumber"] as? Number)?.toInt(),
-      episodeNumber = (data["episodeNumber"] as? Number)?.toInt()
+      episodeNumber = (data["episodeNumber"] as? Number)?.toInt(),
+      watchlist = data["watchlist"] == true
     )
   }
 }
