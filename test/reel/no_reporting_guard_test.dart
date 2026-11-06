@@ -16,6 +16,9 @@ const _forbidden = {
   'lib/services/local_playback_history.dart',
   'lib/screens/video_player/companion_remote_binding.dart',
   'lib/screens/video_player_screen.dart',
+  // The Plex client also sends timelines and scrobbles: the Reel reaches
+  // servers only through the narrow `ReelServers` seam.
+  'lib/services/plex_client.dart',
 };
 
 /// Everything the Reel owns. Watch (a real play, which does report) is

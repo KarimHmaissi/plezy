@@ -1,3 +1,5 @@
+// The fake engine's controllers are closed in tearDown.
+// ignore_for_file: close_sinks
 import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
@@ -68,6 +70,12 @@ const _b = ClipSource(uri: 'https://v.example/b.webm', origin: ClipOrigin.animeT
 void main() {
   late FakeClipEngine engine;
   late ClipPlayer clips;
+
+  tearDown(() async {
+    await engine.completedCtl.close();
+    await engine.firstFrameCtl.close();
+    await engine.errorCtl.close();
+  });
 
   setUp(() {
     engine = FakeClipEngine();

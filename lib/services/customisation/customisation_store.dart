@@ -385,8 +385,18 @@ abstract final class CustomisationExport {
 abstract final class Customisation {
   static Future<CustomisationStore>? _store;
 
+  static Future<ForkDatabase>? _database;
+
+  /// This device's own fork database (one connection for the whole app),
+  /// also when [store] mirrors a TV. The Reel keeps its per-device events
+  /// and caches here.
+  static Future<ForkDatabase> get localDatabase => _database ??= ForkDatabase.open();
+
+  /// Tests: use [db] as this device's database.
+  static void debugSetLocalDatabase(ForkDatabase? db) => _database = db == null ? null : Future.value(db);
+
   static Future<CustomisationStore> get store =>
-      _store ??= ForkDatabase.open().then<CustomisationStore>(LocalCustomisationStore.new);
+      _store ??= localDatabase.then<CustomisationStore>(LocalCustomisationStore.new);
 
   /// Tests: use [store] instead of the on-disk database.
   static void debugSetStore(CustomisationStore? store) => _store = store == null ? null : Future.value(store);
