@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/mpv/models.dart';
@@ -11,6 +12,7 @@ import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/screens/reel/reel_held_step.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/customisation/mirror_store.dart';
@@ -235,15 +237,19 @@ class _CountingDeck extends _Deck {
   }
 }
 
-/// A deck whose load lands only when the test says so.
+/// A deck whose load waits on [gate], and throws while [fails] is set.
 class _SlowDeck extends _Deck {
   _SlowDeck(super.id, super.cards);
 
-  final gate = Completer<void>();
+  Completer<void>? gate;
+  bool fails = false;
+  int loads = 0;
 
   @override
   Future<List<ReelCardData>> load() async {
-    await gate.future;
+    loads++;
+    await gate?.future;
+    if (fails) throw StateError('server unreachable');
     return super.load();
   }
 }
@@ -356,6 +362,7 @@ void main() {
     ValueListenable<ReelPlaybackProfile>? profile,
     ReelItemWithNext? itemWithNext,
     ReelMoreLike? moreLike,
+    Future<void> Function(bool muted)? saveMuted,
   }) => ReelController(
     decks:
         decks ??
@@ -386,6 +393,7 @@ void main() {
     onActive: onActive,
     itemWithNext: itemWithNext,
     moreLike: moreLike,
+    saveMuted: saveMuted,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -489,6 +497,20 @@ void main() {
     engine.firstFrameCtl.add(null);
     await pumpEventQueue();
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
+    c.dispose();
+  });
+
+  test('the mute is kept: each toggle is saved, and an unmute is recorded (V2-22)', () async {
+    final saved = <bool>[];
+    final c = make(saveMuted: (m) async => saved.add(m));
+    await c.start();
+    await c.setMuted(true);
+    expect(c.clips.muted, isTrue);
+    await c.setMuted(false);
+    expect(c.clips.muted, isFalse);
+    expect(saved, [true, false]);
+    final events = await store.events(since: DateTime(2000));
+    expect(events.map((e) => e.action), contains(ReelAction.unmute.name));
     c.dispose();
   });
 
@@ -677,7 +699,7 @@ void main() {
   for (final viaOpen in [false, true]) {
     test('a card still resolving when the deck changes never plays (${viaOpen ? 'openDeck' : 'switchDeck'})', () async {
       final servers = _GatedServers('2');
-      final slow = _SlowDeck('b', [_card('5')]);
+      final slow = _SlowDeck('b', [_card('5')])..gate = Completer<void>();
       final c = make(
         servers: servers,
         decks: [
@@ -693,7 +715,7 @@ void main() {
       servers.gate.complete();
       await stepping;
       await Future<void>.delayed(const Duration(milliseconds: 20));
-      slow.gate.complete();
+      slow.gate!.complete();
       await switching;
       expect(engine.calls, isNot(contains('open https://s1.example/services/iva/assets/2/video.mp4')));
       expect(c.deck.id, 'b');
@@ -1619,6 +1641,56 @@ void main() {
       c.dispose();
     });
 
+    test('a held ↓ on the TV keys: the press opens its card, the repeats open only the landed one', () async {
+      final c = make(
+        clock: clock,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 9; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 9));
+      engine.calls.clear();
+
+      final pending = <Future<void>>[];
+      final held = ReelHeldStep(
+        cursor: () => (index: c.index, last: c.cards!.length),
+        step: (dir, count) {
+          for (var k = 0; k < count; k++) {
+            pending.add(c.step(dir));
+          }
+        },
+      );
+      const key = LogicalKeyboardKey.arrowDown, physical = PhysicalKeyboardKey.arrowDown;
+      held.handle(const KeyDownEvent(physicalKey: physical, logicalKey: key, timeStamp: Duration.zero));
+      await Future.wait(pending);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.current.card?.id, 't2');
+      for (var k = 0; k < 5; k++) {
+        held.handle(const KeyRepeatEvent(physicalKey: physical, logicalKey: key, timeStamp: Duration.zero));
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(c.index, 1, reason: 'the cursor waits for the key up');
+      expect(held.preview.value, 6);
+      held.handle(const KeyUpEvent(physicalKey: physical, logicalKey: key, timeStamp: Duration.zero));
+      expect(c.index, 6, reason: 'the cursor lands before the preview clears');
+      await Future.wait(pending);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.current.card?.id, 't7');
+      expect(opens(), ['2', '7'], reason: 'cards passed while held never open');
+      final events = await store.events(since: DateTime(2000));
+      expect(
+        [for (final e in events) '${e.titleId} ${e.action}'],
+        ['t1 ${ReelAction.sampled.name}', 't2 ${ReelAction.unplayed.name}'],
+      );
+      expect(await store.quickSkips(), isEmpty);
+      held.dispose();
+      c.dispose();
+    });
+
     test('steps back past the start stop at the first card', () async {
       final c = make(clock: clock);
       await c.start();
@@ -2169,6 +2241,163 @@ void main() {
       await c.step(1);
       expect(c.current.card?.id, 't2');
       expect(c.current.isAiCard, isTrue);
+      c.dispose();
+    });
+  });
+
+  group('deck switch (V2-27)', () {
+    test('the strip stays while a slow deck loads, and goes a hold after it shows', () async {
+      final slow = _SlowDeck('b', [_card('5')])..gate = Completer<void>();
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          slow,
+        ],
+      )..stripHold = const Duration(milliseconds: 60);
+      await c.start();
+      final switching = c.switchDeck(1);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(c.current.kind, ReelSlotKind.loading);
+      expect(c.deckStrip.value?.current.id, 'b', reason: 'the deck has not shown: no hold yet');
+      slow.gate!.complete();
+      await switching;
+      expect(c.current.card?.id, 't5');
+      expect(c.deckStrip.value?.current.id, 'b', reason: 'the hold starts when the deck shows');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(c.deckStrip.value, isNull);
+      c.dispose();
+    });
+
+    test("the old deck's card still opening when the deck changes never starts the hold", () async {
+      final media = _GatedMedia('2');
+      final slow = _SlowDeck('b', [_card('5')])..gate = Completer<void>();
+      final c = make(
+        media: media,
+        decks: [
+          _Deck('a', [_card('1'), _card('2')]),
+          slow,
+        ],
+      )..stripHold = const Duration(milliseconds: 60);
+      await c.start();
+      // ↓ onto a card whose metadata is slow, then → before it shows.
+      final stepping = c.step(1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final switching = c.switchDeck(1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      media.gate.complete();
+      await stepping;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(c.deckStrip.value?.current.id, 'b', reason: 'deck b has not shown yet');
+      slow.gate!.complete();
+      await switching;
+      expect(c.current.card?.id, 't5');
+      expect(c.deckStrip.value?.current.id, 'b');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(c.deckStrip.value, isNull);
+      c.dispose();
+    });
+
+    test('the strip names the decks either side', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+          _Deck('c', [_card('3')]),
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      final strip = c.deckStrip.value!;
+      expect([strip.previous?.id, strip.current.id, strip.next?.id], ['a', 'b', 'c']);
+      await c.switchDeck(1);
+      final wrapped = c.deckStrip.value!;
+      expect([wrapped.previous?.id, wrapped.current.id, wrapped.next?.id], ['b', 'c', 'a']);
+      c.dispose();
+    });
+
+    test('with two decks the strip shows only the next one', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.deckStrip.value?.previous, isNull);
+      expect(c.deckStrip.value?.next?.id, 'a');
+      c.dispose();
+    });
+
+    test('leaving the Reel takes the strip down', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.deckStrip.value, isNotNull);
+      await c.suspend();
+      expect(c.deckStrip.value, isNull);
+      c.dispose();
+    });
+
+    test('a deck that fails to load says so, and OK loads it again', () async {
+      final flaky = _SlowDeck('b', [_card('5')])..fails = true;
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          flaky,
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.current.kind, ReelSlotKind.failed, reason: 'not an empty deck');
+      expect(c.cards, isNull);
+
+      flaky
+        ..fails = false
+        ..gate = Completer<void>();
+      final retry = c.retryDeck();
+      await Future<void>.delayed(Duration.zero);
+      expect(c.current.kind, ReelSlotKind.loading, reason: 'the skeleton while it tries again');
+      flaky.gate!.complete();
+      await retry;
+      expect(flaky.loads, 2);
+      expect(c.current.card?.id, 't5');
+      c.dispose();
+    });
+
+    test('a failed deck loads again when it is next visited', () async {
+      final flaky = _SlowDeck('b', [_card('5')])..fails = true;
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          flaky,
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.current.kind, ReelSlotKind.failed);
+      await c.switchDeck(1);
+      flaky.fails = false;
+      await c.switchDeck(1);
+      expect(c.current.card?.id, 't5');
+      c.dispose();
+    });
+
+    test('retry does nothing on a deck that loaded', () async {
+      var loads = 0;
+      final c = make(
+        decks: [
+          _CountingDeck('a', [_card('1')], () => loads++),
+        ],
+      );
+      await c.start();
+      await c.retryDeck();
+      expect(loads, 1);
       c.dispose();
     });
   });

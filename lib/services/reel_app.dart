@@ -47,6 +47,7 @@ import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
 import 'reel_playback_watcher.dart';
 import 'reel_servers_plex.dart';
+import 'settings_service.dart';
 import 'trackers/fribb_mapping_store.dart';
 
 /// Fork: builds the Reel's session from the app's real services. Lives
@@ -122,7 +123,8 @@ abstract final class ReelApp {
     final controller = ReelController(
       decks: decks,
       resolver: resolver,
-      clips: ClipPlayer(),
+      // The mute is kept across launches (V2-22).
+      clips: ClipPlayer(muted: SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false),
       store: store,
       media: media,
       onWatch: (item, {required onTv}) async {
@@ -183,6 +185,9 @@ abstract final class ReelApp {
       // Give it another go: the card's one metadata read brings the show's
       // next episode, so Watch can say which.
       itemWithNext: media.itemWithNext,
+      saveMuted: (muted) async {
+        await SettingsService.instanceOrNull?.write(SettingsService.reelMuted, muted);
+      },
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));

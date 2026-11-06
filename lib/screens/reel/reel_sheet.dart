@@ -2,15 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../services/reel/reel_controller.dart';
+import '../../services/settings_service.dart' show ReelOkAction;
 import '../../widgets/app_menu.dart';
 
-enum ReelSheetAction { save, moreLike, details, notForMe, spoiled, seenIt, deck }
+enum ReelSheetAction { save, moreLike, watch, details, notForMe, spoiled, seenIt, sound, deck }
 
 /// Long-press OK (or the menu key) on the TV, long-press on the Fold: the
 /// app's own menu sheet, Save first and focused, then the rarer choices and
 /// every deck. Never prompted after a skip; swiping past is the normal "no".
-Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {required bool isTv}) async {
+///
+/// On the TV the sheet offers whichever of Watch and Details OK does not
+/// ([okAction], D12), and the clip's sound (V2-50): the phone has both on
+/// the card itself.
+Future<ReelSheetAction?> showReelSheet(
+  BuildContext context,
+  ReelController c, {
+  required bool isTv,
+  ReelOkAction okAction = ReelOkAction.watch,
+}) async {
   final card = c.current.card;
+  final muted = c.clips.muted;
   final picked = await showAdaptiveAppMenu<String>(
     context,
     title: card?.title.title,
@@ -23,17 +34,27 @@ Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {
       if (c.canMoreLike)
         const AppMenuItem(value: 'moreLike', icon: Symbols.auto_awesome_motion_rounded, label: 'More like this'),
       // The phone has Details on the card itself.
-      if (isTv) const AppMenuItem(value: 'details', icon: Symbols.info_rounded, label: 'Details'),
+      if (isTv && okAction == ReelOkAction.details)
+        const AppMenuItem(value: 'watch', icon: Symbols.play_arrow_rounded, label: 'Watch')
+      else if (isTv)
+        const AppMenuItem(value: 'details', icon: Symbols.info_rounded, label: 'Details'),
       const AppMenuItem(value: 'notForMe', icon: Symbols.do_not_disturb_on_rounded, label: 'Not for me'),
       if (c.current.clip != null)
         const AppMenuItem(value: 'spoiled', icon: Symbols.visibility_off_rounded, label: 'Spoiled me'),
       const AppMenuItem(value: 'seenIt', icon: Symbols.check_rounded, label: 'Seen it'),
+      // The phone has its own mute button at the top.
+      if (isTv)
+        AppMenuItem(
+          value: 'sound',
+          icon: muted ? Symbols.volume_up_rounded : Symbols.volume_off_rounded,
+          label: muted ? 'Sound on' : 'Sound off',
+        ),
       // The phone picks decks from its own button at the top.
       if (isTv) ...[
         const AppMenuDivider(),
         const AppMenuHeader(label: 'Decks'),
         for (final (i, d) in c.decks.indexed)
-          AppMenuItem(value: 'deck:${d.id}', icon: _deckIcon(d.id), label: d.name, selected: i == c.deckIndex),
+          AppMenuItem(value: 'deck:${d.id}', icon: reelDeckIcon(d.id), label: d.name, selected: i == c.deckIndex),
       ],
     ],
   );
@@ -55,13 +76,15 @@ Future<void> showReelDeckPicker(BuildContext context, ReelController c) async {
     anchorAlignment: AppMenuAnchorAlignment.center,
     entries: [
       for (final (i, d) in c.decks.indexed)
-        AppMenuItem(value: d.id, icon: _deckIcon(d.id), label: d.name, selected: i == c.deckIndex),
+        AppMenuItem(value: d.id, icon: reelDeckIcon(d.id), label: d.name, selected: i == c.deckIndex),
     ],
   );
   if (picked != null) await c.openDeck(picked);
 }
 
-IconData _deckIcon(String id) => switch (id) {
+/// Each deck's icon, the same in the menu, the picker and the TV's deck
+/// strip.
+IconData reelDeckIcon(String id) => switch (id) {
   'for-you' => Symbols.auto_awesome_rounded,
   'fits-tonight' => Symbols.bedtime_rounded,
   'another-go' => Symbols.replay_rounded,

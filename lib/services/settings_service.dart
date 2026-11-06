@@ -820,6 +820,11 @@ class SettingsService extends BaseSharedPreferencesService {
   /// not exported, as it belongs to this device.
   static const reelIntroSeen = BoolPref('reel_intro_seen');
 
+  /// How many times the Reel has come up on this TV, counted up to one past
+  /// the sessions that always show the key hints (V2-28). Reset shows them
+  /// again; not exported.
+  static const reelHintSessions = IntPref('reel_hint_sessions');
+
   /// Show the Reel tab, which takes Explore's slot (D14). Works like
   /// [showExploreTab]. Today: shown.
   static const showReelTab = BoolPref('show_reel_tab', defaultValue: true);
@@ -1777,6 +1782,7 @@ class SettingsService extends BaseSharedPreferencesService {
     audioOutputDevice,
     reelMuted,
     reelIntroSeen,
+    reelHintSessions,
   ];
 
   /// Settings that "Reset All Settings" actually resets.

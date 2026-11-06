@@ -7,6 +7,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
 import '../../media/media_item_types.dart';
+import '../../services/device_performance.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_art.dart';
@@ -14,6 +15,9 @@ import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_library.dart';
 import '../../services/reel/reel_premise.dart';
 import '../../services/settings_service.dart';
+import '../../theme/fork_motion.dart';
+import '../../theme/mono_motion.dart';
+import '../../theme/mono_tokens.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/fork_motion_widgets.dart';
@@ -205,6 +209,17 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     switch (slot.kind) {
       case ReelSlotKind.loading:
         return const ReelCurtain();
+      case ReelSlotKind.failed:
+        return ReelMessage(
+          icon: Symbols.cloud_off_rounded,
+          title: "Couldn't load ${_c.deck.name}",
+          body: 'Check the connection and try again.',
+          action: FilledButton.tonalIcon(
+            onPressed: () => unawaited(_c.retryDeck()),
+            icon: const Icon(Symbols.refresh_rounded),
+            label: const Text('Try again'),
+          ),
+        );
       case ReelSlotKind.empty:
         return ReelMessage(
           icon: Symbols.movie_rounded,
@@ -544,85 +559,89 @@ class _Info extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 48, 12, 14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (clip != null || card.chip != null || badge != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      if (clip != null)
-                        StatChip(
-                          icon: clip.source.origin == ClipOrigin.animeTheme
-                              ? Symbols.music_note_rounded
-                              : Symbols.movie_rounded,
-                          label: clip.label,
-                        ),
-                      if (card.chip case final chip?) StatChip(label: chip),
-                      if (badge != null) StatChip(icon: Symbols.check_rounded, label: badge),
-                    ],
+          // V2-26: the block grows when the metadata lands (the clip chip,
+          // the credit) by gliding up from the bottom, never by jumping.
+          child: _Grow(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (clip != null || card.chip != null || badge != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        if (clip != null)
+                          StatChip(
+                            icon: clip.source.origin == ClipOrigin.animeTheme
+                                ? Symbols.music_note_rounded
+                                : Symbols.movie_rounded,
+                            label: clip.label,
+                          ),
+                        if (card.chip case final chip?) StatChip(label: chip),
+                        if (badge != null) StatChip(icon: Symbols.check_rounded, label: badge),
+                      ],
+                    ),
                   ),
-                ),
-              Text(
-                card.title.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700, height: 1.15),
-              ),
-              const SizedBox(height: 6),
-              ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
-              _Premise(slot: slot),
-              if (card.why case final why?) ...[
-                const SizedBox(height: 8),
                 Text(
-                  why,
+                  card.title.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
+                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700, height: 1.15),
+                ),
+                const SizedBox(height: 6),
+                ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
+                _Premise(slot: slot),
+                if (card.why case final why?) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    why,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
+                    ),
                   ),
-                ),
-              ],
-              if (clip?.source.origin == ClipOrigin.animeTheme) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Theme via AnimeThemes',
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: onWatch,
-                      icon: Icon(watchOnTv ? Symbols.tv_rounded : Symbols.play_arrow_rounded, fill: 1),
-                      label: Text(
-                        watchOnTv
-                            ? 'Watch on TV'
-                            : (slot.resumeEpisode == null ? 'Watch' : 'Resume ${slot.resumeEpisode}'),
-                        maxLines: 1,
+                ],
+                if (clip?.source.origin == ClipOrigin.animeTheme) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Theme via AnimeThemes',
+                    style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: onWatch,
+                        icon: Icon(watchOnTv ? Symbols.tv_rounded : Symbols.play_arrow_rounded, fill: 1),
+                        label: Text(
+                          watchOnTv
+                              ? 'Watch on TV'
+                              : (slot.resumeEpisode == null ? 'Watch' : 'Resume ${slot.resumeEpisode}'),
+                          maxLines: 1,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: onDetails,
-                      icon: const Icon(Symbols.info_rounded),
-                      label: const Text('Details', maxLines: 1),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onDetails,
+                        icon: const Icon(Symbols.info_rounded),
+                        label: const Text('Details', maxLines: 1),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(tooltip: 'Save', onPressed: onSave, icon: const Icon(Symbols.bookmark_add_rounded)),
-                  IconButton(tooltip: 'More', onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded)),
-                ],
-              ),
-            ],
+                    const SizedBox(width: 4),
+                    IconButton(tooltip: 'Save', onPressed: onSave, icon: const Icon(Symbols.bookmark_add_rounded)),
+                    IconButton(tooltip: 'More', onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded)),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -677,6 +696,24 @@ class _Premise extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Animates [child]'s size changes from the bottom-left at the theme's
+/// normal duration and standard curve. With reduced effects or animations
+/// off the size changes at once (an [AnimatedSize] at zero length re-dirties
+/// itself mid-layout, so it is left out then).
+class _Grow extends StatelessWidget {
+  const _Grow({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final normal = Theme.of(context).extension<MonoTokens>()?.normal ?? const Duration(milliseconds: 200);
+    final duration = ForkMotion.reduceMotion(context) ? Duration.zero : DevicePerformance.reducedDuration(normal);
+    if (duration == Duration.zero) return child;
+    return AnimatedSize(duration: duration, curve: MonoMotion.standard, alignment: Alignment.bottomLeft, child: child);
   }
 }
 
