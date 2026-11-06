@@ -5,10 +5,19 @@ import '../settings_service.dart';
 /// The measure-day probes a `plezy://reel?probe=…` link names.
 enum ReelProbeKind {
   /// Clip coverage over the For You pool (`probe=coverage`).
-  coverage,
+  coverage('coverage'),
 
   /// The shown card's watch state on the server (`probe=watchstate`).
-  watchstate,
+  watchstate('watchstate'),
+
+  /// The shape of the servers' extras: Media per extra, resolution,
+  /// bitrate, codecs, channels (`probe=extras-shape`, plan V2-20).
+  extrasShape('extras-shape');
+
+  const ReelProbeKind(this.link);
+
+  /// The name a `plezy://reel?probe=…` link gives it.
+  final String link;
 }
 
 /// Fork: the Reel's hidden developer setting (plan V2-62). The debug
@@ -43,7 +52,7 @@ abstract final class ReelDeveloper {
   /// a release build.
   static ReelProbeKind? probe(String? name, {bool debugBuild = kDebugMode, SettingsService? settings}) {
     if (name == null) return null;
-    final kind = ReelProbeKind.values.where((k) => k.name == name).firstOrNull;
+    final kind = ReelProbeKind.values.where((k) => k.link == name).firstOrNull;
     if (kind == null) return null;
     return debugBuild || on(debugBuild: debugBuild, settings: settings) ? kind : null;
   }

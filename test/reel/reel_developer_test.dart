@@ -61,6 +61,19 @@ void main() {
     expect(ReelDeveloper.on(debugBuild: true, settings: settings), isFalse, reason: 'the overlay waits for the toggle');
   });
 
+  test('the extras-shape probe (V2-20) is gated like the others, by its link name', () async {
+    expect(releaseProbe('extras-shape'), isNull);
+    expect(ReelDeveloper.probe('extras-shape', debugBuild: true, settings: settings), ReelProbeKind.extrasShape);
+    await settings.write(SettingsService.reelDebugOverlay, true);
+    await settings.write(SettingsService.enableDebugLogging, true);
+    expect(releaseProbe('extras-shape'), ReelProbeKind.extrasShape);
+    expect(releaseProbe('extrasShape'), isNull, reason: 'the link name, not the Dart name');
+    expect(
+      DeepLink.tryParse('plezy://reel?probe=extras-shape'),
+      isA<ReelLink>().having((l) => l.probe, 'probe', 'extras-shape'),
+    );
+  });
+
   test('no probe, or one nobody knows, never runs anything', () async {
     await settings.write(SettingsService.reelDebugOverlay, true);
     await settings.write(SettingsService.enableDebugLogging, true);
