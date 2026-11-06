@@ -102,6 +102,10 @@ dependencies:
   web_socket: ^1.0.1
   flutter_onnxruntime: ^1.9.0
   video_player: ^2.14.1
+  # Vendored 2.12.2: adds per-player buffer durations for the Reel feed
+  # (packages/video_player_android/README.md lists every change).
+  video_player_android:
+    path: packages/video_player_android
 
 dev_dependencies:
   archive: ^4.0.9
@@ -121,6 +125,8 @@ dev_dependencies:
   shared_preferences_platform_interface: ^2.4.0
   path_provider_platform_interface: ^2.1.0
   connectivity_plus_platform_interface: ^2.1.0
+  # The Reel feed's buffer test drives the vendored video_player_android.
+  video_player_platform_interface: ^6.9.0
   # Exercise vendored desktop preference stores against real file I/O,
   # including #1732 repair and atomic writes.
   shared_preferences_linux: ^2.4.1
@@ -159,6 +165,10 @@ dependency_overrides:
     path: packages/shared_preferences_windows
   shared_preferences_linux:
     path: packages/shared_preferences_linux
+  # video_player depends on the hosted package; every consumer gets the
+  # vendored copy instead.
+  video_player_android:
+    path: packages/video_player_android
 flutter:
   uses-material-design: true
   assets:
