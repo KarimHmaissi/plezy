@@ -1,5 +1,6 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart';
+import 'package:flutter/widgets.dart';
+
+import '../../utils/app_logger.dart';
 
 /// The Reel's own decoded art (plan V2-05).
 ///
@@ -34,6 +35,19 @@ abstract final class ReelArt {
   /// every build: server art resolves its key synchronously.
   static void track(ImageProvider provider) {
     provider.obtainKey(ImageConfiguration.empty).then<void>(_record, onError: (Object _) {});
+  }
+
+  /// Warms [provider] in the image cache ahead of the card that shows it
+  /// (plan V2-13), tracked first so suspend still evicts it. Completes when
+  /// the image has decoded or failed; a failure is only logged, and the
+  /// card's own build tries again.
+  static Future<void> precache(ImageProvider provider, BuildContext context) {
+    track(provider);
+    return precacheImage(
+      provider,
+      context,
+      onError: (Object e, StackTrace? _) => appLogger.d('[ReelArt] precache failed (${e.runtimeType})'),
+    );
   }
 
   static void _record(Object key) {

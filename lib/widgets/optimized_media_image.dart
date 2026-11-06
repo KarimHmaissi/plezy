@@ -306,18 +306,18 @@ class OptimizedMediaImage extends StatelessWidget {
   }
 
   Widget _buildCachedImage(BuildContext context, double effectiveWidth, double effectiveHeight) {
-    final pixelRatio = MediaImageHelper.artworkPixelRatio(context, imageType: imageType);
-
-    final imageUrl = MediaImageHelper.getOptimizedImageUrl(
+    final art = MediaImageHelper.serverArtworkProviderFor(
+      context,
       client: client,
       thumbPath: imagePath,
-      maxWidth: effectiveWidth,
-      maxHeight: effectiveHeight,
-      pixelRatio: pixelRatio,
+      width: effectiveWidth,
+      height: effectiveHeight,
       imageType: imageType,
+      logoToneTarget: logoToneTarget,
+      logoToneRemapMixed: logoToneRemapMixed,
     );
 
-    if (imageUrl.isEmpty) {
+    if (art == null) {
       // An unresolvable URL (no client, offline, suppressed transcode) is a
       // load failure from the caller's point of view, so honour its own
       // failure UI rather than the generic broken-image tile.
@@ -326,22 +326,7 @@ class OptimizedMediaImage extends StatelessWidget {
       }
       return _buildFallback(context);
     }
-
-    final scaledWidth = effectiveWidth * pixelRatio;
-    final scaledHeight = effectiveHeight * pixelRatio;
-    final (memWidth, memHeight) = MediaImageHelper.getMemCacheDimensions(
-      displayWidth: scaledWidth.isFinite && scaledWidth > 0 ? scaledWidth.round() : 0,
-      displayHeight: scaledHeight.isFinite && scaledHeight > 0 ? scaledHeight.round() : 0,
-      imageType: imageType,
-    );
-
-    final resizedProvider = MediaImageHelper.serverArtworkProvider(
-      imageUrl: imageUrl,
-      memWidth: memWidth,
-      memHeight: memHeight,
-      logoToneTarget: logoToneTarget,
-      logoToneRemapMixed: logoToneRemapMixed,
-    );
+    final (url: imageUrl, provider: resizedProvider) = art;
     onImageProvider?.call(resizedProvider);
 
     // Reduced tier: swap in directly, no fade machinery at all.

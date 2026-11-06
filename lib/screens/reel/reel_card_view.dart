@@ -6,6 +6,7 @@ import '../../media/media_item.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_library.dart';
 import '../../utils/content_utils.dart';
 import '../../utils/formatters.dart';
 import '../../utils/layout_constants.dart';
@@ -31,6 +32,16 @@ class ReelCardView extends StatelessWidget {
     this.onSave,
     this.onRemote,
   });
+
+  /// TV: decodes [card]'s spotlight art into the image cache exactly as
+  /// this view will build it once the card is on screen (plan V2-13): the
+  /// same server, path, screen-sized slot and, for a card with a [clip],
+  /// the lighter thumbnail art (V2-05).
+  static Future<void> precacheArt(BuildContext context, ReelCardData card, MediaItem item, {required bool clip}) async {
+    final client = context.tryGetMediaClientWithFallback(serverIdOrNull(card.best.serverId));
+    final provider = TvSpotlightBackground.artProviderFor(context, item, client, lightArt: clip);
+    if (provider != null) await ReelArt.precache(provider, context);
+  }
 
   final ReelController controller;
   final ReelSlot slot;

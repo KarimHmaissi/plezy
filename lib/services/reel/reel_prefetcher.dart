@@ -4,9 +4,9 @@ import '../../utils/app_logger.dart';
 import 'clip_resolver.dart';
 
 /// What a prefetch task does for its card, in the order a card's stages
-/// run: its clip first, then its art and text (plan V2-11; V2-13 adds the
-/// art precache after these).
-enum ReelPrefetchStage { resolve, metadata }
+/// run: its clip first, then its art and text (plan V2-11), then, for the
+/// next two cards, its art decoded into the image cache (plan V2-13).
+enum ReelPrefetchStage { resolve, metadata, art }
 
 /// One piece of work for one card near the one on screen.
 class ReelPrefetchTask {
@@ -83,6 +83,13 @@ class ReelPrefetcher {
   final Duration holdCap;
 
   static String keyOf(String cardId, ReelPrefetchStage stage) => '$cardId/${stage.name}';
+
+  /// The lane of art precaches for [serverId]'s images. Kept apart from the
+  /// server's own lane because an art task waits for its card's clip and
+  /// text first, and a task waiting on another lane while holding this one
+  /// could stall the queue; the art downloads still go one at a time per
+  /// server.
+  static String artLaneOf(String serverId) => '$serverId~art';
 
   /// The lane a card's clip lookup starts in: AnimeThemes for an anime
   /// show, else the server the ladder asks first (an HD copy before 4K).

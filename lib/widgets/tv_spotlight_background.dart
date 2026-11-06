@@ -80,6 +80,36 @@ class TvSpotlightBackground extends StatelessWidget {
 
   double _scale(BuildContext context) => TvLayoutConstants.scaleOf(context);
 
+  static List<String> _fallbackPathsOf(MediaItem? media, double containerAspect) => media == null
+      ? const <String>[]
+      : <String>[...media.heroArtCandidates(containerAspectRatio: containerAspect), ?media.thumbPath];
+
+  /// Fork (The Reel): the network provider this background builds first for
+  /// [item] under [context]'s screen, so a card's art can be warmed before
+  /// it shows. Null when there is nothing to fetch.
+  static ImageProvider? artProviderFor(
+    BuildContext context,
+    MediaItem item,
+    MediaServerClient? client, {
+    bool lightArt = false,
+  }) {
+    final size = MediaQuery.sizeOf(context);
+    final containerAspect = size.width / size.height;
+    final path = CyclingMediaBackdrop.firstPathOf(
+      item.heroRotationPaths(containerAspectRatio: containerAspect),
+      _fallbackPathsOf(item, containerAspect),
+    );
+    if (path == null) return null;
+    return CyclingMediaBackdrop.networkProviderFor(
+      context,
+      client: client,
+      path: path,
+      width: size.width,
+      height: size.height,
+      imageType: lightArt ? ImageType.thumb : ImageType.art,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final media = item;
@@ -90,9 +120,7 @@ class TvSpotlightBackground extends StatelessWidget {
     // rotating layer avoids full-screen saveLayers on low-end TVs.
     final size = MediaQuery.sizeOf(context);
     final containerAspect = size.width / size.height;
-    final fallbackPaths = media == null
-        ? const <String>[]
-        : <String>[...media.heroArtCandidates(containerAspectRatio: containerAspect), ?media.thumbPath];
+    final fallbackPaths = _fallbackPathsOf(media, containerAspect);
     return SettingValueBuilder<bool>(
       pref: SettingsService.tvCornerSpotlightBackdrop,
       builder: (context, cornerBackdrop, _) {

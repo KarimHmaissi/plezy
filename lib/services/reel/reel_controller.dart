@@ -36,6 +36,12 @@ typedef ReelWatch = Future<bool> Function(MediaItem item, {required bool onTv});
 /// Adds a title to the Plex watchlist (Save's mirror).
 typedef ReelWatchlist = Future<bool> Function(MediaItem item);
 
+/// Decodes a card's art into the image cache before it shows, with exactly
+/// the providers the view will build for it ([clip]: the card has a clip,
+/// which on the TV picks the lighter art). Set by the view on screen, which
+/// knows its own frame; completes when the art has decoded or failed.
+typedef ReelArtPrecache = Future<void> Function(ReelCardData card, MediaItem item, {required bool clip});
+
 enum ReelSlotKind { card, poolEnd, empty, loading }
 
 /// A card as the views draw it.
@@ -150,6 +156,24 @@ class ReelController extends ChangeNotifier {
 
   @visibleForTesting
   ReelPrefetcher get prefetcher => _prefetch;
+
+  /// Warms the next two cards' art (plan V2-13); null while no view is
+  /// there to build it.
+  ReelArtPrecache? artPrecache;
+
+  /// Cards whose art is warm (`id/clip`), so a card is precached once per
+  /// visit. Forgotten on suspend and under memory pressure, which evict it.
+  final Set<String> _artWarm = {};
+
+  /// Bumped each time the queue is cleared (Watch, suspend, a deck change,
+  /// memory pressure), so an art task already running but still waiting on
+  /// its card's clip and text fetches nothing after it.
+  int _cleared = 0;
+
+  void _clearPrefetch() {
+    _cleared++;
+    _prefetch.clear();
+  }
 
   /// The direction of travel (1 down the deck, -1 back up it): which way the
   /// prefetch window and the preload lean.
@@ -283,9 +307,10 @@ class ReelController extends ChangeNotifier {
   Future<void> suspend() async {
     _active = false;
     _generation++;
-    _prefetch
-      ..clear()
-      ..release();
+    _clearPrefetch();
+    _prefetch.release();
+    // The view evicts the Reel's art on suspend: warm it again next visit.
+    _artWarm.clear();
     await _leaveCard();
     await clips.release();
     _firstClip = true;
@@ -403,7 +428,7 @@ class ReelController extends ChangeNotifier {
   /// Next / previous deck (wraps), with the deck strip.
   Future<void> switchDeck(int dir) async {
     if (decks.length < 2) return;
-    _prefetch.clear();
+    _clearPrefetch();
     await _leaveCard();
     _deck = (_deck + dir) % decks.length;
     if (_deck < 0) _deck += decks.length;
@@ -416,7 +441,7 @@ class ReelController extends ChangeNotifier {
   Future<void> openDeck(String id) async {
     final i = await _deckIndex(id);
     if (i < 0 || i == _deck) return;
-    _prefetch.clear();
+    _clearPrefetch();
     await _leaveCard();
     _deck = i;
     _showStrip();
@@ -544,8 +569,10 @@ class ReelController extends ChangeNotifier {
 
   /// Hands the prefetcher the window around the card on screen, nearest
   /// first (0, +1, -1, +2 in the direction of travel), each card's clip
-  /// before its art and text. On a metered or offline link, or under memory
-  /// pressure, only the card on screen and the next.
+  /// before its art and text, and for +1 and +2 their art decoded last
+  /// (plan V2-13). On a metered or offline link, or under memory pressure,
+  /// only the card on screen and the next; under memory pressure no art is
+  /// decoded ahead.
   void _plan(List<ReelCardData> list, int gen) {
     if (_disposed || gen != _generation) return;
     final lean = memoryLevel >= 1 || resolver.playback.link != ReelLink.unmetered;
@@ -576,8 +603,54 @@ class ReelController extends ChangeNotifier {
           ),
         );
       }
+      if (offset > 0 && memoryLevel == 0 && artPrecache != null && !_artIsWarm(c)) {
+        tasks.add(
+          ReelPrefetchTask(
+            cardId: c.id,
+            offset: offset,
+            stage: ReelPrefetchStage.art,
+            lane: ReelPrefetcher.artLaneOf(c.best.serverId),
+            run: () => _warmArt(c),
+          ),
+        );
+      }
     }
     _prefetch.schedule(gen, tasks);
+  }
+
+  /// Whether [c]'s art is warm for the clip answer it has now (an unresolved
+  /// card isn't).
+  bool _artIsWarm(ReelCardData c) => _resolved.contains(c.id) && _artWarm.contains(_artKey(c));
+
+  String _artKey(ReelCardData c) => '${c.id}/${_clip[c.id] != null}';
+
+  /// The art stage: once the card's clip answer and text are in (the TV's
+  /// art depends on both), its art is decoded at the size its view shows
+  /// it. Skipped when either is missing, under memory pressure, or once the
+  /// queue was cleared (Watch, suspend) or the Reel has gone.
+  Future<void> _warmArt(ReelCardData c) async {
+    final cleared = _cleared;
+    await _prefetch.done(ReelPrefetcher.keyOf(c.id, ReelPrefetchStage.resolve));
+    await _prefetch.done(ReelPrefetcher.keyOf(c.id, ReelPrefetchStage.metadata));
+    final precache = artPrecache;
+    final item = _item[c.id];
+    if (_disposed ||
+        !_active ||
+        cleared != _cleared ||
+        memoryLevel != 0 ||
+        precache == null ||
+        item == null ||
+        !_resolved.contains(c.id)) {
+      return;
+    }
+    final key = _artKey(c);
+    if (!_artWarm.add(key)) return;
+    try {
+      await precache(c, item, clip: _clip[c.id] != null);
+    } catch (e) {
+      _artWarm.remove(key);
+      appLogger.d('Reel: art precache failed (${e.runtimeType})');
+    }
   }
 
   /// TV: the next card in the direction of travel is preloaded on the clip
@@ -709,7 +782,7 @@ class ReelController extends ChangeNotifier {
     final c = s.card;
     if (c == null) return false;
     // No Reel prefetch competes with the hand-over, or follows it.
-    _prefetch.clear();
+    _clearPrefetch();
     // Watch keeps its full read (file checks, streams): the card's own
     // item may be a lean row. The card's item stands in only when that read
     // fails.
@@ -889,8 +962,10 @@ class ReelController extends ChangeNotifier {
     if (to <= memoryLevel) return;
     memoryLevel = to;
     appLogger.w('Reel: memory pressure, level $memoryLevel');
-    // The queue narrows to the card on screen and the next.
-    _prefetch.clear();
+    // The queue narrows to the card on screen and the next, and no art is
+    // decoded ahead; art warmed so far may be trimmed, so it is forgotten.
+    _clearPrefetch();
+    _artWarm.clear();
     final list = cards;
     if (list != null) _plan(list, _generation);
     if (to == 1) {

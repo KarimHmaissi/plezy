@@ -46,7 +46,7 @@ void main() {
   /// art and text after its clip.
   List<ReelPrefetchTask> window() => [
     for (final (card, offset) in [('c5', 2), ('c2', -1), ('c4', 1), ('c3', 0)])
-      for (final stage in ReelPrefetchStage.values) task(card, offset, stage: stage),
+      for (final stage in [ReelPrefetchStage.resolve, ReelPrefetchStage.metadata]) task(card, offset, stage: stage),
   ];
 
   test('the card on screen starts at once; the rest go nearest first, clip before art', () async {
@@ -96,6 +96,23 @@ void main() {
     expect(started.last, 'c6/resolve', reason: 'nearest first once the server is free');
     expect(started, isNot(contains('c2/resolve')));
     expect(started.where((k) => k == 'c4/resolve'), hasLength(1), reason: 'a running task is never doubled');
+  });
+
+  test("a card's art goes last, in its server's art lane, so it never holds the server's reads", () async {
+    final art = ReelPrefetcher.artLaneOf('Server A');
+    q.schedule(1, [
+      task('c3', 0),
+      task('c4', 1),
+      task('c4', 1, stage: ReelPrefetchStage.metadata),
+      task('c4', 1, stage: ReelPrefetchStage.art, lane: art),
+      task('c5', 2, stage: ReelPrefetchStage.art, lane: art),
+    ]);
+    expect(started, ['c3/resolve', 'c4/art'], reason: 'art lane free; the server busy with the card on screen');
+    await finish('c3/resolve');
+    expect(started.last, 'c4/resolve', reason: "c4's art waiting doesn't hold the server");
+    await finish('c4/art');
+    expect(started.last, 'c5/art', reason: 'art downloads go one at a time per server');
+    expect(q.queued.map((t) => t.key), ['c4/metadata']);
   });
 
   test('a window from an older generation is ignored', () async {

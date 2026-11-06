@@ -343,7 +343,16 @@ void main() {
       final size = tester.getSize(find.byWidget(still));
       expect(size.width, lessThanOrEqualTo(420));
       expect(size.height, moreOrLessEquals(size.width * 9 / 16, epsilon: 1));
+      // The frame the next cards' art is warmed at (V2-13).
+      expect(size, reelStillFrame(tester.getSize(find.byType(ReelFeedView)), 16 / 9));
     }
+  });
+
+  testWidgets('the feed warms the next cards\' art while it is mounted (V2-13)', (tester) async {
+    await pump(tester);
+    expect(c.artPrecache, isNotNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(c.artPrecache, isNull, reason: 'a feed that has gone builds no art');
   });
 
   group('TV card art', () {

@@ -22,6 +22,7 @@ import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_playback_profile.dart';
+import 'package:plezy/services/reel/reel_prefetcher.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 import 'clip_player_test.dart' show FakeClipEngine;
@@ -179,6 +180,17 @@ class _RecordingMedia extends _Media {
     reads.add(ratingKey);
     return super.item(serverId, ratingKey);
   }
+}
+
+/// Titles in [bare] have no extras: they end as AI cards.
+class _BareServers extends _Servers {
+  _BareServers(this.bare);
+
+  final Set<String> bare;
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async =>
+      bare.contains(ratingKey) ? const [] : super.extras(serverId, ratingKey, timeout: timeout);
 }
 
 class _Deck extends ReelDeck {
@@ -1352,6 +1364,145 @@ void main() {
       await pumpEventQueue();
       expect(c.prefetcher.held, isFalse);
       expect(servers.reads, ['1', '2', '3']);
+      c.dispose();
+    });
+  });
+  group('the next two cards\' art is warmed ahead (V2-13)', () {
+    List<ReelDeck> deckOf(int n) => [
+      _Deck('a', [for (var i = 1; i <= n; i++) _card('$i')]),
+    ];
+
+    /// Records each warm: the card, the item it was given, and whether the
+    /// card had a clip.
+    List<(String, String, bool)> warmOn(ReelController c) {
+      final warmed = <(String, String, bool)>[];
+      c.artPrecache = (card, item, {required clip}) async => warmed.add((card.id, item.title ?? '', clip));
+      return warmed;
+    }
+
+    Iterable<String> artQueued(ReelController c) =>
+        c.prefetcher.queued.where((t) => t.stage == ReelPrefetchStage.art).map((t) => t.cardId);
+
+    test('+1 and +2, after their clip and text, once the card on screen shows a frame', () async {
+      final c = make(decks: deckOf(5));
+      final warmed = warmOn(c);
+      await c.start();
+      await pumpEventQueue();
+      expect(warmed, isEmpty, reason: 'the lookahead waits for the first frame');
+      expect(artQueued(c), ['t2', 't3'], reason: 'never the card on screen or the one behind');
+
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, [('t2', 'Title 2', true), ('t3', 'Title 3', true)]);
+      c.dispose();
+    });
+
+    test('each card is warmed once: a step on warms only the new +2', () async {
+      final c = make(decks: deckOf(5));
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      warmed.clear();
+
+      await c.step(1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed.map((w) => w.$1), ['t4']);
+      c.dispose();
+    });
+
+    test('an AI card is warmed as one: the TV gives it the full backdrop', () async {
+      final c = make(decks: deckOf(4), servers: _BareServers({'3'}));
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, [('t2', 'Title 2', true), ('t3', 'Title 3', false)]);
+      c.dispose();
+    });
+
+    test('nothing is warmed under memory pressure', () async {
+      final c = make(decks: deckOf(4));
+      final warmed = warmOn(c);
+      await c.start();
+      await pumpEventQueue();
+      await c.trimMemory();
+      expect(artQueued(c), isEmpty);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, isEmpty);
+      c.dispose();
+    });
+
+    test('with no view to build the art, no art task is queued', () async {
+      final c = make(decks: deckOf(4));
+      await c.start();
+      await pumpEventQueue();
+      expect(artQueued(c), isEmpty);
+      c.dispose();
+    });
+
+    test('suspend forgets what was warmed: the art is evicted, so the next visit warms it again', () async {
+      final c = make(decks: deckOf(4));
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, hasLength(2));
+
+      await c.suspend();
+      warmed.clear();
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed.map((w) => w.$1), ['t2', 't3']);
+      c.dispose();
+    });
+
+    test('a warm that fails is tried again on the next window', () async {
+      final c = make(decks: deckOf(5));
+      var fail = true;
+      final warmed = <String>[];
+      c.artPrecache = (card, item, {required clip}) async {
+        if (fail && card.id == 't3') throw StateError('decode failed');
+        warmed.add(card.id);
+      };
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, ['t2']);
+
+      fail = false;
+      await c.step(1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(warmed, ['t2', 't3', 't4'], reason: 't3 is +1 now and is warmed again');
+      c.dispose();
+    });
+
+    test('Watch: an art task still waiting on its card\'s text fetches nothing after it', () async {
+      final media = _GatedMedia('2');
+      final c = make(decks: deckOf(4), media: media, onWatch: (_, {required onTv}) async => true);
+      final warmed = warmOn(c);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(c.prefetcher.running.map((t) => t.key), contains('t2/art'), reason: "waiting on t2's text");
+
+      await c.watch();
+      media.gate.complete();
+      await pumpEventQueue();
+      expect(warmed, isEmpty);
+      c.dispose();
+    });
+
+    test('the phone feed warms ahead at once: it has no clip core to wait for', () async {
+      final c = make(decks: deckOf(4), externalClips: true);
+      final warmed = warmOn(c);
+      await c.start();
+      await pumpEventQueue();
+      expect(warmed.map((w) => w.$1), ['t2', 't3']);
       c.dispose();
     });
   });
