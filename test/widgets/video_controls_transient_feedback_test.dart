@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,7 @@ import 'package:plezy/providers/playback_state_provider.dart';
 import 'package:plezy/services/live_seek_accumulator.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/video_volume_controller.dart';
+import 'package:plezy/utils/key_event_simulator.dart';
 import 'package:plezy/utils/platform_detector.dart';
 import 'package:plezy/watch_together/providers/watch_together_provider.dart';
 import 'package:plezy/focus/transport_keys.dart';
@@ -291,6 +293,80 @@ void main() {
       expect(player.seeks, hasLength(1));
       // 1 press at 10s + 5 repeats at 1.5x + 3 repeats at 3x = 10 + 75 + 90.
       expect(player.seeks.single, const Duration(minutes: 10) + const Duration(seconds: 175));
+
+      await settleFeedback(tester);
+    });
+
+    testWidgets('a held gamepad or phone direction commits exactly one seek on release', (tester) async {
+      // The gamepad and companion-remote hold goes through the key simulator.
+      // It used to send a full press per repeat, so every synthetic release
+      // committed the burst so far: a 1s hold fired a seek per 80ms tick.
+      await pumpControls(tester);
+      final simulator = KeyEventSimulatorController(deviceType: ui.KeyEventDeviceType.gamepad);
+      addTearDown(simulator.dispose);
+
+      simulator.startKeyRepeat(
+        LogicalKeyboardKey.arrowRight,
+        initialDelay: const Duration(milliseconds: 400),
+        interval: const Duration(milliseconds: 80),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 80));
+      }
+
+      expect(chrome.controlsVisible, isFalse, reason: 'a held seek must not escalate to the scrub bar');
+      expect(player.seeks, isEmpty, reason: 'the burst is coalesced, not dispatched per repeat');
+
+      simulator.stopKeyRepeat();
+      await tester.pump();
+
+      expect(player.seeks, hasLength(1));
+      // Same acceleration as a hardware hold: 1 press at 10s + 5 repeats at
+      // 1.5x + 3 repeats at 3x = 10 + 75 + 90.
+      expect(player.seeks.single, const Duration(minutes: 10) + const Duration(seconds: 175));
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(player.seeks, hasLength(1), reason: 'the debounce has nothing left to commit');
+
+      await settleFeedback(tester);
+    });
+
+    testWidgets('a held gamepad direction on the focused timeline commits exactly one seek', (tester) async {
+      await pumpControls(tester);
+      chrome.show();
+      await tester.pumpAndSettle();
+      final timeline = tester
+          .widgetList<Focus>(find.byType(Focus))
+          .map((focus) => focus.focusNode)
+          .firstWhere((node) => node?.debugLabel == 'Timeline')!;
+      timeline.requestFocus();
+      await tester.pump();
+      expect(timeline.hasPrimaryFocus, isTrue, reason: 'precondition: the scrub bar owns focus');
+
+      final simulator = KeyEventSimulatorController(deviceType: ui.KeyEventDeviceType.gamepad);
+      addTearDown(simulator.dispose);
+      simulator.startKeyRepeat(
+        LogicalKeyboardKey.arrowRight,
+        initialDelay: const Duration(milliseconds: 400),
+        interval: const Duration(milliseconds: 80),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 80));
+      }
+      expect(player.seeks, isEmpty, reason: 'only the preview moves while the key is held');
+
+      simulator.stopKeyRepeat();
+      await tester.pump();
+
+      expect(player.seeks, hasLength(1));
+      expect(player.seeks.single, const Duration(minutes: 10) + const Duration(seconds: 175));
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(player.seeks, hasLength(1));
 
       await settleFeedback(tester);
     });

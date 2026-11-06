@@ -188,6 +188,16 @@ Details of each are in the dated entries below.
 - Plezy now publishes Watch Next art at 1280×720 instead of 640×360, so
   Arc's cards on the 4K TV aren't upscaled from half size. Arc's side of
   this (decoding at the card's real pixel size) is in the Arc fork.
+### Holding a direction sends real key repeats
+- Holding the D-pad or stick on a game controller used to send a fresh
+  press-and-release every 80 ms. It now behaves like a held hardware key:
+  one press, then a repeat every 80 ms after a 400 ms wait, and one release
+  when you let go (`KeyEventSimulatorController.startKeyRepeat`).
+- A hold during playback now commits **one** seek when you let go, with the
+  same speed-up a remote hold gets. Before, every synthetic release
+  committed a seek, so a one-second hold fired about seven.
+- Holding still walks focus down lists and rows, one item per repeat. This
+  is also the base the phone remote's hold will use.
 
 ## 2026-11-03
 
