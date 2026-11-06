@@ -73,6 +73,7 @@ class ReelController extends ChangeNotifier {
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
+    ReelStore.picksChanged.addListener(_onPicksChanged);
     decks.forEach(_watchDeck);
   }
 
@@ -210,6 +211,8 @@ class ReelController extends ChangeNotifier {
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
     _active = true;
+    // The picks are synced: the other device may have saved since.
+    unawaited(_loadSaved());
     // The degrade ladder carries over: coming back from Watch or another tab
     // says nothing about memory. Only the policy's restore resets it.
     if (deckId != null) {
@@ -566,29 +569,84 @@ class ReelController extends ChangeNotifier {
     }
   }
 
+  /// The titles saved and still waiting on the TV's Home (fresh picks),
+  /// so the phone's Save shows as saved (V2-29).
+  final Set<String> _saved = {};
+
+  /// Bumped by every Save, so a picks read that started before it can't
+  /// put back a list without it.
+  int _savedReads = 0;
+
+  /// Whether the card [cardId] is saved: a fresh pick, from this device or
+  /// synced from the other one.
+  bool isSaved(String cardId) => _saved.contains(cardId);
+
+  void _onPicksChanged() => unawaited(_loadSaved());
+
+  Future<void> _loadSaved() async {
+    final read = ++_savedReads;
+    final List<ReelPick> picks;
+    try {
+      picks = await store.picks();
+    } catch (e) {
+      appLogger.w('Reel: saved picks could not be read', error: e);
+      return;
+    }
+    if (_disposed || read != _savedReads) return;
+    final now = _clock();
+    final saved = {
+      for (final p in picks)
+        if (p.isFresh(now)) p.titleId,
+    };
+    if (setEquals(saved, _saved)) return;
+    _saved
+      ..clear()
+      ..addAll(saved);
+    notifyListeners();
+  }
+
   /// One Save: waits on the TV's Home for 3 days and goes to the Plex
-  /// watchlist so it's never lost.
-  Future<void> save() => _act('save', () async {
-    final s = current;
-    final c = s.card;
+  /// watchlist so it's never lost. The card shows as saved at once, and
+  /// goes back if the pick couldn't be kept. [silent] leaves out the
+  /// confirmation (the phone feed's filled Save and burst say it, and a
+  /// toast would float over its buttons); a failure is always said.
+  Future<void> save({bool silent = false}) async {
+    final c = current.card;
     if (c == null) return;
-    await store.savePick(
-      ReelPick(
-        titleId: c.id,
-        groupKey: c.title.groupKey,
-        serverId: c.best.serverId,
-        ratingKey: c.best.ratingKey,
-        title: c.title.title,
-        at: _clock().toUtc(),
-        deck: deck.id,
-      ),
-    );
+    _savedReads++;
+    final added = _saved.add(c.id);
+    if (added) notifyListeners();
+    var kept = false;
+    try {
+      await _act('save', () async {
+        await store.savePick(
+          ReelPick(
+            titleId: c.id,
+            groupKey: c.title.groupKey,
+            serverId: c.best.serverId,
+            ratingKey: c.best.ratingKey,
+            title: c.title.title,
+            at: _clock().toUtc(),
+            deck: deck.id,
+          ),
+        );
+        kept = true;
+        await _afterSave(c, silent: silent);
+      });
+    } finally {
+      if (!kept && added && _saved.remove(c.id)) notifyListeners();
+    }
+  }
+
+  /// After the pick is kept: the event, the watchlist mirror, the Home row
+  /// and the confirmation.
+  Future<void> _afterSave(ReelCardData c, {required bool silent}) async {
     await store.record(c.id, ReelAction.save, deck: deck.id);
-    unawaited(_mirrorToWatchlist(s.item, c));
+    unawaited(_mirrorToWatchlist(_item[c.id], c));
     final seat = onSaved;
     if (seat != null) unawaited(seat().catchError((Object _) {}));
-    _say((reachesTvNow?.call() ?? true) ? savedOnTv : savedForLater);
-  });
+    if (!silent) _say((reachesTvNow?.call() ?? true) ? savedOnTv : savedForLater);
+  }
 
   /// Save's watchlist mirror. A card saved before its metadata landed
   /// resolves the item first, as [watch] does, so the mirror isn't skipped.
@@ -768,6 +826,7 @@ class ReelController extends ChangeNotifier {
     _generation++;
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);
+    ReelStore.picksChanged.removeListener(_onPicksChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);
     }

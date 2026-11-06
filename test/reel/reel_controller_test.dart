@@ -267,6 +267,63 @@ void main() {
     c.dispose();
   });
 
+  group('V2-29: Save shows saved state', () {
+    test('a saved card reads as saved at once; a silent Save says nothing', () async {
+      final c = make();
+      await c.start();
+      expect(c.isSaved('t1'), isFalse);
+      var heard = 0;
+      c.addListener(() => heard++);
+      final saving = c.save(silent: true);
+      expect(c.isSaved('t1'), isTrue, reason: 'before the write lands');
+      expect(heard, greaterThan(0));
+      await saving;
+      await pumpEventQueue();
+      expect(c.isSaved('t1'), isTrue);
+      expect(c.isSaved('t2'), isFalse);
+      expect((await store.freshPicks()).map((p) => p.titleId), ['t1']);
+      expect(seated, 1);
+      expect(c.toast.value, isNull);
+      c.dispose();
+    });
+
+    test('a pick already kept (this device or synced) shows as saved; a stale one does not', () async {
+      // The store prunes by the wall clock, so the picks are dated from it.
+      final now = DateTime.now().toUtc();
+      ReelPick pick(String id, DateTime at) =>
+          ReelPick(titleId: id, groupKey: 'g', serverId: 's1', ratingKey: '1', title: 'Harbor Lights', at: at);
+      // Written as the synced list, as a stale pick sits there until the
+      // next save prunes it.
+      final settings = LocalCustomisationStore(db);
+      final raw = jsonEncode([
+        pick('t2', now.subtract(const Duration(hours: 5))).toJson(),
+        pick('t3', now.subtract(const Duration(days: 4))).toJson(),
+      ]);
+      await settings.writeSetting(ReelStore.picksKey, raw);
+      store = ReelStore(database: () async => db, settings: () async => settings);
+      final c = make();
+      await c.start();
+      await pumpEventQueue();
+      expect(c.isSaved('t2'), isTrue);
+      expect(c.isSaved('t3'), isFalse, reason: 'past the 3 days on Home');
+      expect(c.isSaved('t1'), isFalse);
+      c.dispose();
+    });
+
+    test('a Save the mirror could not keep goes back to unsaved and still says so when silent', () async {
+      store = ReelStore(
+        database: () async => db,
+        settings: () async => MirrorCustomisationStore({}, send: (_) => false),
+      );
+      final c = make();
+      await c.start();
+      await c.save(silent: true);
+      expect(c.isSaved('t1'), isFalse);
+      expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+  });
+
   group('card actions say where the pick lives', () {
     void readOnlyMirror() => store = ReelStore(
       database: () async => db,

@@ -203,18 +203,24 @@ void main() {
     await db.close();
   });
 
-  Widget feed({bool metered = false}) => ReelFeedView(
+  Widget feed({bool metered = false, bool watchOnTv = false}) => ReelFeedView(
     metered: metered,
     controller: c,
     players: players,
-    watchOnTv: false,
+    watchOnTv: watchOnTv,
     onWatch: () => watched++,
     onSheet: () => sheets++,
     onDecks: () => decksOpened++,
     onResize: () => resized++,
   );
 
-  Future<void> pump(WidgetTester tester, {ThemeData? appTheme, MonoPalette? palette, bool themed = false}) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    ThemeData? appTheme,
+    MonoPalette? palette,
+    bool themed = false,
+    bool watchOnTv = false,
+  }) async {
     tester.view.physicalSize = const Size(420, 860);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -223,7 +229,12 @@ void main() {
       MaterialApp(
         theme: appTheme ?? ThemeData.dark(),
         home: Scaffold(
-          body: themed ? ReelFeedTheme(palette: palette, child: feed()) : feed(),
+          body: themed
+              ? ReelFeedTheme(
+                  palette: palette,
+                  child: feed(watchOnTv: watchOnTv),
+                )
+              : feed(watchOnTv: watchOnTv),
         ),
       ),
     );
@@ -590,6 +601,103 @@ void main() {
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
   });
+  group('V2-29: Details first, Save shows saved', () {
+    Finder button<T extends Widget>(String label) =>
+        find.ancestor(of: find.text(label).first, matching: find.byWidgetPredicate((w) => w is T));
+
+    testWidgets('Details is the filled control; Watch here is tonal', (tester) async {
+      await pump(tester);
+      final details = tester.widget<ButtonStyleButton>(button<ButtonStyleButton>('Details').first);
+      final watch = tester.widget<ButtonStyleButton>(button<ButtonStyleButton>('Watch').first);
+      expect(details, isA<FilledButton>());
+      expect(watch, isA<FilledButton>());
+      expect(find.byType(OutlinedButton), findsNothing);
+      // Tonal and filled are both FilledButtons; their fills differ.
+      Color fill(String label) => tester
+          .widget<Material>(find.ancestor(of: find.text(label).first, matching: find.byType(Material)).first)
+          .color!;
+      final scheme = Theme.of(tester.element(find.text('Details').first)).colorScheme;
+      expect(fill('Details'), scheme.primary);
+      expect(fill('Watch'), scheme.secondaryContainer);
+      // Details leads the row.
+      expect(tester.getCenter(find.text('Details').first).dx, lessThan(tester.getCenter(find.text('Watch').first).dx));
+    });
+
+    testWidgets('Watch on TV stays filled while connected', (tester) async {
+      await pump(tester, watchOnTv: true);
+      final scheme = Theme.of(tester.element(find.text('Details').first)).colorScheme;
+      final fill = tester
+          .widget<Material>(find.ancestor(of: find.text('Watch on TV').first, matching: find.byType(Material)).first)
+          .color!;
+      expect(fill, scheme.primary);
+    });
+
+    testWidgets('tapping the title block opens Details', (tester) async {
+      await pump(tester);
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Like the films you finish.').first);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      expect(opened.single.id, '1');
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Title 1'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      expect(opened.map((i) => i.id), ['1', '1']);
+      expect(players.paused, isFalse, reason: 'the title is not the picture: it never pauses the clip');
+    });
+
+    Future<int> saves() async =>
+        (await store.events(since: DateTime.utc(2000))).where((e) => e.action == ReelAction.save.name).length;
+
+    testWidgets('Save fills the bookmark, bursts once and floats no toast', (tester) async {
+      await pump(tester);
+      expect(find.byTooltip('Save'), findsOneWidget);
+      await tester.tap(find.byTooltip('Save'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      expect(c.isSaved('t1'), isTrue);
+      expect(find.byTooltip('Saved'), findsOneWidget);
+      final icon = tester.widget<IconButton>(
+        find.ancestor(of: find.byTooltip('Saved'), matching: find.byType(IconButton)),
+      );
+      expect(icon.isSelected, isTrue);
+      expect(c.toast.value, isNull, reason: 'the feed saves silently');
+      expect(await tester.runAsync(saves), 1);
+
+      // A double-tap on the saved card neither bursts nor saves again.
+      await tester.pump(const Duration(seconds: 1));
+      final burst = find.byWidgetPredicate((w) => w is AnimatedOpacity && w.opacity == 1 && w.child is Center);
+      expect(burst, findsNothing);
+      final picture = tester.getCenter(find.byType(PageView)) - const Offset(0, 200);
+      await tester.tapAt(picture);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(picture);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      expect(burst, findsNothing);
+      expect(await tester.runAsync(saves), 1);
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('a double-tap on an unsaved card bursts and saves it', (tester) async {
+      await pump(tester);
+      final burst = find.byWidgetPredicate((w) => w is AnimatedOpacity && w.opacity == 1 && w.child is Center);
+      final picture = tester.getCenter(find.byType(PageView)) - const Offset(0, 200);
+      await tester.tapAt(picture);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(picture);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(burst, findsOneWidget);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      expect(c.isSaved('t1'), isTrue);
+      expect(await tester.runAsync(saves), 1);
+      await tester.pump(const Duration(seconds: 1));
+      expect(burst, findsNothing, reason: 'it fades away');
+    });
+  });
+
   group('V2-24: the feed is always dark', () {
     Color painted(WidgetTester tester, String text) => tester
         .widget<RichText>(find.descendant(of: find.text(text).first, matching: find.byType(RichText)))
@@ -600,21 +708,21 @@ void main() {
     // The feed's canvas and gradients are fixed black.
     const black = Color(0xFF000000);
 
-    testWidgets('under Light the title, deck button and Watch read on black', (tester) async {
+    testWidgets('under Light the title, deck button and Details read on black', (tester) async {
       await pump(tester, appTheme: monoTheme(MonoPalette.light), palette: MonoPalette.light, themed: true);
       expect(Theme.of(tester.element(find.text('Title 1'))).brightness, Brightness.dark);
       for (final text in ['Title 1', 'Deck a']) {
         final ratio = MonoPalette.contrastRatio(Color.alphaBlend(painted(tester, text), black), black);
         expect(ratio, greaterThanOrEqualTo(PaletteContrastCheck.textOnBg.minimum), reason: '$text on black');
       }
-      // Watch is a filled button: its fill must stand off the black page and
-      // its label must read on that fill.
+      // Details is the filled button (V2-29): its fill must stand off the
+      // black page and its label must read on that fill.
       final fill = tester
-          .widget<Material>(find.ancestor(of: find.text('Watch').first, matching: find.byType(Material)).first)
+          .widget<Material>(find.ancestor(of: find.text('Details').first, matching: find.byType(Material)).first)
           .color!;
       expect(MonoPalette.contrastRatio(fill, black), greaterThanOrEqualTo(PaletteContrastCheck.accentOnBg.minimum));
       expect(
-        MonoPalette.contrastRatio(painted(tester, 'Watch'), fill),
+        MonoPalette.contrastRatio(painted(tester, 'Details'), fill),
         greaterThanOrEqualTo(PaletteContrastCheck.labelOnAccent.minimum),
       );
       final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(

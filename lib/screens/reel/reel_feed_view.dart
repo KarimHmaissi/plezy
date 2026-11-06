@@ -11,9 +11,11 @@ import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../theme/fork_motion.dart';
 import '../../theme/mono_theme.dart';
+import '../../theme/mono_tokens.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/optimized_media_image.dart';
+import '../../widgets/pressable.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
 
@@ -111,6 +113,9 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   String? _deck;
   bool _immersive = false;
   bool _burst = false;
+
+  /// Counts bursts, so each one grows in afresh.
+  int _bursts = 0;
 
   ReelController get _c => widget.controller;
 
@@ -230,13 +235,22 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     );
   }
 
+  /// Save from the button or a double-tap (V2-29). The filled bookmark and
+  /// the burst confirm it, so the controller says nothing (a toast would
+  /// float over the buttons); a card already saved neither bursts nor saves
+  /// again.
   void _save() {
-    HapticFeedback.mediumImpact();
-    setState(() => _burst = true);
+    final card = _c.current.card;
+    if (card == null || _c.isSaved(card.id)) return;
+    ForkMotion.success();
+    setState(() {
+      _burst = true;
+      _bursts++;
+    });
     Future<void>.delayed(const Duration(milliseconds: 700), () {
       if (mounted) setState(() => _burst = false);
     });
-    unawaited(_c.save());
+    unawaited(_c.save(silent: true));
   }
 
   @override
@@ -271,25 +285,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
               onRemote: widget.onRemote,
             ),
           ),
-          IgnorePointer(
-            child: AnimatedOpacity(
-              opacity: _burst ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: Center(
-                child: AnimatedScale(
-                  scale: _burst ? 1 : 0.6,
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutBack,
-                  child: Icon(
-                    Symbols.bookmark_added_rounded,
-                    fill: 1,
-                    size: 96,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              ),
-            ),
-          ),
+          _SaveBurst(shown: _burst, count: _bursts),
         ],
       ),
     );
@@ -338,6 +334,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             slot: slot,
             watchOnTv: widget.watchOnTv,
             onWatch: widget.onWatch,
+            saved: _c.isSaved(card.id),
             onDetails: () => unawaited(_c.openDetails()),
             onSave: _save,
             onMore: widget.onSheet,
@@ -390,6 +387,45 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// The Save burst (V2-29): the filled bookmark grows in with the app's
+/// release spring and leaves by fading only, so it never shrinks back over
+/// the picture. With reduce motion on it fades without growing.
+class _SaveBurst extends StatelessWidget {
+  const _SaveBurst({required this.shown, required this.count});
+
+  final bool shown;
+
+  /// Each burst grows from the start again.
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final still = ForkMotion.reduceMotion(context);
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: shown ? 1 : 0,
+        duration: shown ? ForkMotion.release : ForkMotion.sheetOut,
+        curve: shown ? ForkMotion.enterCurve : ForkMotion.exitCurve,
+        child: Center(
+          child: TweenAnimationBuilder<double>(
+            key: ValueKey(count),
+            tween: Tween(begin: still ? 1 : 0.6, end: 1),
+            duration: ForkMotion.release,
+            curve: ForkMotion.releaseCurve,
+            builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+            child: Icon(
+              Symbols.bookmark_added_rounded,
+              fill: 1,
+              size: 96,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -574,12 +610,15 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-/// Title, facts, why, and the controls: Watch and Details first.
+/// Title, facts, why, and the controls (V2-29, D7): Details is the primary
+/// control, and the title block opens it too; Watch is tonal here, filled
+/// as Watch on TV while connected. Save fills once the card is saved.
 class _Info extends StatelessWidget {
   const _Info({
     required this.controller,
     required this.slot,
     required this.watchOnTv,
+    required this.saved,
     required this.onWatch,
     required this.onDetails,
     required this.onSave,
@@ -589,6 +628,7 @@ class _Info extends StatelessWidget {
   final ReelController controller;
   final ReelSlot slot;
   final bool watchOnTv;
+  final bool saved;
   final VoidCallback onWatch;
   final VoidCallback onDetails;
   final VoidCallback onSave;
@@ -599,6 +639,7 @@ class _Info extends StatelessWidget {
     final theme = Theme.of(context);
     final card = slot.card!;
     final clip = slot.clip;
+    final radius = BorderRadius.circular(theme.extension<MonoTokens>()?.radiusSm ?? 8);
     return Align(
       alignment: Alignment.bottomCenter,
       child: DecoratedBox(
@@ -634,25 +675,42 @@ class _Info extends StatelessWidget {
                     ],
                   ),
                 ),
-              Text(
-                card.title.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700, height: 1.15),
-              ),
-              const SizedBox(height: 6),
-              ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
-              if (card.why case final why?) ...[
-                const SizedBox(height: 8),
-                Text(
-                  why,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
+              Pressable(
+                longPress: false,
+                borderRadius: radius,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    borderRadius: radius,
+                    onTap: onDetails,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          card.title.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700, height: 1.15),
+                        ),
+                        const SizedBox(height: 6),
+                        ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
+                        if (card.why case final why?) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            why,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
-              ],
+              ),
               if (clip?.source.origin == ClipOrigin.animeTheme) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -665,21 +723,33 @@ class _Info extends StatelessWidget {
                 children: [
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: onWatch,
-                      icon: Icon(watchOnTv ? Symbols.tv_rounded : Symbols.play_arrow_rounded, fill: 1),
-                      label: Text(watchOnTv ? 'Watch on TV' : 'Watch', maxLines: 1),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
                       onPressed: onDetails,
                       icon: const Icon(Symbols.info_rounded),
                       label: const Text('Details', maxLines: 1),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: watchOnTv
+                        ? FilledButton.icon(
+                            onPressed: onWatch,
+                            icon: const Icon(Symbols.tv_rounded, fill: 1),
+                            label: const Text('Watch on TV', maxLines: 1),
+                          )
+                        : FilledButton.tonalIcon(
+                            onPressed: onWatch,
+                            icon: const Icon(Symbols.play_arrow_rounded, fill: 1),
+                            label: const Text('Watch', maxLines: 1),
+                          ),
+                  ),
                   const SizedBox(width: 4),
-                  IconButton(tooltip: 'Save', onPressed: onSave, icon: const Icon(Symbols.bookmark_add_rounded)),
+                  IconButton(
+                    tooltip: saved ? 'Saved' : 'Save',
+                    isSelected: saved,
+                    onPressed: onSave,
+                    icon: const Icon(Symbols.bookmark_add_rounded),
+                    selectedIcon: const Icon(Symbols.bookmark_added_rounded, fill: 1),
+                  ),
                   IconButton(tooltip: 'More', onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded)),
                 ],
               ),
