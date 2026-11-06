@@ -12,6 +12,7 @@ import '../../mixins/refreshable.dart';
 import '../../navigation/navigation_tabs.dart';
 import '../../mixins/tab_visibility_aware.dart';
 import '../../providers/companion_remote_provider.dart';
+import '../../providers/offline_mode_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
@@ -445,6 +446,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onRemote: remote,
       // V2-65: a Fold screen switch is timed to the picture moving again.
       onResize: () => _feedProbe?.screenChanged(),
+      // V2-08: on mobile data with no Wi-Fi the feed parks only the next card.
+      metered: context.select<OfflineModeProvider?, bool>((p) => p?.isCellularOnly ?? false),
     );
   }
 }

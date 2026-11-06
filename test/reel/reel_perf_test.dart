@@ -37,6 +37,8 @@ class _Video extends ChangeNotifier implements FeedVideo {
   Duration get duration => const Duration(seconds: 60);
   @override
   bool get playing => _playing;
+  @override
+  Duration get buffered => _ready ? duration : Duration.zero;
 
   @override
   Future<void> initialize() async => _ready = true;
@@ -255,7 +257,8 @@ void main() {
     late ReelFeedProbe probe;
     var deck = 'deck-a';
 
-    FeedClip clip(String id) => (id: id, uri: Uri.parse('https://cdn.example/$id.mp4'));
+    FeedClip clip(String id, [int offset = 0]) =>
+        (id: id, uri: Uri.parse('https://cdn.example/$id.mp4'), offset: offset);
 
     setUp(() {
       made = {};
@@ -270,7 +273,7 @@ void main() {
     });
 
     test('the first card is an open; a swipe onto a parked player is a preload hit', () async {
-      players.sync(current: 'a', window: [clip('a'), clip('b')]);
+      players.sync(current: 'a', window: [clip('a'), clip('b', 1)]);
       at(40);
       await _settle();
       at(120);
@@ -280,7 +283,7 @@ void main() {
       expect(perf.last!.totalMs, 120);
 
       at(1000);
-      players.sync(current: 'b', window: [clip('b'), clip('a')]);
+      players.sync(current: 'b', window: [clip('b'), clip('a', -1)]);
       await _settle();
       // Parked at 0 and playing, but no picture moved yet.
       expect(perf.samples, hasLength(1));
@@ -314,7 +317,7 @@ void main() {
     });
 
     test('a screen switch is a fold sample: same card, timed to its picture moving again', () async {
-      players.sync(current: 'a', window: [clip('a'), clip('b')]);
+      players.sync(current: 'a', window: [clip('a'), clip('b', 1)]);
       await _settle();
       made['a']!.tick(const Duration(seconds: 2));
       expect(perf.samples, hasLength(1));
@@ -334,7 +337,7 @@ void main() {
       expect(s.logLine(), startsWith('[ReelPerf] fold=240ms'));
 
       // The next swipe is a swipe again.
-      players.sync(current: 'b', window: [clip('b'), clip('a')]);
+      players.sync(current: 'b', window: [clip('b'), clip('a', -1)]);
       await _settle();
       made['b']!.tick(const Duration(milliseconds: 80));
       expect(perf.last!.trigger, ReelPerfTrigger.swipe);

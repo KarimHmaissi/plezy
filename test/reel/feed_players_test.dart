@@ -4,9 +4,12 @@ import 'package:plezy/services/reel/feed_players.dart';
 
 /// A player that opens at once and remembers what was asked of it.
 class _FakeVideo extends ChangeNotifier implements FeedVideo {
-  _FakeVideo(this.uri);
+  _FakeVideo(this.uri, {this.loaded});
 
   final Uri uri;
+
+  /// How far it has loaded once open; null loads the whole clip at once.
+  Duration? loaded;
   final calls = <String>[];
   bool _ready = false;
   bool _playing = false;
@@ -27,6 +30,8 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
   Duration get duration => const Duration(seconds: 90);
   @override
   bool get playing => _playing;
+  @override
+  Duration get buffered => _ready ? (loaded ?? duration) : Duration.zero;
 
   @override
   Future<void> initialize() async {
@@ -60,6 +65,12 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
     notifyListeners();
   }
 
+  /// The plugin's buffer poll.
+  void loadTo(Duration to) {
+    loaded = to;
+    notifyListeners();
+  }
+
   @override
   Future<void> dispose() async {
     disposed = true;
@@ -70,7 +81,15 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
   Widget view() => const SizedBox();
 }
 
-FeedClip _clip(String id) => (id: id, uri: Uri.parse('https://cdn.example/$id.mp4'));
+FeedClip _clip(String id, int offset) => (id: id, uri: Uri.parse('https://cdn.example/$id.mp4'), offset: offset);
+
+/// The view's window: the card on screen, the ones [ahead] of it, and the
+/// one [behind].
+List<FeedClip> _win(String current, [List<String> ahead = const [], String? behind]) => [
+  _clip(current, 0),
+  for (var i = 0; i < ahead.length; i++) _clip(ahead[i], i + 1),
+  if (behind != null) _clip(behind, -1),
+];
 
 Future<void> _settle() async {
   for (var i = 0; i < 10; i++) {
@@ -85,13 +104,17 @@ void main() {
   late List<String> failed;
   late ReelFeedPlayers players;
 
+  /// How far each new player has loaded once open (null: the whole clip).
+  Duration? loadedAtOpen;
+
   setUp(() {
+    loadedAtOpen = null;
     made = {};
     looped = [];
     started = [];
     failed = [];
     players = ReelFeedPlayers(
-      create: (uri) => made[uri.pathSegments.last.split('.').first] = _FakeVideo(uri),
+      create: (uri) => made[uri.pathSegments.last.split('.').first] = _FakeVideo(uri, loaded: loadedAtOpen),
       onLooped: looped.add,
       onStarted: started.add,
       onFailed: failed.add,
@@ -101,7 +124,7 @@ void main() {
   tearDown(() => players.dispose());
 
   test('the card on screen plays; the next ones open and wait on their first frame', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
     await _settle();
     expect(made.keys, ['a', 'b', 'c']);
     expect(made['a']!.playing, isTrue);
@@ -112,10 +135,10 @@ void main() {
   });
 
   test('a swipe plays the parked player at once; the one left behind holds its frame until settle', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
     await _settle();
     made['a']!.tick(const Duration(seconds: 12));
-    players.sync(current: 'b', window: [_clip('b'), _clip('c'), _clip('d'), _clip('a')]);
+    players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
     await _settle();
     expect(made['b']!.playing, isTrue);
     expect(made['b']!.calls.where((c) => c == 'init'), hasLength(1), reason: 'not opened again');
@@ -131,14 +154,14 @@ void main() {
   });
 
   test('a drag that comes back plays the first card on from where it held', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
     await _settle();
     made['a']!.tick(const Duration(seconds: 12));
     // Past the middle and back again before the page settles.
-    players.sync(current: 'b', window: [_clip('b'), _clip('c'), _clip('d'), _clip('a')]);
+    players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
     await _settle();
     made['b']!.tick(const Duration(milliseconds: 300));
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
     await _settle();
     expect(made['a']!.playing, isTrue);
     expect(made['a']!.position, const Duration(seconds: 12));
@@ -153,10 +176,10 @@ void main() {
     final left = <String>[];
     final p = ReelFeedPlayers(create: _FakeVideo.new, onLeft: left.add);
     addTearDown(p.dispose);
-    p.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    p.sync(current: 'a', window: _win('a', ['b']));
     await _settle();
-    p.sync(current: 'a', window: [_clip('a'), _clip('b')]);
-    p.sync(current: 'b', window: [_clip('b'), _clip('a')]);
+    p.sync(current: 'a', window: _win('a', ['b']));
+    p.sync(current: 'b', window: _win('b', [], 'a'));
     await _settle();
     expect(left, ['a']);
     await p.releaseAll();
@@ -164,7 +187,7 @@ void main() {
   });
 
   test("each card's page hears only about its own card", () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
     final a = players.card('a'), c = players.card('c');
     var aHeard = 0, cHeard = 0;
     void onA() => aHeard++;
@@ -183,7 +206,7 @@ void main() {
     expect(aHeard, 1);
     expect(cHeard, 0, reason: 'a pause on card a does not rebuild card c');
 
-    players.sync(current: 'b', window: [_clip('b'), _clip('c'), _clip('a')]);
+    players.sync(current: 'b', window: _win('b', ['c'], 'a'));
     await _settle();
     expect(a.value.current, isFalse);
     expect(a.value.paused, isFalse);
@@ -193,26 +216,26 @@ void main() {
   });
 
   test('players that leave the window are disposed', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
     await _settle();
-    players.sync(current: 'c', window: [_clip('c'), _clip('d'), _clip('e'), _clip('b')]);
+    players.sync(current: 'c', window: _win('c', ['d', 'e'], 'b'));
     await _settle();
     expect(made['a']!.disposed, isTrue);
     expect(players.held.toSet(), {'b', 'c', 'd', 'e'});
   });
 
   test('memory pressure keeps only the card on screen, then none', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')], memoryLevel: 1);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']), memoryLevel: 1);
     await _settle();
     expect(players.held, ['a']);
-    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')], memoryLevel: 2);
+    players.sync(current: 'a', window: _win('a', ['b', 'c']), memoryLevel: 2);
     await _settle();
     expect(players.held, isEmpty);
     expect(made['a']!.disposed, isTrue);
   });
 
   test('a tap pauses and resumes; mute reaches every player', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    players.sync(current: 'a', window: _win('a', ['b']));
     await _settle();
     await players.togglePause();
     expect(made['a']!.playing, isFalse);
@@ -225,7 +248,7 @@ void main() {
   });
 
   test('a loop back to the start counts as one play-through', () async {
-    players.sync(current: 'a', window: [_clip('a')]);
+    players.sync(current: 'a', window: _win('a'));
     await _settle();
     made['a']!.tick(const Duration(seconds: 80));
     made['a']!.tick(const Duration(milliseconds: 200));
@@ -233,7 +256,7 @@ void main() {
   });
 
   test('before real playback every decoder is let go', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    players.sync(current: 'a', window: _win('a', ['b']));
     await _settle();
     await players.releaseAll();
     expect(made.values.every((v) => v.disposed), isTrue);
@@ -241,7 +264,7 @@ void main() {
   });
 
   test('the card on screen reports playing once its position moves, again after a revisit', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    players.sync(current: 'a', window: _win('a', ['b']));
     await _settle();
     expect(started, isEmpty, reason: 'play() alone is not a picture');
     made['a']!.tick(const Duration(milliseconds: 100));
@@ -249,17 +272,17 @@ void main() {
     made['b']!.tick(const Duration(milliseconds: 100));
     expect(started, ['a'], reason: 'once, and never for a parked card');
 
-    players.sync(current: 'b', window: [_clip('b'), _clip('a')]);
+    players.sync(current: 'b', window: _win('b', [], 'a'));
     await _settle();
     made['b']!.tick(const Duration(milliseconds: 100));
-    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    players.sync(current: 'a', window: _win('a', ['b']));
     await _settle();
     made['a']!.tick(const Duration(milliseconds: 100));
     expect(started, ['a', 'b', 'a']);
   });
 
   test('a player that breaks on screen is reported once', () async {
-    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    players.sync(current: 'a', window: _win('a', ['b']));
     await _settle();
     made['b']!
       ..broken = true
@@ -270,5 +293,143 @@ void main() {
       ..tick(Duration.zero);
     expect(failed, ['a']);
     expect(started, isEmpty);
+  });
+
+  group('the window opens by what the card on screen has loaded (V2-08)', () {
+    const s1 = Duration(seconds: 1);
+
+    test('on Wi-Fi: the next card at 6 s loaded, the one after and the one behind at 10 s', () async {
+      loadedAtOpen = s1;
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
+      await _settle();
+      expect(players.held, ['b'], reason: 'the card on screen has its first second to itself');
+
+      made['b']!.loadTo(const Duration(seconds: 5));
+      await _settle();
+      expect(players.held, ['b']);
+
+      made['b']!.loadTo(const Duration(seconds: 6));
+      await _settle();
+      expect(players.held.toSet(), {'b', 'c'});
+      expect(made['c']!.ready, isTrue, reason: 'parked on its first frame');
+
+      made['b']!.loadTo(const Duration(seconds: 10));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c', 'd'});
+    });
+
+    test('loaded is counted ahead of where the clip is playing', () async {
+      loadedAtOpen = const Duration(seconds: 8);
+      players.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b'});
+
+      // Already open: a buffer that falls behind the playhead closes nothing.
+      made['a']!.tick(const Duration(seconds: 7));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b'});
+    });
+
+    test('a card that has played 3 s opens the next even on a slow link', () async {
+      loadedAtOpen = s1;
+      players.sync(current: 'a', window: _win('a', ['b', 'c']));
+      await _settle();
+      made['a']!.tick(const Duration(seconds: 2));
+      await _settle();
+      expect(players.held, ['a']);
+      made['a']!
+        ..loadTo(const Duration(seconds: 4))
+        ..tick(const Duration(seconds: 3));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b'}, reason: 'the one after waits for 10 s loaded');
+    });
+
+    test('a short clip loaded to its end opens the whole window', () async {
+      loadedAtOpen = const Duration(seconds: 89, milliseconds: 600);
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c', 'd'});
+    });
+
+    test('a card on screen with no clip, or a broken one, holds nothing back', () async {
+      loadedAtOpen = s1;
+      // An AI card on screen: the next two have clips.
+      players.sync(current: 'still', window: [_clip('b', 1), _clip('c', 2)]);
+      await _settle();
+      expect(players.held.toSet(), {'b', 'c'});
+
+      final p = ReelFeedPlayers(create: (uri) => _FakeVideo(uri, loaded: s1)..broken = true);
+      addTearDown(p.dispose);
+      p.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      expect(p.held.toSet(), {'a', 'b'});
+    });
+
+    test('on a metered link only the card on screen and the next, however much is loaded', () async {
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'), metered: true);
+      await _settle();
+      expect(players.held.toSet(), {'b', 'c'});
+    });
+
+    test('on a metered link the card left behind holds its frame until the page settles', () async {
+      players.sync(current: 'a', window: _win('a', ['b', 'c']), metered: true);
+      await _settle();
+      made['a']!.tick(const Duration(seconds: 12));
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'), metered: true);
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c'});
+      expect(made['a']!.disposed, isFalse, reason: 'still half on screen');
+      expect(made['a']!.position, const Duration(seconds: 12));
+
+      await players.settle();
+      await _settle();
+      expect(players.held.toSet(), {'b', 'c'});
+      expect(made['a']!.disposed, isTrue);
+    });
+
+    test('Wi-Fi dropping to mobile data lets the far players go; Wi-Fi back opens them again', () async {
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c', 'd'});
+
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'), metered: true);
+      await _settle();
+      expect(players.held.toSet(), {'b', 'c'});
+      expect(made['a']!.disposed && made['d']!.disposed, isTrue);
+      expect(made['b']!.playing, isTrue, reason: 'the card on screen is left alone');
+
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c', 'd'});
+    });
+
+    test('the window opening further never restarts a card paused by a tap', () async {
+      loadedAtOpen = s1;
+      players.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      await players.togglePause();
+      made['a']!.loadTo(const Duration(seconds: 6));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b'});
+      expect(made['a']!.playing, isFalse);
+      expect(made['b']!.playing, isFalse);
+    });
+
+    test('each new card on screen stages its window again', () async {
+      loadedAtOpen = s1;
+      players.sync(current: 'a', window: _win('a', ['b', 'c']));
+      await _settle();
+      made['a']!.loadTo(const Duration(seconds: 10));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c'});
+
+      // b was parked with only a second loaded: d waits for it.
+      players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c'});
+      made['b']!.loadTo(const Duration(seconds: 10));
+      await _settle();
+      expect(players.held.toSet(), {'a', 'b', 'c', 'd'});
+    });
   });
 }

@@ -69,6 +69,7 @@ class ReelFeedView extends StatefulWidget {
     required this.onDecks,
     this.onRemote,
     this.onResize,
+    this.metered = false,
   });
 
   final ReelController controller;
@@ -86,6 +87,10 @@ class ReelFeedView extends StatefulWidget {
   /// The window changed size under the feed (V2-65), told after the feed has
   /// re-synced its players (the `[ReelPerf]` fold sample starts here).
   final VoidCallback? onResize;
+
+  /// On a metered link (mobile data with no Wi-Fi) the window holds only the
+  /// card on screen and the next (V2-08).
+  final bool metered;
 
   @override
   State<ReelFeedView> createState() => _ReelFeedViewState();
@@ -154,6 +159,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       old.controller.removeListener(_onController);
       widget.controller.addListener(_onController);
     }
+    if (old.metered != widget.metered) _sync();
   }
 
   @override
@@ -204,18 +210,24 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     return false;
   }
 
-  /// The card on screen, the next two, then the one behind.
+  /// The card on screen, the next two, then the one behind; the players
+  /// open them in stages as the card on screen loads (V2-08).
   void _sync() {
     // Hidden, paused or handing over to real playback: nothing plays.
     if (!_c.active) return;
     final i = _page;
     final window = <FeedClip>[
-      for (final j in [i, i + 1, i + 2, i - 1])
-        if (j >= 0)
-          if (_c.slotAt(j) case ReelSlot(card: final card?, clip: final clip?))
-            if (Uri.tryParse(clip.source.uri) case final uri?) (id: card.id, uri: uri),
+      for (final offset in const [0, 1, 2, -1])
+        if (i + offset >= 0)
+          if (_c.slotAt(i + offset) case ReelSlot(card: final card?, clip: final clip?))
+            if (Uri.tryParse(clip.source.uri) case final uri?) (id: card.id, uri: uri, offset: offset),
     ];
-    widget.players.sync(current: _c.slotAt(i).card?.id, window: window, memoryLevel: _c.memoryLevel);
+    widget.players.sync(
+      current: _c.slotAt(i).card?.id,
+      window: window,
+      memoryLevel: _c.memoryLevel,
+      metered: widget.metered,
+    );
   }
 
   void _save() {

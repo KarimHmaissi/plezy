@@ -127,6 +127,8 @@ class _Video extends ChangeNotifier implements FeedVideo {
   @override
   bool get playing => _playing;
   @override
+  Duration get buffered => _ready ? duration : Duration.zero;
+  @override
   Future<void> initialize() async => _ready = true;
   @override
   Future<void> play() async => _playing = true;
@@ -201,7 +203,8 @@ void main() {
     await db.close();
   });
 
-  Widget feed() => ReelFeedView(
+  Widget feed({bool metered = false}) => ReelFeedView(
+    metered: metered,
     controller: c,
     players: players,
     watchOnTv: false,
@@ -245,6 +248,31 @@ void main() {
     await pump(tester);
     expect(players.current, 't1');
     expect(players.held, containsAll(['t1', 't2']));
+  });
+
+  testWidgets('on mobile data the feed parks only the next card; Wi-Fi opens the window again (V2-08)', (tester) async {
+    await pump(tester);
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(players.held, containsAll(['t1', 't2', 't3']), reason: 'the one behind is parked too');
+
+    Widget app(bool metered) => MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: feed(metered: metered)),
+    );
+    await tester.pumpWidget(app(true));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(players.current, 't2');
+    expect(players.held.toSet(), {'t2', 't3'}, reason: 'the card on screen and the next only');
+
+    await tester.pumpWidget(app(false));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(players.held, containsAll(['t1', 't2', 't3']));
   });
 
   testWidgets('a halved watchdog tick shrinks the feed to the card on screen until restore', (tester) async {
