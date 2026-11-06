@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/reel/feed_players.dart';
@@ -97,6 +98,15 @@ List<FeedClip> _win(String current, [List<String> ahead = const [], String? behi
   for (var i = 0; i < ahead.length; i++) _clip(ahead[i], i + 1),
   if (behind != null) _clip(behind, -1),
 ];
+
+/// The volumes set on [v], in order.
+List<double> _volumes(_FakeVideo v) => [
+  for (final c in v.calls)
+    if (c.startsWith('volume ')) double.parse(c.substring(7)),
+];
+
+/// What [v] was asked from its last play on: volumes and pauses.
+List<String> _since(_FakeVideo v, String call) => v.calls.sublist(v.calls.lastIndexOf(call));
 
 Future<void> _settle() async {
   for (var i = 0; i < 10; i++) {
@@ -484,6 +494,141 @@ void main() {
       made['b']!.loadTo(const Duration(seconds: 10));
       await _settle();
       expect(players.held.toSet(), {'a', 'b', 'c', 'd'});
+    });
+  });
+
+  group('loudness between clips: the phone ramp (V2-19)', () {
+    test('the card on screen starts at 30% and rises to full over about 200 ms', () {
+      fakeAsync((async) {
+        players.sync(current: 'a', window: _win('a', ['b']));
+        async.flushMicrotasks();
+        final a = made['a']!;
+        expect(a.calls.sublist(a.calls.indexOf('init')), [
+          'init',
+          'volume 0.3',
+          'play',
+        ], reason: 'quiet before the first sound');
+
+        async.elapse(const Duration(milliseconds: 100));
+        final mid = _volumes(a).last;
+        expect(mid, greaterThan(FeedRamp.from));
+        expect(mid, lessThan(1.0));
+
+        async.elapse(const Duration(milliseconds: 100));
+        final vs = _volumes(a);
+        expect(vs.last, 1.0);
+        expect(vs, hasLength(1 + FeedRamp.steps));
+        for (var i = 1; i < vs.length; i++) {
+          expect(vs[i], greaterThan(vs[i - 1]), reason: 'it only rises');
+        }
+
+        expect(made['b']!.calls, isNot(contains('play')));
+        expect(_volumes(made['b']!), [FeedRamp.from], reason: 'parked, never full');
+        unawaited(players.releaseAll());
+        async.flushMicrotasks();
+      });
+    });
+
+    test('a swipe silences the card left before it is parked; the new card rises without waiting', () {
+      fakeAsync((async) {
+        players.sync(current: 'a', window: _win('a', ['b']));
+        async.elapse(FeedRamp.over * 2);
+        final a = made['a']!, b = made['b']!;
+
+        players.sync(current: 'b', window: _win('b', [], 'a'));
+        async.flushMicrotasks();
+        final silenced = a.calls.lastIndexOf('volume 0.0');
+        expect(silenced, greaterThan(a.calls.indexOf('play')));
+        final after = a.calls.sublist(silenced + 1);
+        expect(after, isNotEmpty);
+        expect(after, everyElement('pause'), reason: 'silent, then parked');
+        expect(_since(b, 'play'), ['play'], reason: 'already at 30%: no volume call ahead of the play');
+        expect(_volumes(b).last, FeedRamp.from);
+
+        async.elapse(FeedRamp.over);
+        expect(_volumes(b).last, 1.0);
+        expect(_volumes(a).last, 0.0, reason: 'the card left stays silent');
+        unawaited(players.releaseAll());
+        async.flushMicrotasks();
+      });
+    });
+
+    test('a swipe mid-rise stops the rise on the card left', () {
+      fakeAsync((async) {
+        players.sync(current: 'a', window: _win('a', ['b']));
+        async.elapse(const Duration(milliseconds: 70));
+        players.sync(current: 'b', window: _win('b', [], 'a'));
+        async.elapse(FeedRamp.over * 2);
+        final a = _volumes(made['a']!);
+        expect(a, isNot(contains(1.0)));
+        expect(a.last, 0.0);
+        unawaited(players.releaseAll());
+        async.flushMicrotasks();
+      });
+    });
+
+    test('a drag that comes back brings the first card in quietly again', () {
+      fakeAsync((async) {
+        players.sync(current: 'a', window: _win('a', ['b']));
+        async.elapse(FeedRamp.over * 2);
+        players.sync(current: 'b', window: _win('b', [], 'a'));
+        async.flushMicrotasks();
+        players.sync(current: 'a', window: _win('a', ['b']));
+        async.flushMicrotasks();
+        final a = made['a']!;
+        expect(_since(a, 'play').first, 'play');
+        expect(a.calls[a.calls.lastIndexOf('play') - 1], 'volume 0.3');
+        async.elapse(FeedRamp.over);
+        expect(_volumes(a).last, 1.0);
+        unawaited(players.releaseAll());
+        async.flushMicrotasks();
+      });
+    });
+
+    test('unmute rises on the card on screen instead of jumping; parked cards stay silent', () {
+      fakeAsync((async) {
+        players.sync(current: 'a', window: _win('a', ['b']));
+        async.elapse(FeedRamp.over * 2);
+        unawaited(players.setMuted(true));
+        async.flushMicrotasks();
+        expect(_volumes(made['a']!).last, 0.0);
+        expect(_volumes(made['b']!).last, 0.0);
+
+        final before = _volumes(made['a']!).length;
+        unawaited(players.setMuted(false));
+        async.flushMicrotasks();
+        expect(_volumes(made['a']!).sublist(before), [FeedRamp.from], reason: 'no jump to full');
+        async.elapse(FeedRamp.over);
+        expect(_volumes(made['a']!).last, 1.0);
+        expect(_volumes(made['b']!).last, 0.0, reason: 'b is not on screen');
+
+        // b comes on screen later: it rises like any other card.
+        players.sync(current: 'b', window: _win('b', [], 'a'));
+        async.flushMicrotasks();
+        final b = made['b']!;
+        expect(b.calls[b.calls.lastIndexOf('play') - 1], 'volume 0.3');
+        async.elapse(FeedRamp.over);
+        expect(_volumes(b).last, 1.0);
+        unawaited(players.releaseAll());
+        async.flushMicrotasks();
+      });
+    });
+
+    test('muted, a new card plays silent and a mute mid-rise holds it silent', () {
+      fakeAsync((async) {
+        players.sync(current: 'a', window: _win('a', ['b']));
+        async.elapse(const Duration(milliseconds: 70));
+        unawaited(players.setMuted(true));
+        async.elapse(FeedRamp.over * 2);
+        expect(_volumes(made['a']!).last, 0.0, reason: 'the rise stopped at the mute');
+
+        players.sync(current: 'b', window: _win('b', [], 'a'));
+        async.elapse(FeedRamp.over * 2);
+        expect(made['b']!.playing, isTrue);
+        expect(_volumes(made['b']!).last, 0.0);
+        unawaited(players.releaseAll());
+        async.flushMicrotasks();
+      });
     });
   });
 }

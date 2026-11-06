@@ -130,6 +130,23 @@ abstract final class FeedStaging {
   static const fullSlack = Duration(milliseconds: 500);
 }
 
+/// How a card comes in on screen (V2-19). Clips differ in loudness (one
+/// source may be mastered far louder than the next), so a card never starts
+/// at full volume: it starts at [from] and rises to full over [over], in
+/// [steps] steps, the way the TV dips in after a step. A card that leaves
+/// the screen goes silent before it is parked, and unmuting rises the same
+/// way instead of jumping.
+abstract final class FeedRamp {
+  /// The volume a card starts at.
+  static const from = 0.3;
+
+  /// How long it takes to reach full volume.
+  static const over = Duration(milliseconds: 200);
+
+  /// How many volume changes the rise is made of.
+  static const steps = 6;
+}
+
 /// What one card's page draws (V2-02): its player once it has a picture,
 /// whether it is the card on screen, and whether a tap paused it. Each page
 /// listens to its own card ([ReelFeedPlayers.card]), so a player opening two
@@ -154,10 +171,20 @@ typedef FeedCardState = ({FeedVideo? video, bool current, bool paused});
 /// It goes back to its start at [settle], once the page has come to rest;
 /// on a metered link that is also when it is let go if it is now behind.
 class ReelFeedPlayers extends ChangeNotifier {
-  ReelFeedPlayers({FeedVideo Function(Uri uri)? create, this.onLooped, this.onStarted, this.onFailed, this.onLeft})
-    : _create = create ?? PluginFeedVideo.new;
+  ReelFeedPlayers({
+    FeedVideo Function(Uri uri)? create,
+    this.onLooped,
+    this.onStarted,
+    this.onFailed,
+    this.onLeft,
+    this.riseOver = FeedRamp.over,
+  }) : _create = create ?? PluginFeedVideo.new;
 
   final FeedVideo Function(Uri uri) _create;
+
+  /// How long a card takes to rise to full volume ([FeedRamp.over]); zero
+  /// sets full volume at once, with no timer (widget tests).
+  final Duration riseOver;
 
   /// The card on screen played through once (it loops on).
   final void Function(String cardId)? onLooped;
@@ -318,7 +345,10 @@ class ReelFeedPlayers extends ChangeNotifier {
           if (!_isLive(entry)) return;
           await entry.video.initialize();
           if (!_isLive(entry)) return;
-          await entry.video.setVolume(_muted ? 0 : 1);
+          // Parked (paused, so silent) at the volume a card comes in at
+          // ([FeedRamp]), so a swipe onto it plays without first waiting on
+          // a volume change.
+          await _volume(entry, _muted ? 0 : FeedRamp.from);
           notifyListeners();
           if (entry.id == _current) _advance();
         }(),
@@ -351,18 +381,65 @@ class ReelFeedPlayers extends ChangeNotifier {
   Future<void> _apply(_Entry e) async {
     if (!_isLive(e) || !e.video.ready) return;
     if (e.id == _current && !_paused) {
-      if (!e.video.playing) await e.video.play();
+      if (e.video.playing) return;
+      // A start already on its way (the open and the sync both apply).
+      if (e.starting case final s?) return s;
+      await (e.starting = _start(e).whenComplete(() => e.starting = null));
     } else if (e.id != _current) {
       // Paused, not rewound: it may still be half on screen.
       await _leave(e);
     }
   }
 
-  /// Off screen for now: stopped on the frame it was showing.
+  /// Plays the card on screen. The first play of a visit comes in quietly
+  /// and rises to full (V2-19).
+  Future<void> _start(_Entry e) async {
+    final rise = !e.voiced && !_muted;
+    e.voiced = true;
+    if (rise) await _volume(e, FeedRamp.from);
+    if (!_isLive(e)) return;
+    await e.video.play();
+    if (rise && _isLive(e) && e.id == _current && !_muted) _rise(e);
+  }
+
+  /// Off screen for now: silenced, then stopped on the frame it was showing.
   Future<void> _leave(_Entry e) async {
     e.last = Duration.zero;
     e.started = false;
-    if (e.video.ready && e.video.playing) await e.video.pause();
+    e.voiced = false;
+    e.ramp?.cancel();
+    if (!e.video.ready || !e.video.playing) return;
+    await _volume(e, 0);
+    await e.video.pause();
+  }
+
+  /// Sets [e]'s volume, skipping a call that would change nothing.
+  Future<void> _volume(_Entry e, double volume) async {
+    if (e.volume == volume) return;
+    e.volume = volume;
+    await e.video.setVolume(volume);
+  }
+
+  /// Raises the card on screen from where it is to full volume over
+  /// [riseOver]. A leave, a mute or a let-go stops it.
+  void _rise(_Entry e) {
+    e.ramp?.cancel();
+    if (riseOver <= Duration.zero) {
+      unawaited(_volume(e, 1.0));
+      return;
+    }
+    final from = e.volume ?? FeedRamp.from;
+    var i = 0;
+    e.ramp = Timer.periodic(riseOver ~/ FeedRamp.steps, (t) {
+      if (!_isLive(e) || _muted || e.id != _current) {
+        t.cancel();
+        return;
+      }
+      i++;
+      final done = i >= FeedRamp.steps;
+      unawaited(_volume(e, done ? 1.0 : from + (1 - from) * i / FeedRamp.steps));
+      if (done) t.cancel();
+    });
   }
 
   /// The page has come to rest: every card but the one on screen goes back
@@ -406,6 +483,7 @@ class ReelFeedPlayers extends ChangeNotifier {
   Future<void> _drop(String id) async {
     final e = _byId.remove(id);
     if (e == null) return;
+    e.ramp?.cancel();
     if (!e.dropped.isCompleted) e.dropped.complete();
     try {
       await e.video.dispose();
@@ -422,10 +500,21 @@ class ReelFeedPlayers extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Mute silences every player at once; unmute brings only the card on
+  /// screen back, rising from [FeedRamp.from] rather than jumping to full
+  /// (V2-19). Parked cards stay silent until they come on screen.
   Future<void> setMuted(bool muted) async {
+    if (muted == _muted) return;
     _muted = muted;
-    for (final e in _byId.values) {
-      if (e.video.ready) await e.video.setVolume(muted ? 0 : 1);
+    for (final e in _byId.values.toList()) {
+      e.ramp?.cancel();
+      if (!e.video.ready || !_isLive(e)) continue;
+      if (muted) {
+        await _volume(e, 0);
+      } else if (e.id == _current && e.voiced) {
+        await _volume(e, FeedRamp.from);
+        if (_isLive(e) && e.id == _current && !_muted) _rise(e);
+      }
     }
     notifyListeners();
   }
@@ -517,4 +606,17 @@ class _Entry {
   /// this visit to the screen.
   bool started = false;
   bool failedTold = false;
+
+  /// Has had its first play of this visit, so its volume rise has begun
+  /// (or is owed on unmute).
+  bool voiced = false;
+
+  /// The volume last set on the player; null before the first.
+  double? volume;
+
+  /// A play of the card on screen on its way.
+  Future<void>? starting;
+
+  /// The rise to full volume in progress ([FeedRamp]).
+  Timer? ramp;
 }

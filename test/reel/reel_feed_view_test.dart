@@ -213,6 +213,9 @@ void main() {
         final id = uri.pathSegments.last.split('.').first;
         return videos[id] = _Video()..ratio = ratios[id] ?? 16 / 9;
       },
+      // Full volume at once: the rise (V2-19) is covered in
+      // feed_players_test.dart and would leave a timer behind here.
+      riseOver: Duration.zero,
     );
   });
 
