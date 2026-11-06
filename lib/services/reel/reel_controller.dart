@@ -280,6 +280,9 @@ class ReelController extends ChangeNotifier {
           '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
         );
         _cards[d.id] = loaded;
+        // One AnimeThemes batch for the deck's anime shows (plan V2-12);
+        // the first card waits for it rather than asking on its own.
+        unawaited(resolver.warm([for (final c in loaded) c.title]));
         return loaded;
       } catch (e) {
         appLogger.w('Reel: deck ${d.id} failed to load', error: e);
@@ -315,6 +318,9 @@ class ReelController extends ChangeNotifier {
     }
     if (_disposed || fresh.isEmpty) return;
     _loadedOn[d.id] = _today();
+    // The new build's anime shows, in one batch (titles already answered
+    // are skipped).
+    unawaited(resolver.warm([for (final c in fresh) c.title]));
     final old = _cards[d.id] ?? const <ReelCardData>[];
     if (!identical(deck, d)) {
       _cards[d.id] = fresh;

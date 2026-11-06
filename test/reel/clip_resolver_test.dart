@@ -59,19 +59,25 @@ void main() {
   Object? atFailure;
   late Map<int, Map<String, dynamic>> atRecords;
 
-  ClipResolver make({ReelServerWait? wait, AniListLookup? aniList, ValueListenable<ReelPlaybackProfile>? profile}) =>
-      ClipResolver(
-        servers: servers,
-        store: store,
-        aniList: aniList ?? (t) async => t.tvdbId == 1 ? 101 : null,
-        waitForServer: wait,
-        profile: profile,
-        animeThemes: (ids) async {
+  ClipResolver make({
+    ReelServerWait? wait,
+    AniListLookup? aniList,
+    ValueListenable<ReelPlaybackProfile>? profile,
+    AnimeThemesFetch? animeThemes,
+  }) => ClipResolver(
+    servers: servers,
+    store: store,
+    aniList: aniList ?? (t) async => t.tvdbId == 1 ? 101 : null,
+    waitForServer: wait,
+    profile: profile,
+    animeThemes:
+        animeThemes ??
+        (ids) async {
           atCalls.add(ids);
           if (atFailure case final e?) throw e;
           return atRecords;
         },
-      );
+  );
 
   setUp(() {
     db = ForkDatabase.memory();
@@ -775,6 +781,184 @@ void main() {
       expect(batches, isEmpty);
       await client.fetch([for (var i = 1; i <= 120; i++) i]);
       expect(batches.map((b) => b.length), [50, 50, 20]);
+    });
+  });
+
+  group('a deck asks AnimeThemes in one batch (V2-12)', () {
+    ReelTitle anime(int n, {bool show = true}) => ReelTitle(
+      titleId: 's:tvdb:$n',
+      groupKey: 'tvdb:$n',
+      title: 'Harbor Lights $n',
+      isShow: show,
+      anime: true,
+      tvdbId: n,
+      copies: [ReelCopy(serverId: 'a', ratingKey: '$n')],
+    );
+    ReelTitle plain(int n) => ReelTitle(
+      titleId: 's:tvdb:$n',
+      groupKey: 'tvdb:$n',
+      title: 'Quiet Valley $n',
+      isShow: true,
+      tvdbId: n,
+      copies: [ReelCopy(serverId: 'a', ratingKey: '$n')],
+    );
+    Map<String, dynamic> record(int id) => {
+      'animethemes': [
+        {
+          'type': 'OP',
+          'sequence': 1,
+          'animethemeentries': [
+            {
+              'episodes': '1-12',
+              'videos': [
+                {
+                  'id': id,
+                  'link': 'https://v.animethemes.moe/OP$id.webm',
+                  'nc': true,
+                  'resolution': 1080,
+                  'overlap': 'NONE',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    /// AniList id = 100 + tvdb id; AnimeThemes has a record for every id
+    /// except those in [without].
+    late Set<int> without;
+    late List<List<int>> batches;
+    late Completer<void>? gate;
+    ClipResolver batched() => make(
+      aniList: (t) async => t.tvdbId == null ? null : 100 + t.tvdbId!,
+      animeThemes: (ids) async {
+        batches.add(ids);
+        if (gate case final g?) await g.future;
+        if (atFailure case final e?) throw e;
+        return {
+          for (final id in ids)
+            if (!without.contains(id)) id: record(id),
+        };
+      },
+    );
+
+    setUp(() {
+      without = {};
+      batches = [];
+      gate = null;
+    });
+
+    test('one request for the deck\'s anime shows; their openings are cached without another', () async {
+      final r = batched();
+      await r.warm([anime(1), plain(2), anime(3), anime(4, show: false), anime(1), anime(5)]);
+      expect(batches, [
+        [101, 103, 105],
+      ], reason: 'anime shows only, each once, in deck order');
+      expect(await store.cached('src:tvdb:1'), contains('at:101'));
+      expect(await store.cached('src:tvdb:2'), isNull);
+
+      for (final n in [1, 3, 5]) {
+        expect((await r.lookup(anime(n))).clip?.assetId, 'at:${100 + n}');
+      }
+      expect(batches, hasLength(1), reason: 'every card plays from the batch');
+      expect(servers.calls, isEmpty);
+    });
+
+    test('more than 50 shows go in requests of 50, in deck order', () async {
+      final r = batched();
+      await r.warm([for (var n = 1; n <= 120; n++) anime(n)]);
+      expect(batches.map((b) => b.length), [50, 50, 20]);
+      expect(batches.first.first, 101);
+      expect(await store.cached('src:tvdb:120'), contains('at:220'));
+    });
+
+    test('a show already cached is not asked about again', () async {
+      final r = batched();
+      await r.warm([anime(1)]);
+      await r.warm([anime(1), anime(2)]);
+      expect(batches, [
+        [101],
+        [102],
+      ]);
+      await batched().warm([anime(1), anime(2)]);
+      expect(batches, hasLength(2), reason: 'a fresh session reads the cached rows');
+    });
+
+    test('a show with no opening writes no miss: its Plex extras are still read per title', () async {
+      without = {102};
+      final r = batched();
+      await r.warm([anime(2)]);
+      expect(await store.cached('src:tvdb:2'), isNull, reason: 'the Plex rung has not answered yet');
+
+      expect((await r.lookup(anime(2))).answer, ClipAnswer.none);
+      expect(batches, hasLength(1), reason: 'the batch answered AnimeThemes for this show');
+      expect(servers.calls, ['a:2']);
+      expect(await store.cached('src:tvdb:2'), ClipResolver.missRow);
+    });
+
+    test('a show with no opening plays its Plex trailer', () async {
+      without = {102};
+      servers.extrasByKey['a:2'] = [_x('90', 'Harbor Lights 2 Trailer')];
+      final r = batched();
+      await r.warm([anime(2)]);
+      expect((await r.lookup(anime(2))).clip?.assetId, 'plex:90');
+      expect(batches, hasLength(1));
+    });
+
+    test('a blocked batch writes and keeps nothing; the card asks on its own', () async {
+      atFailure = const AnimeThemesUnavailable('429');
+      final r = batched();
+      await r.warm([anime(1), anime(2)]);
+      expect(await store.cached('src:tvdb:1'), isNull);
+      expect(await store.cached('src:tvdb:2'), isNull);
+
+      atFailure = null;
+      expect((await r.lookup(anime(1))).clip?.assetId, 'at:101');
+      expect(batches, [
+        [101, 102],
+        [101],
+      ]);
+    });
+
+    test('a card resolving while the batch is in flight waits for it', () async {
+      gate = Completer<void>();
+      final r = batched();
+      final warming = r.warm([anime(1), anime(2)]);
+      final card = r.lookup(anime(1));
+      await Future<void>.delayed(Duration.zero);
+      gate!.complete();
+      await warming;
+      expect((await card).clip?.assetId, 'at:101');
+      expect(batches, [
+        [101, 102],
+      ], reason: 'no request of its own');
+    });
+
+    test('a mapping that could not be read leaves that show to its own lookup', () async {
+      final r = make(
+        aniList: (t) async => t.tvdbId == 1 ? throw StateError('mapping unavailable') : 100 + t.tvdbId!,
+        animeThemes: (ids) async {
+          batches.add(ids);
+          return {for (final id in ids) id: record(id)};
+        },
+      );
+      await r.warm([anime(1), anime(2)]);
+      expect(batches, [
+        [102],
+      ]);
+      expect(await store.cached('src:tvdb:1'), isNull);
+    });
+
+    test('an opening marked as a spoiler is not cached by the batch', () async {
+      await store.spoiled('s:tvdb:1', 'at:101');
+      without = {};
+      servers.extrasByKey['a:1'] = [_x('91', 'Harbor Lights 1 Trailer')];
+      final r = batched();
+      await r.warm([anime(1)]);
+      expect(await store.cached('src:tvdb:1'), isNull);
+      expect((await r.lookup(anime(1))).clip?.assetId, 'plex:91');
+      expect(batches, hasLength(1));
     });
   });
 }

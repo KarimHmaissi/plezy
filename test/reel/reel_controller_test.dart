@@ -590,6 +590,69 @@ void main() {
     expect(told, 1, reason: 'a disposed controller stops listening');
   });
 
+  test('opening a deck asks AnimeThemes once for all its anime shows (V2-12)', () async {
+    ReelCardData anime(String id) => ReelCardData(
+      title: ReelTitle(
+        titleId: 't$id',
+        groupKey: 'g$id',
+        title: 'Harbor Lights $id',
+        isShow: true,
+        anime: true,
+        tvdbId: int.parse(id),
+        copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+      ),
+      facts: TitleFacts(
+        ref: TitleRef(id: 't$id', groupKey: 'g$id'),
+        seen: SeenState.unseen,
+      ),
+      best: _copy(id),
+    );
+    final batches = <List<int>>[];
+    final c = make(
+      decks: [
+        _Deck('a', [anime('1'), anime('2'), _card('3'), anime('4'), anime('5')]),
+      ],
+      aniList: (t) async => t.tvdbId,
+      animeThemes: (ids) async {
+        batches.add(ids);
+        return {
+          for (final id in ids)
+            id: {
+              'animethemes': [
+                {
+                  'type': 'OP',
+                  'sequence': 1,
+                  'animethemeentries': [
+                    {
+                      'episodes': '1-12',
+                      'videos': [
+                        {
+                          'id': id,
+                          'link': 'https://v.animethemes.moe/OP$id.webm',
+                          'resolution': 1080,
+                          'overlap': 'NONE',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+        };
+      },
+    );
+    await c.start();
+    await c.step(1);
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(c.current.card?.id, 't3');
+    expect(c.slotAt(3).clip?.assetId, 'at:4');
+    expect(batches, [
+      [1, 2, 4, 5],
+    ], reason: 'the first card waits for the batch; no card asks on its own');
+    c.dispose();
+  });
+
   test('a clip the feed played through is recorded as watched to the end', () async {
     final c = make(externalClips: true);
     await c.start();

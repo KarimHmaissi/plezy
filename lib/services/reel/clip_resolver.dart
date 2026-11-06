@@ -239,10 +239,12 @@ class _Run {
 /// an AI card. Caches the asset identity per title for 30 days
 /// (`src:<groupKey>`), never a resolved CDN URL. A miss is cached only when
 /// every rung answered for sure; a rung that couldn't answer leaves the
-/// title unknown, which lasts for the session only. One request at a time,
-/// per title, on demand: never a batch or crawl of a server. A clip with
-/// several files (an opening at 720 and 1080) caches them all, and the
-/// playback [profile] picks one each time the title is looked up.
+/// title unknown, which lasts for the session only. Plex servers get one
+/// request at a time, per title, on demand: never a batch or crawl of a
+/// server. AnimeThemes is asked once per deck open for the deck's anime
+/// shows ([warm]). A clip with several files (an opening at 720 and 1080)
+/// caches them all, and the playback [profile] picks one each time the title
+/// is looked up.
 class ClipResolver {
   ClipResolver({
     required this.servers,
@@ -284,6 +286,15 @@ class ClipResolver {
   final Set<String> _slowServers = {};
   final Map<String, Future<bool>> _waits = {};
   Future<void> _queue = Future.value();
+
+  /// Season 1 OP1's files per AniList id, as AnimeThemes answered this
+  /// session; an empty list is a sure "no opening". Failed lookups are never
+  /// kept, so they are asked again.
+  final Map<int, List<AnimeOpening>> _openingsById = {};
+
+  /// Anime shows a [warm] batch is answering, by group key: the ladder waits
+  /// for the batch rather than asking AnimeThemes about the one title.
+  final Map<String, Future<void>> _warming = {};
 
   /// Servers whose extras call timed out this session.
   Set<String> get slowServers => Set.unmodifiable(_slowServers);
@@ -342,6 +353,132 @@ class ClipResolver {
 
   /// A definitive miss in the current [sourceFormat].
   static const String missRow = '{"v":$sourceFormat,"miss":true}';
+
+  /// Asks AnimeThemes about a deck's anime shows when the deck loads (plan
+  /// V2-12): each show is mapped to its AniList id locally (Fribb), then the
+  /// ids not yet answered this session go in one request per
+  /// [AnimeThemesClient.maxBatch], in deck order. A show whose opening is
+  /// found has its `src:` row written as the ladder writes it. A show with
+  /// no opening is kept as a sure answer for the session only: its Plex
+  /// extras are still read per title, on demand, before any miss is cached.
+  /// A failed or blocked batch (429, the local cap) writes and keeps
+  /// nothing, so its shows resolve one by one as before. Shows with a
+  /// cached row are skipped. Never throws.
+  Future<void> warm(List<ReelTitle> titles) async {
+    final keys = <String>{};
+    final shows = [
+      for (final t in titles)
+        if (t.anime && t.isShow && !_warming.containsKey(t.groupKey) && keys.add(t.groupKey)) t,
+    ];
+    if (shows.isEmpty) return;
+    // Registered before the first await, so a card resolving straight after
+    // the deck loads waits for this batch.
+    final done = {for (final t in shows) t.groupKey: Completer<void>()};
+    for (final t in shows) {
+      _warming[t.groupKey] = done[t.groupKey]!.future;
+    }
+    void finish(ReelTitle t) {
+      final c = done[t.groupKey]!;
+      if (c.isCompleted) return;
+      c.complete();
+      if (identical(_warming[t.groupKey], c.future)) _warming.remove(t.groupKey);
+    }
+
+    final sw = Stopwatch()..start();
+    var requests = 0;
+    var hits = 0;
+    try {
+      final idOf = await Future.wait([
+        for (final t in shows)
+          () async {
+            try {
+              final raw = await store.cached('src:${t.groupKey}', ttl: ReelStore.sourceTtl);
+              if (raw != null && _entry(raw) != null) return null;
+              return await aniList(t);
+            } catch (_) {
+              // The mapping couldn't be read: the ladder asks again.
+              return null;
+            }
+          }(),
+      ]);
+      final asking = <int>[];
+      for (final (i, t) in shows.indexed) {
+        final id = idOf[i];
+        if (id == null) {
+          finish(t);
+        } else if (!_openingsById.containsKey(id) && !asking.contains(id)) {
+          asking.add(id);
+        }
+      }
+      for (var i = 0; i < asking.length; i += AnimeThemesClient.maxBatch) {
+        final chunk = asking.sublist(i, (i + AnimeThemesClient.maxBatch).clamp(0, asking.length));
+        final Map<int, Map<String, dynamic>> got;
+        try {
+          requests++;
+          got = await _animeThemes(chunk);
+        } catch (e) {
+          appLogger.d('Reel: AnimeThemes batch failed; its shows resolve one by one', error: e);
+          break;
+        }
+        for (final id in chunk) {
+          try {
+            _openingsById[id] = got[id] == null ? const [] : ClipFilter.openings(got[id]!);
+          } catch (_) {
+            // Not shaped as read: unknown, asked again per title.
+          }
+        }
+        for (final (j, t) in shows.indexed) {
+          final id = idOf[j];
+          if (id == null || done[t.groupKey]!.isCompleted || !_openingsById.containsKey(id)) continue;
+          if (await _writeOpening(t, _openingsById[id]!)) hits++;
+          finish(t);
+        }
+      }
+      // Shows answered by an earlier batch this session.
+      for (final (j, t) in shows.indexed) {
+        final id = idOf[j];
+        if (id == null || done[t.groupKey]!.isCompleted) continue;
+        if (_openingsById[id] case final ops?) {
+          if (await _writeOpening(t, ops)) hits++;
+        }
+        finish(t);
+      }
+    } catch (e) {
+      appLogger.d('Reel: AnimeThemes warm failed', error: e);
+    } finally {
+      shows.forEach(finish);
+    }
+    appLogger.i(
+      '[ReelWarm] ${shows.length} anime shows: $requests requests, $hits openings (${sw.elapsedMilliseconds}ms)',
+    );
+  }
+
+  /// Writes [t]'s `src:` row for [ops] as the ladder would; false when the
+  /// ladder would go on to the Plex rung (no file this profile plays, or a
+  /// file the user marked as a spoiler).
+  Future<bool> _writeOpening(ReelTitle t, List<AnimeOpening> ops) async {
+    try {
+      final candidates = [for (final op in ops) ClipCandidate.opening(op)];
+      if (candidates.isEmpty) return false;
+      final banned = await store.spoiledAssets(t.titleId);
+      if (candidates.any((c) => banned.contains(c.assetId))) return false;
+      final clip = _opening1('Opening 1', candidates);
+      if (clip == null) return false;
+      await store.cache('src:${t.groupKey}', jsonEncode(_openingRow(clip, candidates)));
+      return true;
+    } catch (e) {
+      appLogger.d('Reel: AnimeThemes warm could not cache a show', error: e);
+      return false;
+    }
+  }
+
+  /// The `src:` row for an AnimeThemes clip.
+  static Map<String, Object?> _openingRow(ResolvedClip clip, List<ClipCandidate> candidates) => {
+    'v': sourceFormat,
+    'k': 'at',
+    'l': clip.label,
+    'c': [for (final c in candidates) c.toJson()],
+  };
 
   /// A cached row in the current [sourceFormat]; anything else (an older
   /// format, a forgotten or unreadable row) is not cached.
@@ -454,19 +591,7 @@ class ClipResolver {
       // A banned file bans the opening: its other files are the same clip.
       final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1('Opening 1', candidates);
       if (clip != null) {
-        return _Run(
-          (
-            clip,
-            {
-              'v': sourceFormat,
-              'k': 'at',
-              'l': clip.label,
-              'c': [for (final c in candidates) c.toJson()],
-            },
-          ),
-          sure: sure,
-          offline: offline,
-        );
+        return _Run((clip, _openingRow(clip, candidates)), sure: sure, offline: offline);
       }
     }
     // Plex extras: HD copies first, then 4K, skipping servers already slow.
@@ -520,13 +645,18 @@ class ClipResolver {
 
   /// Every file of AnimeThemes OP1 for [t], and whether the answer is
   /// sure: no mapping or no record is sure, a failed lookup (429, 5xx, the
-  /// local cap, a changed response) is not.
+  /// local cap, a changed response) is not. A deck's batch ([warm]) in
+  /// flight for [t] is waited for, and its answer used.
   Future<(List<AnimeOpening>, bool)> _openings(ReelTitle t) async {
     try {
+      if (_warming[t.groupKey] case final batch?) await batch;
       final id = await aniList(t);
       if (id == null) return (const <AnimeOpening>[], true);
+      if (_openingsById[id] case final known?) return (known, true);
       final anime = (await _animeThemes([id]))[id];
-      return (anime == null ? const <AnimeOpening>[] : ClipFilter.openings(anime), true);
+      final ops = anime == null ? const <AnimeOpening>[] : ClipFilter.openings(anime);
+      _openingsById[id] = ops;
+      return (ops, true);
     } catch (e) {
       appLogger.d('Reel: AnimeThemes lookup failed', error: e);
       return (const <AnimeOpening>[], false);
