@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -11,6 +12,7 @@ import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
+import 'package:plezy/services/reel/reel_playback_profile.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 class FakeServers implements ReelServers {
@@ -57,17 +59,19 @@ void main() {
   Object? atFailure;
   late Map<int, Map<String, dynamic>> atRecords;
 
-  ClipResolver make({ReelServerWait? wait, AniListLookup? aniList}) => ClipResolver(
-    servers: servers,
-    store: store,
-    aniList: aniList ?? (t) async => t.tvdbId == 1 ? 101 : null,
-    waitForServer: wait,
-    animeThemes: (ids) async {
-      atCalls.add(ids);
-      if (atFailure case final e?) throw e;
-      return atRecords;
-    },
-  );
+  ClipResolver make({ReelServerWait? wait, AniListLookup? aniList, ValueListenable<ReelPlaybackProfile>? profile}) =>
+      ClipResolver(
+        servers: servers,
+        store: store,
+        aniList: aniList ?? (t) async => t.tvdbId == 1 ? 101 : null,
+        waitForServer: wait,
+        profile: profile,
+        animeThemes: (ids) async {
+          atCalls.add(ids);
+          if (atFailure case final e?) throw e;
+          return atRecords;
+        },
+      );
 
   setUp(() {
     db = ForkDatabase.memory();
@@ -236,7 +240,7 @@ void main() {
 
     test('a server that answers with no trailer is a definitive miss, cached', () async {
       expect((await resolver.lookup(film())).answer, ClipAnswer.none);
-      expect(await store.cached('src:imdb:tt1'), '{"miss":true}');
+      expect(await store.cached('src:imdb:tt1'), ClipResolver.missRow);
     });
 
     test('one copy offline and one answering with nothing is still unknown', () async {
@@ -277,7 +281,7 @@ void main() {
     test('no AnimeThemes record and no Plex trailer is a definitive miss', () async {
       atRecords = {};
       expect((await resolver.lookup(animeShow())).answer, ClipAnswer.none);
-      expect(await store.cached('src:tvdb:1'), '{"miss":true}');
+      expect(await store.cached('src:tvdb:1'), ClipResolver.missRow);
     });
 
     test('a mapping that could not be read is unknown', () async {
@@ -356,8 +360,164 @@ void main() {
       await resolver.forget(film());
       final r = await resolver.lookup(film(), exclude: {'plex:78'});
       expect(r.answer, ClipAnswer.none);
-      expect(await store.cached('src:imdb:tt1'), isNot('{"miss":true}'));
+      expect(await store.cached('src:imdb:tt1'), isNot(ClipResolver.missRow));
       expect((await resolver.lookup(film())).clip?.assetId, 'plex:78', reason: 'the exclusion was for one call');
+    });
+  });
+
+  group('the playback profile picks the file at play time (V2-16)', () {
+    const harbor = ReelTitle(
+      titleId: 's:tvdb:1',
+      groupKey: 'tvdb:1',
+      title: 'Harbor Lights',
+      isShow: true,
+      anime: true,
+      tvdbId: 1,
+      copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+    );
+    const cover = ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
+    const inner = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
+
+    Map<String, dynamic> video(int id, int res, {bool nc = true, int size = 30}) => {
+      'id': id,
+      'link': 'https://v.animethemes.moe/HarborLights-OP1-$id.webm',
+      'nc': nc,
+      'resolution': res,
+      'size': size,
+    };
+
+    setUp(() {
+      atRecords = {
+        101: {
+          'animethemes': [
+            {
+              'type': 'OP',
+              'sequence': 1,
+              'animethemeentries': [
+                {
+                  'episodes': '1-12',
+                  'videos': [video(1, 480), video(2, 720), video(3, 1080), video(4, 1080, nc: false)],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    });
+
+    test('every candidate is cached, and the profile picks among them without another read', () async {
+      final profile = ValueNotifier<ReelPlaybackProfile>(inner);
+      addTearDown(profile.dispose);
+      resolver = make(profile: profile);
+      final first = await resolver.lookup(harbor);
+      expect(first.clip?.assetId, 'at:3');
+      expect(first.clip?.height, 1080);
+      expect(first.clip?.candidates.map((c) => c.assetId), ['at:1', 'at:2', 'at:3', 'at:4']);
+      final row = jsonDecode((await store.cached('src:tvdb:1'))!) as Map<String, dynamic>;
+      expect(row['v'], ClipResolver.sourceFormat);
+      expect((row['c'] as List).length, 4);
+
+      // The Fold folds: the cover screen's profile.
+      profile.value = cover;
+      final folded = await resolver.lookup(harbor);
+      expect(folded.clip?.assetId, 'at:2');
+      expect(folded.clip?.source.uri, endsWith('-2.webm'));
+      expect(atCalls, hasLength(1), reason: 'served from the cached candidates');
+    });
+
+    test('repick follows the profile and returns the same clip when nothing changes', () async {
+      final profile = ValueNotifier<ReelPlaybackProfile>(inner);
+      addTearDown(profile.dispose);
+      resolver = make(profile: profile);
+      final clip = (await resolver.lookup(harbor)).clip!;
+      expect(identical(resolver.repick(clip), clip), isTrue);
+      profile.value = cover;
+      final again = resolver.repick(clip);
+      expect(again.assetId, 'at:2');
+      expect(again.label, clip.label);
+      expect(again.candidates, clip.candidates);
+    });
+
+    test('data saver takes the lowest height above its cap when none is at or below it', () async {
+      atRecords = {
+        101: {
+          'animethemes': [
+            {
+              'type': 'OP',
+              'sequence': 1,
+              'animethemeentries': [
+                {
+                  'episodes': '1-12',
+                  'videos': [video(2, 720), video(3, 1080)],
+                },
+              ],
+            },
+          ],
+        },
+      };
+      resolver = make(
+        profile: ValueNotifier(
+          const ReelPlaybackProfile(
+            screen: ReelScreen.large,
+            maxHeight: 480,
+            link: ReelLink.cellular,
+            dataSaver: true,
+            largerFileAtHeight: false,
+          ),
+        ),
+      );
+      expect((await resolver.lookup(harbor)).clip?.assetId, 'at:2');
+    });
+
+    test('a spoiled file bans the whole opening: its other files are the same clip', () async {
+      await resolver.lookup(harbor);
+      await store.spoiled('s:tvdb:1', 'at:1');
+      servers.extrasByKey['a:5'] = [_x('90', 'Harbor Lights Trailer')];
+      final r = await resolver.lookup(harbor);
+      expect(r.clip?.assetId, 'plex:90');
+    });
+
+    for (final (name, row) in [
+      ('a one-file opening', '{"k":"at","u":"https://v.animethemes.moe/Old.webm","a":"at:9","l":"Opening 1"}'),
+      (
+        'a trailer identity',
+        '{"k":"plex","sv":"a","pk":"/services/iva/assets/1/video.mp4","a":"plex:1","l":"Trailer"}',
+      ),
+      ('a miss', '{"miss":true}'),
+    ]) {
+      test('a row in the older format ($name) reads as not cached and is resolved again', () async {
+        await store.cache('src:tvdb:1', row);
+        final r = await resolver.lookup(harbor);
+        expect(r.clip?.assetId, 'at:3');
+        expect(atCalls, hasLength(1));
+        final saved = jsonDecode((await store.cached('src:tvdb:1'))!) as Map<String, dynamic>;
+        expect(saved['v'], ClipResolver.sourceFormat);
+      });
+    }
+
+    test('a cached row with a malformed candidate is resolved again', () async {
+      await store.cache(
+        'src:tvdb:1',
+        jsonEncode({
+          'v': ClipResolver.sourceFormat,
+          'k': 'at',
+          'l': 'Opening 1',
+          'c': [
+            {'a': 'at:3', 'u': 'http://insecure.example/x.webm', 'h': 1080, 'sz': 1, 'r': 0},
+          ],
+        }),
+      );
+      expect((await resolver.lookup(harbor)).clip?.assetId, 'at:3');
+      expect(atCalls, hasLength(1));
+    });
+
+    test('Plex trailers are cached in the new format with their one file', () async {
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      final clip = (await resolver.lookup(film())).clip!;
+      expect(clip.candidates, isEmpty);
+      expect(identical(resolver.repick(clip), clip), isTrue);
+      final row = jsonDecode((await store.cached('src:imdb:tt1'))!) as Map<String, dynamic>;
+      expect(row, containsPair('v', ClipResolver.sourceFormat));
     });
   });
 

@@ -73,6 +73,7 @@ class ReelController extends ChangeNotifier {
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
+    resolver.profile?.addListener(_onProfile);
     decks.forEach(_watchDeck);
   }
 
@@ -769,6 +770,25 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The playback profile changed (the Fold switched screens, the network
+  /// changed, data saver was turned on): every resolved card except the one
+  /// on screen picks its file again, so the next card plays at the new
+  /// height. The card on screen keeps its file until it is shown again.
+  void _onProfile() {
+    if (_disposed) return;
+    final onScreen = {?_cardShown, ?current.card?.id};
+    var changed = false;
+    for (final MapEntry(key: id, value: clip) in _clip.entries.toList()) {
+      if (clip == null || onScreen.contains(id)) continue;
+      final next = resolver.repick(clip);
+      if (identical(next, clip)) continue;
+      _clip[id] = next;
+      changed = true;
+    }
+    appLogger.d('Reel: playback profile now ${resolver.playback}');
+    if (changed) notifyListeners();
+  }
+
   /// The On TV state the TV broadcasts on every card change: what the
   /// Fold's On TV mode shows (`reelState`). Image paths only: the
   /// phone loads them through its own server connection.
@@ -817,6 +837,7 @@ class ReelController extends ChangeNotifier {
     _generation++;
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);
+    resolver.profile?.removeListener(_onProfile);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);
     }

@@ -21,6 +21,7 @@ import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
+import 'package:plezy/services/reel/reel_playback_profile.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 import 'clip_player_test.dart' show FakeClipEngine;
@@ -226,6 +227,9 @@ void main() {
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
     ReelServers? servers,
+    AniListLookup? aniList,
+    AnimeThemesFetch? animeThemes,
+    ValueListenable<ReelPlaybackProfile>? profile,
   }) => ReelController(
     decks:
         decks ??
@@ -235,8 +239,9 @@ void main() {
     resolver: ClipResolver(
       servers: servers ?? _Servers(),
       store: store,
-      aniList: (_) async => null,
-      animeThemes: (_) async => const {},
+      aniList: aniList ?? (_) async => null,
+      animeThemes: animeThemes ?? (_) async => const {},
+      profile: profile,
     ),
     clips: ClipPlayer(
       engine: () {
@@ -513,6 +518,75 @@ void main() {
     expect(c.current.card?.id, 't2');
     expect(engines, 0);
     c.dispose();
+  });
+
+  test('a new playback profile re-picks the files of the cards ahead, not the one on screen (V2-16)', () async {
+    ReelCardData anime(String id) => ReelCardData(
+      title: ReelTitle(
+        titleId: 't$id',
+        groupKey: 'g$id',
+        title: 'Harbor Lights $id',
+        isShow: true,
+        anime: true,
+        tvdbId: int.parse(id),
+        copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+      ),
+      facts: TitleFacts(
+        ref: TitleRef(id: 't$id', groupKey: 'g$id'),
+        seen: SeenState.unseen,
+      ),
+      best: _copy(id),
+    );
+    Map<String, dynamic> record(int id) => {
+      'animethemes': [
+        {
+          'type': 'OP',
+          'sequence': 1,
+          'animethemeentries': [
+            {
+              'episodes': '1-12',
+              'videos': [
+                for (final res in [720, 1080])
+                  {
+                    'id': id * 10000 + res,
+                    'link': 'https://v.animethemes.moe/OP$id-$res.webm',
+                    'nc': true,
+                    'resolution': res,
+                  },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    final profile = ValueNotifier(const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080));
+    addTearDown(profile.dispose);
+    final c = make(
+      externalClips: true,
+      decks: [
+        _Deck('a', [anime('1'), anime('2'), anime('3')]),
+      ],
+      aniList: (t) async => t.tvdbId,
+      animeThemes: (ids) async => {for (final id in ids) id: record(id)},
+      profile: profile,
+    );
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.current.clip?.height, 1080);
+    expect(c.slotAt(1).clip?.height, 1080);
+    var told = 0;
+    c.addListener(() => told++);
+
+    // The Fold folds to its cover screen.
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
+    expect(c.current.clip?.height, 1080, reason: 'the clip on screen keeps playing its file');
+    expect(c.slotAt(1).clip?.height, 720);
+    expect(c.slotAt(1).clip?.source.uri, 'https://v.animethemes.moe/OP2-720.webm');
+    expect(told, 1);
+
+    c.dispose();
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
+    expect(told, 1, reason: 'a disposed controller stops listening');
   });
 
   test('a clip the feed played through is recorded as watched to the end', () async {

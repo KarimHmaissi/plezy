@@ -3,6 +3,8 @@
 /// spoiler rules are unit-tested on real-shaped titles.
 library;
 
+import 'reel_playback_profile.dart';
+
 /// One Plex extra, as `/library/metadata/{id}/extras` lists it: only the
 /// fields the ladder reads.
 class PlexExtraClip {
@@ -128,18 +130,26 @@ class ClipFilter {
   static String _norm(String s) =>
       s.toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
 
-  /// Season 1's first opening from an AnimeThemes `anime` record: OP with
-  /// sequence 1 (or the only OP), an entry whose episodes start at 1, not a
-  /// spoiler, not NSFW; creditless (`nc`) preferred, then 1080p, then the
-  /// smallest file. Never EDs, never later OPs.
-  static AnimeOpening? firstOpening(Map<String, dynamic> anime) {
+  /// Season 1's first opening from an AnimeThemes `anime` record, as
+  /// [profile] plays it: the best of [openings] by its rank (creditless
+  /// first), then the profile's height and file size (plan V2-16).
+  static AnimeOpening? firstOpening(
+    Map<String, dynamic> anime, {
+    ReelPlaybackProfile profile = ReelPlaybackProfile.standard,
+  }) => profile.pick(openings(anime));
+
+  /// Every file of season 1's first opening: OP with sequence 1 (or the
+  /// only OP), from an entry whose episodes start at 1, not a spoiler, not
+  /// NSFW. Never EDs, never later OPs. Which file plays is the playback
+  /// profile's choice, made when the card plays.
+  static List<AnimeOpening> openings(Map<String, dynamic> anime) {
     final themes = [
       for (final t in (anime['animethemes'] as List? ?? const []))
         if (t is Map && t['type'] == 'OP') t,
     ];
-    if (themes.isEmpty) return null;
+    if (themes.isEmpty) return const [];
     final op1 = themes.where((t) => (t['sequence'] as int? ?? (themes.length == 1 ? 1 : 0)) == 1).firstOrNull;
-    if (op1 == null) return null;
+    if (op1 == null) return const [];
     final candidates = <AnimeOpening>[];
     for (final entry in (op1['animethemeentries'] as List? ?? const [])) {
       if (entry is! Map) continue;
@@ -161,14 +171,7 @@ class ClipFilter {
         );
       }
     }
-    if (candidates.isEmpty) return null;
-    candidates.sort((a, b) {
-      if (a.creditless != b.creditless) return a.creditless ? -1 : 1;
-      final ra = (a.resolution ?? 0) == 1080, rb = (b.resolution ?? 0) == 1080;
-      if (ra != rb) return ra ? -1 : 1;
-      return (a.sizeBytes ?? 1 << 40).compareTo(b.sizeBytes ?? 1 << 40);
-    });
-    return candidates.first;
+    return candidates;
   }
 
   /// "1-14", "1", "1, 3" start at episode 1; null (unknown) is allowed for a
@@ -180,8 +183,8 @@ class ClipFilter {
   }
 }
 
-/// A season-1 opening from AnimeThemes.
-class AnimeOpening {
+/// One file of a season-1 opening from AnimeThemes.
+class AnimeOpening implements ReelRendition {
   const AnimeOpening({
     required this.url,
     this.videoId,
@@ -195,6 +198,14 @@ class AnimeOpening {
   final int? videoId;
   final bool creditless;
   final int? resolution;
+  @override
   final int? sizeBytes;
   final String? song;
+
+  @override
+  int? get height => resolution;
+
+  /// Creditless before credited.
+  @override
+  int get rank => creditless ? 0 : 1;
 }

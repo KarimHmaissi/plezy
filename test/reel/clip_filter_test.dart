@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
+import 'package:plezy/services/reel/reel_playback_profile.dart';
 
 PlexExtraClip _x(String title, {int i = 0, String subtype = 'trailer'}) => PlexExtraClip(
   ratingKey: 'k$i',
@@ -150,6 +151,23 @@ void main() {
       expect(op?.url, 'https://v.animethemes.moe/OP1.webm');
       expect(op?.creditless, isTrue);
       expect(op?.song, 'song OP1');
+    });
+
+    test('every file of OP1 is a candidate; the profile picks the height (V2-16)', () {
+      final anime = {
+        'animethemes': [
+          theme('OP', 1, [
+            {
+              'episodes': '1-12',
+              'videos': [video('OP1-480', res: 480, size: 5), video('OP1-720', res: 720, size: 20), video('OP1')],
+            },
+          ]),
+        ],
+      };
+      expect(ClipFilter.openings(anime).map((o) => o.height), [480, 720, 1080]);
+      const cover = ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
+      expect(ClipFilter.firstOpening(anime, profile: cover)?.url, endsWith('OP1-720.webm'));
+      expect(ClipFilter.firstOpening(anime)?.url, endsWith('/OP1.webm'));
     });
 
     test('spoiler or NSFW entries and openings that start later are refused', () {

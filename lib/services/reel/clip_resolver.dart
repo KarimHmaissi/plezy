@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:http/http.dart' as http;
 
 import '../../utils/app_logger.dart';
 import 'clip_filter.dart';
 import 'clip_player.dart';
+import 'reel_playback_profile.dart';
 import 'reel_store.dart';
 
 /// The only server calls the Reel may make: per-title extras and a clip URL.
@@ -68,9 +70,45 @@ class ReelTitle {
   final int? tmdbId;
 }
 
+/// One file of a clip with several (an opening at 720 and 1080, with and
+/// without credits). The resolver keeps them all and the playback profile
+/// picks one when the card plays (plan V2-16).
+class ClipCandidate implements ReelRendition {
+  const ClipCandidate({required this.uri, required this.assetId, this.height, this.sizeBytes, this.rank = 0});
+
+  final String uri;
+
+  /// `at:<video id>`.
+  final String assetId;
+  @override
+  final int? height;
+  @override
+  final int? sizeBytes;
+  @override
+  final int rank;
+
+  Map<String, Object?> toJson() => {'a': assetId, 'u': uri, 'h': height, 'sz': sizeBytes, 'r': rank};
+
+  /// A cached candidate, or null when it isn't shaped as written.
+  static ClipCandidate? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final (a, u, h, sz, r) = (j['a'], j['u'], j['h'], j['sz'], j['r']);
+    if (a is! String || u is! String || !u.startsWith('https://')) return null;
+    if ((h != null && h is! int) || (sz != null && sz is! int) || r is! int) return null;
+    return ClipCandidate(uri: u, assetId: a, height: h as int?, sizeBytes: sz as int?, rank: r);
+  }
+}
+
 /// A resolved rung: where the clip is and what it is.
 class ResolvedClip {
-  const ResolvedClip({required this.source, required this.assetId, required this.label, this.serverId});
+  const ResolvedClip({
+    required this.source,
+    required this.assetId,
+    required this.label,
+    this.serverId,
+    this.height,
+    this.candidates = const [],
+  });
 
   final ClipSource source;
 
@@ -83,6 +121,14 @@ class ResolvedClip {
   /// Plex rungs: the server the clip streams from (never preloaded off a
   /// server marked slow).
   final String? serverId;
+
+  /// The picked file's height, when the source says it.
+  final int? height;
+
+  /// Every file of this clip, the picked one included; empty for a Plex
+  /// trailer, which has the one file. [ClipResolver.repick] chooses again
+  /// from these when the playback profile changes.
+  final List<ClipCandidate> candidates;
 }
 
 /// How sure the ladder is about a title.
@@ -138,7 +184,9 @@ class _Run {
 /// (`src:<groupKey>`), never a resolved CDN URL. A miss is cached only when
 /// every rung answered for sure; a rung that couldn't answer leaves the
 /// title unknown, which lasts for the session only. One request at a time,
-/// per title, on demand: never a batch or crawl of a server.
+/// per title, on demand: never a batch or crawl of a server. A clip with
+/// several files (an opening at 720 and 1080) caches them all, and the
+/// playback [profile] picks one each time the title is looked up.
 class ClipResolver {
   ClipResolver({
     required this.servers,
@@ -147,6 +195,7 @@ class ClipResolver {
     AnimeThemesFetch? animeThemes,
     this.waitForServer,
     this.firstTry = const Duration(seconds: 5),
+    this.profile,
   }) : _animeThemes = animeThemes ?? AnimeThemesClient().fetch;
 
   final ReelServers servers;
@@ -162,6 +211,18 @@ class ClipResolver {
   /// A server gets one try this long; a timeout marks it slow for the
   /// session (its titles stay unknown, never a cached miss).
   final Duration firstTry;
+
+  /// The device's playback profile, rebuilt when the screen or network
+  /// changes (plan V2-16). Null plays [ReelPlaybackProfile.standard].
+  final ValueListenable<ReelPlaybackProfile>? profile;
+
+  ReelPlaybackProfile get playback => profile?.value ?? ReelPlaybackProfile.standard;
+
+  /// The `src:` row format. Rows written before it (one file per title, or
+  /// a miss cached by the older ladder) read as not cached, so the title is
+  /// resolved once more and every candidate is stored.
+  static const int sourceFormat = 2;
+
   final Set<String> _slowServers = {};
   final Map<String, Future<bool>> _waits = {};
   Future<void> _queue = Future.value();
@@ -187,18 +248,18 @@ class ClipResolver {
     final key = 'src:${t.groupKey}';
     final cached = await store.cached(key, ttl: ReelStore.sourceTtl);
     var keep = false;
-    if (cached != null) {
-      final entry = _entry(cached);
-      if (entry != null && entry['miss'] == true) return const ClipLookup.none();
-      final asset = entry?['a'];
-      if (entry != null && asset is String && !banned.contains(asset)) {
-        var hit = _fromCache(entry, asset);
+    final entry = cached == null ? null : _entry(cached);
+    if (entry != null) {
+      if (entry['miss'] == true) return const ClipLookup.none();
+      final assets = _assets(entry);
+      if (assets.isNotEmpty && !assets.any(banned.contains)) {
+        var hit = _fromCache(entry);
         if (hit == null && entry['k'] == 'plex' && entry['sv'] is String) {
           // A good identity whose server is offline is kept, never
           // overwritten by a miss.
           keep = true;
           final sv = entry['sv'] as String;
-          if (await _awaitServer(sv)) hit = _fromCache(entry, asset);
+          if (await _awaitServer(sv)) hit = _fromCache(entry);
         }
         if (hit != null) return ClipLookup.found(hit);
       }
@@ -214,38 +275,90 @@ class ClipResolver {
       return ClipLookup.found(hit.$1);
     }
     if (run.sure && !keep) {
-      if (exclude.isEmpty) await store.cache(key, _miss);
+      if (exclude.isEmpty) await store.cache(key, missRow);
       return const ClipLookup.none();
     }
     appLogger.d('Reel: clip answer unknown for now; not cached');
     return const ClipLookup.unknown();
   }
 
-  static const String _miss = '{"miss":true}';
+  /// A definitive miss in the current [sourceFormat].
+  static const String missRow = '{"v":$sourceFormat,"miss":true}';
 
+  /// A cached row in the current [sourceFormat]; anything else (an older
+  /// format, a forgotten or unreadable row) is not cached.
   Map<String, dynamic>? _entry(String raw) {
     try {
       final j = jsonDecode(raw);
-      return j is Map<String, dynamic> ? j : null;
+      return j is Map<String, dynamic> && j['v'] == sourceFormat ? j : null;
     } catch (_) {
       return null;
     }
   }
 
-  ResolvedClip? _fromCache(Map<String, dynamic> j, String asset) {
+  /// Every asset a cached row can play.
+  List<String> _assets(Map<String, dynamic> j) => switch (j['k']) {
+    'at' => [
+      for (final c in (j['c'] is List ? j['c'] as List : const []))
+        if (c is Map && c['a'] is String) c['a'] as String,
+    ],
+    'plex' => [if (j['a'] case final String a) a],
+    _ => const [],
+  };
+
+  ResolvedClip? _fromCache(Map<String, dynamic> j) {
     try {
       return switch (j['k']) {
-        'at' => ResolvedClip(
-          source: ClipSource(uri: j['u'] as String, origin: ClipOrigin.animeTheme),
-          assetId: asset,
-          label: j['l'] as String? ?? 'Opening',
-        ),
-        'plex' => _plex(j['sv'] as String, j['pk'] as String, asset, j['l'] as String? ?? 'Trailer'),
+        'at' => _opening1(j['l'] as String? ?? 'Opening', _candidates(j['c'])),
+        'plex' => _plex(j['sv'] as String, j['pk'] as String, j['a'] as String, j['l'] as String? ?? 'Trailer'),
         _ => null,
       };
     } catch (_) {
       return null;
     }
+  }
+
+  /// A cached candidate list, or empty when any entry isn't shaped as
+  /// written (the row is then resolved again).
+  static List<ClipCandidate> _candidates(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <ClipCandidate>[];
+    for (final j in raw) {
+      final c = ClipCandidate.fromJson(j);
+      if (c == null) return const [];
+      out.add(c);
+    }
+    return out;
+  }
+
+  /// An AnimeThemes clip as [playback] plays it from [candidates]; null for
+  /// none.
+  ResolvedClip? _opening1(String label, List<ClipCandidate> candidates) {
+    final pick = playback.pick(candidates);
+    if (pick == null) return null;
+    return ResolvedClip(
+      source: ClipSource(uri: pick.uri, origin: ClipOrigin.animeTheme),
+      assetId: pick.assetId,
+      label: label,
+      height: pick.height,
+      candidates: candidates,
+    );
+  }
+
+  /// [clip] as the current profile plays it: another of its candidates when
+  /// the profile now picks one, else [clip] itself (identical).
+  ResolvedClip repick(ResolvedClip clip) {
+    if (clip.candidates.length < 2) return clip;
+    final pick = playback.pick(clip.candidates);
+    if (pick == null || pick.assetId == clip.assetId) return clip;
+    return ResolvedClip(
+      source: ClipSource(uri: pick.uri, origin: clip.source.origin),
+      assetId: pick.assetId,
+      label: clip.label,
+      serverId: clip.serverId,
+      height: pick.height,
+      candidates: clip.candidates,
+    );
   }
 
   ResolvedClip? _plex(String serverId, String partKey, String asset, String label) {
@@ -277,15 +390,34 @@ class ClipResolver {
     var sure = true;
     final offline = <String>{};
     if (t.anime && t.isShow) {
-      final (op, opSure) = await _opening(t);
+      final (ops, opSure) = await _openings(t);
       sure &= opSure;
-      if (op != null && !banned.contains('at:${op.videoId}')) {
-        final clip = ResolvedClip(
-          source: ClipSource(uri: op.url, origin: ClipOrigin.animeTheme),
-          assetId: 'at:${op.videoId}',
-          label: 'Opening 1',
+      final candidates = [
+        for (final op in ops)
+          ClipCandidate(
+            uri: op.url,
+            assetId: 'at:${op.videoId}',
+            height: op.resolution,
+            sizeBytes: op.sizeBytes,
+            rank: op.rank,
+          ),
+      ];
+      // A banned file bans the opening: its other files are the same clip.
+      final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1('Opening 1', candidates);
+      if (clip != null) {
+        return _Run(
+          (
+            clip,
+            {
+              'v': sourceFormat,
+              'k': 'at',
+              'l': clip.label,
+              'c': [for (final c in candidates) c.toJson()],
+            },
+          ),
+          sure: sure,
+          offline: offline,
         );
-        return _Run((clip, {'k': 'at', 'u': op.url, 'a': clip.assetId, 'l': clip.label}), sure: sure, offline: offline);
       }
     }
     // Plex extras: HD copies first, then 4K, skipping servers already slow.
@@ -329,7 +461,7 @@ class ClipResolver {
         continue;
       }
       return _Run(
-        (clip, {'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, 'l': label}),
+        (clip, {'v': sourceFormat, 'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, 'l': label}),
         sure: sure,
         offline: offline,
       );
@@ -337,18 +469,18 @@ class ClipResolver {
     return _Run(null, sure: sure, offline: offline);
   }
 
-  /// AnimeThemes OP1 for [t], and whether the answer is sure: no mapping or
-  /// no record is sure, a failed lookup (429, 5xx, the local cap, a changed
-  /// response) is not.
-  Future<(AnimeOpening?, bool)> _opening(ReelTitle t) async {
+  /// Every file of AnimeThemes OP1 for [t], and whether the answer is
+  /// sure: no mapping or no record is sure, a failed lookup (429, 5xx, the
+  /// local cap, a changed response) is not.
+  Future<(List<AnimeOpening>, bool)> _openings(ReelTitle t) async {
     try {
       final id = await aniList(t);
-      if (id == null) return (null, true);
+      if (id == null) return (const <AnimeOpening>[], true);
       final anime = (await _animeThemes([id]))[id];
-      return (anime == null ? null : ClipFilter.firstOpening(anime), true);
+      return (anime == null ? const <AnimeOpening>[] : ClipFilter.openings(anime), true);
     } catch (e) {
       appLogger.d('Reel: AnimeThemes lookup failed', error: e);
-      return (null, false);
+      return (const <AnimeOpening>[], false);
     }
   }
 }

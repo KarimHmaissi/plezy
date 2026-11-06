@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -39,8 +40,10 @@ import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
 import 'reel/reel_decks.dart';
 import 'reel/reel_library.dart';
+import 'reel/reel_playback_profile.dart';
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
+import 'reel_playback_watcher.dart';
 import 'reel_servers_plex.dart';
 import 'trackers/fribb_mapping_store.dart';
 
@@ -60,7 +63,7 @@ abstract final class ReelApp {
     final store = ReelStore.instance;
     final facts = IndexTitleFactsSource.app();
     final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
-    final resolver = resolverFor(servers, store, serversChanged: multi);
+    final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
     final pool = ReelPool(store: store, library: library, model: _sonnet);
     final media = _AppReelMedia(servers);
     final resolverRows = catalog == null
@@ -226,13 +229,21 @@ abstract final class ReelApp {
   /// The clip resolver over the app's servers (also the measure-day probe).
   /// With [serversChanged], a server that isn't connected yet is waited for
   /// as long as a deep link waits ([deepLinkServerWait]), once per start or
-  /// resume: after a wake the Reel opens before the servers reconnect.
-  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store, {Listenable? serversChanged}) {
+  /// resume: after a wake the Reel opens before the servers reconnect. With
+  /// [profile], a clip's file is picked for the device as it is now (plan
+  /// V2-16); without it, by the standard profile.
+  static ClipResolver resolverFor(
+    MultiServerManager servers,
+    ReelStore store, {
+    Listenable? serversChanged,
+    ValueListenable<ReelPlaybackProfile>? profile,
+  }) {
     final plex = PlexReelServers(servers);
     return ClipResolver(
       servers: plex,
       store: store,
       aniList: _aniList,
+      profile: profile,
       waitForServer: serversChanged == null
           ? null
           : (id) => waitForServers(serversChanged, () => plex.connected(id), timeout: deepLinkServerWait),
