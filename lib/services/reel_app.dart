@@ -257,8 +257,13 @@ abstract final class ReelApp {
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).
-  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store) =>
-      ClipResolver(servers: PlexReelServers(servers), store: store, aniList: _aniList);
+  static ClipResolver resolverFor(MultiServerManager servers, ReelStore store) => ClipResolver(
+    servers: PlexReelServers(servers),
+    store: store,
+    aniList: _aniList,
+    // Openings with lyrics or subtitles first (V2-54), read per resolve.
+    captions: () => SettingsService.instanceOrNull?.read(SettingsService.reelCaptions) ?? false,
+  );
 
   /// Answers worth a deck: the user's own asks, not Tonight or the briefing.
   static Future<List<AiHistoryEntry>> _answers() async {

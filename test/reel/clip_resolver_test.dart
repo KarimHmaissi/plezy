@@ -170,4 +170,80 @@ void main() {
     );
     expect(servers.calls.first, 'b:2');
   });
+
+  group('captions (V2-54)', () {
+    late bool captions;
+    late ClipResolver ccResolver;
+
+    Map<String, dynamic> video(int id, String name, {bool lyrics = false}) => {
+      'id': id,
+      'link': 'https://v.animethemes.moe/$name.webm',
+      'nc': true,
+      'lyrics': lyrics,
+      'subbed': false,
+      'resolution': 1080,
+    };
+
+    setUp(() {
+      captions = false;
+      atCalls = [];
+      ccResolver = ClipResolver(
+        servers: servers,
+        store: store,
+        aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+        captions: () => captions,
+        animeThemes: (ids) async {
+          atCalls.add(ids);
+          return {
+            101: {
+              'animethemes': [
+                {
+                  'type': 'OP',
+                  'sequence': 1,
+                  'animethemeentries': [
+                    {
+                      'episodes': '1-12',
+                      'videos': [video(9, 'Harbor-OP1'), video(10, 'Harbor-OP1-Lyrics', lyrics: true)],
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+        },
+      );
+    });
+
+    const show = ReelTitle(
+      titleId: 's:tvdb:1',
+      groupKey: 'tvdb:1',
+      title: 'Harbor Lights',
+      isShow: true,
+      anime: true,
+      tvdbId: 1,
+      copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+    );
+
+    test('off picks the clean opening; on picks the one with lyrics; each choice keeps its own entry', () async {
+      expect((await ccResolver.resolve(show))?.assetId, 'at:9');
+      captions = true;
+      expect((await ccResolver.resolve(show))?.assetId, 'at:10', reason: 'the switch re-picks, not the cached one');
+      expect(atCalls, hasLength(2));
+
+      // Both choices are cached now: switching back and forth asks nobody.
+      captions = false;
+      expect((await ccResolver.resolve(show))?.assetId, 'at:9');
+      captions = true;
+      expect((await ccResolver.resolve(show))?.assetId, 'at:10');
+      expect(atCalls, hasLength(2));
+    });
+
+    test('a film keeps one entry whatever the choice', () async {
+      servers.extrasByKey['a:1'] = [_x('70', 'Trailer')];
+      expect((await ccResolver.resolve(film()))?.assetId, 'plex:70');
+      captions = true;
+      expect((await ccResolver.resolve(film()))?.assetId, 'plex:70');
+      expect(servers.calls, ['a:1'], reason: 'no second server read for a choice that only touches openings');
+    });
+  });
 }

@@ -86,6 +86,7 @@ class ClipResolver {
     required this.aniList,
     AnimeThemesFetch? animeThemes,
     this.firstTry = const Duration(seconds: 5),
+    this.captions,
   }) : _animeThemes = animeThemes ?? AnimeThemesClient().fetch;
 
   final ReelServers servers;
@@ -96,6 +97,11 @@ class ClipResolver {
   /// A server gets one try this long; a timeout marks it slow for the
   /// session and the miss is cached for 30 days.
   final Duration firstTry;
+
+  /// The Reel's captions pref (V2-54): openings with lyrics or subtitles
+  /// first. Read per resolve, so a change applies to the next card. Null is
+  /// off.
+  final bool Function()? captions;
   final Set<String> _slowServers = {};
   Future<void> _queue = Future.value();
 
@@ -104,13 +110,18 @@ class ClipResolver {
 
   Future<ResolvedClip?> resolve(ReelTitle t) async {
     final spoiled = await store.spoiledAssets(t.titleId);
-    final cached = await store.cached('src:${t.groupKey}', ttl: ReelStore.sourceTtl);
+    // An anime show's pick depends on the captions pref, so each choice
+    // keeps its own entry: switching it re-picks instead of replaying the
+    // other choice's opening for 30 days. Other titles keep one entry.
+    final cc = t.anime && t.isShow && (captions?.call() ?? false);
+    final key = 'src:${t.groupKey}${cc ? ':cc' : ''}';
+    final cached = await store.cached(key, ttl: ReelStore.sourceTtl);
     if (cached != null) {
       final hit = _fromCache(cached, spoiled);
       if (hit != null || cached == _miss) return hit;
     }
-    final found = await _serial(() => _resolveFresh(t, spoiled));
-    await store.cache('src:${t.groupKey}', found == null ? _miss : jsonEncode(found.$2));
+    final found = await _serial(() => _resolveFresh(t, spoiled, captions: cc));
+    await store.cache(key, found == null ? _miss : jsonEncode(found.$2));
     return found?.$1;
   }
 
@@ -153,9 +164,13 @@ class ClipResolver {
     return next;
   }
 
-  Future<(ResolvedClip, Map<String, Object?>)?> _resolveFresh(ReelTitle t, Set<String> spoiled) async {
+  Future<(ResolvedClip, Map<String, Object?>)?> _resolveFresh(
+    ReelTitle t,
+    Set<String> spoiled, {
+    required bool captions,
+  }) async {
     if (t.anime && t.isShow) {
-      final op = await _opening(t);
+      final op = await _opening(t, captions: captions);
       if (op != null && !spoiled.contains('at:${op.videoId}')) {
         final clip = ResolvedClip(
           source: ClipSource(uri: op.url, origin: ClipOrigin.animeTheme),
@@ -195,12 +210,12 @@ class ClipResolver {
     return null;
   }
 
-  Future<AnimeOpening?> _opening(ReelTitle t) async {
+  Future<AnimeOpening?> _opening(ReelTitle t, {required bool captions}) async {
     final id = await aniList(t);
     if (id == null) return null;
     try {
       final anime = (await _animeThemes([id]))[id];
-      return anime == null ? null : ClipFilter.firstOpening(anime);
+      return anime == null ? null : ClipFilter.firstOpening(anime, captions: captions);
     } catch (e) {
       appLogger.d('Reel: AnimeThemes lookup failed', error: e);
       return null;
@@ -211,7 +226,9 @@ class ClipResolver {
 /// AnimeThemes (volunteer-run): batched lookups by AniList id, under 90
 /// requests a minute, honouring Retry-After. Fields verified against a live
 /// `/anime` response (animethemes[].type/sequence, animethemeentries[]
-/// .episodes/spoiler/nsfw, videos[].link/nc/resolution/size).
+/// .episodes/spoiler/nsfw, videos[].link/nc/resolution/size). videos[]
+/// .lyrics/subbed are booleans like `nc` (animethemes-server
+/// app/Models/Wiki/Video.php casts, Api/Schema/Wiki/VideoSchema.php fields).
 class AnimeThemesClient {
   AnimeThemesClient({http.Client? client}) : _client = client ?? http.Client();
 

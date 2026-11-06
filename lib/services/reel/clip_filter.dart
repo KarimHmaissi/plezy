@@ -130,9 +130,12 @@ class ClipFilter {
 
   /// Season 1's first opening from an AnimeThemes `anime` record: OP with
   /// sequence 1 (or the only OP), an entry whose episodes start at 1, not a
-  /// spoiler, not NSFW; creditless (`nc`) preferred, then 1080p, then the
-  /// smallest file. Never EDs, never later OPs.
-  static AnimeOpening? firstOpening(Map<String, dynamic> anime) {
+  /// spoiler, not NSFW; creditless (`nc`) preferred, then one without
+  /// on-screen lyrics or subtitles (`lyrics`/`subbed`), then 1080p, then the
+  /// smallest file. With [captions] (the Reel's captions pref, V2-54) a
+  /// version with lyrics or subtitles comes first instead. Never EDs, never
+  /// later OPs.
+  static AnimeOpening? firstOpening(Map<String, dynamic> anime, {bool captions = false}) {
     final themes = [
       for (final t in (anime['animethemes'] as List? ?? const []))
         if (t is Map && t['type'] == 'OP') t,
@@ -154,6 +157,7 @@ class ClipFilter {
             url: link,
             videoId: v['id'] as int?,
             creditless: v['nc'] == true,
+            captioned: v['lyrics'] == true || v['subbed'] == true,
             resolution: v['resolution'] as int?,
             sizeBytes: v['size'] as int?,
             song: (op1['song'] as Map?)?['title'] as String?,
@@ -164,6 +168,7 @@ class ClipFilter {
     if (candidates.isEmpty) return null;
     candidates.sort((a, b) {
       if (a.creditless != b.creditless) return a.creditless ? -1 : 1;
+      if (a.captioned != b.captioned) return a.captioned == captions ? -1 : 1;
       final ra = (a.resolution ?? 0) == 1080, rb = (b.resolution ?? 0) == 1080;
       if (ra != rb) return ra ? -1 : 1;
       return (a.sizeBytes ?? 1 << 40).compareTo(b.sizeBytes ?? 1 << 40);
@@ -186,6 +191,7 @@ class AnimeOpening {
     required this.url,
     this.videoId,
     this.creditless = false,
+    this.captioned = false,
     this.resolution,
     this.sizeBytes,
     this.song,
@@ -194,6 +200,9 @@ class AnimeOpening {
   final String url;
   final int? videoId;
   final bool creditless;
+
+  /// On-screen lyrics or subtitles (AnimeThemes `lyrics` or `subbed`).
+  final bool captioned;
   final int? resolution;
   final int? sizeBytes;
   final String? song;
