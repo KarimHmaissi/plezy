@@ -183,14 +183,18 @@ class ExtrasShape {
 typedef ExtrasRowsRead = Future<List<Object?>?> Function(ReelCopy copy);
 
 /// The probe's walk: every copy of up to [maxTitles] titles, one request at
-/// a time with [gap] between them, [maxReads] reads at most.
+/// a time with [gap] after each one (a failed read too, so a server that
+/// refuses every read is never hammered), [maxReads] reads at most.
+/// [pause] waits out the gap (tests pass a recorder).
 Future<ExtrasShape> probeExtrasShape(
   List<ReelTitle> titles,
   ExtrasRowsRead read, {
   int maxTitles = 30,
   int maxReads = 60,
   Duration gap = const Duration(milliseconds: 150),
+  Future<void> Function(Duration gap)? pause,
 }) async {
+  final wait = pause ?? (Duration d) => Future<void>.delayed(d);
   final shape = ExtrasShape();
   var reads = 0;
   for (final t in titles.take(maxTitles)) {
@@ -202,6 +206,7 @@ Future<ExtrasShape> probeExtrasShape(
       } catch (_) {
         reads++;
         shape.failed++;
+        if (gap > Duration.zero) await wait(gap);
         continue;
       }
       if (rows == null) {
@@ -210,7 +215,7 @@ Future<ExtrasShape> probeExtrasShape(
       }
       reads++;
       shape.addCopy(rows, is4k: c.is4k);
-      if (gap > Duration.zero) await Future<void>.delayed(gap);
+      if (gap > Duration.zero) await wait(gap);
     }
   }
   return shape;

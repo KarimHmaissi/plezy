@@ -208,6 +208,28 @@ void main() {
       expect(shape.extras, 2);
     });
 
+    test('waits the gap after every read, a failed one too, and not after a skipped copy', () async {
+      final events = <String>[];
+      await probeExtrasShape(
+        [
+          title('t1', const [
+            ReelCopy(serverId: 'a', ratingKey: 'ok'),
+            ReelCopy(serverId: 'a', ratingKey: 'fail'),
+            ReelCopy(serverId: 'b', ratingKey: 'skip'),
+            ReelCopy(serverId: 'a', ratingKey: 'fail-2'),
+          ]),
+        ],
+        (copy) async {
+          events.add('read ${copy.ratingKey}');
+          if (copy.ratingKey.startsWith('fail')) throw Exception('401');
+          return copy.ratingKey == 'skip' ? null : const [];
+        },
+        gap: const Duration(milliseconds: 150),
+        pause: (gap) async => events.add('gap ${gap.inMilliseconds}'),
+      );
+      expect(events, ['read ok', 'gap 150', 'read fail', 'gap 150', 'read skip', 'read fail-2', 'gap 150']);
+    });
+
     test('stops at the title and read caps', () async {
       final titles = [
         for (var i = 0; i < 10; i++)
