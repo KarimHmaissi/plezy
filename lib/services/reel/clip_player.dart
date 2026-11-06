@@ -266,10 +266,13 @@ class ClipPlayer {
     _current = null;
     _preloaded = null;
     _perf.cancel();
-    for (final s in _subs) {
+    // Taken before the first await: going to the background sends hidden
+    // then paused, so a second release can start while this one waits.
+    final subs = [..._subs];
+    _subs.clear();
+    for (final s in subs) {
       await s.cancel();
     }
-    _subs.clear();
     phase.value = ClipPhase.idle;
     if (e != null) await e.dispose();
   }

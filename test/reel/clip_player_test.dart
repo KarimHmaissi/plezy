@@ -163,6 +163,16 @@ void main() {
     expect(clips.engine, isNull);
   });
 
+  test('two releases at once (the app hidden, then paused) both finish and dispose the core', () async {
+    await clips.play(_a);
+    final first = clips.release();
+    final second = clips.release();
+    await Future.wait([first, second]);
+    expect(engine.disposed, isTrue);
+    expect(engine.calls.where((c) => c == 'dispose'), hasLength(1));
+    expect(clips.phase.value, ClipPhase.idle);
+  });
+
   test('FF/RW move 10 s within the clip, never before 0', () async {
     await clips.play(_a);
     await clips.seekBy(const Duration(seconds: 10));
