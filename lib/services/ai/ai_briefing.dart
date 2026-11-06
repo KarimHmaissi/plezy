@@ -319,6 +319,14 @@ abstract final class AiBriefing {
 
   /// Unwatched titles in the library nearest the ones they love most, with
   /// how strongly and which loved titles they're like.
+  /// The taste pool (similar unwatched titles to their best-loved ones),
+  /// shared with the Reel's daily For You build.
+  static Future<List<({TitleProfile profile, double score, List<String> like})>> tastePool(
+    HistoryBrain brain,
+    List<TitleProfile> watched,
+    DateTime now,
+  ) => _tastePool(brain, watched, now);
+
   static Future<List<({TitleProfile profile, double score, List<String> like})>> _tastePool(
     HistoryBrain brain,
     List<TitleProfile> watched,
