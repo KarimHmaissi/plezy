@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../../utils/app_logger.dart';
 import 'reel_decay.dart';
 import 'reel_library.dart';
+import 'reel_signals.dart';
 import 'reel_store.dart';
 
 /// One For You candidate as code assembles it: facts only, no verdicts.
@@ -58,6 +59,9 @@ class ReelPool {
   /// build to itself.
   final bool host;
   final DateTime Function() _clock;
+
+  /// What the Reel saw on this device and the other one (the build's facts).
+  late final ReelSignals signals = ReelSignals(store: store, host: host, clock: _clock);
 
   static const int maxCandidates = 250;
   static const int target = 90;
@@ -150,6 +154,27 @@ class ReelPool {
         ),
   ];
 
+  /// The pools' cluster labels (title id → `cl`) over the last [days] days,
+  /// this device's own pools and the shared one; a newer day's label wins.
+  Future<Map<String, String>> clusters({int days = 30}) async {
+    final now = _clock();
+    final share = await shared();
+    final out = <String, String>{};
+    void add(Iterable<({String? id, DeckEntry entry})> rows) {
+      for (final r in rows) {
+        final id = r.id, cl = r.entry.cluster;
+        if (id != null && cl != null) out.putIfAbsent(id, () => cl);
+      }
+    }
+
+    for (var back = 0; back < days; back++) {
+      final day = now.subtract(Duration(days: back));
+      add(await _localRows(day) ?? const []);
+      if (share != null && share.day == dateOf(day)) add(_rows(share.rows));
+    }
+    return out;
+  }
+
   /// Titles with a recorded Reel event (other than unplayed) since [since].
   Future<Set<String>> goneThrough({required DateTime since}) async => {
     for (final e in await store.events(since: since))
@@ -198,8 +223,14 @@ class ReelPool {
     final list = candidates.take(maxCandidates).toList();
     final cards = await library.cards([for (final c in list) c.entry]);
     final byRow = {for (final c in cards) c.best.id: c};
-    final skips = await store.quickSkips();
+    final skips = await signals.quickSkips();
     final now = _clock();
+    final notes = ReelSignals.notes(
+      await signals.since(now.subtract(const Duration(days: 30))),
+      {for (final c in cards) c.id},
+      picks: {for (final p in await store.picks()) p.titleId: p.at},
+      now: now,
+    );
     final lines = <String>[];
     final idOf = <String, PoolCandidate>{};
     for (final (i, c) in list.indexed) {
@@ -219,6 +250,7 @@ class ReelPool {
           if (c.like.isNotEmpty) 'similar to ${c.like.take(3).join(', ')}',
           if (c.askedFor != null) 'from their ask "${c.askedFor}"',
           if (fatigue > 0.05) 'skipped quickly in the Reel lately (fatigue ${fatigue.toStringAsFixed(1)})',
+          ...?notes[card.id],
         ].join(' · '),
       );
     }
@@ -285,6 +317,7 @@ Choose about $target candidates and put them in the order you think they would m
 - Ratings are labelled with their source; IMDb with its vote count is the most reliable. Few votes means unproven. "Plex audience (source unknown)" is a weaker signal.
 - This is a showcase of the best of their library for them: every card should be worth their evening. Leave out titles the public rates poorly (for example IMDb below about 6 with a fair number of votes), however similar they are to something they liked, unless their own history shows they love exactly that kind of film. Fewer, better cards beat a long list.
 - "skipped quickly in the Reel lately" is a fact, not a ban: show such titles sparingly when an equally good fresh one exists.
+- Passes (Not for me, "Passed on in the Reel lately") are facts about the kind of title, not bans: a pass on one title never rules out its kind.
 - Kids' and family titles only when their own history shows they watch them.
 - why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence ("similar to …" titles or "from their ask …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
 - anchor: the exact evidence title or ask your why line names.

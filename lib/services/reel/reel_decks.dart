@@ -14,6 +14,7 @@ import '../library_index/index_database.dart';
 import 'reel_decay.dart';
 import 'reel_library.dart';
 import 'reel_pool.dart';
+import 'reel_signals.dart';
 import 'reel_store.dart';
 
 /// A deck: an ordered list of titles and how seen titles are treated
@@ -394,8 +395,17 @@ Future<List<PoolCandidate>> forYouCandidates({
 }
 
 /// The facts block the daily build reads first: how they watch lately, the
-/// day, and what the Reel saw them do.
-Future<String> forYouFacts({required ReelStore store, HistoryBrain? brain, DateTime? now}) async {
+/// day, and what the Reel saw them do on this device and the other one:
+/// counts, counts per kind of title (the pool's clusters, from [pool]) and
+/// the titles they passed on lately. [nameOf] names a title id (the brain's
+/// profile by default).
+Future<String> forYouFacts({
+  required ReelStore store,
+  ReelPool? pool,
+  HistoryBrain? brain,
+  DateTime? now,
+  Future<String?> Function(String titleId)? nameOf,
+}) async {
   final b = brain ?? HistoryBrain.instance;
   final at = now ?? DateTime.now();
   final lines = <String>[];
@@ -420,18 +430,66 @@ Future<String> forYouFacts({required ReelStore store, HistoryBrain? brain, DateT
   } catch (e) {
     appLogger.d('Reel: brain facts unavailable', error: e);
   }
-  // Cards left before their clip played are neutral, not a Reel habit.
-  final events = [
-    for (final e in await store.events(since: at.subtract(const Duration(days: 30))))
-      if (e.action != ReelAction.unplayed.name) e,
-  ];
-  if (events.isNotEmpty) {
-    int n(ReelAction a) => events.where((e) => e.action == a.name).length;
+  // Cards left before their clip played are neutral, not a Reel habit (the
+  // signals leave them out).
+  final signals = pool?.signals ?? ReelSignals(store: store, host: true, clock: () => at);
+  final seen = await signals.since(at.subtract(const Duration(days: 30)));
+  final clusters = pool == null ? const <String, String>{} : await pool.clusters();
+  final counts = ReelSignals.countsLine(seen);
+  if (counts.isNotEmpty) lines.add('In the Reel, last 30 days, both devices together: $counts.');
+  final kinds = ReelSignals.clusterLines(seen, clusters);
+  if (kinds.isNotEmpty) lines.add('In the Reel by kind of title, last 30 days:\n${kinds.join('\n')}');
+  final passed = await _passedOn(store, seen, at, nameOf ?? (id) async => (await b.profile(id))?.title);
+  if (passed.isNotEmpty) {
     lines.add(
-      'In the Reel, last 30 days: ${n(ReelAction.sampled)} sampled, ${n(ReelAction.toEnd)} watched to the end, '
-      '${n(ReelAction.quickSkip)} skipped within 2 s, ${n(ReelAction.save)} saved, '
-      '${n(ReelAction.watch) + n(ReelAction.watchOnTv)} played.',
+      'Passed on in the Reel lately (Not for me, newest first): '
+      '${[for (final (id, name) in passed) clusters[id] == null ? name : '$name (${clusters[id]})'].join(', ')}',
     );
   }
   return lines.join('\n');
+}
+
+/// How far back a Not for me still counts as "lately".
+const Duration passedOnWindow = Duration(days: 180);
+
+/// How many passes the facts name.
+const int passedOnShown = 30;
+
+/// The newest [passedOnShown] titles passed on within [passedOnWindow]:
+/// the synced vetoes (either device) and the Not for me signals, named by
+/// [nameOf]; titles it can't name are left out.
+Future<List<(String, String)>> _passedOn(
+  ReelStore store,
+  List<ReelSignal> seen,
+  DateTime now,
+  Future<String?> Function(String) nameOf,
+) async {
+  final when = <String, DateTime>{};
+  void note(String id, DateTime at) {
+    final had = when[id];
+    if (had == null || at.isAfter(had)) when[id] = at;
+  }
+
+  try {
+    for (final MapEntry(:key, :value) in (await store.passedOn()).entries) {
+      note(key, value);
+    }
+  } catch (e) {
+    appLogger.d('Reel: passes unavailable', error: e);
+  }
+  for (final s in seen) {
+    if (s.action == ReelAction.notForMe) note(s.titleId, s.at);
+  }
+  final since = now.subtract(passedOnWindow);
+  final newest = when.entries.where((e) => e.value.isAfter(since)).toList()..sort((a, b) => b.value.compareTo(a.value));
+  final out = <(String, String)>[];
+  for (final e in newest) {
+    if (out.length >= passedOnShown) break;
+    String? name;
+    try {
+      name = await nameOf(e.key);
+    } catch (_) {}
+    if (name != null && name.isNotEmpty) out.add((e.key, name));
+  }
+  return out;
 }

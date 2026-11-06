@@ -88,7 +88,7 @@ abstract final class ReelApp {
         pool: pool,
         library: library,
         candidates: () => forYouCandidates(library: library, store: store),
-        facts: () => forYouFacts(store: store),
+        facts: () => forYouFacts(store: store, pool: pool),
         sharedChanges: Customisation.changed,
       ),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
@@ -163,10 +163,13 @@ abstract final class ReelApp {
     // While the Reel plays, the brain's indexer rests and its ONNX session
     // (about 66 MB) is released; it reopens on the next embed.
     var yielded = false;
+    // When a session ends, this device shares its Reel signals so the other
+    // device's daily build hears them.
     controller.addListener(() {
       if (controller.active == yielded) return;
       yielded = controller.active;
       unawaited(HistoryBrain.instance.yieldTo(yielded));
+      if (!yielded) unawaited(pool.signals.publish());
     });
     return controller;
   }

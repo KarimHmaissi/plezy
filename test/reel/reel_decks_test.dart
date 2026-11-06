@@ -4,12 +4,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
+import 'package:plezy/services/brain/history_brain.dart';
+import 'package:plezy_brain/plezy_brain.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_pool.dart';
+import 'package:plezy/services/reel/reel_signals.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 ReelCardData _card(String id, {double? imdb, double? tmdb, double? audience}) => ReelCardData(
@@ -81,6 +84,14 @@ class _Synced extends ChangeNotifier {
     listening--;
     super.removeListener(listener);
   }
+}
+
+/// A brain with no history of its own.
+class _Brain extends HistoryBrain {
+  @override
+  Future<String> taste() async => 'Harbor dramas, slow sci-fi.';
+  @override
+  Future<List<TitleProfile>> watchedProfiles() async => const [];
 }
 
 PoolCandidate _candidate(String id) => PoolCandidate(
@@ -309,6 +320,80 @@ void main() {
       expect((await deck.load()).map((c) => c.id), ['h', 'k']);
       await deck.building;
       expect(called, 0);
+    });
+
+    test("the build's candidates carry the Reel's facts from both devices, and passes are not bans", () async {
+      await recordAt(DateTime(2026, 3, 9, 21), 'm', ReelAction.toEnd);
+      await recordAt(DateTime(2026, 3, 10, 9), 'm', ReelAction.details);
+      await recordAt(DateTime(2026, 3, 8, 21), 'n', ReelAction.save);
+      // The phone's aggregate: 'n' watched to the end there twice.
+      await settings.writeSetting(
+        ReelSignals.phoneKey,
+        jsonEncode({
+          'v': 1,
+          'days': {
+            '2026-03-09': {'n': 'ee'},
+          },
+        }),
+      );
+      String? system, user;
+      await pool(
+        model: (s, u, _) async {
+          system = s;
+          user = u;
+          return null;
+        },
+      ).build([_candidate('m'), _candidate('n')], facts: 'Today is a test.');
+      final lines = user!.split('\n');
+      expect(
+        lines.firstWhere((l) => l.startsWith('c1:')),
+        allOf(contains('clip watched to the end'), contains('opened Details')),
+      );
+      expect(
+        lines.firstWhere((l) => l.startsWith('c2:')),
+        allOf(contains('saved 2 days ago, not played yet'), contains('clip watched to the end 2×')),
+      );
+      expect(system, contains('facts about the kind of title, not bans'));
+    });
+
+    test('the facts name Not for me, the counts per kind of title and the titles passed on lately', () async {
+      await sharePool(DateTime(2026, 3, 9), ['a', 'b']); // both 'harbor drama'
+      await cachePool(now, ['c']);
+      await store.cache(
+        ReelPool.dayKey(now),
+        jsonEncode([
+          {'id': 'c', 'sv': 's1', 'rk': 'c', 'cl': 'cosy anime'},
+        ]),
+      );
+      await recordAt(DateTime(2026, 3, 9, 20), 'a', ReelAction.sampled);
+      await recordAt(DateTime(2026, 3, 9, 20, 5), 'b', ReelAction.notForMe);
+      await store.notForMe('b');
+      await recordAt(DateTime(2026, 3, 10, 9), 'c', ReelAction.toEnd);
+      // A pass made on the phone weeks ago, in the synced vetoes only.
+      final was = now;
+      now = DateTime(2026, 2, 1);
+      await store.notForMe('d');
+      now = was;
+      final names = {'b': 'Harbor Lights', 'd': 'Lantern Street'};
+      final facts = await forYouFacts(
+        store: store,
+        pool: pool(),
+        brain: _Brain(),
+        now: now,
+        nameOf: (id) async => names[id],
+      );
+      expect(
+        facts,
+        contains('In the Reel, last 30 days, both devices together: 1 sampled, 1 watched to the end, 1 Not for me.'),
+      );
+      expect(facts, contains('- harbor drama: 1 sampled, 1 Not for me'));
+      expect(facts, contains('- cosy anime: 1 watched to the end'));
+      expect(
+        facts,
+        contains(
+          'Passed on in the Reel lately (Not for me, newest first): Harbor Lights (harbor drama), Lantern Street',
+        ),
+      );
     });
 
     test("today's shared pool arriving fires rebuilt once, and only while something listens", () async {

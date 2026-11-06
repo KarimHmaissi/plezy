@@ -189,6 +189,12 @@ class ReelStore {
   /// The host shares its day's pool. Newest write wins, like picks.
   Future<void> sharePool(String value) async => (await _settings()).writeSetting(poolKey, value);
 
+  // ---- per-device Reel signals (synced; see ReelSignals) ----
+
+  Future<String?> readSignals(String key) async => (await _settings()).readSetting(key);
+
+  Future<void> writeSignals(String key, String value) async => (await _settings()).writeSetting(key, value);
+
   // ---- picks (synced) ----
 
   Future<List<ReelPick>> picks() async {
@@ -285,6 +291,13 @@ class ReelStore {
           key,
     };
   }
+
+  /// Titles passed on with Not for me (on either device), and when: the
+  /// daily build's "passed on lately" facts.
+  Future<Map<String, DateTime>> passedOn() async => {
+    for (final MapEntry(:key, :value) in (await _vetoes()).entries)
+      if (value['n'] case final int ms) key: DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true),
+  };
 
   Future<Set<String>> spoiledAssets(String titleId) async => {
     ...(((await _vetoes())[titleId]?['s'] as List?) ?? const []).map((e) => '$e'),
