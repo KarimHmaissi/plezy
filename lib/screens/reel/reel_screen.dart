@@ -99,6 +99,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     onLooped: (_) => _controller?.clipEnded(),
     onStarted: (id) => _controller?.clipStarted(id),
     onFailed: (id) => _controller?.clipFailed(id),
+    onLeft: (id) => _controller?.clipLeft(id),
   );
 
   bool get _isTv => PlatformDetector.isTV();
@@ -192,8 +193,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted && text != null) showAppSnackBar(context, text);
   }
 
+  /// TV only: the card view is drawn from here. The phone feed listens to
+  /// the controller itself and each page to its own card (V2-02), so a
+  /// swipe doesn't rebuild the whole screen on top of that.
   void _onChanged() {
-    if (mounted) setState(() {});
+    if (mounted && _isTv) setState(() {});
   }
 
   /// Opens a deck (deep link `plezy://reel?deck=…`, Reel it, On TV mode).
@@ -290,10 +294,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted && _shown && (onTv || !ok)) ReelScreen.showing.value = true;
   }
 
-  /// Fold: On TV mode, offered while connected to a TV as its remote.
+  /// Fold: On TV mode, offered while connected to a TV as its remote. Read
+  /// with `select` so connecting or dropping the TV redraws the feed's
+  /// buttons now that controller changes no longer rebuild this screen.
   VoidCallback? _remoteMode() {
-    final remote = context.read<CompanionRemoteProvider?>();
-    if (remote == null || !remote.isRemote || !remote.isConnected) return null;
+    final connected = context.select<CompanionRemoteProvider?, bool>((r) => r != null && r.isRemote && r.isConnected);
+    if (!connected) return null;
     return () => unawaited(
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ReelRemoteView(deck: _controller?.deck.id))),
     );
@@ -427,7 +433,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   );
 
   Widget _phone(ReelController c) {
-    final onTv = _remoteMode() != null;
+    final remote = _remoteMode();
+    final onTv = remote != null;
     return ReelFeedView(
       controller: c,
       players: _players,
@@ -435,7 +442,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onWatch: () => unawaited(_watch(onTv: onTv)),
       onSheet: () => unawaited(_openSheet()),
       onDecks: () => unawaited(showReelDeckPicker(context, c)),
-      onRemote: _remoteMode(),
+      onRemote: remote,
     );
   }
 }

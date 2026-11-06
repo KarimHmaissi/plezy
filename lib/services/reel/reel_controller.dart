@@ -490,6 +490,13 @@ class ReelController extends ChangeNotifier {
     if (externalClips && cardId == _cardShown) _cardFailed = true;
   }
 
+  /// Phone feed: [cardId] is no longer the page under the thumb (V2-02). A
+  /// start it reported before the swipe committed belonged to a visit that
+  /// ended, so it can't time a later one.
+  void clipLeft(String cardId) {
+    if (_feedStarted?.id == cardId) _feedStarted = null;
+  }
+
   /// Records how the card was left, timed from its first frame: a quick
   /// skip (<2 s) adds fatigue; 8 s or more is a sample; scrolling past in
   /// between records nothing. Left before the first frame, or after the
@@ -500,7 +507,8 @@ class ReelController extends ChangeNotifier {
     _cardSince = null;
     _cardFailed = false;
     _cardClip = null;
-    _feedStarted = null;
+    // [_feedStarted] stays: on the phone the step commits when the page
+    // settles (V2-02), after the incoming card has already started playing.
     if (id == null) return;
     final deckId = deck.id;
     if (since == null || failed) {

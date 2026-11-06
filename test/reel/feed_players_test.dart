@@ -111,7 +111,7 @@ void main() {
     expect(players.videoFor('b'), isNotNull, reason: 'the next page already has a picture');
   });
 
-  test('a swipe plays the parked player at once and rewinds the one left behind', () async {
+  test('a swipe plays the parked player at once; the one left behind holds its frame until settle', () async {
     players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
     await _settle();
     made['a']!.tick(const Duration(seconds: 12));
@@ -120,8 +120,76 @@ void main() {
     expect(made['b']!.playing, isTrue);
     expect(made['b']!.calls.where((c) => c == 'init'), hasLength(1), reason: 'not opened again');
     expect(made['a']!.playing, isFalse);
-    expect(made['a']!.position, Duration.zero);
+    expect(made['a']!.position, const Duration(seconds: 12), reason: 'still half on screen: no jump to frame 0');
+    expect(made['a']!.calls.where((c) => c.startsWith('seek')), isEmpty);
     expect(made.keys, contains('d'));
+
+    await players.settle();
+    expect(made['a']!.position, Duration.zero, reason: 'off screen once the page rests');
+    expect(made['b']!.playing, isTrue, reason: 'the card on screen is left alone');
+    expect(made['b']!.calls.where((c) => c.startsWith('seek')), isEmpty);
+  });
+
+  test('a drag that comes back plays the first card on from where it held', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    await _settle();
+    made['a']!.tick(const Duration(seconds: 12));
+    // Past the middle and back again before the page settles.
+    players.sync(current: 'b', window: [_clip('b'), _clip('c'), _clip('d'), _clip('a')]);
+    await _settle();
+    made['b']!.tick(const Duration(milliseconds: 300));
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    await _settle();
+    expect(made['a']!.playing, isTrue);
+    expect(made['a']!.position, const Duration(seconds: 12));
+    expect(made['b']!.playing, isFalse);
+
+    await players.settle();
+    expect(made['a']!.position, const Duration(seconds: 12));
+    expect(made['b']!.position, Duration.zero, reason: 'the card that peeked in starts from the top next time');
+  });
+
+  test('the card left behind is told once per change of card', () async {
+    final left = <String>[];
+    final p = ReelFeedPlayers(create: _FakeVideo.new, onLeft: left.add);
+    addTearDown(p.dispose);
+    p.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    await _settle();
+    p.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    p.sync(current: 'b', window: [_clip('b'), _clip('a')]);
+    await _settle();
+    expect(left, ['a']);
+    await p.releaseAll();
+    expect(left, ['a', 'b']);
+  });
+
+  test("each card's page hears only about its own card", () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    final a = players.card('a'), c = players.card('c');
+    var aHeard = 0, cHeard = 0;
+    void onA() => aHeard++;
+    void onC() => cHeard++;
+    a.addListener(onA);
+    c.addListener(onC);
+    await _settle();
+    expect(a.value.current, isTrue);
+    expect(a.value.video, isNotNull);
+    expect(c.value.current, isFalse);
+    expect(c.value.video, isNotNull, reason: 'parked on its first frame');
+
+    aHeard = cHeard = 0;
+    await players.togglePause();
+    expect(a.value.paused, isTrue);
+    expect(aHeard, 1);
+    expect(cHeard, 0, reason: 'a pause on card a does not rebuild card c');
+
+    players.sync(current: 'b', window: [_clip('b'), _clip('c'), _clip('a')]);
+    await _settle();
+    expect(a.value.current, isFalse);
+    expect(a.value.paused, isFalse);
+    expect(players.card('b').value.current, isTrue);
+    a.removeListener(onA);
+    c.removeListener(onC);
   });
 
   test('players that leave the window are disposed', () async {

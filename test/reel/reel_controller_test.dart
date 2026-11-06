@@ -624,6 +624,38 @@ void main() {
       c.dispose();
     });
 
+    test('a card that starts mid-swipe, before the settle commits the step, is timed from its start', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      // V2-02: past the middle of the swipe the next card plays; the step
+      // only lands when the page comes to rest.
+      c.clipStarted('t2');
+      now = now.add(const Duration(seconds: 1));
+      await c.step(1);
+      now = now.add(const Duration(seconds: 8));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.titleId, 't2');
+      expect(events.last.action, ReelAction.sampled.name);
+      expect(events.last.seconds, 9);
+      c.dispose();
+    });
+
+    test('a start from a card the swipe went back from does not time a later visit', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      c.clipStarted('t2');
+      c.clipLeft('t2');
+      now = now.add(const Duration(seconds: 9));
+      await c.step(1);
+      now = now.add(const Duration(seconds: 9));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.titleId, 't2');
+      expect(events.last.action, ReelAction.unplayed.name);
+      c.dispose();
+    });
+
     test('a phone player that broke records nothing about the title', () async {
       final c = make(externalClips: true, clock: clock);
       await c.start();

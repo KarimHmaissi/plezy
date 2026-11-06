@@ -9,6 +9,7 @@ import '../../providers/theme_provider.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../theme/fork_motion.dart';
 import '../../theme/mono_theme.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
@@ -40,6 +41,12 @@ class ReelFeedTheme extends StatelessWidget {
 /// the cards around it are already open and parked on their first frame
 /// ([ReelFeedPlayers]). Swipe right to hide everything and just watch; swipe
 /// left to bring it back. The deck is picked from the button at the top.
+///
+/// A swipe (V2-02): past the middle, the incoming card plays and the one
+/// leaving pauses on its frame; the step is committed to the controller and
+/// the cards off screen rewound only once the page settles, so a wobble or a
+/// half swipe never snaps the outgoing picture back to its first frame. The
+/// pages either side are built ahead (`allowImplicitScrolling`).
 class ReelFeedView extends StatefulWidget {
   const ReelFeedView({
     super.key,
@@ -70,6 +77,10 @@ class ReelFeedView extends StatefulWidget {
 
 class _ReelFeedViewState extends State<ReelFeedView> {
   late final PageController _pages = PageController(initialPage: widget.controller.index);
+
+  /// The page under the thumb: it runs ahead of the controller's cursor
+  /// from the middle of a swipe until the page settles.
+  late int _page = widget.controller.index;
   String? _deck;
   bool _immersive = false;
   bool _burst = false;
@@ -106,27 +117,53 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     // a step from the TV moves the page to match.
     if (_deck != _c.deck.id) {
       _deck = _c.deck.id;
+      _page = _c.index;
       if (_pages.hasClients) _pages.jumpToPage(_c.index);
     } else if (_pages.hasClients && !_pages.position.isScrollingNotifier.value) {
+      _page = _c.index;
       final page = _pages.page?.round();
       if (page != null && page != _c.index) _pages.jumpToPage(_c.index);
+    } else if (!_pages.hasClients) {
+      _page = _c.index;
     }
     _sync();
     setState(() {});
+  }
+
+  /// Past the middle of a swipe: the incoming card plays and the window
+  /// moves with it; the controller hears of it when the page settles.
+  void _onPageChanged(int page) {
+    _page = page;
+    _sync();
+  }
+
+  /// The page came to rest: commit the step and rewind what is off screen.
+  bool _onScrollEnd(ScrollEndNotification n) {
+    if (n.depth != 0) return false;
+    final metrics = n.metrics;
+    final page = metrics is PageMetrics ? metrics.page : null;
+    if (page == null) return false;
+    final at = page.round();
+    // Caught mid-flight by a finger: the release ends somewhere else.
+    if ((page - at).abs() > 0.01) return false;
+    _page = at;
+    if (at != _c.index) unawaited(_c.step(at - _c.index));
+    unawaited(widget.players.settle());
+    return false;
   }
 
   /// The card on screen, the next two, then the one behind.
   void _sync() {
     // Hidden, paused or handing over to real playback: nothing plays.
     if (!_c.active) return;
-    final i = _c.index;
+    final i = _page;
     final window = <FeedClip>[
       for (final j in [i, i + 1, i + 2, i - 1])
         if (j >= 0)
           if (_c.slotAt(j) case ReelSlot(card: final card?, clip: final clip?))
             if (Uri.tryParse(clip.source.uri) case final uri?) (id: card.id, uri: uri),
     ];
-    widget.players.sync(current: _c.current.card?.id, window: window, memoryLevel: _c.memoryLevel);
+    widget.players.sync(current: _c.slotAt(i).card?.id, window: window, memoryLevel: _c.memoryLevel);
   }
 
   void _save() {
@@ -147,20 +184,28 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          PageView.builder(
-            controller: _pages,
-            scrollDirection: Axis.vertical,
-            itemCount: count,
-            onPageChanged: (i) => unawaited(_c.step(i - _c.index)),
-            itemBuilder: (context, i) => _page(_c.slotAt(i)),
+          NotificationListener<ScrollEndNotification>(
+            onNotification: _onScrollEnd,
+            child: PageView.builder(
+              controller: _pages,
+              scrollDirection: Axis.vertical,
+              // The page either side is built before the drag reaches it.
+              allowImplicitScrolling: true,
+              itemCount: count,
+              onPageChanged: _onPageChanged,
+              itemBuilder: (context, i) => _pageFor(_c.slotAt(i)),
+            ),
           ),
-          _TopBar(
-            hidden: _immersive,
-            deckName: _c.deck.name,
-            muted: widget.players.muted,
-            onDecks: widget.onDecks,
-            onMute: () => unawaited(widget.players.setMuted(!widget.players.muted)),
-            onRemote: widget.onRemote,
+          ListenableBuilder(
+            listenable: widget.players,
+            builder: (context, _) => _TopBar(
+              hidden: _immersive,
+              deckName: _c.deck.name,
+              muted: widget.players.muted,
+              onDecks: widget.onDecks,
+              onMute: () => unawaited(widget.players.setMuted(!widget.players.muted)),
+              onRemote: widget.onRemote,
+            ),
           ),
           IgnorePointer(
             child: AnimatedOpacity(
@@ -186,7 +231,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     );
   }
 
-  Widget _page(ReelSlot slot) {
+  Widget _pageFor(ReelSlot slot) {
     switch (slot.kind) {
       case ReelSlotKind.loading:
         return const ReelCurtain();
@@ -216,7 +261,26 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         break;
     }
     final card = slot.card!;
-    final isCurrent = card.id == _c.current.card?.id;
+    // Built once per page build and handed through, so a player change
+    // redraws the picture and not the title and buttons.
+    final info = AnimatedOpacity(
+      opacity: _immersive ? 0 : 1,
+      duration: const Duration(milliseconds: 220),
+      child: IgnorePointer(
+        ignoring: _immersive,
+        child: RepaintBoundary(
+          child: _Info(
+            controller: _c,
+            slot: slot,
+            watchOnTv: widget.watchOnTv,
+            onWatch: widget.onWatch,
+            onDetails: () => unawaited(_c.openDetails()),
+            onSave: _save,
+            onMore: widget.onSheet,
+          ),
+        ),
+      ),
+    );
     // Sideways anywhere on the page hides or shows the controls. Tap,
     // double-tap and long-press live on the picture only, so the buttons
     // answer at once instead of waiting out the double-tap window.
@@ -228,11 +292,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         HapticFeedback.selectionClick();
         setState(() => _immersive = v > 0);
       },
-      child: ListenableBuilder(
-        listenable: widget.players,
-        builder: (context, _) {
-          final video = widget.players.videoFor(card.id);
-          final paused = isCurrent && widget.players.paused;
+      child: ValueListenableBuilder<FeedCardState>(
+        valueListenable: widget.players.card(card.id),
+        child: info,
+        builder: (context, state, info) {
+          final video = state.video;
+          final isCurrent = state.current;
           return Stack(
             fit: StackFit.expand,
             children: [
@@ -249,27 +314,14 @@ class _ReelFeedViewState extends State<ReelFeedView> {
                       duration: const Duration(milliseconds: 280),
                       curve: Curves.easeOutCubic,
                       alignment: _immersive ? Alignment.center : const Alignment(0, -0.16),
-                      child: _Picture(slot: slot, video: video, paused: paused),
+                      child: RepaintBoundary(
+                        child: _Picture(slot: slot, video: video, paused: state.paused),
+                      ),
                     ),
                   ],
                 ),
               ),
-              AnimatedOpacity(
-                opacity: _immersive ? 0 : 1,
-                duration: const Duration(milliseconds: 220),
-                child: IgnorePointer(
-                  ignoring: _immersive,
-                  child: _Info(
-                    controller: _c,
-                    slot: slot,
-                    watchOnTv: widget.watchOnTv,
-                    onWatch: widget.onWatch,
-                    onDetails: () => unawaited(_c.openDetails()),
-                    onSave: _save,
-                    onMore: widget.onSheet,
-                  ),
-                ),
-              ),
+              info!,
               if (video != null && isCurrent) _Progress(video: video),
             ],
           );
@@ -575,11 +627,69 @@ class _Info extends StatelessWidget {
   }
 }
 
-/// A hairline of how far the clip is, along the page's foot.
-class _Progress extends StatelessWidget {
+/// A hairline of how far the clip is, along the page's foot. The player
+/// reports its position only every 100 ms or so, so between reports the bar
+/// runs on at play speed (V2-02); each report puts it back on the truth. It
+/// runs ahead at most [_ahead], so a stalled clip doesn't race the bar on.
+/// With reduce motion on, it steps with the reports.
+class _Progress extends StatefulWidget {
   const _Progress({required this.video});
 
   final FeedVideo video;
+
+  @override
+  State<_Progress> createState() => _ProgressState();
+}
+
+class _ProgressState extends State<_Progress> with SingleTickerProviderStateMixin {
+  static const _ahead = Duration(milliseconds: 250);
+
+  late final AnimationController _bar = AnimationController(vsync: this);
+  bool _still = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.video.addListener(_onVideo);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _still = ForkMotion.reduceMotion(context);
+    _onVideo();
+  }
+
+  @override
+  void didUpdateWidget(_Progress old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.video, widget.video)) {
+      old.video.removeListener(_onVideo);
+      widget.video.addListener(_onVideo);
+      _onVideo();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.video.removeListener(_onVideo);
+    _bar.dispose();
+    super.dispose();
+  }
+
+  void _onVideo() {
+    final v = widget.video;
+    final total = v.duration.inMilliseconds;
+    if (total <= 0) {
+      _bar.value = 0;
+      return;
+    }
+    double at(Duration p) => (p.inMilliseconds / total).clamp(0.0, 1.0);
+    _bar.value = at(v.position);
+    if (_still || !v.playing) return;
+    final to = at(v.position + _ahead);
+    if (to > _bar.value) _bar.animateTo(to, duration: _ahead, curve: Curves.linear);
+  }
 
   @override
   Widget build(BuildContext context) => Positioned(
@@ -587,18 +697,16 @@ class _Progress extends StatelessWidget {
     right: 0,
     bottom: 0,
     height: 2,
-    child: ListenableBuilder(
-      listenable: video,
-      builder: (context, _) {
-        final total = video.duration.inMilliseconds;
-        final at = total <= 0 ? 0.0 : (video.position.inMilliseconds / total).clamp(0.0, 1.0);
-        return LinearProgressIndicator(
-          value: at,
+    child: RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _bar,
+        builder: (context, _) => LinearProgressIndicator(
+          value: _bar.value,
           minHeight: 2,
           backgroundColor: Colors.white.withValues(alpha: 0.12),
           color: Theme.of(context).colorScheme.primary,
-        );
-      },
+        ),
+      ),
     ),
   );
 }

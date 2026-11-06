@@ -112,6 +112,8 @@ ReelCardData _card(String id) => ReelCardData(
 /// A player that is ready as soon as it opens.
 class _Video extends ChangeNotifier implements FeedVideo {
   bool _ready = false, _playing = false;
+  Duration at = Duration.zero;
+  int seeks = 0;
   @override
   bool get ready => _ready;
   @override
@@ -119,7 +121,7 @@ class _Video extends ChangeNotifier implements FeedVideo {
   @override
   double get aspectRatio => 16 / 9;
   @override
-  Duration get position => Duration.zero;
+  Duration get position => at;
   @override
   Duration get duration => const Duration(seconds: 60);
   @override
@@ -131,7 +133,17 @@ class _Video extends ChangeNotifier implements FeedVideo {
   @override
   Future<void> pause() async => _playing = false;
   @override
-  Future<void> seekTo(Duration position) async {}
+  Future<void> seekTo(Duration position) async {
+    seeks++;
+    at = position;
+  }
+
+  /// The plugin's position poll.
+  void tick(Duration to) {
+    at = to;
+    notifyListeners();
+  }
+
   @override
   Future<void> setVolume(double volume) async {}
   @override
@@ -144,6 +156,8 @@ void main() {
   late ForkDatabase db;
   late ReelController c;
   late ReelFeedPlayers players;
+  late Map<String, _Video> videos;
+  late ReelStore store;
   late List<MediaItem> opened;
   late int decksOpened, watched, sheets;
   late ValueNotifier<int> restored;
@@ -152,7 +166,7 @@ void main() {
   setUp(() {
     db = ForkDatabase.memory();
     final settings = LocalCustomisationStore(db);
-    final store = ReelStore(database: () async => db, settings: () async => settings);
+    store = ReelStore(database: () async => db, settings: () async => settings);
     opened = [];
     decksOpened = watched = sheets = 0;
     restored = ValueNotifier(0);
@@ -176,7 +190,8 @@ void main() {
       memoryRestored: restored,
       onOpen: (item) async => opened.add(item),
     );
-    players = ReelFeedPlayers(create: (_) => _Video());
+    videos = {};
+    players = ReelFeedPlayers(create: (uri) => videos[uri.pathSegments.last.split('.').first] = _Video());
   });
 
   tearDown(() async {
@@ -260,6 +275,121 @@ void main() {
     await tester.pumpAndSettle();
     expect(c.current.card?.id, 't2');
     expect(players.current, 't2');
+  });
+
+  group('V2-02: a swipe commits on settle', () {
+    // The players were opened under runAsync (the resolves read drift), so
+    // their futures answer on the real event loop.
+    Future<void> flush(WidgetTester tester) async {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
+
+    Future<void> drag(WidgetTester tester, TestGesture g, double dy) async {
+      for (var i = 0; i < 10; i++) {
+        await g.moveBy(Offset(0, dy / 10));
+        await tester.pump();
+      }
+      await flush(tester);
+    }
+
+    Future<TestGesture> dragPastMiddle(WidgetTester tester) async {
+      final g = await tester.startGesture(tester.getCenter(find.byType(PageView)));
+      await drag(tester, g, -500);
+      return g;
+    }
+
+    Future<void> letGo(WidgetTester tester, TestGesture g) async {
+      await g.up();
+      await tester.pumpAndSettle();
+      // The step writes the card left through drift, which needs real async.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the next page is built before the drag reaches it', (tester) async {
+      await pump(tester);
+      expect(find.text('Title 2'), findsNothing, reason: 'below the fold');
+      expect(find.text('Title 2', skipOffstage: false), findsOneWidget, reason: 'already built');
+    });
+
+    testWidgets('past the middle the next card plays, the one left holds its frame, and the step waits', (
+      tester,
+    ) async {
+      await pump(tester);
+      videos['1']!.at = const Duration(seconds: 5);
+      final g = await dragPastMiddle(tester);
+      expect(players.current, 't2', reason: 'the incoming card plays from the middle of the swipe');
+      expect(videos['2']!.playing, isTrue);
+      expect(videos['1']!.playing, isFalse);
+      expect(videos['1']!.at, const Duration(seconds: 5), reason: 'no snap to frame 0 while half on screen');
+      expect(videos['1']!.seeks, 0);
+      expect(c.index, 0, reason: 'the controller hears of it at the settle');
+
+      await letGo(tester, g);
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't2');
+      expect(players.current, 't2');
+      expect(videos['1']!.at, Duration.zero, reason: 'rewound once off screen');
+    });
+
+    testWidgets('a drag that comes back leaves the card and the cursor where they were', (tester) async {
+      await pump(tester);
+      videos['1']!.at = const Duration(seconds: 5);
+      final g = await dragPastMiddle(tester);
+      expect(players.current, 't2');
+      await drag(tester, g, 500);
+      expect(players.current, 't1');
+      expect(videos['1']!.playing, isTrue);
+      expect(videos['1']!.at, const Duration(seconds: 5), reason: 'plays on from where it held');
+
+      await letGo(tester, g);
+      expect(c.index, 0);
+      expect(players.current, 't1');
+      expect(videos['1']!.seeks, 0);
+      final events = await tester.runAsync(() => store.events(since: DateTime(2000)));
+      expect(events, isEmpty, reason: 'no card was left');
+    });
+
+    double bar(WidgetTester tester) =>
+        tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value!;
+
+    testWidgets('the progress hairline runs on between position reports, and no further than a stall allows', (
+      tester,
+    ) async {
+      await pump(tester);
+      expect(videos['1']!.playing, isTrue);
+      videos['1']!.tick(const Duration(seconds: 30));
+      await tester.pump();
+      expect(bar(tester), closeTo(0.5, 0.0001));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(bar(tester), greaterThan(0.5 + 0.05 / 60), reason: 'moved with no new report');
+      await tester.pump(const Duration(seconds: 1));
+      expect(bar(tester), closeTo(30.25 / 60, 0.0001), reason: 'a stalled clip holds the bar a quarter second on');
+      videos['1']!.tick(const Duration(seconds: 30, milliseconds: 100));
+      await tester.pump();
+      expect(bar(tester), closeTo(30.1 / 60, 0.0001), reason: 'each report puts it back on the truth');
+    });
+
+    testWidgets('with reduce motion on the hairline steps with the reports', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+        disableAnimations: true,
+      );
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await pump(tester);
+      videos['1']!.tick(const Duration(seconds: 30));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(bar(tester), closeTo(0.5, 0.0001));
+    });
+
+    testWidgets('the picture and the info each repaint on their own', (tester) async {
+      await pump(tester);
+      final title = find.text('Title 1');
+      expect(find.ancestor(of: title, matching: find.byType(RepaintBoundary)), findsWidgets);
+      final page = find.ancestor(of: title, matching: find.byType(ValueListenableBuilder<FeedCardState>));
+      expect(page, findsOneWidget, reason: 'the page listens to its own card, not every player');
+    });
   });
 
   testWidgets("today's build landing keeps the page on screen and follows it", (tester) async {

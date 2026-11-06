@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
@@ -87,13 +88,23 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
 /// A card the feed wants a player for: its id and its clip's address.
 typedef FeedClip = ({String id, Uri uri});
 
+/// What one card's page draws (V2-02): its player once it has a picture,
+/// whether it is the card on screen, and whether a tap paused it. Each page
+/// listens to its own card ([ReelFeedPlayers.card]), so a player opening two
+/// cards away doesn't rebuild the page you are looking at.
+typedef FeedCardState = ({FeedVideo? video, bool current, bool paused});
+
 /// The phone feed's players, the TikTok way: the card on screen plays, and
 /// the cards around it (the previous one and the next two) are opened and
 /// parked on their first frame, so a swipe slides a live picture in instead
 /// of a still that later flashes into video. Players outside that window are
 /// disposed; opening is in priority order (on screen first, then the next).
+///
+/// A card the swipe leaves is only paused, so it holds its frame while it is
+/// still half on screen (and plays on from there if the drag comes back).
+/// It goes back to its start at [settle], once the page has come to rest.
 class ReelFeedPlayers extends ChangeNotifier {
-  ReelFeedPlayers({FeedVideo Function(Uri uri)? create, this.onLooped, this.onStarted, this.onFailed})
+  ReelFeedPlayers({FeedVideo Function(Uri uri)? create, this.onLooped, this.onStarted, this.onFailed, this.onLeft})
     : _create = create ?? PluginFeedVideo.new;
 
   final FeedVideo Function(Uri uri) _create;
@@ -108,7 +119,12 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// The card on screen failed to open, or broke mid-play.
   final void Function(String cardId)? onFailed;
 
+  /// The card stopped being the one on screen (a swipe went past the middle,
+  /// or everything was let go). Its next [onStarted] is a new visit.
+  final void Function(String cardId)? onLeft;
+
   final Map<String, _Entry> _byId = {};
+  final Map<String, _CardNotifier> _cards = {};
   String? _current;
   bool _muted = false;
   bool _paused = false;
@@ -130,9 +146,19 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// Cards with a player now (tests and memory checks).
   Iterable<String> get held => _byId.keys;
 
+  /// [cardId]'s page state, which changes only when that card's does.
+  ValueListenable<FeedCardState> card(String cardId) =>
+      _cards.putIfAbsent(cardId, () => _CardNotifier(_stateOf(cardId)));
+
+  FeedCardState _stateOf(String cardId) {
+    final current = cardId == _current;
+    return (video: videoFor(cardId), current: current, paused: current && _paused);
+  }
+
   /// Brings the window in line: [window] in priority order, the card on
-  /// screen first. [current] plays (unless paused by a tap); the rest are
-  /// parked at 0. Under memory pressure ([memoryLevel] 1) only the card on
+  /// screen first. [current] plays (unless paused by a tap); the card it
+  /// takes over from is paused where it is, and the rest wait on their
+  /// first frame. Under memory pressure ([memoryLevel] 1) only the card on
   /// screen keeps a player, and at level 2 none does (stills only).
   void sync({required String? current, required List<FeedClip> window, int memoryLevel = 0}) {
     if (_disposed) return;
@@ -147,10 +173,12 @@ class ReelFeedPlayers extends ChangeNotifier {
       if (keep[id] != e.uri) unawaited(_drop(id));
     }
     if (current != _current) {
-      final old = _byId[_current];
-      if (old != null) unawaited(_park(old));
+      final left = _current;
+      final old = _byId[left];
+      if (old != null) unawaited(_leave(old));
       _current = current;
       _paused = false;
+      if (left != null) onLeft?.call(left);
     }
     Future<void>? before;
     for (final w in wanted) {
@@ -185,16 +213,27 @@ class ReelFeedPlayers extends ChangeNotifier {
     if (e.id == _current && !_paused) {
       if (!e.video.playing) await e.video.play();
     } else if (e.id != _current) {
-      await _park(e);
+      // Paused, not rewound: it may still be half on screen.
+      await _leave(e);
     }
   }
 
-  Future<void> _park(_Entry e) async {
-    if (!e.video.ready) return;
-    if (e.video.playing) await e.video.pause();
-    if (e.video.position > Duration.zero) await e.video.seekTo(Duration.zero);
+  /// Off screen for now: stopped on the frame it was showing.
+  Future<void> _leave(_Entry e) async {
     e.last = Duration.zero;
     e.started = false;
+    if (e.video.ready && e.video.playing) await e.video.pause();
+  }
+
+  /// The page has come to rest: every card but the one on screen goes back
+  /// to its start, so the next swipe onto it begins at the top. Nothing on
+  /// screen is touched, so there is no jump to frame 0 mid-swipe.
+  Future<void> settle() async {
+    for (final e in _byId.values.toList()) {
+      if (e.id == _current || !_isLive(e) || !e.video.ready) continue;
+      await _leave(e);
+      if (e.video.position > Duration.zero) await e.video.seekTo(Duration.zero);
+    }
   }
 
   /// A looping clip's position jumps back to the start: one play-through.
@@ -247,7 +286,9 @@ class ReelFeedPlayers extends ChangeNotifier {
 
   /// Real playback is about to start, or the Reel closed: free every decoder.
   Future<void> releaseAll() async {
+    final left = _current;
     _current = null;
+    if (left != null) onLeft?.call(left);
     for (final id in _byId.keys.toList()) {
       await _drop(id);
     }
@@ -256,14 +297,52 @@ class ReelFeedPlayers extends ChangeNotifier {
 
   @override
   void notifyListeners() {
-    if (!_disposed) super.notifyListeners();
+    if (_disposed) return;
+    _publish();
+    super.notifyListeners();
+  }
+
+  /// Hands each watched card its state; a card nobody watches and with no
+  /// player is forgotten.
+  void _publish() {
+    _cards.removeWhere((id, n) {
+      if (n.listeners == 0 && !_byId.containsKey(id) && id != _current) {
+        n.dispose();
+        return true;
+      }
+      n.value = _stateOf(id);
+      return false;
+    });
   }
 
   @override
   void dispose() {
     _disposed = true;
     unawaited(releaseAll());
+    for (final n in _cards.values) {
+      n.dispose();
+    }
+    _cards.clear();
     super.dispose();
+  }
+}
+
+/// A card's [FeedCardState], counting its listeners so it can be let go.
+class _CardNotifier extends ValueNotifier<FeedCardState> {
+  _CardNotifier(super.value);
+
+  int listeners = 0;
+
+  @override
+  void addListener(VoidCallback listener) {
+    listeners++;
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    listeners--;
+    super.removeListener(listener);
   }
 }
 
