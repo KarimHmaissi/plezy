@@ -59,6 +59,21 @@ class MediaServerTimeouts {
   /// every other server. Same budget as [homeHubDeadline].
   static const libraryListServerDeadline = Duration(seconds: 15);
 
+  /// Deadline for the two optional extras on a Plex Continue Watching fetch:
+  /// the older-items top-up from `/library/onDeck` and the bulk show-logo
+  /// lookup. Neither is the row itself, so a slow server (PRM2-Xtra in the
+  /// evening, 15-30 s) costs the row its older items or its logos for this
+  /// load, never the hero.
+  static const continueWatchingExtrasDeadline = Duration(seconds: 5);
+
+  /// Per-server deadline for one server's Continue Watching leg
+  /// (`DataAggregationService.getOnDeckFromAllServers`). Every server's rows
+  /// are shown together, so a server that stops answering would otherwise
+  /// hold back the whole row and the hero. The leg is [homeHubDeadline] for
+  /// the hubs call with [continueWatchingExtrasDeadline] running alongside it,
+  /// plus headroom for parsing and Jellyfin's multi-request merge.
+  static const continueWatchingServerDeadline = Duration(seconds: 20);
+
   /// Timeout for probing a cached/preferred endpoint (used in
   /// [PlexServer.findBestWorkingConnection]).
   static const preferredEndpointProbe = Duration(milliseconds: 1500);

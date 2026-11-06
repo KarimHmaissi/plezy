@@ -11,6 +11,7 @@ import 'package:plezy/models/plex/plex_config.dart';
 import 'package:plezy/services/plex_api_cache.dart';
 import 'package:plezy/services/plex_client.dart';
 import 'package:plezy/utils/active_client_scope.dart';
+import 'package:plezy/utils/continue_watching_logo_notifier.dart';
 
 import '../test_helpers/backend_client_fixtures.dart';
 
@@ -352,7 +353,7 @@ void main() {
   });
 
   group('PlexClient continue-watching logo backfill', () {
-    test('episodes without an inherited logo get the show logo stamped', () async {
+    test('episodes without an inherited logo get the show logo patched in', () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       PlexApiCache.initialize(db);
       addTearDown(db.close);
@@ -363,10 +364,14 @@ void main() {
       ]);
       final client = _continueWatchingTestClient(httpClient);
       addTearDown(client.close);
+      final patch = ContinueWatchingLogoNotifier().stream.first;
 
       final items = await client.fetchContinueWatching(count: 10);
 
-      expect(items.single.clearLogoPath, '/library/metadata/show-1/clearLogo/123');
+      // The row returns at once; the show logo follows as a patch.
+      expect(items.single.clearLogoPath, isNull);
+      expect((await patch).logosBySeriesGlobalKey, {'server-id:show-1': '/library/metadata/show-1/clearLogo/123'});
+      expect(items.single.seriesGlobalKey, 'server-id:show-1');
       expect(httpClient.requests.map((r) => r.url.path), ['/hubs', '/library/metadata/show-1']);
     });
 
@@ -380,6 +385,7 @@ void main() {
       addTearDown(client.close);
 
       final items = await client.fetchContinueWatching(count: 10);
+      await pumpEventQueue();
 
       expect(items, hasLength(2));
       expect(items[0].clearLogoPath, '/library/metadata/movie-1/clearLogo/456');
@@ -399,9 +405,15 @@ void main() {
       final client = _continueWatchingTestClient(httpClient);
       addTearDown(client.close);
 
+      final patches = <ContinueWatchingLogoPatch>[];
+      final subscription = ContinueWatchingLogoNotifier().stream.listen(patches.add);
+      addTearDown(subscription.cancel);
+
       final items = await client.fetchContinueWatching(count: 10);
+      await pumpEventQueue();
 
       expect(items.single.clearLogoPath, isNull);
+      expect(patches, isEmpty);
       expect(httpClient.requests, hasLength(2));
     });
 
@@ -417,10 +429,14 @@ void main() {
       final client = _continueWatchingTestClient(httpClient);
       addTearDown(client.close);
 
-      final items = await client.fetchContinueWatching(count: 10);
+      final patch = ContinueWatchingLogoNotifier().stream.first;
 
-      expect(items[0].clearLogoPath, '/library/metadata/show-1/clearLogo/123');
-      expect(items[1].clearLogoPath, '/library/metadata/show-2/clearLogo/456');
+      await client.fetchContinueWatching(count: 10);
+
+      expect((await patch).logosBySeriesGlobalKey, {
+        'server-id:show-1': '/library/metadata/show-1/clearLogo/123',
+        'server-id:show-2': '/library/metadata/show-2/clearLogo/456',
+      });
       expect(httpClient.requests.map((r) => r.url.path), ['/hubs', '/library/metadata/show-1,show-2']);
     });
   });

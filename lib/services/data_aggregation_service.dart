@@ -307,9 +307,15 @@ class DataAggregationService {
       clients,
       failureMessage: (serverId) => 'Failed on-deck fetch from $serverId',
       fetch: (serverId, client) async {
-        final rows = await client.fetchContinueWatching(
-          count: limit,
-          excludedLibraryIds: _hiddenLibraryIdsOn(serverId, hiddenLibraryKeys),
+        // Bounded per server, as the library list is: a server that stops
+        // answering fails its own leg instead of holding back every row.
+        final rows = await _withinServerDeadline(
+          MediaServerTimeouts.continueWatchingServerDeadline,
+          operation: 'Continue Watching fetch on $serverId',
+          run: (_) => client.fetchContinueWatching(
+            count: limit,
+            excludedLibraryIds: _hiddenLibraryIdsOn(serverId, hiddenLibraryKeys),
+          ),
         );
         // Capture the scope here: after the fan-out flattens and dedup runs,
         // there is no way back to the client that produced a row.

@@ -18,6 +18,7 @@ import 'package:plezy/services/data_aggregation_service.dart';
 import 'package:plezy/services/library_events/library_event_service.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/utils/continue_watching_logo_notifier.dart';
 import 'package:plezy/utils/deletion_notifier.dart';
 import 'package:plezy/utils/watch_state_notifier.dart';
 import 'package:plezy/utils/library_content_notifier.dart';
@@ -463,6 +464,80 @@ void main() {
     expect(shelfSyncs, hasLength(1));
     expect(shelfSyncs.single.$1, 'profile-a');
     expect(shelfSyncs.single.$2.first.viewOffsetMs, 30000);
+  });
+
+  group('show logos that land after the Continue Watching row', () {
+    const logoA = '/library/metadata/show-a/clearLogo/1';
+    const logoB = '/library/metadata/show-b/clearLogo/1';
+
+    test('fill the row in place: same rows, same order, no refetch', () async {
+      final own = _item('ep-3', grandparentId: 'show-c').copyWith(clearLogoPath: '/own-logo');
+      aggregation.onDeckResult = () => [
+        _item('ep-1', grandparentId: 'show-a'),
+        _item('movie-1', kind: MediaKind.movie),
+        _item('ep-2', grandparentId: 'show-b'),
+        own,
+      ];
+      aggregation.hubsResult = () => [_hub('hub-1')];
+      await provider.load();
+      await pumpEventQueue();
+      final generation = provider.loadGeneration;
+      final onDeckCalls = aggregation.onDeckCalls;
+      var notifies = 0;
+      provider.addListener(() => notifies++);
+
+      ContinueWatchingLogoNotifier().notifyLogos(
+        const ContinueWatchingLogoPatch({
+          'server_1:show-a': logoA,
+          'server_1:show-b': logoB,
+          'server_1:show-c': '/patched-over-own',
+        }),
+      );
+      await pumpEventQueue();
+
+      expect(provider.onDeck.map((item) => item.id), ['ep-1', 'movie-1', 'ep-2', 'ep-3']);
+      expect(provider.onDeck.map((item) => item.clearLogoPath), [logoA, null, logoB, '/own-logo']);
+      expect(notifies, 1);
+      expect(provider.loadGeneration, generation, reason: 'a patch is not a new load, so the hero stays put');
+      expect(aggregation.onDeckCalls, onDeckCalls);
+    });
+
+    test('a patch while hubs are still loading does not supersede the pass', () async {
+      final hubs = Completer<void>();
+      aggregation.onDeckResult = () => [_item('ep-1', grandparentId: 'show-a')];
+      aggregation.hubsResult = () => [_hub('hub-1')];
+      aggregation.hubGate = hubs.future;
+
+      final load = provider.load();
+      await pumpEventQueue();
+      expect(provider.onDeck.map((item) => item.id), ['ep-1']);
+
+      ContinueWatchingLogoNotifier().notifyLogos(const ContinueWatchingLogoPatch({'server_1:show-a': logoA}));
+      await pumpEventQueue();
+      expect(provider.onDeck.single.clearLogoPath, logoA);
+
+      hubs.complete();
+      await load;
+      await pumpEventQueue();
+
+      expect(provider.hubs.map((hub) => hub.id), ['hub-1']);
+      expect(provider.onDeck.single.clearLogoPath, logoA);
+      expect(shelfSyncs, isNotEmpty, reason: 'the pass still commits and syncs the launcher shelf');
+    });
+
+    test('rows that arrive after their patch get the logo when they commit', () async {
+      ContinueWatchingLogoNotifier().notifyLogos(const ContinueWatchingLogoPatch({'server_1:show-a': logoA}));
+      await pumpEventQueue();
+      aggregation.onDeckResult = () => [
+        _item('ep-1', grandparentId: 'show-a'),
+        _item('ep-9', grandparentId: 'show-a', serverId: 'server_2'),
+      ];
+      aggregation.hubsResult = () => [_hub('hub-1')];
+
+      await provider.load();
+
+      expect(provider.onDeck.map((item) => item.clearLogoPath), [logoA, null], reason: 'logos are per server');
+    });
   });
 
   group('copies behind a merged Continue Watching row', () {

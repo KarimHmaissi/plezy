@@ -64,6 +64,8 @@ import '../models/transcode_quality_preset.dart';
 import '../utils/device_identity.dart';
 import '../utils/failover_http_client.dart';
 import '../utils/app_logger.dart';
+import '../utils/continue_watching_logo_notifier.dart';
+import '../utils/global_key_utils.dart';
 import '../utils/media_server_retry.dart';
 import '../utils/future_extensions.dart';
 import '../utils/media_server_timeouts.dart';
@@ -1677,6 +1679,10 @@ class PlexClient
   /// Prefer the provider's dedicated Continue Watching feature key when
   /// advertised; fall back to Plex Web's legacy hubs query. Both respect the
   /// server's OnDeckWindow preference (unlike /library/onDeck).
+  ///
+  /// The `/library/onDeck` top-up runs alongside the hubs call, and the show
+  /// logo lookup runs after the rows are returned (see
+  /// [_backfillMissingLogos]), so neither extra can hold back the row.
   Future<List<PlexMetadataDto>> _getContinueWatching({int? count = 20}) async {
     final continueWatchingHubKey = _providerContinueWatchingHubKey;
     final queryParameters = <String, dynamic>{'count': ?count, 'includeGuids': 1};
@@ -1684,6 +1690,9 @@ class PlexClient
       queryParameters['identifier'] = 'home.continue,home.ondeck';
     }
 
+    // Started with the hubs call, not after it: the merge needs the hub's
+    // rows, but the request does not. Never throws.
+    final olderOnDeck = _fetchOlderOnDeckItems();
     final response = await retryTransientMediaServerCall(
       operation: 'Plex continue watching hubs',
       deadline: MediaServerTimeouts.homeHubDeadline,
@@ -1718,38 +1727,66 @@ class PlexClient
       }
       result.add(item);
     }
-    await _addOlderOnDeckItems(result);
-    return _backfillMissingLogos(result);
+    _addOlderOnDeckItems(result, await olderOnDeck);
+    unawaited(_backfillMissingLogos(List.of(result)));
+    return result;
+  }
+
+  /// `/library/onDeck`'s items, or an empty list when the request fails or
+  /// misses [MediaServerTimeouts.continueWatchingExtrasDeadline] — the row
+  /// then shows the hub's items without the older top-up for this load.
+  /// No connection retries: the top-up is optional, so it never costs the
+  /// server a second request.
+  Future<List<PlexMetadataDto>> _fetchOlderOnDeckItems() async {
+    try {
+      final response = await retryTransientMediaServerCall(
+        operation: 'Plex /library/onDeck top-up',
+        deadline: MediaServerTimeouts.continueWatchingExtrasDeadline,
+        maxConnectionRetries: 0,
+        call: (timeout, abort) => _getWithFailover(
+          '/library/onDeck',
+          queryParameters: {'X-Plex-Container-Start': 0, 'X-Plex-Container-Size': 100, 'includeGuids': 1},
+          timeout: timeout,
+          abort: abort,
+          allowEndpointFailover: false,
+        ),
+      );
+      return _extractMetadataList(response);
+    } on MediaServerHttpException catch (e) {
+      if (e.type == MediaServerHttpErrorType.connectionTimeout || e.type == MediaServerHttpErrorType.receiveTimeout) {
+        appLogger.w(
+          'ContinueWatching: /library/onDeck top-up on $serverName missed its '
+          '${MediaServerTimeouts.continueWatchingExtrasDeadline.inSeconds}s deadline; '
+          'showing the hub rows without the older items',
+        );
+      } else {
+        appLogger.d('Plex: /library/onDeck top-up failed', error: e);
+      }
+    } catch (e) {
+      appLogger.d('Plex: /library/onDeck top-up failed', error: e);
+    }
+    return const [];
   }
 
   /// The Continue Watching hub hides anything older than the server's
   /// OnDeckWindow (about 16 weeks), but `/library/onDeck` still lists those
   /// in-progress items — on a live account, a dozen half-watched films last
-  /// touched months ago. Append the ones the hub left out (same item, or an
-  /// episode of a show the hub already has, is skipped) so Home's "Pick back
-  /// up" row can show them. Best-effort: a failure keeps the hub's items.
-  Future<void> _addOlderOnDeckItems(List<PlexMetadataDto> result) async {
-    try {
-      final response = await _getWithFailover(
-        '/library/onDeck',
-        queryParameters: {'X-Plex-Container-Start': 0, 'X-Plex-Container-Size': 100, 'includeGuids': 1},
-        allowEndpointFailover: false,
-      );
-      final seenKeys = {for (final item in result) item.ratingKey};
-      final seenShows = {
-        for (final item in result)
-          if (item.type?.toLowerCase() == 'episode' && item.grandparentRatingKey != null) item.grandparentRatingKey,
-      };
-      for (final item in _extractMetadataList(response)) {
-        if (seenKeys.contains(item.ratingKey)) continue;
-        final isEpisode = item.type?.toLowerCase() == 'episode';
-        if (isEpisode && seenShows.contains(item.grandparentRatingKey)) continue;
-        result.add(item);
-        seenKeys.add(item.ratingKey);
-        if (isEpisode && item.grandparentRatingKey != null) seenShows.add(item.grandparentRatingKey);
-      }
-    } catch (e) {
-      appLogger.d('Plex: /library/onDeck top-up failed', error: e);
+  /// touched months ago. Append the [onDeck] ones the hub left out (same
+  /// item, or an episode of a show the hub already has, is skipped) so Home's
+  /// "Pick back up" row can show them.
+  void _addOlderOnDeckItems(List<PlexMetadataDto> result, List<PlexMetadataDto> onDeck) {
+    final seenKeys = {for (final item in result) item.ratingKey};
+    final seenShows = {
+      for (final item in result)
+        if (item.type?.toLowerCase() == 'episode' && item.grandparentRatingKey != null) item.grandparentRatingKey,
+    };
+    for (final item in onDeck) {
+      if (seenKeys.contains(item.ratingKey)) continue;
+      final isEpisode = item.type?.toLowerCase() == 'episode';
+      if (isEpisode && seenShows.contains(item.grandparentRatingKey)) continue;
+      result.add(item);
+      seenKeys.add(item.ratingKey);
+      if (isEpisode && item.grandparentRatingKey != null) seenShows.add(item.grandparentRatingKey);
     }
   }
 
@@ -1758,14 +1795,16 @@ class PlexClient
   /// show's own metadata still carries it, so the hero and other logo
   /// surfaces fall back to the title even though the detail page works.
   /// Resolve every missing owner's logo in one bulk metadata request
-  /// (`/library/metadata` accepts comma-joined rating keys) and stamp it on
-  /// the rows — the same grandparent lookup Plex Web performs. Best-effort:
-  /// a failed lookup never fails the shelf (it is retried on the next
-  /// refresh).
-  Future<List<PlexMetadataDto>> _backfillMissingLogos(List<PlexMetadataDto> items) async {
-    final missingByOwner = <String, List<int>>{};
-    for (var i = 0; i < items.length; i++) {
-      final item = items[i];
+  /// (`/library/metadata` accepts comma-joined rating keys) — the same
+  /// grandparent lookup Plex Web performs — and publish them through
+  /// [ContinueWatchingLogoNotifier]. The rows were already returned, so this
+  /// patches logos in later without reordering them. Best-effort and bounded
+  /// by [MediaServerTimeouts.continueWatchingExtrasDeadline]: a failed lookup
+  /// never fails the shelf (it is retried on the next refresh). Returns the
+  /// published patch, or null when nothing was published.
+  Future<ContinueWatchingLogoPatch?> _backfillMissingLogos(List<PlexMetadataDto> items) async {
+    final missingOwners = <String>{};
+    for (final item in items) {
       if (item.clearLogo != null && item.clearLogo!.isNotEmpty) continue;
       final ownerKey = switch (item.type?.toLowerCase()) {
         'episode' => item.grandparentRatingKey,
@@ -1773,35 +1812,39 @@ class PlexClient
         _ => null,
       };
       if (ownerKey == null || ownerKey.isEmpty) continue;
-      missingByOwner.putIfAbsent(ownerKey, () => []).add(i);
+      missingOwners.add(ownerKey);
     }
-    if (missingByOwner.isEmpty) return items;
+    if (missingOwners.isEmpty) return null;
 
     try {
-      final response = await _getWithFailover(
-        '/library/metadata/${missingByOwner.keys.join(',')}',
-        allowEndpointFailover: false,
+      final response = await retryTransientMediaServerCall(
+        operation: 'Plex continue watching logos',
+        deadline: MediaServerTimeouts.continueWatchingExtrasDeadline,
+        maxConnectionRetries: 0,
+        call: (timeout, abort) => _getWithFailover(
+          '/library/metadata/${missingOwners.join(',')}',
+          timeout: timeout,
+          abort: abort,
+          allowEndpointFailover: false,
+        ),
       );
       final metadata = _getMediaContainer(response)?['Metadata'] as List? ?? const [];
-      final logosByKey = <String, String>{};
+      final logos = <String, String>{};
       for (final entry in metadata) {
         final json = entry as Map<String, dynamic>;
         final ratingKey = json['ratingKey']?.toString();
         final logo = PlexMetadataDto.fromJsonWithImages(json).clearLogo;
-        if (ratingKey == null || ratingKey.isEmpty || logo == null || logo.isEmpty) continue;
-        logosByKey[ratingKey] = logo;
+        if (ratingKey == null || !missingOwners.contains(ratingKey) || logo == null || logo.isEmpty) continue;
+        logos[buildGlobalKey(serverId, ratingKey)] = logo;
       }
-      for (final entry in missingByOwner.entries) {
-        final logo = logosByKey[entry.key];
-        if (logo == null) continue;
-        for (final index in entry.value) {
-          items[index] = items[index].copyWith(clearLogo: logo);
-        }
-      }
+      if (logos.isEmpty) return null;
+      final patch = ContinueWatchingLogoPatch(logos);
+      ContinueWatchingLogoNotifier().notifyLogos(patch);
+      return patch;
     } catch (e, st) {
       appLogger.d('Failed to backfill continue-watching logos', error: e, stackTrace: st);
+      return null;
     }
-    return items;
   }
 
   /// Get children of a metadata item (e.g., seasons for a show, episodes for a season).
