@@ -256,6 +256,11 @@ abstract final class ReelApp {
     appLogger.i('[ReelSave] Home row ${added ? 'seated first' : 'already on Home'}');
   }
 
+  /// The cards' metadata and art over the app's servers, for the run-time
+  /// seam test (V2-62).
+  @visibleForTesting
+  static ReelMedia mediaFor(MultiServerManager servers) => _AppReelMedia(servers);
+
   /// The clip resolver over the app's servers (also the measure-day probe).
   static ClipResolver resolverFor(MultiServerManager servers, ReelStore store) => ClipResolver(
     servers: PlexReelServers(servers),
