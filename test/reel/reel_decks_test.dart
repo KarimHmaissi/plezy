@@ -15,40 +15,42 @@ import 'package:plezy/services/reel/reel_pool.dart';
 import 'package:plezy/services/reel/reel_signals.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
-ReelCardData _card(String id, {double? imdb, double? tmdb, double? audience}) => ReelCardData(
-  title: ReelTitle(
-    titleId: id,
-    groupKey: 'g$id',
-    title: 'Title $id',
-    isShow: false,
-    copies: [ReelCopy(serverId: 's1', ratingKey: id)],
-  ),
-  facts: TitleFacts(
-    ref: TitleRef(id: id, groupKey: 'g$id'),
-    seen: SeenState.unseen,
-    imdb: imdb,
-    tmdb: tmdb,
-    audience: audience,
-  ),
-  best: IndexedTitle(
-    id: 's1:$id',
-    serverId: 's1',
-    serverName: 'S',
-    libraryKey: '1',
-    libraryTitle: 'Films',
-    ratingKey: id,
-    type: 'movie',
-    title: 'Title $id',
-    genres: '',
-    countries: '',
-    directors: '',
-    writers: '',
-    cast: '',
-    collections: '',
-    groupKey: 'g$id',
-    summary: '',
-  ),
-);
+ReelCardData _card(String id, {double? imdb, double? tmdb, double? audience, String? tagline, String? summary}) =>
+    ReelCardData(
+      title: ReelTitle(
+        titleId: id,
+        groupKey: 'g$id',
+        title: 'Title $id',
+        isShow: false,
+        copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+      ),
+      facts: TitleFacts(
+        ref: TitleRef(id: id, groupKey: 'g$id'),
+        seen: SeenState.unseen,
+        imdb: imdb,
+        tmdb: tmdb,
+        audience: audience,
+      ),
+      best: IndexedTitle(
+        id: 's1:$id',
+        serverId: 's1',
+        serverName: 'S',
+        libraryKey: '1',
+        libraryTitle: 'Films',
+        ratingKey: id,
+        type: 'movie',
+        title: 'Title $id',
+        genres: '',
+        countries: '',
+        directors: '',
+        writers: '',
+        cast: '',
+        collections: '',
+        groupKey: 'g$id',
+        summary: summary ?? '',
+        tagline: tagline,
+      ),
+    );
 
 class _NoFacts implements TitleFactsSource {
   @override
@@ -57,13 +59,17 @@ class _NoFacts implements TitleFactsSource {
   TitleFacts? peek(String globalKey) => null;
 }
 
-/// Maps entries straight onto invented cards (card id = rating key).
+/// Maps entries straight onto invented cards (card id = rating key), each
+/// with its own words from [texts] when given.
 class _Library extends ReelLibrary {
-  _Library() : super(database: () => throw UnimplementedError(), facts: _NoFacts());
+  _Library({this.texts = const {}}) : super(database: () => throw UnimplementedError(), facts: _NoFacts());
+
+  final Map<String, ({String? tagline, String? summary})> texts;
 
   @override
   Future<List<ReelCardData>> cards(List<DeckEntry> entries) async => [
-    for (final e in entries) _card(e.ratingKey!, imdb: 7.5),
+    for (final e in entries)
+      _card(e.ratingKey!, imdb: 7.5, tagline: texts[e.ratingKey]?.tagline, summary: texts[e.ratingKey]?.summary),
   ];
 }
 
@@ -116,8 +122,8 @@ void main() {
 
     tearDown(() async => db.close());
 
-    ReelPool pool({PoolModel? model, bool host = true}) =>
-        ReelPool(store: store, library: _Library(), model: model, host: host, clock: () => now);
+    ReelPool pool({PoolModel? model, bool host = true, ReelLibrary? library}) =>
+        ReelPool(store: store, library: library ?? _Library(), model: model, host: host, clock: () => now);
 
     /// The TV's pool for [day] as it reaches the phone's synced settings.
     Future<void> sharePool(DateTime day, List<String> ids) => settings.writeSetting(
@@ -189,6 +195,47 @@ void main() {
       expect(raw.map((j) => (j as Map)['id']), ['n', 'm']);
       await recordAt(now, 'n', ReelAction.sampled);
       expect((await p.cachedPool())?.map((e) => e.ratingKey), ['m']);
+    });
+
+    test("the build reads each candidate's own words and keeps checked hooks with the pool", () async {
+      final library = _Library(
+        texts: {
+          'm': (tagline: 'Every tide returns', summary: 'A ferry pilot finds a letter. Then the island goes dark.'),
+          'n': (tagline: null, summary: null),
+        },
+      );
+      String? user;
+      Map<String, Object?>? tool;
+      String? system;
+      await pool(
+        library: library,
+        model: (s, u, t) async {
+          system = s;
+          user = u;
+          tool = t;
+          return {
+            'cards': [
+              {'id': 'c1', 'cluster': 'harbor drama', 'hook': 'A ferry pilot and an unsent letter'},
+              // No words of its own to write from: the hook is dropped.
+              {'id': 'c2', 'cluster': 'harbor drama', 'hook': 'Made up from memory'},
+            ],
+          };
+        },
+      ).build([_candidate('m'), _candidate('n')], facts: '');
+      final lines = user!.split('\n');
+      expect(
+        lines.firstWhere((l) => l.startsWith('c1:')),
+        contains('premise: Every tide returns A ferry pilot finds a letter. Then the island goes dark.'),
+      );
+      expect(lines.firstWhere((l) => l.startsWith('c2:')), isNot(contains('premise:')));
+      expect(system, contains('hook: optional, at most 12 words'));
+      final props = (((tool!['input_schema'] as Map)['properties'] as Map)['cards'] as Map)['items'] as Map;
+      expect((props['properties'] as Map).containsKey('hook'), isTrue);
+
+      final raw = jsonDecode((await store.cached(ReelPool.dayKey(now)))!) as List;
+      expect(raw.map((j) => (j as Map)['hk']), ['A ferry pilot and an unsent letter', null]);
+      final cached = await pool(library: library).cachedPool();
+      expect(cached?.map((e) => e.hook), ['A ferry pilot and an unsent letter', null]);
     });
 
     test("For You opens on code order, then today's build lands, fires rebuilt and loads next", () async {

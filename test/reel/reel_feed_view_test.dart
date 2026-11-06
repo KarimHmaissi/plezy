@@ -67,11 +67,15 @@ class _Deck extends ReelDeck {
   bool get keepsSeen => true;
   @override
   bool get raw => true;
+
+  /// Cards built with a hook or a seen state of their own.
+  final Map<String, ReelCardData> special = {};
+
   @override
-  Future<List<ReelCardData>> load() async => [for (final i in ids) _card(i)];
+  Future<List<ReelCardData>> load() async => [for (final i in ids) special[i] ?? _card(i)];
 }
 
-ReelCardData _card(String id) => ReelCardData(
+ReelCardData _card(String id, {String? hook, SeenState seen = SeenState.unseen}) => ReelCardData(
   title: ReelTitle(
     titleId: 't$id',
     groupKey: 'g$id',
@@ -81,7 +85,7 @@ ReelCardData _card(String id) => ReelCardData(
   ),
   facts: TitleFacts(
     ref: TitleRef(id: 't$id', groupKey: 'g$id'),
-    seen: SeenState.unseen,
+    seen: seen,
   ),
   best: IndexedTitle(
     id: 's1:$id',
@@ -99,9 +103,10 @@ ReelCardData _card(String id) => ReelCardData(
     cast: '',
     collections: '',
     groupKey: 'g$id',
-    summary: '',
+    summary: 'A keeper relights the harbor lamp. The town learns why it went dark.',
   ),
   why: 'Like the films you finish.',
+  hook: hook,
 );
 
 /// A player that is ready as soon as it opens.
@@ -143,11 +148,12 @@ void main() {
   late int decksOpened, watched, sheets;
   late ValueNotifier<int> restored;
   late _Deck first;
+  late ReelStore store;
 
   setUp(() {
     db = ForkDatabase.memory();
     final settings = LocalCustomisationStore(db);
-    final store = ReelStore(database: () async => db, settings: () async => settings);
+    store = ReelStore(database: () async => db, settings: () async => settings);
     opened = [];
     decksOpened = watched = sheets = 0;
     restored = ValueNotifier(0);
@@ -308,5 +314,40 @@ void main() {
     expect(opened.single.id, '1');
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
+  });
+
+  group('what a card is about', () {
+    const premise = 'A keeper relights the harbor lamp.';
+
+    testWidgets('a card with no clip shows the first sentence of its summary', (tester) async {
+      await tester.runAsync(() => store.cache('src:g1', '{"miss":true}'));
+      await pump(tester);
+      await tester.pumpAndSettle();
+      expect(c.current.isAiCard, isTrue);
+      expect(find.text(premise), findsOneWidget);
+      expect(find.textContaining('learns why'), findsNothing, reason: 'the first sentence only');
+    });
+
+    testWidgets("a trailer card doesn't: the trailer tells you", (tester) async {
+      await pump(tester);
+      await tester.pumpAndSettle();
+      expect(c.current.clip, isNotNull);
+      expect(find.text(premise), findsNothing);
+    });
+
+    testWidgets("the daily build's hook comes before the summary", (tester) async {
+      first.special['1'] = _card('1', hook: 'A lamp, a harbor and one long night');
+      await tester.runAsync(() => store.cache('src:g1', '{"miss":true}'));
+      await pump(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('A lamp, a harbor and one long night'), findsOneWidget);
+      expect(find.text(premise), findsNothing);
+    });
+
+    testWidgets('a deck that keeps seen titles shows the seen badge', (tester) async {
+      first.special['1'] = _card('1', seen: const SeenState(kind: SeenKind.finished, eps: 10, total: 10));
+      await pump(tester);
+      expect(find.text('Seen'), findsOneWidget);
+    });
   });
 }

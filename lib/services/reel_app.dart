@@ -273,7 +273,18 @@ abstract final class ReelApp {
     }
   }
 
+  /// The daily build's output ceiling: about 90 cards, each with an id, a
+  /// cluster and optional why, anchor and hook lines (about 7k tokens).
+  /// Only the tokens written are billed. It stays well under the size the
+  /// API docs say needs streaming (about 21k) and inside the client's
+  /// 3-minute timeout. A call cut short ends with `stop_reason` max_tokens
+  /// and a truncated tool input
+  /// (https://platform.claude.com/docs/en/api/handling-stop-reasons).
+  static const int poolMaxTokens = 12000;
+
   /// The daily build's one Sonnet call (spend recorded like every AI call).
+  /// Its `stop_reason` is logged, so a build cut short by the ceiling never
+  /// falls back to code order silently.
   static Future<Map<String, dynamic>?> _sonnet(String system, String user, Map<String, Object?> tool) async {
     final key = await AiKeyStore.read();
     if (key == null) return null;
@@ -282,7 +293,7 @@ abstract final class ReelApp {
     try {
       final response = await client.createMessage({
         'model': model.id,
-        'max_tokens': 6000,
+        'max_tokens': poolMaxTokens,
         'thinking': model.noThinking,
         'system': system,
         'tools': [tool],
@@ -291,7 +302,15 @@ abstract final class ReelApp {
           {'role': 'user', 'content': user},
         ],
       });
-      await AiSpend.record(model, (response['usage'] as Map?)?.cast<String, dynamic>() ?? const {});
+      final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+      await AiSpend.record(model, usage);
+      final stop = response['stop_reason'] as String?;
+      final out = usage['output_tokens'];
+      if (stop == 'max_tokens') {
+        appLogger.w('[ReelPool] build cut short: stop_reason=max_tokens, output $out of $poolMaxTokens tokens');
+      } else {
+        appLogger.i('[ReelPool] build stop_reason=$stop, output $out tokens');
+      }
       return [
         for (final b in (response['content'] as List? ?? const []).whereType<Map>())
           if (b['type'] == 'tool_use') (b['input'] as Map).cast<String, dynamic>(),

@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../../utils/app_logger.dart';
 import 'reel_decay.dart';
 import 'reel_library.dart';
+import 'reel_premise.dart';
 import 'reel_signals.dart';
 import 'reel_store.dart';
 
@@ -150,6 +151,7 @@ class ReelPool {
             ratingKey: j['rk'] as String,
             why: j['why'] is String ? j['why'] as String : null,
             cluster: j['cl'] is String ? j['cl'] as String : null,
+            hook: j['hk'] is String ? j['hk'] as String : null,
           ),
         ),
   ];
@@ -233,12 +235,15 @@ class ReelPool {
     );
     final lines = <String>[];
     final idOf = <String, PoolCandidate>{};
+    final hasPremise = <String>{};
     for (final (i, c) in list.indexed) {
       final card = byRow[c.entry.rowId];
       if (card == null) continue;
       final id = 'c${i + 1}';
       idOf[id] = c;
       final fatigue = ReelDecay.fatigue(skips[card.id] ?? const [], now);
+      final premise = ReelPremise.source(tagline: card.best.tagline, summary: card.best.summary);
+      if (premise != null) hasPremise.add(id);
       lines.add(
         [
           '$id: ${card.title.title}${card.best.year == null ? '' : ' (${card.best.year})'}',
@@ -251,6 +256,7 @@ class ReelPool {
           if (c.askedFor != null) 'from their ask "${c.askedFor}"',
           if (fatigue > 0.05) 'skipped quickly in the Reel lately (fatigue ${fatigue.toStringAsFixed(1)})',
           ...?notes[card.id],
+          if (premise != null) 'premise: $premise',
         ].join(' · '),
       );
     }
@@ -273,13 +279,17 @@ class ReelPool {
             ratingKey: c.entry.ratingKey,
             why: checkedWhy(p['why'] as String?, p['anchor'] as String?, c),
             cluster: (p['cluster'] as String?)?.trim().toLowerCase(),
+            hook: ReelPremise.checkedHook(
+              p['hook'] is String ? p['hook'] as String : null,
+              hadSource: hasPremise.contains('${p['id']}'),
+            ),
           ),
         );
       }
       if (out.isEmpty) return null;
       final rows = [
         for (final (i, e) in out.indexed)
-          {'id': ids[i], 'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster},
+          {'id': ids[i], 'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster, 'hk': ?e.hook},
       ];
       await store.cache(dayKey(now), jsonEncode(rows));
       if (host) {
@@ -321,7 +331,8 @@ Choose about $target candidates and put them in the order you think they would m
 - Kids' and family titles only when their own history shows they watch them.
 - why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence ("similar to …" titles or "from their ask …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
 - anchor: the exact evidence title or ask your why line names.
-- cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.''';
+- cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.
+- hook: optional, at most ${ReelPremise.hookWords} words: what the title is about, for someone deciding whether to watch it. Write it only from that candidate's own "premise:" text, never from memory, and leave it out when the candidate has none. It is shown on screen, so it must not spoil: only the opening setup, never a twist, a death, an ending or who did it. No ratings or praise words.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'reel_pool',
@@ -338,6 +349,10 @@ Choose about $target candidates and put them in the order you think they would m
               'why': {'type': 'string'},
               'anchor': {'type': 'string'},
               'cluster': {'type': 'string'},
+              'hook': {
+                'type': 'string',
+                'description': 'At most ${ReelPremise.hookWords} words, from the candidate premise only; no spoilers',
+              },
             },
             'required': ['id', 'cluster'],
           },

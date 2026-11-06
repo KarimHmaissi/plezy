@@ -98,4 +98,15 @@ void main() {
     await upgraded.close();
     await dir.delete(recursive: true);
   });
+
+  test('many cache rows read at once, stale ones left out', () async {
+    await store.cache('src:ga', '{"miss":true}');
+    now = now.add(const Duration(days: 31));
+    await store.cache('src:gb', '{"miss":true}');
+    expect(await store.cachedMany(['src:ga', 'src:gb', 'src:gc'], ttl: ReelStore.sourceTtl), {
+      'src:gb': '{"miss":true}',
+    });
+    expect((await store.cachedMany(['src:ga', 'src:gb'])).keys, unorderedEquals(['src:ga', 'src:gb']));
+    expect(await store.cachedMany(const []), isEmpty);
+  });
 }

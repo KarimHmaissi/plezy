@@ -8,6 +8,7 @@ import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
+import 'reel_decay.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
 import 'reel_pool.dart';
@@ -251,7 +252,7 @@ class ReelController extends ChangeNotifier {
         final sw = Stopwatch()..start();
         final raw = await d.load();
         final loadMs = sw.elapsedMilliseconds;
-        final loaded = await finishDeck(d, raw, store: store, hasClip: (_) => true);
+        final loaded = await _finish(d, raw);
         appLogger.i(
           '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
         );
@@ -271,6 +272,22 @@ class ReelController extends ChangeNotifier {
 
   String _today() => ReelPool.dayKey(_clock());
 
+  /// [finishDeck] with what is known of each card's clip: a cached miss is
+  /// an AI card, so the 1-in-6 spacing applies to it; a card not resolved
+  /// yet is assumed to have a clip (it resolves on demand, two cards ahead,
+  /// never the whole deck at once).
+  Future<List<ReelCardData>> _finish(ReelDeck d, List<ReelCardData> raw) async {
+    var misses = const <String>{};
+    if (!d.raw) {
+      try {
+        misses = await resolver.knownMisses([for (final c in raw) c.title]);
+      } catch (e) {
+        appLogger.d('Reel: cached clip answers unavailable', error: e);
+      }
+    }
+    return finishDeck(d, raw, store: store, hasClip: (c) => !misses.contains(c.title.groupKey));
+  }
+
   /// A fresh build of [d] landed after its list was loaded. On screen, the
   /// cards up to and including the one showing stay put and the new list
   /// follows them (titles already there are left out), so the cursor and
@@ -284,7 +301,7 @@ class ReelController extends ChangeNotifier {
     if (_disposed || !_cards.containsKey(d.id)) return;
     final List<ReelCardData> fresh;
     try {
-      fresh = await finishDeck(d, await d.load(), store: store, hasClip: (_) => true);
+      fresh = await _finish(d, await d.load());
     } catch (e) {
       appLogger.w('Reel: deck ${d.id} rebuild failed to load', error: e);
       return;
@@ -409,10 +426,11 @@ class ReelController extends ChangeNotifier {
     await _resolve(c);
     if (gen != _generation || !_active) return;
     // An AI card only with room (at most 1 in 6); otherwise the title waits
-    // for another day and the feed moves on.
+    // for another day and the feed moves on. The phone holds them back
+    // before they come on screen instead ([_holdBackAhead]).
     if (!externalClips &&
         _clip[c.id] == null &&
-        _sinceAiCard < 6 &&
+        _sinceAiCard < ReelDecay.aiCardEvery &&
         index + direction >= 0 &&
         index + direction <= list.length) {
       _cursor[deck.id] = index + (direction == 0 ? 1 : direction);
@@ -429,6 +447,7 @@ class ReelController extends ChangeNotifier {
       final started = _feedStarted;
       _feedStarted = null;
       if (clip != null && started?.id == c.id) _cardSince = started!.at;
+      _sinceAiCard = clip == null ? 0 : _sinceAiCard + 1;
     } else if (clip == null) {
       _sinceAiCard = 0;
       await clips.pause();
@@ -448,7 +467,10 @@ class ReelController extends ChangeNotifier {
   void _prepareAhead(List<ReelCardData> list, int direction, int gen) {
     for (var k = 1; k <= 2; k++) {
       final j = index + k * (direction < 0 ? -1 : 1);
-      if (j >= 0 && j < list.length) unawaited(_resolve(list[j]));
+      if (j >= 0 && j < list.length) {
+        final next = list[j];
+        unawaited(_resolve(next).then((_) => _holdBackAhead(next)));
+      }
     }
     final ahead = index + (direction < 0 ? -1 : 1);
     if (!externalClips && memoryLevel == 0 && ahead >= 0 && ahead < list.length) {
@@ -459,6 +481,37 @@ class ReelController extends ChangeNotifier {
         }),
       );
     }
+  }
+
+  /// Phone: the TV's 1-in-6 AI-card cap. The feed never skips the card
+  /// under your thumb, so an AI card ahead (resolved two cards early) with
+  /// no room is taken out of this session's list before it comes on screen;
+  /// the title waits for another day, as on the TV.
+  void _holdBackAhead(ReelCardData c) {
+    if (!externalClips || _disposed || !_active) return;
+    final list = _cards[deck.id];
+    if (list == null) return;
+    final j = list.indexOf(c);
+    if (j <= index || !_resolved.contains(c.id) || _clip[c.id] != null) return;
+    if (_aiCardFits(list, j)) return;
+    final left = [...list]..removeAt(j);
+    _cards[deck.id] = left;
+    appLogger.d('[ReelDeck] ${deck.id}: AI card held back (at most 1 in ${ReelDecay.aiCardEvery})');
+    notifyListeners();
+    _prepareAhead(left, 1, _generation);
+  }
+
+  /// Whether an AI card at [j] (ahead of the cursor) keeps the 1-in-6 cap:
+  /// the clip cards since the last AI card shown, plus those between here
+  /// and [j] (a card not resolved yet counts as a clip card).
+  bool _aiCardFits(List<ReelCardData> list, int j) {
+    var since = _sinceAiCard;
+    for (var i = index + 1; i < j; i++) {
+      final x = list[i];
+      if (_resolved.contains(x.id) && _clip[x.id] == null) return false;
+      since++;
+    }
+    return since >= ReelDecay.aiCardEvery;
   }
 
   /// TV: the clock starts on this card's first frame (the core moves from

@@ -5,11 +5,15 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../media/ids.dart';
+import '../../media/media_item_types.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_premise.dart';
+import '../../services/settings_service.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
+import '../../widgets/fork_motion_widgets.dart';
 import '../../widgets/optimized_media_image.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
@@ -462,6 +466,7 @@ class _Info extends StatelessWidget {
     final theme = Theme.of(context);
     final card = slot.card!;
     final clip = slot.clip;
+    final badge = controller.deck.keepsSeen ? card.facts.seen.badge : null;
     return Align(
       alignment: Alignment.bottomCenter,
       child: DecoratedBox(
@@ -479,7 +484,7 @@ class _Info extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (clip != null || card.chip != null)
+              if (clip != null || card.chip != null || badge != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Wrap(
@@ -494,6 +499,7 @@ class _Info extends StatelessWidget {
                           label: clip.label,
                         ),
                       if (card.chip case final chip?) StatChip(label: chip),
+                      if (badge != null) StatChip(icon: Symbols.check_rounded, label: badge),
                     ],
                   ),
                 ),
@@ -505,6 +511,7 @@ class _Info extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               ReelMetadataLine(item: slot.item, year: card.best.year, fontSize: 14),
+              _Premise(slot: slot),
               if (card.why case final why?) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -548,6 +555,56 @@ class _Info extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the title is about, in two lines at most, on a card with no clip
+/// to tell you (an AI card) and on an anime opening, which is a song
+/// (plan D19); never on a trailer. The daily build's hook first, else the
+/// tagline, else the summary's first sentence ([ReelPremise.line]), under
+/// the app's spoiler setting. It fades in once the card has resolved.
+class _Premise extends StatelessWidget {
+  const _Premise({required this.slot});
+
+  final ReelSlot slot;
+
+  bool get _shows => slot.isAiCard || slot.clip?.source.origin == ClipOrigin.animeTheme;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_shows) return const SizedBox.shrink();
+    final hide = SettingsService.instanceOrNull?.listenable(SettingsService.hideSpoilers);
+    if (hide == null) return _line(context, hideSpoilers: false);
+    return ValueListenableBuilder<bool>(
+      valueListenable: hide,
+      builder: (context, hideSpoilers, _) => _line(context, hideSpoilers: hideSpoilers),
+    );
+  }
+
+  Widget _line(BuildContext context, {required bool hideSpoilers}) {
+    final card = slot.card!;
+    final item = slot.item;
+    final text = ReelPremise.line(
+      hook: card.hook,
+      tagline: item?.tagline ?? card.best.tagline,
+      summary: item?.summary ?? card.best.summary,
+      hideSpoilers: hideSpoilers,
+      unwatchedEpisode: item?.shouldHideSpoiler ?? false,
+    );
+    if (text == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return ForkEntrance(
+      key: ValueKey('premise:${card.id}'),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          text,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurface),
         ),
       ),
     );

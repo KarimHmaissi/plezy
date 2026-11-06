@@ -102,6 +102,14 @@ class _Deck extends ReelDeck {
   Future<List<ReelCardData>> load() async => cards;
 }
 
+/// A deck code arranges (the 1-in-6 AI-card spacing applies).
+class _ArrangedDeck extends _Deck {
+  _ArrangedDeck(super.id, super.cards);
+
+  @override
+  bool get raw => false;
+}
+
 class _CountingDeck extends _Deck {
   _CountingDeck(super.id, super.cards, this.onLoad);
 
@@ -828,6 +836,76 @@ void main() {
       await c.start();
       expect(loads, 1);
       expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
+  });
+
+  group('the 1-in-6 AI-card cap', () {
+    Future<void> miss(List<String> ids) async {
+      for (final id in ids) {
+        await store.cache('src:g$id', '{"miss":true}');
+      }
+    }
+
+    test('cached misses are AI cards when the deck is built; titles not resolved yet count as clips', () async {
+      await miss(['1', '2']);
+      final c = make(
+        externalClips: true,
+        decks: [
+          _ArrangedDeck('a', [for (var i = 1; i <= 8; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      expect(c.cards?.map((x) => x.id), ['t1', 't3', 't4', 't5', 't6', 't7', 't2', 't8']);
+      await pumpEventQueue();
+      c.dispose();
+    });
+
+    test('a raw deck keeps its own order whatever the cache says', () async {
+      await miss(['1', '2']);
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+        externalClips: true,
+      );
+      await c.start();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      await pumpEventQueue();
+      c.dispose();
+    });
+
+    test('the phone holds back an AI card ahead with no room, before it comes on screen', () async {
+      await miss(['1', '2', '4']);
+      final c = make(
+        externalClips: true,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 5; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.card?.id, 't1');
+      expect(c.current.isAiCard, isTrue);
+      expect(c.cards?.map((x) => x.id), ['t1', 't3', 't5']);
+      expect(c.index, 0);
+      c.dispose();
+    });
+
+    test('an AI card ahead with room stays in the phone feed', () async {
+      await miss(['2']);
+      final c = make(
+        externalClips: true,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      await c.step(1);
+      expect(c.current.card?.id, 't2');
+      expect(c.current.isAiCard, isTrue);
       c.dispose();
     });
   });

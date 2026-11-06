@@ -172,6 +172,24 @@ class ReelStore {
     return row.value;
   }
 
+  /// [cached] for many keys in a few reads: key → value for the keys
+  /// that have a row (within [ttl]).
+  Future<Map<String, String>> cachedMany(Iterable<String> keys, {Duration? ttl}) async {
+    final list = keys.toSet().toList();
+    if (list.isEmpty) return const {};
+    final db = await _database();
+    final now = _clock().millisecondsSinceEpoch;
+    final out = <String, String>{};
+    for (var i = 0; i < list.length; i += 400) {
+      final chunk = list.sublist(i, i + 400 > list.length ? list.length : i + 400);
+      for (final row in await (db.select(db.reelCache)..where((c) => c.key.isIn(chunk))).get()) {
+        if (ttl != null && now - row.updatedAt > ttl.inMilliseconds) continue;
+        out[row.key] = row.value;
+      }
+    }
+    return out;
+  }
+
   Future<void> cache(String key, String value) async {
     final db = await _database();
     await db
