@@ -139,8 +139,9 @@ class ReelPool {
   /// day keys and in the shared pool.
   static String dateOf(DateTime d) => ReelStore.dayStamp(d);
 
-  /// Read for [ReelStore.daysKept] days at most (and for cluster labels,
-  /// [clusters]); the daily sweep deletes older ones.
+  /// Read for [ReelStore.daysKept] days at most, and for cluster labels
+  /// ([clusters]) for [ReelStore.poolsKept]; the daily sweep deletes older
+  /// ones.
   static String dayKey(DateTime d) => 'pool:${dateOf(d)}';
 
   /// The day's "Give it another go" order (the same build's `another_go`).
@@ -252,7 +253,7 @@ class ReelPool {
 
   /// The pools' cluster labels (title id → `cl`) over the last [days] days,
   /// this device's own pools and the shared one; a newer day's label wins.
-  Future<Map<String, String>> clusters({int days = 30}) async {
+  Future<Map<String, String>> clusters({int days = ReelStore.poolsKept}) async {
     final now = _clock();
     final share = await shared();
     final out = <String, String>{};

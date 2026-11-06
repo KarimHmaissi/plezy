@@ -58,10 +58,6 @@ class ReelSignals {
   String get _ownKey => host ? hostKey : phoneKey;
   String get _otherKey => host ? phoneKey : hostKey;
 
-  /// The calendar day of [d], `YYYY-MM-DD`.
-  static String _dateOf(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
   /// This device's own events since [since], [ReelAction.unplayed] left out.
   Future<List<ReelSignal>> _own({required DateTime since}) async => [
     for (final e in await store.events(since: since))
@@ -78,7 +74,7 @@ class ReelSignals {
     final since = DateTime(now.year, now.month, now.day).subtract(const Duration(days: keepDays - 1));
     final days = <String, Map<String, String>>{};
     for (final s in await _own(since: since)) {
-      final day = days[_dateOf(s.at)] ??= {};
+      final day = days[ReelStore.dayStamp(s.at)] ??= {};
       if (!day.containsKey(s.titleId) && day.length >= maxTitlesPerDay) continue;
       day[s.titleId] = (day[s.titleId] ?? '') + _codes[s.action]!;
     }

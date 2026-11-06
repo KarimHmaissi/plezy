@@ -1199,6 +1199,27 @@ void main() {
       c.dispose();
     });
 
+    test("a pick's Watch hands over the full read, as a card's does, and clears the queue", () async {
+      await saved('8');
+      final handed = <String?>[];
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+        onWatch: (item, {required onTv}) async {
+          handed.add(item.title);
+          return true;
+        },
+      );
+      await c.start();
+      await c.step(3);
+      expect(c.current.kind, ReelSlotKind.decide);
+      expect(await c.watch(), isTrue);
+      expect(handed, ['Full 8'], reason: 'the lean row may lack the streams playback needs');
+      expect(c.prefetcher.queued, isEmpty);
+      c.dispose();
+    });
+
     test('card actions do nothing on it', () async {
       await saved('8');
       final c = make(

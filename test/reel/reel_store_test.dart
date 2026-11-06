@@ -79,13 +79,16 @@ void main() {
     Future<Set<String>> keys() async => {for (final r in await db.select(db.reelCache).get()) r.key};
 
     test('drops old pools, stale day rows, expired sources, old metadata and old events', () async {
+      String day(int back) => ReelStore.dayStamp(now.subtract(Duration(days: back)));
       // Written over the past days, each on its own day.
-      for (var back = 0; back < 5; back++) {
+      for (final back in [0, 1, 2, 3, 4, 29, 30]) {
         final then = now.subtract(Duration(days: back));
         final at = ReelStore(database: () async => db, clock: () => then);
-        await at.cache('pool:${ReelStore.dayStamp(then)}', '[]');
-        await at.cache('deck:for-you:${ReelStore.dayStamp(then)}', '[]');
-        await at.cache('cursor:ai:a1:${ReelStore.dayStamp(then)}', '4');
+        await at.cache('pool:${day(back)}', '[]');
+        if (back > 4) continue;
+        await at.cache('again:${day(back)}', '[]');
+        await at.cache('deck:for-you:${day(back)}', '[]');
+        await at.cache('cursor:ai:a1:${day(back)}', '4');
       }
       final old = ReelStore(database: () async => db, clock: () => now.subtract(const Duration(days: 31)));
       await old.cache('src:g-old', '{"miss":true}');
@@ -101,16 +104,19 @@ void main() {
 
       final swept = await store.sweep();
 
-      expect(swept, (pools: 2, days: 2, sources: 1, metas: 1, events: 1));
+      // Pools older than 30 days and Give it another go orders older than
+      // 3; the pools in between stay for the signals' cluster labels.
+      expect(swept, (pools: 3, days: 2, sources: 1, metas: 1, events: 1));
       expect(await keys(), {
+        for (final back in [0, 1, 2, 3, 4, 29]) 'pool:${day(back)}',
         for (var back = 0; back < 3; back++) ...[
-          'pool:${ReelStore.dayStamp(now.subtract(Duration(days: back)))}',
-          'deck:for-you:${ReelStore.dayStamp(now.subtract(Duration(days: back)))}',
-          'cursor:ai:a1:${ReelStore.dayStamp(now.subtract(Duration(days: back)))}',
+          'again:${day(back)}',
+          'deck:for-you:${day(back)}',
+          'cursor:ai:a1:${day(back)}',
         ],
         // Written exactly 3 days ago: not yet older than that.
-        'deck:for-you:${ReelStore.dayStamp(now.subtract(const Duration(days: 3)))}',
-        'cursor:ai:a1:${ReelStore.dayStamp(now.subtract(const Duration(days: 3)))}',
+        'deck:for-you:${day(3)}',
+        'cursor:ai:a1:${day(3)}',
         'src:g-new',
         'meta:s1:new',
         'other',
@@ -126,7 +132,7 @@ void main() {
       expect(await first, isNotNull);
       expect(await store.sweep(), isNull);
       now = now.add(const Duration(days: 1));
-      await store.cache('pool:2026-11-01', '[]');
+      await store.cache('pool:2026-10-01', '[]');
       expect((await store.sweep())?.pools, 1);
     });
   });

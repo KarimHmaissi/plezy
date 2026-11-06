@@ -1120,25 +1120,30 @@ class ReelController extends ChangeNotifier {
   // ---- actions ----
 
   /// OK = Watch: pause, show the loading curtain, await the clip core's
-  /// dispose, then hand over to real playback (which reports normally).
+  /// dispose, then hand over to real playback (which reports normally). On
+  /// the decision card it watches the chosen pick the same way.
   Future<bool> watch({bool onTv = false}) async {
     final s = current;
-    if (s.kind == ReelSlotKind.decide) return _watchPick(s, onTv: onTv);
-    final c = s.card;
-    if (c == null) return false;
+    final c = s.card, pick = s.chosen?.pick;
+    final ({String id, String serverId, String ratingKey, MediaItem? known})? target = c != null
+        ? (id: c.id, serverId: c.best.serverId, ratingKey: c.best.ratingKey, known: s.item)
+        : pick != null
+        ? (id: pick.titleId, serverId: pick.serverId, ratingKey: pick.ratingKey, known: s.chosen?.item)
+        : null;
+    if (target == null) return false;
     // No Reel prefetch competes with the hand-over, or follows it.
     _clearPrefetch();
     // Watch keeps its full read (file checks, streams): the card's own
     // item may be a lean row. The card's item stands in only when that read
     // fails.
-    final item = await media.fullItem(c.best.serverId, c.best.ratingKey).catchError((Object _) => null) ?? s.item;
+    final item = await media.fullItem(target.serverId, target.ratingKey).catchError((Object _) => null) ?? target.known;
     if (item == null) {
       // Nothing to hand over: the Reel stays, and so does its window.
       final list = cards;
       if (list != null && _active) _plan(list, _generation);
       return false;
     }
-    await store.record(c.id, onTv ? ReelAction.watchOnTv : ReelAction.watch, deck: deck.id);
+    await store.record(target.id, onTv ? ReelAction.watchOnTv : ReelAction.watch, deck: deck.id);
     if (!onTv) {
       // A card change still on its way stops here: real playback is next.
       _generation++;
@@ -1155,23 +1160,9 @@ class ReelController extends ChangeNotifier {
       if (list != null) _plan(list, _generation);
     }
     // The TV couldn't be reached: keep the pick instead, and say where it
-    // went (or that it couldn't be kept).
-    if (!ok && onTv) await save();
+    // went (or that it couldn't be kept). A pick is already kept.
+    if (!ok && onTv && c != null) await save();
     return ok;
-  }
-
-  /// The decision card's Watch: the chosen pick, handed over like a card.
-  Future<bool> _watchPick(ReelSlot s, {required bool onTv}) async {
-    final p = s.chosen;
-    if (p == null) return false;
-    final item = p.item ?? await media.item(p.pick.serverId, p.pick.ratingKey).catchError((Object _) => null);
-    if (item == null) return false;
-    await store.record(p.pick.titleId, onTv ? ReelAction.watchOnTv : ReelAction.watch, deck: deck.id);
-    if (!onTv) {
-      await clips.release();
-      _firstClip = true;
-    }
-    return onWatch(item, onTv: onTv);
   }
 
   /// The decision card: moves the choice [dir] picks along (D-pad left and
