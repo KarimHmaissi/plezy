@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../services/device_performance.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
@@ -215,7 +216,7 @@ class ReelPauseFeedback extends StatelessWidget {
                 : TransportFeedbackIndicator(
                     key: const ValueKey('reel-transport'),
                     icon: pulse.paused ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
-                    text: pulse.paused ? 'Paused' : 'Playing',
+                    text: pulse.paused ? t.reel.card.paused : t.reel.card.playing,
                     pulse: pulse.count,
                   ),
           ),
@@ -235,7 +236,7 @@ class ReelPauseFeedback extends StatelessWidget {
                   ? StatChip(
                       key: const ValueKey('reel-paused'),
                       icon: Symbols.pause_rounded,
-                      label: 'Paused',
+                      label: t.reel.card.paused,
                       fontSize: TvSpotlightBackground.metadataFontSize(scale, compact: true),
                     )
                   : const SizedBox.shrink(),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../focus/focus_theme.dart';
 import '../../media/ids.dart';
 import '../../services/reel/reel_controller.dart';
@@ -40,11 +41,11 @@ class ReelDecideView extends StatelessWidget {
   /// Phone: Watch plays on the connected TV.
   final bool watchOnTv;
 
-  static const String title = "Tonight's picks";
-  static const String prompt = 'One for tonight?';
-  static const String body = 'From what you saved in the Reel lately.';
-  static const String nonePhone = 'Nothing saved lately. Swipe up to keep going.';
-  static const String noneTv = 'Nothing saved lately. Press ↓ to keep going.';
+  static String get title => t.reel.decide.title;
+  static String get prompt => t.reel.decide.prompt;
+  static String get body => t.reel.decide.body;
+  static String get nonePhone => t.reel.decide.nonePhone;
+  static String get noneTv => t.reel.decide.noneTv;
 
   @override
   Widget build(BuildContext context) {
@@ -108,13 +109,13 @@ class ReelDecideView extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: onWatch,
                       icon: const Icon(Symbols.play_arrow_rounded, fill: 1),
-                      label: const Text('Watch'),
+                      label: Text(t.reel.card.watch),
                     ),
                   ),
                   SizedBox(width: 16 * scale),
                   Flexible(
                     child: Text(
-                      '← → choose  ·  OK watch  ·  ↓ keep going',
+                      t.reel.decide.hintTv,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -175,12 +176,12 @@ class ReelDecideView extends StatelessWidget {
                       child: FilledButton.icon(
                         onPressed: onWatch,
                         icon: Icon(watchOnTv ? Symbols.tv_rounded : Symbols.play_arrow_rounded, fill: 1),
-                        label: Text(watchOnTv ? 'Watch on TV' : 'Watch', maxLines: 1),
+                        label: Text(watchOnTv ? t.reel.card.watchOnTv : t.reel.card.watch, maxLines: 1),
                       ),
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Swipe up to keep going.',
+                      t.reel.decide.keepGoing,
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
@@ -208,7 +209,7 @@ class _Heading extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: centred ? CrossAxisAlignment.center : CrossAxisAlignment.start,
       children: [
-        const StatChip(icon: Symbols.bookmarks_rounded, label: ReelDecideView.title),
+        StatChip(icon: Symbols.bookmarks_rounded, label: ReelDecideView.title),
         SizedBox(height: 10 * scale),
         Text(
           ReelDecideView.prompt,

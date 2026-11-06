@@ -306,7 +306,7 @@ class FitsTonightDeck extends ReelDeck {
   @override
   String get id => 'fits-tonight';
   @override
-  String get name => 'Fits tonight';
+  String get name => t.reel.deckNames.fitsTonight;
   @override
   bool get keepsSeen => false;
   @override
@@ -336,7 +336,7 @@ class FitsTonightDeck extends ReelDeck {
   static String? fitLine(TitleFacts f) {
     final m = f.runtimeMinutes;
     if (m == null || m <= 0) return null;
-    if (f.isShow) return m <= fitsTonightEpisodeMinutes ? '${m}m episodes' : null;
+    if (f.isShow) return m <= fitsTonightEpisodeMinutes ? t.reel.card.episodeLength(minutes: m) : null;
     return m <= fitsTonightFilmMinutes ? f.lengthLine() : null;
   }
 }
@@ -359,7 +359,7 @@ class AnotherGoDeck extends ReelDeck {
   @override
   String get id => 'another-go';
   @override
-  String get name => 'Give it another go';
+  String get name => t.reel.deckNames.anotherGo;
   @override
   bool get keepsSeen => true;
   @override

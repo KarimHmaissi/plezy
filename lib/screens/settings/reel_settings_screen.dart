@@ -10,6 +10,7 @@ import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_page.dart';
 import '../../widgets/settings_section.dart';
 import 'reel_decks_screen.dart';
+import 'reel_for_you_tiles.dart';
 import 'settings_utils.dart';
 
 /// Fork: the Reel's settings (plan V2-46), from the fork group in Settings
@@ -18,8 +19,10 @@ import 'settings_utils.dart';
 /// takes a change up at once (`ReelController.settingsChanged`), and Show
 /// the Reel tab brings the tab and rail item in or out like Explore's
 /// toggle. Decks (order, hidden decks, start deck; synced) have their own
-/// screen ([ReelDecksScreen]). The hidden developer setting (V2-62) shows
-/// last, only in a debug build or while debug logging is on.
+/// screen ([ReelDecksScreen]). For You's note and today's rebuild (V2-51,
+/// synced) sit in their own group ([ReelForYouTiles]). The hidden developer
+/// setting (V2-62) shows last, only in a debug build or while debug logging
+/// is on.
 class ReelSettingsScreen extends StatelessWidget {
   const ReelSettingsScreen({super.key, this.tv, @visibleForTesting this.debugBuild = kDebugMode});
 
@@ -61,6 +64,9 @@ class ReelSettingsScreen extends StatelessWidget {
             ),
           ],
         ),
+        // Synced: the same note and rebuild on the TV and the phone, whether
+        // or not this phone uses the TV's AI.
+        SettingsGroup(title: t.reelForYou.title, children: const [ReelForYouTiles(showTitle: false)]),
         SettingsGroup(
           title: t.settings.navigation,
           children: [

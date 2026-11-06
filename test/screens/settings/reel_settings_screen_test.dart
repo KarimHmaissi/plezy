@@ -48,6 +48,16 @@ void main() {
     expect(find.text(s.okAction), findsNothing, reason: 'the OK button is the TV remote');
   });
 
+  testWidgets("both devices have For You's own words and today's rebuild (V2-51)", (tester) async {
+    for (final tv in [false, true]) {
+      await pump(tester, tv: tv);
+      expect(find.text(t.reelForYou.title), findsOneWidget, reason: 'the group header');
+      expect(find.text(t.reelForYou.explainer), findsOneWidget);
+      expect(find.text(t.reelForYou.note), findsOneWidget);
+      expect(find.text(t.reelForYou.rebuild), findsOneWidget);
+    }
+  });
+
   testWidgets('both devices have a way to the Decks screen', (tester) async {
     for (final tv in [false, true]) {
       await pump(tester, tv: tv);

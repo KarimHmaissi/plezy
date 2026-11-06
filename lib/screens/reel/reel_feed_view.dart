@@ -520,7 +520,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     final settings = SettingsService.instanceOrNull;
     if (settings == null || settings.read(SettingsService.reelImmersiveHintSeen)) return;
     unawaited(settings.write(SettingsService.reelImmersiveHintSeen, true));
-    showAppSnackBar(context, 'Swipe left to bring the controls back');
+    showAppSnackBar(context, t.reel.card.immersiveHint);
   }
 
   /// Back while immersive brings the controls back. A sheet open over the
@@ -636,12 +636,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       case ReelSlotKind.failed:
         return ReelMessage(
           icon: Symbols.cloud_off_rounded,
-          title: "Couldn't load ${_c.deck.name}",
-          body: 'Check the connection and try again.',
+          title: t.reel.card.failedTitle(deck: _c.deck.name),
+          body: t.reel.card.failedBodyPhone,
           action: FilledButton.tonalIcon(
             onPressed: () => unawaited(_c.retryDeck()),
             icon: const Icon(Symbols.refresh_rounded),
-            label: const Text('Try again'),
+            label: Text(t.reel.card.tryAgain),
           ),
         );
       case ReelSlotKind.empty:
@@ -1069,7 +1069,7 @@ class _Picture extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: onReplay,
                   icon: const Icon(Symbols.replay_rounded),
-                  label: const Text('Replay'),
+                  label: Text(t.reel.card.replay),
                 ),
               ),
             ),
@@ -1273,7 +1273,7 @@ class _Info extends StatelessWidget {
       if (clip?.source.origin == ClipOrigin.animeTheme) ...[
         const SizedBox(height: 4),
         Text(
-          'Theme via AnimeThemes',
+          t.reel.card.themeCredit,
           style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
       ],
@@ -1373,27 +1373,30 @@ class _Controls extends StatelessWidget {
     final details = FilledButton.icon(
       onPressed: onDetails,
       icon: const Icon(Symbols.info_rounded),
-      label: const Text('Details', maxLines: 1),
+      label: Text(t.reel.card.details, maxLines: 1),
     );
     final watch = watchOnTv
         ? FilledButton.icon(
             onPressed: onWatch,
             icon: const Icon(Symbols.tv_rounded, fill: 1),
-            label: const Text('Watch on TV', maxLines: 1),
+            label: Text(t.reel.card.watchOnTv, maxLines: 1),
           )
         : FilledButton.tonalIcon(
             onPressed: onWatch,
             icon: const Icon(Symbols.play_arrow_rounded, fill: 1),
-            label: Text(resume == null ? 'Watch' : 'Resume $resume', maxLines: 1),
+            label: Text(switch (resume) {
+              final episode? => t.reel.card.resume(episode: episode),
+              null => t.reel.card.watch,
+            }, maxLines: 1),
           );
     final save = IconButton(
-      tooltip: saved ? 'Saved' : 'Save',
+      tooltip: saved ? t.reel.card.saved : t.reel.card.save,
       isSelected: saved,
       onPressed: onSave,
       icon: const Icon(Symbols.bookmark_add_rounded),
       selectedIcon: const Icon(Symbols.bookmark_added_rounded, fill: 1),
     );
-    final more = IconButton(tooltip: 'More', onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded));
+    final more = IconButton(tooltip: t.reel.card.more, onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded));
     Widget oneRow() => Row(
       children: [
         Expanded(child: details),
@@ -1451,7 +1454,7 @@ class _UpNext extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(height: spacing.titleGap * 2),
-        Text('Up next', style: spacing.titleStyle(context)),
+        Text(t.reel.card.upNext, style: spacing.titleStyle(context)),
         SizedBox(height: spacing.titleGap),
         Flexible(
           child: ListView(

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../i18n/strings.g.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/platform_detector.dart';
 import '../catalog/home_pins.dart';
@@ -22,7 +23,7 @@ abstract final class ReelHomeRow {
   /// it on the TV without the TV ever seating the row.
   static const String recheckedKey = 'reel.homeRowRechecked';
 
-  static const String title = 'From the Reel';
+  static String get title => t.reel.homeRow;
 
   static Future<void> _queue = Future.value();
 

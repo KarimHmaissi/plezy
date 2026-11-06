@@ -139,7 +139,7 @@ class ReelSlot {
     final n = e?.index;
     if (card?.resume != true || e == null || n == null) return null;
     final season = e.parentIndex;
-    return season == null || season <= 1 ? 'E$n' : 'S$season E$n';
+    return season == null || season <= 1 ? t.reel.card.episode(n: n) : t.reel.card.seasonEpisode(season: season, n: n);
   }
 }
 
@@ -1781,9 +1781,9 @@ class ReelController extends ChangeNotifier {
 
   /// What More like this says: while the call runs, when its cards are in,
   /// and when it found none.
-  static const String findingMoreLike = 'Finding more like this…';
-  static const String moreLikeUpNext = 'More like this, up next';
-  static const String noMoreLike = "Couldn't find more like this right now";
+  static String get findingMoreLike => t.reel.moreLike.finding;
+  static String get moreLikeUpNext => t.reel.moreLike.upNext;
+  static String get noMoreLike => t.reel.moreLike.none;
 
   /// Whether the current card offers More like this.
   bool get canMoreLike => moreLike != null && current.card != null;

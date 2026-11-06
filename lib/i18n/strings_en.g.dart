@@ -4546,6 +4546,9 @@ class Translations$reel$en {
 	late final Translations$reel$card$en card = Translations$reel$card$en.internal(_root);
 	late final Translations$reel$sheet$en sheet = Translations$reel$sheet$en.internal(_root);
 	late final Translations$reel$toast$en toast = Translations$reel$toast$en.internal(_root);
+	late final Translations$reel$moreLike$en moreLike = Translations$reel$moreLike$en.internal(_root);
+	late final Translations$reel$decide$en decide = Translations$reel$decide$en.internal(_root);
+	late final Translations$reel$status$en status = Translations$reel$status$en.internal(_root);
 	late final Translations$reel$remote$en remote = Translations$reel$remote$en.internal(_root);
 	late final Translations$reel$deckNames$en deckNames = Translations$reel$deckNames$en.internal(_root);
 
@@ -8394,12 +8397,6 @@ class Translations$reel$card$en {
 	/// en: 'Replay'
 	String get replay => 'Replay';
 
-	/// en: 'OK watch · ↓ next · → next deck · hold OK for more'
-	String get hintsWatch => 'OK watch  ·  ↓ next  ·  → next deck  ·  hold OK for more';
-
-	/// en: 'OK replay · ↓ next · → next deck · hold OK for more'
-	String get hintsReplay => 'OK replay  ·  ↓ next  ·  → next deck  ·  hold OK for more';
-
 	/// en: 'Watch'
 	String get watch => 'Watch';
 
@@ -8429,6 +8426,63 @@ class Translations$reel$card$en {
 
 	/// en: 'Show controls'
 	String get showControls => 'Show controls';
+
+	/// en: 'Couldn't load ${deck}'
+	String failedTitle({required Object deck}) => 'Couldn\'t load ${deck}';
+
+	/// en: 'Press OK to try again, or → for the next deck.'
+	String get failedBodyTv => 'Press OK to try again, or → for the next deck.';
+
+	/// en: 'Tap to try again.'
+	String get failedBodyTap => 'Tap to try again.';
+
+	/// en: 'Check the connection and try again.'
+	String get failedBodyPhone => 'Check the connection and try again.';
+
+	/// en: 'Try again'
+	String get tryAgain => 'Try again';
+
+	/// en: 'Saved'
+	String get saved => 'Saved';
+
+	/// en: 'Resume ${episode}'
+	String resume({required Object episode}) => 'Resume ${episode}';
+
+	/// en: 'E${n}'
+	String episode({required Object n}) => 'E${n}';
+
+	/// en: 'S${season} E${n}'
+	String seasonEpisode({required Object season, required Object n}) => 'S${season} E${n}';
+
+	/// en: '${minutes}m episodes'
+	String episodeLength({required Object minutes}) => '${minutes}m episodes';
+
+	/// en: 'Up next'
+	String get upNext => 'Up next';
+
+	/// en: 'Swipe left to bring the controls back'
+	String get immersiveHint => 'Swipe left to bring the controls back';
+
+	/// en: 'Paused'
+	String get paused => 'Paused';
+
+	/// en: 'Playing'
+	String get playing => 'Playing';
+
+	/// en: 'OK watch'
+	String get okWatch => 'OK watch';
+
+	/// en: 'OK details'
+	String get okDetails => 'OK details';
+
+	/// en: 'OK replay'
+	String get okReplay => 'OK replay';
+
+	/// en: 'OK resume ${episode}'
+	String okResume({required Object episode}) => 'OK resume ${episode}';
+
+	/// en: '${ok} · ↓ next · → next deck · hold OK for more'
+	String hintLine({required Object ok}) => '${ok}  ·  ↓ next  ·  → next deck  ·  hold OK for more';
 }
 
 // Path: reel.sheet
@@ -8483,6 +8537,81 @@ class Translations$reel$toast$en {
 
 	/// en: 'Couldn't save: not connected to the TV'
 	String get notConnected => 'Couldn\'t save: not connected to the TV';
+}
+
+// Path: reel.moreLike
+class Translations$reel$moreLike$en {
+	Translations$reel$moreLike$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Finding more like this…'
+	String get finding => 'Finding more like this…';
+
+	/// en: 'More like this, up next'
+	String get upNext => 'More like this, up next';
+
+	/// en: 'Couldn't find more like this right now'
+	String get none => 'Couldn\'t find more like this right now';
+}
+
+// Path: reel.decide
+class Translations$reel$decide$en {
+	Translations$reel$decide$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Tonight's picks'
+	String get title => 'Tonight\'s picks';
+
+	/// en: 'One for tonight?'
+	String get prompt => 'One for tonight?';
+
+	/// en: 'From what you saved in the Reel lately.'
+	String get body => 'From what you saved in the Reel lately.';
+
+	/// en: 'Nothing saved lately. Swipe up to keep going.'
+	String get nonePhone => 'Nothing saved lately. Swipe up to keep going.';
+
+	/// en: 'Nothing saved lately. Press ↓ to keep going.'
+	String get noneTv => 'Nothing saved lately. Press ↓ to keep going.';
+
+	/// en: '← → choose · OK watch · ↓ keep going'
+	String get hintTv => '← → choose  ·  OK watch  ·  ↓ keep going';
+
+	/// en: 'Swipe up to keep going.'
+	String get keepGoing => 'Swipe up to keep going.';
+}
+
+// Path: reel.status
+class Translations$reel$status$en {
+	Translations$reel$status$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'You're offline'
+	String get offlineTitle => 'You\'re offline';
+
+	/// en: 'The Reel plays from your servers. It picks up again once you are back online.'
+	String get offlineBody => 'The Reel plays from your servers. It picks up again once you are back online.';
+
+	/// en: 'The Reel didn't open'
+	String get openFailedTitle => 'The Reel didn\'t open';
+
+	/// en: 'Press OK to try again.'
+	String get openFailedBodyTv => 'Press OK to try again.';
+
+	/// en: 'Something went wrong getting it ready.'
+	String get openFailedBodyPhone => 'Something went wrong getting it ready.';
+
+	/// en: 'Retry'
+	String get retry => 'Retry';
 }
 
 // Path: reel.remote
@@ -8555,6 +8684,12 @@ class Translations$reel$deckNames$en {
 
 	/// en: 'For You'
 	String get forYou => 'For You';
+
+	/// en: 'Fits tonight'
+	String get fitsTonight => 'Fits tonight';
+
+	/// en: 'Give it another go'
+	String get anotherGo => 'Give it another go';
 
 	/// en: 'Anime openings'
 	String get animeOpenings => 'Anime openings';
@@ -11568,8 +11703,6 @@ extension on Translations {
 			'reel.card.decks' => 'Decks',
 			'reel.card.themeCredit' => 'Theme via AnimeThemes',
 			'reel.card.replay' => 'Replay',
-			'reel.card.hintsWatch' => 'OK watch  ·  ↓ next  ·  → next deck  ·  hold OK for more',
-			'reel.card.hintsReplay' => 'OK replay  ·  ↓ next  ·  → next deck  ·  hold OK for more',
 			'reel.card.watch' => 'Watch',
 			'reel.card.watchOnTv' => 'Watch on TV',
 			'reel.card.details' => 'Details',
@@ -11580,6 +11713,25 @@ extension on Translations {
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
 			'reel.card.showControls' => 'Show controls',
+			'reel.card.failedTitle' => ({required Object deck}) => 'Couldn\'t load ${deck}',
+			'reel.card.failedBodyTv' => 'Press OK to try again, or → for the next deck.',
+			'reel.card.failedBodyTap' => 'Tap to try again.',
+			'reel.card.failedBodyPhone' => 'Check the connection and try again.',
+			'reel.card.tryAgain' => 'Try again',
+			'reel.card.saved' => 'Saved',
+			'reel.card.resume' => ({required Object episode}) => 'Resume ${episode}',
+			'reel.card.episode' => ({required Object n}) => 'E${n}',
+			'reel.card.seasonEpisode' => ({required Object season, required Object n}) => 'S${season} E${n}',
+			'reel.card.episodeLength' => ({required Object minutes}) => '${minutes}m episodes',
+			'reel.card.upNext' => 'Up next',
+			'reel.card.immersiveHint' => 'Swipe left to bring the controls back',
+			'reel.card.paused' => 'Paused',
+			'reel.card.playing' => 'Playing',
+			'reel.card.okWatch' => 'OK watch',
+			'reel.card.okDetails' => 'OK details',
+			'reel.card.okReplay' => 'OK replay',
+			'reel.card.okResume' => ({required Object episode}) => 'OK resume ${episode}',
+			'reel.card.hintLine' => ({required Object ok}) => '${ok}  ·  ↓ next  ·  → next deck  ·  hold OK for more',
 			'reel.sheet.watchHere' => 'Watch here',
 			'reel.sheet.saveForTv' => 'Save for the TV',
 			'reel.sheet.moreLike' => 'More like this',
@@ -11592,6 +11744,22 @@ extension on Translations {
 			'reel.toast.savedOnTv' => 'On the TV tonight',
 			'reel.toast.savedForLater' => 'Saved, on the TV next time you connect',
 			'reel.toast.notConnected' => 'Couldn\'t save: not connected to the TV',
+			'reel.moreLike.finding' => 'Finding more like this…',
+			'reel.moreLike.upNext' => 'More like this, up next',
+			'reel.moreLike.none' => 'Couldn\'t find more like this right now',
+			'reel.decide.title' => 'Tonight\'s picks',
+			'reel.decide.prompt' => 'One for tonight?',
+			'reel.decide.body' => 'From what you saved in the Reel lately.',
+			'reel.decide.nonePhone' => 'Nothing saved lately. Swipe up to keep going.',
+			'reel.decide.noneTv' => 'Nothing saved lately. Press ↓ to keep going.',
+			'reel.decide.hintTv' => '← → choose  ·  OK watch  ·  ↓ keep going',
+			'reel.decide.keepGoing' => 'Swipe up to keep going.',
+			'reel.status.offlineTitle' => 'You\'re offline',
+			'reel.status.offlineBody' => 'The Reel plays from your servers. It picks up again once you are back online.',
+			'reel.status.openFailedTitle' => 'The Reel didn\'t open',
+			'reel.status.openFailedBodyTv' => 'Press OK to try again.',
+			'reel.status.openFailedBodyPhone' => 'Something went wrong getting it ready.',
+			'reel.status.retry' => 'Retry',
 			'reel.remote.title' => 'The Reel',
 			'reel.remote.onTv' => ({required Object tv}) => 'On ${tv}',
 			'reel.remote.theTv' => 'the TV',
@@ -11610,6 +11778,8 @@ extension on Translations {
 			'reel.remote.notShowing' => ({required Object tv}) => '${tv} isn\'t showing the Reel.',
 			'reel.remote.tryAgain' => 'Try again',
 			'reel.deckNames.forYou' => 'For You',
+			'reel.deckNames.fitsTonight' => 'Fits tonight',
+			'reel.deckNames.anotherGo' => 'Give it another go',
 			'reel.deckNames.animeOpenings' => 'Anime openings',
 			'reel.deckNames.mostWatched' => 'Most Watched',
 			'reel.deckNames.showThisWeek' => ({required Object n}) => '#${n} show this week',
@@ -12024,6 +12194,8 @@ extension on Translations {
 			'collections.removeFromCollectionConfirm' => ({required Object title}) => 'Remove "${title}" from this collection?',
 			'collections.removedFromCollection' => 'Removed from collection',
 			'collections.removeFromCollectionFailed' => 'Failed to remove from collection',
+			_ => null,
+		} ?? switch (path) {
 			'collections.removeFromCollectionError' => ({required Object error}) => 'Error removing from collection: ${error}',
 			'collections.searchCollections' => 'Search collections...',
 			'playlists.title' => 'Playlists',
@@ -12059,8 +12231,6 @@ extension on Translations {
 			'music.addToQueue' => 'Add to queue',
 			'music.discNumber' => ({required Object n}) => 'Disc ${n}',
 			'music.trackCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} track', other: '${n} tracks', ), 
-			_ => null,
-		} ?? switch (path) {
 			'music.nowPlaying' => 'Now Playing',
 			'music.playingFrom' => ({required Object title}) => 'Playing from ${title}',
 			'music.queue' => 'Queue',
@@ -12538,6 +12708,8 @@ extension on Translations {
 			'externalPlayer.playInExternalPlayer' => 'Play in External Player',
 			'metadataEdit.editMetadata' => 'Edit...',
 			'metadataEdit.screenTitle' => 'Edit Metadata',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.basicInfo' => 'Basic Info',
 			'metadataEdit.artwork' => 'Artwork',
 			'metadataEdit.advancedSettings' => 'Advanced Settings',
@@ -12573,8 +12745,6 @@ extension on Translations {
 			'metadataEdit.accountDefault' => 'Account default',
 			'metadataEdit.seriesDefault' => 'Series default',
 			'metadataEdit.episodeSorting' => 'Episode Sorting',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.oldestFirst' => 'Oldest first',
 			'metadataEdit.newestFirst' => 'Newest first',
 			'metadataEdit.keep' => 'Keep',

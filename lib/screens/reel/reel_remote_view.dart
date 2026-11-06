@@ -414,9 +414,9 @@ class _DecideCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const StatChip(icon: Symbols.bookmarks_rounded, label: "Tonight's picks"),
+        StatChip(icon: Symbols.bookmarks_rounded, label: t.reel.decide.title),
         const SizedBox(height: 8),
-        Text('One for tonight?', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+        Text(t.reel.decide.prompt, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         Row(
           children: [

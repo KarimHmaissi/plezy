@@ -112,12 +112,12 @@ class ReelCardView extends StatelessWidget {
       case ReelSlotKind.failed:
         return ReelMessage(
           icon: Symbols.cloud_off_rounded,
-          title: "Couldn't load ${controller.deck.name}",
-          body: tv ? 'Press OK to try again, or → for the next deck.' : 'Tap to try again.',
+          title: t.reel.card.failedTitle(deck: controller.deck.name),
+          body: tv ? t.reel.card.failedBodyTv : t.reel.card.failedBodyTap,
           action: FilledButton.tonalIcon(
             onPressed: () => unawaited(controller.retryDeck()),
             icon: const Icon(Symbols.refresh_rounded),
-            label: const Text('Try again'),
+            label: Text(t.reel.card.tryAgain),
           ),
         );
       case ReelSlotKind.empty:
@@ -474,7 +474,7 @@ class _ExtrasLayout {
       color: theme.colorScheme.onSurfaceVariant,
       fontSize: hintSize * scale,
     );
-    final credit = slot.clip?.source.origin == ClipOrigin.animeTheme ? 'Theme via AnimeThemes' : null;
+    final credit = slot.clip?.source.origin == ClipOrigin.animeTheme ? t.reel.card.themeCredit : null;
     // OK replays a held clip, else follows the OK pref (ReelScreen's key
     // map); a resume card's Watch plays the show's next episode (V2-40).
     final hintText = reelHintLine(held: held, okAction: okAction, resumeEpisode: slot.resumeEpisode);

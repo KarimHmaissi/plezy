@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../focus/dpad_navigator.dart';
 import '../../focus/dpad_select_long_press_controller.dart';
 import '../../focus/transport_keys.dart';
@@ -247,6 +248,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       unawaited(openDeck(deck, groupKey: card));
     } else if (_introUnseen && _shown) {
       // An On TV open may have just deferred the intro: start what it held.
+      if (!_intro) _beginLeanBack();
       unawaited(_visit());
     }
     if (_introUnseen && mounted) setState(() {});
@@ -259,8 +261,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     setState(() => _introUnseen = false);
     unawaited(SettingsService.instanceOrNull?.write(SettingsService.reelIntroSeen, true));
     _focus.requestFocus();
-    // A visit, so the phone settles how its sound starts first (V2-22).
-    if (_shown) unawaited(_visit());
+    if (!_shown) return;
+    // The session starts now, so the TV's hint rule counts it from here
+    // (V2-28), and the phone settles how its sound starts first (V2-22).
+    _beginLeanBack();
+    unawaited(_visit());
   }
 
   @override
@@ -503,7 +508,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _shown = true;
     ReelScreen.showing.value = true;
     _perf.attachFrames();
-    _beginLeanBack();
+    // Under the first-run intro nothing has started yet ([_endIntro]).
+    if (!_intro) _beginLeanBack();
     unawaited(_visit());
   }
 
@@ -522,12 +528,13 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   }
 
   /// Phone (V2-22): a visit starts muted when the mute was kept, while the
-  /// connected TV is playing, or, with "Muted if other audio is playing",
-  /// while another app's audio plays. Only the kept mute is saved; the
-  /// others hold for this visit. The players take it here; the controller
+  /// connected TV is playing, with a screen reader on (V2-54), or, with
+  /// "Muted if other audio is playing", while another app's audio plays.
+  /// Only the kept mute is saved; the others hold for this visit. The players take it here; the controller
   /// takes it in [_start], once it is built (a failed build shows Retry
   /// there). Null: the visit ended while it looked.
   Future<bool?> _startSound() async {
+    final screenReader = MediaQuery.maybeAccessibleNavigationOf(context) ?? false;
     final remote = context.read<CompanionRemoteProvider?>();
     final tvPlaying =
         remote != null && remote.isRemote && remote.isConnected && ReelSound.tvPlaying(remote.nowPlaying.value);
@@ -536,7 +543,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final otherAudio =
         !saved && !tvPlaying && pref == ReelStartSound.mutedIfOtherAudio && await ReelSound.otherAudioPlaying();
     if (!mounted || !_shown) return null;
-    final muted = ReelSound.startMuted(saved: saved, pref: pref, tvPlaying: tvPlaying, otherAudio: otherAudio);
+    final muted =
+        screenReader || ReelSound.startMuted(saved: saved, pref: pref, tvPlaying: tvPlaying, otherAudio: otherAudio);
     await _players.setMuted(muted);
     return muted;
   }
@@ -788,10 +796,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   Widget build(BuildContext context) {
     final c = _controller;
     final Widget body = widget.offline
-        ? const ReelMessage(
+        ? ReelMessage(
             icon: Symbols.cloud_off_rounded,
-            title: "You're offline",
-            body: 'The Reel plays from your servers. It picks up again once you are back online.',
+            title: t.reel.status.offlineTitle,
+            body: t.reel.status.offlineBody,
           )
         : c == null
         ? (_createFailed
@@ -833,12 +841,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// The session could not be built: say so, with Retry.
   Widget _failed() => ReelMessage(
     icon: Symbols.error_outline_rounded,
-    title: "The Reel didn't open",
-    body: _isTv ? 'Press OK to try again.' : 'Something went wrong getting it ready.',
+    title: t.reel.status.openFailedTitle,
+    body: _isTv ? t.reel.status.openFailedBodyTv : t.reel.status.openFailedBodyPhone,
     action: FilledButton.tonalIcon(
       onPressed: _retry,
       icon: const Icon(Symbols.refresh_rounded),
-      label: const Text('Retry'),
+      label: Text(t.reel.status.retry),
     ),
   );
 

@@ -19,16 +19,9 @@ void main() {
     expect(SettingsService.reelCellular.resolvedDefault, ReelCellular.dataSaver);
   });
 
-  test('the window: on screen first, then ahead, then behind', () {
-    expect(ReelDataBudget.full.window(4), [4, 5, 6, 3]);
-    expect(ReelDataBudget.saver.window(4), [4, 5]);
-    expect(ReelDataBudget.stills.window(4), isEmpty);
-  });
-
-  test('only Data saver caps the picture height', () {
-    expect(ReelDataBudget.saver.heightCap, ReelDataBudget.dataSaverHeight);
-    expect(ReelDataBudget.full.heightCap, isNull);
-    expect(ReelDataBudget.stills.heightCap, isNull);
+  test('Data saver keeps the card on screen and the next; Stills only plays no clips', () {
+    expect((ReelDataBudget.full.ahead, ReelDataBudget.full.behind), (2, true));
+    expect((ReelDataBudget.saver.ahead, ReelDataBudget.saver.behind), (1, false));
     expect(ReelDataBudget.stills.clips, isFalse);
   });
 }

@@ -1705,8 +1705,6 @@
       "decks": "Decks",
       "themeCredit": "Theme via AnimeThemes",
       "replay": "Replay",
-      "hintsWatch": "OK watch  ·  ↓ next  ·  → next deck  ·  hold OK for more",
-      "hintsReplay": "OK replay  ·  ↓ next  ·  → next deck  ·  hold OK for more",
       "watch": "Watch",
       "watchOnTv": "Watch on TV",
       "details": "Details",
@@ -1716,7 +1714,26 @@
       "soundOn": "Sound on",
       "mute": "Mute",
       "hideControls": "Hide controls",
-      "showControls": "Show controls"
+      "showControls": "Show controls",
+      "failedTitle": "Couldn't load ${deck}",
+      "failedBodyTv": "Press OK to try again, or → for the next deck.",
+      "failedBodyTap": "Tap to try again.",
+      "failedBodyPhone": "Check the connection and try again.",
+      "tryAgain": "Try again",
+      "saved": "Saved",
+      "resume": "Resume ${episode}",
+      "episode": "E${n}",
+      "seasonEpisode": "S${season} E${n}",
+      "episodeLength": "${minutes}m episodes",
+      "upNext": "Up next",
+      "immersiveHint": "Swipe left to bring the controls back",
+      "paused": "Paused",
+      "playing": "Playing",
+      "okWatch": "OK watch",
+      "okDetails": "OK details",
+      "okReplay": "OK replay",
+      "okResume": "OK resume ${episode}",
+      "hintLine": "${ok}  ·  ↓ next  ·  → next deck  ·  hold OK for more"
     },
     "sheet": {
       "watchHere": "Watch here",
@@ -1733,6 +1750,28 @@
       "savedOnTv": "On the TV tonight",
       "savedForLater": "Saved, on the TV next time you connect",
       "notConnected": "Couldn't save: not connected to the TV"
+    },
+    "moreLike": {
+      "finding": "Finding more like this…",
+      "upNext": "More like this, up next",
+      "none": "Couldn't find more like this right now"
+    },
+    "decide": {
+      "title": "Tonight's picks",
+      "prompt": "One for tonight?",
+      "body": "From what you saved in the Reel lately.",
+      "nonePhone": "Nothing saved lately. Swipe up to keep going.",
+      "noneTv": "Nothing saved lately. Press ↓ to keep going.",
+      "hintTv": "← → choose  ·  OK watch  ·  ↓ keep going",
+      "keepGoing": "Swipe up to keep going."
+    },
+    "status": {
+      "offlineTitle": "You're offline",
+      "offlineBody": "The Reel plays from your servers. It picks up again once you are back online.",
+      "openFailedTitle": "The Reel didn't open",
+      "openFailedBodyTv": "Press OK to try again.",
+      "openFailedBodyPhone": "Something went wrong getting it ready.",
+      "retry": "Retry"
     },
     "remote": {
       "title": "The Reel",
@@ -1755,6 +1794,8 @@
     },
     "deckNames": {
       "forYou": "For You",
+      "fitsTonight": "Fits tonight",
+      "anotherGo": "Give it another go",
       "animeOpenings": "Anime openings",
       "mostWatched": "Most Watched",
       "showThisWeek": "#$n show this week",

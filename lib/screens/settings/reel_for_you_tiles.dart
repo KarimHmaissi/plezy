@@ -15,10 +15,14 @@ import '../../widgets/focusable_list_tile.dart';
 
 /// For You in the Reel: their own words to the daily build (a synced note,
 /// so it can be typed on the phone and read by the TV's build) and
-/// "Rebuild today's For You". Shown on Settings ▸ AI until the Reel has a
-/// settings page of its own.
+/// "Rebuild today's For You". Shown on the Reel's settings page (V2-46),
+/// under a For You group of its own.
 class ReelForYouTiles extends StatefulWidget {
-  const ReelForYouTiles({super.key, this.store, this.rebuild});
+  const ReelForYouTiles({super.key, this.store, this.rebuild, this.showTitle = true});
+
+  /// Whether the explainer carries its own title; false under a group
+  /// header that already names it.
+  final bool showTitle;
 
   /// Tests: the store the note is kept in (the app's by default).
   final ReelStore? store;
@@ -114,10 +118,13 @@ class _ReelForYouTilesState extends State<ReelForYouTiles> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ListTile(
-          title: Text(t.reelForYou.title, style: Theme.of(context).textTheme.titleMedium),
-          subtitle: Text(t.reelForYou.explainer),
-        ),
+        if (widget.showTitle)
+          ListTile(
+            title: Text(t.reelForYou.title, style: Theme.of(context).textTheme.titleMedium),
+            subtitle: Text(t.reelForYou.explainer),
+          )
+        else
+          ListTile(subtitle: Text(t.reelForYou.explainer)),
         FocusableListTile(
           leading: const AppIcon(Symbols.edit_note_rounded, fill: 1),
           title: Text(t.reelForYou.note),

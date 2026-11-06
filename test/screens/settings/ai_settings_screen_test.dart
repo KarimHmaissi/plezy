@@ -57,16 +57,10 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets("For You's own words and today's rebuild sit on the AI page", (tester) async {
+  testWidgets("For You's own words and today's rebuild are no longer on the AI page", (tester) async {
     await pumpScreen(tester);
-
-    await tester.scrollUntilVisible(
-      find.text("Rebuild today's For You"),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('Tell For You in your own words'), findsOneWidget);
-    expect(find.text('No note yet: For You goes by what you watch'), findsOneWidget);
+    expect(find.text("Rebuild today's For You"), findsNothing, reason: "they moved to the Reel's settings (V2-46)");
+    expect(find.text('Tell For You in your own words'), findsNothing);
     await unmount(tester);
   });
 

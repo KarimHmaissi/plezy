@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../focus/transport_keys.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
@@ -57,14 +58,15 @@ ReelOkTarget reelOkTarget({required ClipPhase phase, required ReelSlotKind kind,
 /// The TV's key hint line, which follows what OK does. On a "Give it
 /// another go" card ([resumeEpisode], V2-40) Watch resumes that episode.
 String reelHintLine({required bool held, ReelOkAction okAction = ReelOkAction.watch, String? resumeEpisode}) {
+  final s = t.reel.card;
   final ok = held
-      ? 'OK replay'
+      ? s.okReplay
       : okAction == ReelOkAction.details
-      ? 'OK details'
+      ? s.okDetails
       : resumeEpisode == null
-      ? 'OK watch'
-      : 'OK resume $resumeEpisode';
-  return '$ok  ·  ↓ next  ·  → next deck  ·  hold OK for more';
+      ? s.okWatch
+      : s.okResume(episode: resumeEpisode);
+  return s.hintLine(ok: ok);
 }
 
 /// A key as the remote sent it, for the `[ReelKey]` log: the remote's own
