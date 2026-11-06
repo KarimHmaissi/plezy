@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../models/companion_remote/remote_command.dart';
 import '../media/media_item.dart';
@@ -248,7 +249,7 @@ abstract final class ReelApp {
     }
     final added = await HomePinsController.instance.insertFirst((
       id: HomeRowIds.reelPicks,
-      title: 'From the Reel',
+      title: t.reel.homeRow,
       sources: const <String>[],
     ));
     await settings.writeSetting(homeRowSeatedKey, '1');

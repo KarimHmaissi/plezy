@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../media/catalog_item_ref.dart';
 import '../../media/media_item.dart';
 import '../../media/media_kind.dart';
@@ -100,7 +101,7 @@ class ForYouDeck extends ReelDeck {
   @override
   String get id => 'for-you';
   @override
-  String get name => 'For You';
+  String get name => t.reel.deckNames.forYou;
   @override
   bool get keepsSeen => false;
   @override
@@ -183,7 +184,7 @@ class ForYouDeck extends ReelDeck {
 EntriesDeck animeOpeningsDeck({required ReelLibrary library, required Future<IndexDatabase> Function() database}) =>
     EntriesDeck(
       id: 'anime-openings',
-      name: 'Anime openings',
+      name: t.reel.deckNames.animeOpenings,
       library: library,
       keepsSeen: true,
       entries: () async {
@@ -197,7 +198,7 @@ EntriesDeck animeOpeningsDeck({required ReelLibrary library, required Future<Ind
             .get();
         return [
           for (final r in rows)
-            if (db.indexTitles.map(r.data) case final t) DeckEntry(serverId: t.serverId, ratingKey: t.ratingKey),
+            if (db.indexTitles.map(r.data) case final row) DeckEntry(serverId: row.serverId, ratingKey: row.ratingKey),
         ];
       },
     );
@@ -222,7 +223,7 @@ EntriesDeck mostWatchedDeck({
   required Future<List<MediaItem>> Function() shows,
 }) => EntriesDeck(
   id: 'most-watched',
-  name: 'Most Watched',
+  name: t.reel.deckNames.mostWatched,
   library: library,
   keepsSeen: true,
   raw: true,
@@ -230,8 +231,8 @@ EntriesDeck mostWatchedDeck({
     final (f, s) = await (films(), shows()).wait;
     final out = <DeckEntry>[];
     for (var i = 0; i < f.length || i < s.length; i++) {
-      final show = i < s.length ? entryOf(s[i], chip: '#${i + 1} show this week') : null;
-      final film = i < f.length ? entryOf(f[i], chip: '#${i + 1} film this week') : null;
+      final show = i < s.length ? entryOf(s[i], chip: t.reel.deckNames.showThisWeek(n: i + 1)) : null;
+      final film = i < f.length ? entryOf(f[i], chip: t.reel.deckNames.filmThisWeek(n: i + 1)) : null;
       if (show != null) out.add(show);
       if (film != null) out.add(film);
     }

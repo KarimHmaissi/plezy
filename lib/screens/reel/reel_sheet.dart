@@ -25,13 +25,13 @@ Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {
     anchorRect: _centre(context),
     anchorAlignment: AppMenuAnchorAlignment.center,
     entries: [
-      const AppMenuItem(value: 'save', icon: Symbols.bookmark_add_rounded, label: 'Save for the TV'),
+      AppMenuItem(value: 'save', icon: Symbols.bookmark_add_rounded, label: t.reel.sheet.saveForTv),
       // The phone has Details on the card itself.
-      if (isTv) const AppMenuItem(value: 'details', icon: Symbols.info_rounded, label: 'Details'),
-      const AppMenuItem(value: 'notForMe', icon: Symbols.do_not_disturb_on_rounded, label: 'Not for me'),
+      if (isTv) AppMenuItem(value: 'details', icon: Symbols.info_rounded, label: t.reel.sheet.details),
+      AppMenuItem(value: 'notForMe', icon: Symbols.do_not_disturb_on_rounded, label: t.reel.sheet.notForMe),
       if (c.current.clip != null)
-        const AppMenuItem(value: 'spoiled', icon: Symbols.visibility_off_rounded, label: 'Spoiled me'),
-      const AppMenuItem(value: 'seenIt', icon: Symbols.check_rounded, label: 'Seen it'),
+        AppMenuItem(value: 'spoiled', icon: Symbols.visibility_off_rounded, label: t.reel.sheet.spoiledMe),
+      AppMenuItem(value: 'seenIt', icon: Symbols.check_rounded, label: t.reel.sheet.seenIt),
       AppMenuItem(value: 'settings', icon: Symbols.tune_rounded, label: t.reel.settings.sheetEntry),
       // The phone picks decks from its own button at the top.
       if (isTv) ...[

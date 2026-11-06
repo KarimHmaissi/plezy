@@ -1075,7 +1075,7 @@ class _MainScreenState extends State<MainScreen>
     receiver.onReelOpen = (data) {
       if (!_hasReel || !mounted) return;
       final deck = data['deck'];
-      ReelScreen.open(context, deck: deck is String && deck.isNotEmpty ? deck : null);
+      ReelScreen.open(context, deck: deck is String && deck.isNotEmpty ? deck : null, fromRemote: true);
       ReelApp.republish?.call();
     };
     receiver.onReelStep = ReelScreen.remoteStep;

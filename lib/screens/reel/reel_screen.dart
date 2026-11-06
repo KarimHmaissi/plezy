@@ -26,6 +26,7 @@ import '../../services/reel/feed_players.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
 import 'reel_feed_view.dart';
+import 'reel_intro.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
 
@@ -82,13 +83,23 @@ class ReelScreen extends StatefulWidget {
 
   /// Opens the Reel tab, on [deck] when given: closes pages above the shell
   /// first so the tab is what shows. Does nothing while the Reel is turned
-  /// off ([enabled]).
-  static void open(BuildContext context, {String? deck}) {
+  /// off ([enabled]). [fromRemote]: the Fold's On TV mode asked for it, so
+  /// the first-run intro waits (see [_introDeferred]).
+  static void open(BuildContext context, {String? deck, bool fromRemote = false}) {
     if (!enabled) return;
+    if (fromRemote) _introDeferred = true;
     requestedDeck.value = deck ?? requestedDeck.value ?? '';
     Navigator.of(context).popUntil((r) => r.isFirst);
     MainTabSwitcher.select?.call(NavigationTabId.reel);
   }
+
+  /// Set once the Fold's On TV mode has opened the Reel: the phone is
+  /// driving it and can't press OK on the TV, so the first-run intro waits
+  /// until the next launch rather than hold the TV's Reel back.
+  static bool _introDeferred = false;
+
+  @visibleForTesting
+  static set debugIntroDeferred(bool value) => _introDeferred = value;
 
   @override
   State<ReelScreen> createState() => ReelScreenState();
@@ -102,6 +113,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   final FocusNode _focus = FocusNode(debugLabel: 'reel');
   final DpadSelectLongPressController _longPress = DpadSelectLongPressController();
   bool _sheetOpen = false;
+
+  /// The first-run intro (V2-55), until it is dismissed on this device.
+  /// While it shows, the session is built but not started: nothing plays,
+  /// nothing is recorded, and no card slot is taken.
+  bool _introUnseen = !(SettingsService.instanceOrNull?.read(SettingsService.reelIntroSeen) ?? true);
+  bool get _intro => _introUnseen && !ReelScreen._introDeferred;
 
   /// Phone: the feed's players (the TV plays on the native clip core).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
@@ -158,7 +175,23 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final deck = ReelScreen.requestedDeck.value;
     if (deck == null) return;
     ReelScreen.requestedDeck.value = null;
-    if (deck.isNotEmpty) unawaited(openDeck(deck));
+    if (deck.isNotEmpty) {
+      unawaited(openDeck(deck));
+    } else if (_introUnseen && _shown) {
+      // An On TV open may have just deferred the intro: start what it held.
+      unawaited(_start());
+    }
+    if (_introUnseen && mounted) setState(() {});
+  }
+
+  /// The intro's Start (OK on the TV): never shown again on this device,
+  /// and the Reel starts on the deck it would have.
+  void _endIntro() {
+    if (!_introUnseen) return;
+    setState(() => _introUnseen = false);
+    unawaited(SettingsService.instanceOrNull?.write(SettingsService.reelIntroSeen, true));
+    _focus.requestFocus();
+    if (_shown) unawaited(_start());
   }
 
   @override
@@ -215,7 +248,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   Future<void> _start() async {
     final c = await _ensure();
-    if (!mounted || !_shown) return;
+    // Under the intro the session is ready but waits; a requested deck is
+    // kept for when it ends.
+    if (!mounted || !_shown || _intro) return;
     final deck = _pendingDeck;
     _pendingDeck = null;
     if (deck != null && c.active) {
@@ -227,7 +262,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   void _remoteStep(Map<String, dynamic> data) {
     final c = _controller;
-    if (c == null || !_shown) return;
+    if (c == null || !_shown || _intro) return;
     final dir = data['dir'];
     final deckDir = data['deckDir'];
     if (dir is int && dir != 0) {
@@ -242,7 +277,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   void _remoteAction(String action) {
     final c = _controller;
-    if (c == null || !_shown) return;
+    if (c == null || !_shown || _intro) return;
     unawaited(switch (action) {
       'watch' => _watch(),
       'save' => c.save(),
@@ -339,6 +374,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (_intro) return _introKey(event);
     final c = _controller;
     if (c == null) return KeyEventResult.ignored;
     final sel = _longPress.handleKeyEvent(
@@ -392,6 +428,18 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     return KeyEventResult.handled;
   }
 
+  /// TV keys under the intro: a fresh OK press starts the Reel (on the
+  /// press, so the release of the OK that opened the tab can't), the
+  /// d-pad stays here, and Back goes on to the shell.
+  KeyEventResult _introKey(KeyEvent event) {
+    final key = event.logicalKey;
+    if (key.isSelectKey) {
+      if (event is KeyDownEvent) _endIntro();
+      return KeyEventResult.handled;
+    }
+    return key.isDpadDirection ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = _controller;
@@ -399,21 +447,23 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       focusNode: _focus,
       autofocus: false,
       onKeyEvent: _onKey,
-      child: ColoredBox(
-        color: Colors.transparent,
-        child: c == null
-            ? const ReelCurtain()
-            : Stack(
-                fit: StackFit.expand,
-                children: [
-                  _isTv ? _tv(c) : _phone(c),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: _perf.overlay,
-                    builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-      ),
+      child: _intro
+          ? ReelIntro(tv: _isTv, onStart: _endIntro)
+          : ColoredBox(
+              color: Colors.transparent,
+              child: c == null
+                  ? const ReelCurtain()
+                  : Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _isTv ? _tv(c) : _phone(c),
+                        ValueListenableBuilder<bool>(
+                          valueListenable: _perf.overlay,
+                          builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),
+                        ),
+                      ],
+                    ),
+            ),
     );
   }
 

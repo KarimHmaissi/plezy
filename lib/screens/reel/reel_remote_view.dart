@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../models/companion_remote/remote_command.dart';
 import '../../providers/companion_remote_provider.dart';
@@ -70,18 +71,21 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
 
   @override
   Widget build(BuildContext context) {
-    final tv = _remote.connectedDevice?.name ?? 'the TV';
+    final tv = _remote.connectedDevice?.name ?? t.reel.remote.theTv;
     return ValueListenableBuilder<Map<String, dynamic>?>(
       valueListenable: _remote.reelState,
       builder: (context, state, _) {
         final deckName = state?['deckName'] as String?;
         return Scaffold(
           appBar: AppBar(
-            title: Text(deckName ?? 'The Reel'),
+            title: Text(deckName ?? t.reel.remote.title),
             actions: [
               Padding(
                 padding: const EdgeInsets.only(right: 12),
-                child: StatChip(icon: Symbols.tv_rounded, label: 'On $tv'),
+                child: StatChip(
+                  icon: Symbols.tv_rounded,
+                  label: t.reel.remote.onTv(tv: tv),
+                ),
               ),
             ],
           ),
@@ -165,13 +169,13 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
               ),
               if (next.isNotEmpty) ...[
                 const SizedBox(height: 20),
-                Text('Up next', style: theme.textTheme.titleMedium),
+                Text(t.reel.remote.upNext, style: theme.textTheme.titleMedium),
                 const SizedBox(height: 8),
                 for (final n in next) _NextRow(card: n),
               ],
               const SizedBox(height: 12),
               Text(
-                'Swipe the picture up for the next title, sideways for another deck. Tap it to pause.',
+                t.reel.remote.howTo,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
@@ -190,7 +194,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                   child: FilledButton.icon(
                     onPressed: card == null ? null : () => _act('watch'),
                     icon: const Icon(Symbols.play_arrow_rounded),
-                    label: const Text('Watch on TV'),
+                    label: Text(t.reel.remote.watchOnTv),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -200,7 +204,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                       child: OutlinedButton.icon(
                         onPressed: card == null ? null : () => _act('save'),
                         icon: const Icon(Symbols.bookmark_add_rounded),
-                        label: const Text('Save'),
+                        label: Text(t.reel.remote.save),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -208,7 +212,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                       child: OutlinedButton.icon(
                         onPressed: card == null ? null : () => _act('notForMe'),
                         icon: const Icon(Symbols.do_not_disturb_on_rounded),
-                        label: const Text('Not for me', maxLines: 1, overflow: TextOverflow.ellipsis),
+                        label: Text(t.reel.remote.notForMe, maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -216,7 +220,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                       child: OutlinedButton.icon(
                         onPressed: card == null ? null : () => _act('pause'),
                         icon: Icon(playing ? Symbols.pause_rounded : Symbols.play_arrow_rounded),
-                        label: Text(playing ? 'Pause' : 'Play'),
+                        label: Text(playing ? t.reel.remote.pause : t.reel.remote.play),
                       ),
                     ),
                   ],
@@ -248,7 +252,7 @@ class _NowCard extends StatelessWidget {
           margin: EdgeInsets.zero,
           child: Center(
             child: Text(
-              poolEnd ? "That's the deck. Swipe sideways for another." : 'Nothing on this deck yet.',
+              poolEnd ? t.reel.remote.deckEnd : t.reel.remote.deckEmpty,
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ),
@@ -272,7 +276,7 @@ class _NowCard extends StatelessWidget {
                   bottom: 10,
                   child: StatChip(
                     icon: playing ? Symbols.graphic_eq_rounded : Symbols.pause_rounded,
-                    label: playing ? 'Playing on TV' : 'Paused',
+                    label: playing ? t.reel.remote.playingOnTv : t.reel.remote.paused,
                   ),
                 ),
               ],
@@ -368,13 +372,13 @@ class _Waiting extends StatelessWidget {
               Icon(Symbols.tv_off_rounded, size: 48, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(height: 16),
             Text(
-              long ? "$tv isn't showing the Reel." : 'Opening the Reel on $tv…',
+              long ? t.reel.remote.notShowing(tv: tv) : t.reel.remote.opening(tv: tv),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge,
             ),
             if (long) ...[
               const SizedBox(height: 12),
-              OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+              OutlinedButton(onPressed: onRetry, child: Text(t.reel.remote.tryAgain)),
             ],
           ],
         ),

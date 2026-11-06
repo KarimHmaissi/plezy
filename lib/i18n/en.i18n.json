@@ -1670,6 +1670,75 @@
     "history": "History"
   },
   "reel": {
+    "intro": {
+      "title": "Welcome to the Reel",
+      "bodyTv": "Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.",
+      "bodyPhone": "Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.",
+      "start": "Start"
+    },
+    "card": {
+      "emptyTitle": "Nothing in $deck yet",
+      "emptyBodyTv": "Press → for the next deck.",
+      "emptyBodyPhone": "Swipe sideways for the next deck.",
+      "endForYou": "That's today's For You",
+      "endTitle": "That's all of $deck",
+      "endBodyTv": "Press → for $deck.",
+      "endBodyPhone": "Swipe sideways for $deck.",
+      "anotherDeck": "another deck",
+      "pickAnotherDeck": "Pick another deck to keep going.",
+      "decks": "Decks",
+      "themeCredit": "Theme via AnimeThemes",
+      "replay": "Replay",
+      "hintsWatch": "OK watch  ·  ↓ next  ·  → next deck  ·  hold OK for more",
+      "hintsReplay": "OK replay  ·  ↓ next  ·  → next deck  ·  hold OK for more",
+      "watch": "Watch",
+      "watchOnTv": "Watch on TV",
+      "details": "Details",
+      "save": "Save",
+      "more": "More",
+      "onTv": "On TV",
+      "soundOn": "Sound on",
+      "mute": "Mute"
+    },
+    "sheet": {
+      "saveForTv": "Save for the TV",
+      "details": "Details",
+      "notForMe": "Not for me",
+      "spoiledMe": "Spoiled me",
+      "seenIt": "Seen it"
+    },
+    "toast": {
+      "savedOnTv": "On the TV tonight",
+      "savedForLater": "Saved, on the TV next time you connect",
+      "notConnected": "Couldn't save: not connected to the TV"
+    },
+    "remote": {
+      "title": "The Reel",
+      "onTv": "On $tv",
+      "theTv": "the TV",
+      "upNext": "Up next",
+      "howTo": "Swipe the picture up for the next title, sideways for another deck. Tap it to pause.",
+      "watchOnTv": "Watch on TV",
+      "save": "Save",
+      "notForMe": "Not for me",
+      "pause": "Pause",
+      "play": "Play",
+      "deckEnd": "That's the deck. Swipe sideways for another.",
+      "deckEmpty": "Nothing on this deck yet.",
+      "playingOnTv": "Playing on TV",
+      "paused": "Paused",
+      "opening": "Opening the Reel on $tv…",
+      "notShowing": "$tv isn't showing the Reel.",
+      "tryAgain": "Try again"
+    },
+    "deckNames": {
+      "forYou": "For You",
+      "animeOpenings": "Anime openings",
+      "mostWatched": "Most Watched",
+      "showThisWeek": "#$n show this week",
+      "filmThisWeek": "#$n film this week"
+    },
+    "homeRow": "From the Reel",
     "settings": {
       "title": "Reel",
       "subtitle": "Sound, clip ends and the Reel tab",

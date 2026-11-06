@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
 import '../customisation/customisation_store.dart';
@@ -727,9 +728,9 @@ class ReelController extends ChangeNotifier {
   }
 
   /// Confirmations that say where a Save went.
-  static const String savedOnTv = 'On the TV tonight';
-  static const String savedForLater = 'Saved, on the TV next time you connect';
-  static const String notConnected = "Couldn't save: not connected to the TV";
+  static String get savedOnTv => t.reel.toast.savedOnTv;
+  static String get savedForLater => t.reel.toast.savedForLater;
+  static String get notConnected => t.reel.toast.notConnected;
 
   /// Runs a card action that writes the synced Reel data. A phone mirroring
   /// a TV it has lost can't write ([MirrorReadOnlyException]): say so and

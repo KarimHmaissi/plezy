@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
@@ -175,23 +176,23 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       case ReelSlotKind.empty:
         return ReelMessage(
           icon: Symbols.movie_rounded,
-          title: 'Nothing in ${_c.deck.name} yet',
-          body: 'Pick another deck to keep going.',
+          title: t.reel.card.emptyTitle(deck: _c.deck.name),
+          body: t.reel.card.pickAnotherDeck,
           action: FilledButton.tonalIcon(
             onPressed: widget.onDecks,
             icon: const Icon(Symbols.video_library_rounded),
-            label: const Text('Decks'),
+            label: Text(t.reel.card.decks),
           ),
         );
       case ReelSlotKind.poolEnd:
         return ReelMessage(
           icon: Symbols.check_circle_rounded,
-          title: _c.deck.id == 'for-you' ? "That's today's For You" : "That's all of ${_c.deck.name}",
-          body: 'Pick another deck to keep going.',
+          title: _c.deck.id == 'for-you' ? t.reel.card.endForYou : t.reel.card.endTitle(deck: _c.deck.name),
+          body: t.reel.card.pickAnotherDeck,
           action: FilledButton.tonalIcon(
             onPressed: widget.onDecks,
             icon: const Icon(Symbols.video_library_rounded),
-            label: const Text('Decks'),
+            label: Text(t.reel.card.decks),
           ),
         );
       case ReelSlotKind.card:
@@ -421,12 +422,12 @@ class _TopBar extends StatelessWidget {
                   const Spacer(),
                   if (onRemote != null)
                     IconButton(
-                      tooltip: 'On TV',
+                      tooltip: t.reel.card.onTv,
                       onPressed: onRemote,
                       icon: const Icon(Symbols.settings_remote_rounded),
                     ),
                   IconButton(
-                    tooltip: muted ? 'Sound on' : 'Mute',
+                    tooltip: muted ? t.reel.card.soundOn : t.reel.card.mute,
                     onPressed: onMute,
                     icon: Icon(muted ? Symbols.volume_off_rounded : Symbols.volume_up_rounded),
                   ),
@@ -522,7 +523,7 @@ class _Info extends StatelessWidget {
               if (clip?.source.origin == ClipOrigin.animeTheme) ...[
                 const SizedBox(height: 4),
                 Text(
-                  'Theme via AnimeThemes',
+                  t.reel.card.themeCredit,
                   style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               ],
@@ -533,7 +534,7 @@ class _Info extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: onWatch,
                       icon: Icon(watchOnTv ? Symbols.tv_rounded : Symbols.play_arrow_rounded, fill: 1),
-                      label: Text(watchOnTv ? 'Watch on TV' : 'Watch', maxLines: 1),
+                      label: Text(watchOnTv ? t.reel.card.watchOnTv : t.reel.card.watch, maxLines: 1),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -541,12 +542,16 @@ class _Info extends StatelessWidget {
                     child: OutlinedButton.icon(
                       onPressed: onDetails,
                       icon: const Icon(Symbols.info_rounded),
-                      label: const Text('Details', maxLines: 1),
+                      label: Text(t.reel.card.details, maxLines: 1),
                     ),
                   ),
                   const SizedBox(width: 4),
-                  IconButton(tooltip: 'Save', onPressed: onSave, icon: const Icon(Symbols.bookmark_add_rounded)),
-                  IconButton(tooltip: 'More', onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded)),
+                  IconButton(
+                    tooltip: t.reel.card.save,
+                    onPressed: onSave,
+                    icon: const Icon(Symbols.bookmark_add_rounded),
+                  ),
+                  IconButton(tooltip: t.reel.card.more, onPressed: onMore, icon: const Icon(Symbols.more_vert_rounded)),
                 ],
               ),
             ],
