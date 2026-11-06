@@ -161,6 +161,7 @@ abstract final class ReelApp {
       },
     );
     if (remote != null) _publish(controller, remote);
+    _sweepLater(store);
     // While the Reel plays, the brain's indexer rests and its ONNX session
     // (about 66 MB) is released; it reopens on the next embed.
     var yielded = false;
@@ -171,6 +172,25 @@ abstract final class ReelApp {
     });
     return controller;
   }
+
+  /// How long after the Reel opens the daily sweep waits, so it never
+  /// competes with the open's own cache reads.
+  static const Duration sweepDelay = Duration(seconds: 30);
+
+  /// The Reel's cache housekeeping ([ReelStore.sweep]), at most once a day.
+  /// It runs here until the warm start before the tab opens (V2-14) exists.
+  static void _sweepLater(ReelStore store) => Timer(sweepDelay, () async {
+    try {
+      final s = await store.sweep();
+      if (s == null) return;
+      appLogger.i(
+        '[ReelCache] daily sweep: ${s.pools} pool, ${s.days} deck/cursor, '
+        '${s.sources} source rows, ${s.events} events',
+      );
+    } catch (e) {
+      appLogger.w('[ReelCache] daily sweep failed', error: e);
+    }
+  });
 
   /// Sends the current card to a connected phone at once (it just opened
   /// On TV mode).

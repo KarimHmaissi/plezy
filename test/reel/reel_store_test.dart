@@ -75,6 +75,59 @@ void main() {
     expect(await store.cached('src:g1'), isNotNull);
   });
 
+  group('daily sweep', () {
+    Future<Set<String>> keys() async => {for (final r in await db.select(db.reelCache).get()) r.key};
+
+    test('drops pools past the 3 days read, stale deck and cursor rows, expired sources and old events', () async {
+      // Written over the past days, each on its own day.
+      for (var back = 0; back < 5; back++) {
+        final then = now.subtract(Duration(days: back));
+        final at = ReelStore(database: () async => db, clock: () => then);
+        await at.cache('pool:${ReelStore.dayStamp(then)}', '[]');
+        await at.cache('deck:for-you:${ReelStore.dayStamp(then)}', '[]');
+        await at.cache('cursor:ai:a1:${ReelStore.dayStamp(then)}', '4');
+      }
+      final old = ReelStore(database: () async => db, clock: () => now.subtract(const Duration(days: 31)));
+      await old.cache('src:g-old', '{"miss":true}');
+      await old.record('t-old', ReelAction.sampled);
+      await ReelStore(
+        database: () async => db,
+        clock: () => now.subtract(const Duration(days: 401)),
+      ).record('t-ancient', ReelAction.sampled);
+      await store.cache('src:g-new', '{"k":"plex:1"}');
+      await store.cache('other', 'kept');
+
+      final swept = await store.sweep();
+
+      expect(swept, (pools: 2, days: 2, sources: 1, events: 1));
+      expect(await keys(), {
+        for (var back = 0; back < 3; back++) ...[
+          'pool:${ReelStore.dayStamp(now.subtract(Duration(days: back)))}',
+          'deck:for-you:${ReelStore.dayStamp(now.subtract(Duration(days: back)))}',
+          'cursor:ai:a1:${ReelStore.dayStamp(now.subtract(Duration(days: back)))}',
+        ],
+        // Written exactly 3 days ago: not yet older than that.
+        'deck:for-you:${ReelStore.dayStamp(now.subtract(const Duration(days: 3)))}',
+        'cursor:ai:a1:${ReelStore.dayStamp(now.subtract(const Duration(days: 3)))}',
+        'src:g-new',
+        'other',
+        ReelStore.sweptKey,
+      });
+      expect((await store.events(since: DateTime.utc(2000))).map((e) => e.titleId), ['t-old']);
+    });
+
+    test('runs once a day; calls made together share one run', () async {
+      final first = store.sweep();
+      final again = store.sweep();
+      expect(identical(first, again), isTrue);
+      expect(await first, isNotNull);
+      expect(await store.sweep(), isNull);
+      now = now.add(const Duration(days: 1));
+      await store.cache('pool:2026-11-01', '[]');
+      expect((await store.sweep())?.pools, 1);
+    });
+  });
+
   test('picks and vetoes sync one title at a time; the migration markers stay here', () async {
     await store.savePick(pick('a', now));
     await store.spoiled('x', 'plex:1');
