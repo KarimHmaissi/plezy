@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
+import 'package:plezy/mpv/models.dart';
 import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
@@ -112,7 +113,12 @@ void main() {
   late int seated;
   late List<String> built;
 
-  ReelController make({List<ReelDeck>? decks, bool externalClips = false, List<MediaItem>? opened}) => ReelController(
+  ReelController make({
+    List<ReelDeck>? decks,
+    bool externalClips = false,
+    List<MediaItem>? opened,
+    DateTime Function()? clock,
+  }) => ReelController(
     decks:
         decks ??
         [
@@ -136,6 +142,7 @@ void main() {
     addToWatchlist: (_) async => true,
     onSaved: () async => seated++,
     externalClips: externalClips,
+    clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
       built.add(id);
@@ -253,6 +260,7 @@ void main() {
   test('a clip the feed played through is recorded as watched to the end', () async {
     final c = make(externalClips: true);
     await c.start();
+    c.clipStarted('t1');
     c.clipEnded();
     await c.step(1);
     final events = await store.events(since: DateTime(2000));
@@ -283,5 +291,116 @@ void main() {
     await c.suspend();
     expect(c.remoteState()['active'], isFalse);
     c.dispose();
+  });
+
+  group('fatigue is timed from the first frame', () {
+    late DateTime now;
+    DateTime clock() => now;
+
+    setUp(() => now = DateTime.utc(2026, 3, 1, 20));
+
+    Future<List<String>> actions() async => [for (final e in await store.events(since: DateTime(2000))) e.action];
+
+    test('a TV card left while its clip is still loading is unplayed, not a quick skip', () async {
+      final c = make(clock: clock);
+      await c.start();
+      now = now.add(const Duration(milliseconds: 500));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      expect(await store.quickSkips(), isEmpty);
+      c.dispose();
+    });
+
+    test('the TV clock starts at the first frame, not when the card was shown', () async {
+      final c = make(clock: clock);
+      await c.start();
+      // A slow open: 5 s of loading, then a first frame, then left 1 s in.
+      now = now.add(const Duration(seconds: 5));
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 1));
+      await c.step(1);
+      expect(await actions(), [ReelAction.quickSkip.name]);
+
+      // The next card plays 9 s after its frame: a sample of 9 s.
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 9));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.action, ReelAction.sampled.name);
+      expect(events.last.seconds, 9);
+      c.dispose();
+    });
+
+    test('a resume from pause before any frame does not start the clock', () async {
+      final c = make(clock: clock);
+      await c.start();
+      await c.clips.pause();
+      await c.clips.resume();
+      expect(c.clips.phase.value, ClipPhase.playing);
+      now = now.add(const Duration(seconds: 1));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      c.dispose();
+    });
+
+    test('a TV clip that failed records nothing about the title', () async {
+      final c = make(clock: clock);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      engine.errorCtl.add(const PlayerError('decoder gave up'));
+      now = now.add(const Duration(milliseconds: 800));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      expect(await store.quickSkips(), isEmpty);
+      c.dispose();
+    });
+
+    test('a phone card swiped past before its player moved is unplayed', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      now = now.add(const Duration(milliseconds: 700));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      c.dispose();
+    });
+
+    test('the phone clock starts when the feed says the card is playing', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      now = now.add(const Duration(seconds: 4));
+      c.clipStarted('t1');
+      now = now.add(const Duration(seconds: 1));
+      await c.step(1);
+      expect(await actions(), [ReelAction.quickSkip.name]);
+      c.dispose();
+    });
+
+    test('a parked phone player that starts before the card is on screen still counts', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      c.clipStarted('t1');
+      // The feed's next player moves before the controller has shown it.
+      final stepping = c.step(1);
+      c.clipStarted('t2');
+      await stepping;
+      now = now.add(const Duration(seconds: 10));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.titleId, 't2');
+      expect(events.last.action, ReelAction.sampled.name);
+      expect(events.last.seconds, 10);
+      c.dispose();
+    });
+
+    test('a phone player that broke records nothing about the title', () async {
+      final c = make(externalClips: true, clock: clock);
+      await c.start();
+      c.clipStarted('t1');
+      c.clipFailed('t1');
+      now = now.add(const Duration(milliseconds: 300));
+      await c.step(1);
+      expect(await actions(), [ReelAction.unplayed.name]);
+      c.dispose();
+    });
   });
 }

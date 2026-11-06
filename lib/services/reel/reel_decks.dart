@@ -318,7 +318,11 @@ Future<String> forYouFacts({required ReelStore store, HistoryBrain? brain, DateT
   } catch (e) {
     appLogger.d('Reel: brain facts unavailable', error: e);
   }
-  final events = await store.events(since: at.subtract(const Duration(days: 30)));
+  // Cards left before their clip played are neutral, not a Reel habit.
+  final events = [
+    for (final e in await store.events(since: at.subtract(const Duration(days: 30))))
+      if (e.action != ReelAction.unplayed.name) e,
+  ];
   if (events.isNotEmpty) {
     int n(ReelAction a) => events.where((e) => e.action == a.name).length;
     lines.add(

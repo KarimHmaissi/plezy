@@ -65,7 +65,9 @@ class ReelController extends ChangeNotifier {
     this.onOpen,
     this.externalClips = false,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  }) : _clock = clock ?? DateTime.now {
+    clips.phase.addListener(_onPhase);
+  }
 
   final List<ReelDeck> decks;
   final ClipResolver resolver;
@@ -114,8 +116,24 @@ class ReelController extends ChangeNotifier {
   bool _active = false;
   bool _firstClip = true;
   bool _clipEnded = false;
-  DateTime? _cardSince;
+
+  /// The card on screen, and when its clip showed a first frame (the
+  /// fatigue clock); null until then. A still (AI) card is seen whole the
+  /// moment it is shown.
   String? _cardShown;
+  DateTime? _cardSince;
+
+  /// The card's clip failed: how it was left says nothing about the title.
+  bool _cardFailed = false;
+
+  /// TV: the clip the card handed to [clips], so a first frame or error
+  /// from the outgoing clip (still fading out) isn't taken for this card's.
+  String? _cardClip;
+  ClipPhase _lastPhase = ClipPhase.idle;
+
+  /// Phone: a parked player can start the moment the feed moves, before
+  /// [_show] has the card on screen.
+  ({String id, DateTime at})? _feedStarted;
   int _sinceAiCard = 99;
   int _generation = 0;
 
@@ -297,20 +315,26 @@ class ReelController extends ChangeNotifier {
       _cursor[deck.id] = index + (direction == 0 ? 1 : direction);
       return _show(direction: direction == 0 ? 1 : direction);
     }
-    _cardSince = _clock();
-    _cardShown = c.id;
-    _clipEnded = false;
     final clip = _clip[c.id];
+    _cardShown = c.id;
+    _cardSince = clip == null ? _clock() : null;
+    _cardFailed = false;
+    _cardClip = null;
+    _clipEnded = false;
     if (externalClips) {
-      // The feed plays it; only the two ahead need resolving.
+      // The feed plays it ([clipStarted]); only the two ahead need resolving.
+      final started = _feedStarted;
+      _feedStarted = null;
+      if (clip != null && started?.id == c.id) _cardSince = started!.at;
     } else if (clip == null) {
       _sinceAiCard = 0;
       await clips.pause();
     } else if (memoryLevel >= 2) {
-      // Low memory: the backdrop as a still, no clip core.
+      // Low memory: the backdrop as a still, no clip core (and no clock).
       _sinceAiCard++;
     } else {
       _sinceAiCard++;
+      _cardClip = clip.source.uri;
       await clips.play(clip.source, first: _firstClip);
       _firstClip = false;
     }
@@ -330,15 +354,53 @@ class ReelController extends ChangeNotifier {
     }
   }
 
-  /// Records how the card was left: a quick skip (<2 s) adds fatigue; 8 s
-  /// or more is a sample; scrolling past in between records nothing.
+  /// TV: the clock starts on this card's first frame (the core moves from
+  /// loading to playing only then; a resume from pause doesn't count).
+  void _onPhase() {
+    final now = clips.phase.value, was = _lastPhase;
+    _lastPhase = now;
+    final uri = _cardClip;
+    if (externalClips || _cardShown == null || uri == null || clips.current?.uri != uri) return;
+    if (now == ClipPhase.failed) {
+      _cardFailed = true;
+    } else if (was == ClipPhase.loading && now == ClipPhase.playing && _cardSince == null && !_cardFailed) {
+      _cardSince = _clock();
+    }
+  }
+
+  /// Phone feed: [cardId]'s player is playing (its position has moved).
+  void clipStarted(String cardId) {
+    if (!externalClips) return;
+    if (cardId != _cardShown) {
+      _feedStarted = (id: cardId, at: _clock());
+    } else if (_cardSince == null && !_cardFailed) {
+      _cardSince = _clock();
+    }
+  }
+
+  /// Phone feed: [cardId]'s player failed to open or broke mid-play.
+  void clipFailed(String cardId) {
+    if (externalClips && cardId == _cardShown) _cardFailed = true;
+  }
+
+  /// Records how the card was left, timed from its first frame: a quick
+  /// skip (<2 s) adds fatigue; 8 s or more is a sample; scrolling past in
+  /// between records nothing. Left before the first frame, or after the
+  /// clip failed, is a neutral [ReelAction.unplayed].
   Future<void> _leaveCard() async {
-    final id = _cardShown, since = _cardSince;
+    final id = _cardShown, since = _cardSince, failed = _cardFailed;
     _cardShown = null;
     _cardSince = null;
-    if (id == null || since == null) return;
-    final secs = _clock().difference(since).inMilliseconds / 1000;
+    _cardFailed = false;
+    _cardClip = null;
+    _feedStarted = null;
+    if (id == null) return;
     final deckId = deck.id;
+    if (since == null || failed) {
+      await store.record(id, ReelAction.unplayed, deck: deckId);
+      return;
+    }
+    final secs = _clock().difference(since).inMilliseconds / 1000;
     if (clips.phase.value == ClipPhase.held || _clipEnded) {
       await store.record(id, ReelAction.toEnd, deck: deckId, seconds: secs.round());
     } else if (secs < 2) {
@@ -534,6 +596,7 @@ class ReelController extends ChangeNotifier {
     _disposed = true;
     _active = false;
     _generation++;
+    clips.phase.removeListener(_onPhase);
     _stripTimer?.cancel();
     _toastTimer?.cancel();
     deckStrip.dispose();

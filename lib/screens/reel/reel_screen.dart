@@ -85,7 +85,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _sheetOpen = false;
 
   /// Phone: the feed's players (the TV plays on the native clip core).
-  late final ReelFeedPlayers _players = ReelFeedPlayers(onLooped: (_) => _controller?.clipEnded());
+  late final ReelFeedPlayers _players = ReelFeedPlayers(
+    onLooped: (_) => _controller?.clipEnded(),
+    onStarted: (id) => _controller?.clipStarted(id),
+    onFailed: (id) => _controller?.clipFailed(id),
+  );
 
   bool get _isTv => PlatformDetector.isTV();
 
