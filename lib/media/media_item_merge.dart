@@ -145,27 +145,50 @@ int bestCopyBitrate(MediaItem copy) {
 
 /// Fork: the copy to open without asking: the highest bitrate, then the
 /// usual order ([compareLibraryCopies]: resolution first). Copies that
-/// [isAvailable] rejects (an offline server) are skipped.
-MediaItem? bestLibraryCopy(Iterable<MediaItem> copies, {bool Function(MediaItem copy)? isAvailable}) {
-  final candidates = [for (final c in copies) if (isAvailable == null || isAvailable(c)) c];
+/// [isAvailable] rejects (an offline server) are skipped. Copies that
+/// [isBroken] names (every file failed to play recently) are passed over
+/// while another copy is left, so a broken best copy no longer blocks Play.
+MediaItem? bestLibraryCopy(
+  Iterable<MediaItem> copies, {
+  bool Function(MediaItem copy)? isAvailable,
+  bool Function(MediaItem copy)? isBroken,
+}) {
+  final candidates = [
+    for (final c in copies)
+      if (isAvailable == null || isAvailable(c)) c,
+  ];
   if (candidates.isEmpty) return null;
   candidates.sort((a, b) {
     final byBitrate = bestCopyBitrate(b).compareTo(bestCopyBitrate(a));
     return byBitrate != 0 ? byBitrate : compareLibraryCopies(a, b);
   });
+  if (isBroken != null) {
+    for (final candidate in candidates) {
+      if (!isBroken(candidate)) return candidate;
+    }
+  }
   return candidates.first;
 }
 
 /// Fork: index of the version Play uses by default: the highest bitrate,
-/// then the highest resolution; 0 when there's nothing to compare.
-int bestVersionIndex(List<MediaVersion>? versions) {
+/// then the highest resolution; 0 when there's nothing to compare. Versions
+/// that [isBroken] names (failed to play recently) are passed over while
+/// another is left.
+int bestVersionIndex(List<MediaVersion>? versions, {bool Function(MediaVersion version)? isBroken}) {
   if (versions == null || versions.length < 2) return 0;
-  var best = 0;
-  for (var i = 1; i < versions.length; i++) {
-    final a = versions[i];
-    final b = versions[best];
-    final byBitrate = (a.bitrate ?? 0).compareTo(b.bitrate ?? 0);
-    if (byBitrate > 0 || (byBitrate == 0 && (a.height ?? 0) > (b.height ?? 0))) best = i;
+  int? best;
+  int? bestWorking;
+  for (var i = 0; i < versions.length; i++) {
+    if (best == null || _betterVersion(versions[i], versions[best])) best = i;
+    if (isBroken != null && !isBroken(versions[i])) {
+      if (bestWorking == null || _betterVersion(versions[i], versions[bestWorking])) bestWorking = i;
+    }
   }
-  return best;
+  return bestWorking ?? best!;
+}
+
+/// Whether [a] beats [b] for Play's default: higher bitrate, then taller.
+bool _betterVersion(MediaVersion a, MediaVersion b) {
+  final byBitrate = (a.bitrate ?? 0).compareTo(b.bitrate ?? 0);
+  return byBitrate > 0 || (byBitrate == 0 && (a.height ?? 0) > (b.height ?? 0));
 }

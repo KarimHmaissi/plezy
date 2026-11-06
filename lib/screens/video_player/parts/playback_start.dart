@@ -247,6 +247,10 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         subtitleSelection: subtitleSelection,
       );
       _commitPlaybackSession(session);
+      // Fork: a default that failed to play recently gives way to a copy
+      // that has not.
+      if (await _skipRememberedBrokenCopy()) return;
+      if (!attempt.isCurrent) return;
 
       // Display matching: mpv and Apple TV open paused and negotiate from the
       // decoded stream at the first frame; ExoPlayer switches before creating

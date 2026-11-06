@@ -22,6 +22,7 @@ import 'package:plezy/providers/companion_remote_provider.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/providers/playback_state_provider.dart';
 import 'package:plezy/screens/video_player_screen.dart';
+import 'package:plezy/services/broken_copies.dart';
 import 'package:plezy/services/download_storage_service.dart';
 import 'package:plezy/services/offline_watch_sync_service.dart';
 import 'package:plezy/services/playback_coordinator.dart';
@@ -61,6 +62,7 @@ void main() {
     PathProviderPlatform.instance = FakePathProvider(tmpRoot);
     await DownloadStorageService.instance.initialize(SettingsService.instance);
     db = AppDatabase.forTesting(NativeDatabase.memory());
+    BrokenCopies.instance.resetForTesting();
   });
 
   tearDown(() async {
@@ -175,6 +177,10 @@ void main() {
           reason: 'the notice says what it is trying, and where',
         );
         expect(find.text(t.messages.serverBusyTitle), findsNothing);
+        // The 4K on Server A is remembered as broken; Server B's, which
+        // played, is not.
+        expect(BrokenCopies.instance.isBroken('server-a|101|a4k'), isTrue);
+        expect(BrokenCopies.instance.isBroken('server-b|202|b4k'), isFalse);
 
         await tester.pump(const Duration(seconds: 5));
       },

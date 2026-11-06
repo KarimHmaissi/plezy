@@ -124,6 +124,14 @@ Details of each are in the dated entries below.
   after the film has started playing.
 - Each try logs one `[CopyFallback]` line (reason, quality and server
   number; no names, addresses or tokens).
+- **Copies that failed are remembered** (`BrokenCopies`): for the rest of
+  the app run, and on this device for 24 hours, keyed by server, item and
+  version id only. Play's default (`bestVersionIndex`), Explore and AI
+  picks (`bestLibraryCopy`) pass over them while another copy is left, and
+  when Play's default lands on one anyway the player opens the best other
+  copy straight away ("That copy didn't play recently — opening the 4K
+  copy on Server B"). A version picked or remembered by hand is still
+  opened as asked. A copy that plays is forgotten at once.
 
 ## 2026-11-05
 

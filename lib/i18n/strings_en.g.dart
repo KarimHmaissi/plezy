@@ -7474,6 +7474,12 @@ class Translations$copies$en {
 
 	/// en: 'Didn't play recently'
 	String get didNotPlayMark => 'Didn\'t play recently';
+
+	/// en: 'That copy didn't play recently — opening the ${quality} copy on ${location}'
+	String skippingRemembered({required Object quality, required Object location}) => 'That copy didn\'t play recently — opening the ${quality} copy on ${location}';
+
+	/// en: 'That copy didn't play recently — opening another copy on ${location}'
+	String skippingRememberedAnother({required Object location}) => 'That copy didn\'t play recently — opening another copy on ${location}';
 }
 
 // Path: appIcon.names
@@ -12301,6 +12307,8 @@ extension on Translations {
 			'copies.chooseAnother' => 'Choose another copy',
 			'copies.pickerTitle' => 'Choose a copy',
 			'copies.didNotPlayMark' => 'Didn\'t play recently',
+			'copies.skippingRemembered' => ({required Object quality, required Object location}) => 'That copy didn\'t play recently — opening the ${quality} copy on ${location}',
+			'copies.skippingRememberedAnother' => ({required Object location}) => 'That copy didn\'t play recently — opening another copy on ${location}',
 			_ => null,
 		};
 	}

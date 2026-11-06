@@ -3027,6 +3027,8 @@
     "tryingAnother": "That copy wouldn't play — trying another copy on ${location}",
     "chooseAnother": "Choose another copy",
     "pickerTitle": "Choose a copy",
-    "didNotPlayMark": "Didn't play recently"
+    "didNotPlayMark": "Didn't play recently",
+    "skippingRemembered": "That copy didn't play recently — opening the ${quality} copy on ${location}",
+    "skippingRememberedAnother": "That copy didn't play recently — opening another copy on ${location}"
   }
 }

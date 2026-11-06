@@ -74,6 +74,7 @@ import '../services/media_control_router.dart';
 import '../services/player_sync_offsets.dart';
 import '../services/preferred_audio_device.dart';
 import '../services/scoped_player_prefs.dart';
+import '../services/broken_copies.dart';
 import '../services/settings_service.dart';
 import '../services/title_copy_lookup.dart';
 import '../services/sleep_timer_service.dart';
@@ -493,6 +494,11 @@ class VideoPlayerScreen extends StatefulWidget {
   final WatchCopy? watchTogetherCopy;
   final Duration? initialPosition;
   final bool strictMediaSelection;
+
+  /// Fork: the version is Play's own default (nothing picked, remembered,
+  /// downloaded or shared by a room), so a copy that failed to play recently
+  /// may be skipped for a working one before it is opened.
+  final bool defaultCopyChoice;
   final bool Function()? isLaunchCurrent;
   final PlaybackLaunchObserver? launchObserver;
 
@@ -527,6 +533,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.watchTogetherCopy,
     this.initialPosition,
     this.strictMediaSelection = false,
+    this.defaultCopyChoice = false,
     this.isLaunchCurrent,
     this.launchObserver,
   });

@@ -23,6 +23,7 @@ import '../screens/video_player_screen.dart';
 import '../services/external_player_service.dart';
 import '../services/local_playback_history.dart';
 import '../services/offline_watch_sync_service.dart';
+import '../services/broken_copies.dart';
 import '../services/settings_service.dart';
 import '../services/playback_launch_observer.dart';
 import '../services/playback_coordinator.dart';
@@ -348,7 +349,12 @@ Future<bool?> navigateToVideoPlayer(
   }
   // Casting (fork): a phone connected to a TV sends Play there instead.
   final cast = context.read<CompanionRemoteProvider?>();
-  if (allowCast && cast != null && cast.isCasting && !isOffline && watchTogetherCopy == null && metadata.serverId != null) {
+  if (allowCast &&
+      cast != null &&
+      cast.isCasting &&
+      !isOffline &&
+      watchTogetherCopy == null &&
+      metadata.serverId != null) {
     // An explicit position (play from start, resume at) travels; otherwise
     // the TV resumes from the account's watch state like a normal Play.
     final explicitOffset = resolveWatchState ? null : Duration(milliseconds: metadata.viewOffsetMs ?? 0);
@@ -411,13 +417,27 @@ Future<bool?> navigateToVideoPlayer(
   }
   if (!launchCurrent()) return null;
   final preferredVersion = savedVersion;
-  // Fork: with no choice made or remembered, the highest-bitrate version.
+  // Fork: with no choice made or remembered, the highest-bitrate version
+  // that has not failed to play recently.
+  final defaultCopyChoice =
+      selectedMediaIndex == null &&
+      downloadedMediaIndex == null &&
+      roomVersion == null &&
+      preferredVersion == null &&
+      !isOffline;
+  if (defaultCopyChoice) {
+    await BrokenCopies.instance.ensureLoaded();
+    if (!launchCurrent()) return null;
+  }
   final mediaIndex =
       selectedMediaIndex ??
       downloadedMediaIndex ??
       roomVersion?.index ??
       preferredVersion?.index ??
-      bestVersionIndex(metadata.mediaVersions);
+      bestVersionIndex(
+        metadata.mediaVersions,
+        isBroken: (version) => BrokenCopies.instance.isVersionBroken(metadata, version),
+      );
   final mediaSourceId =
       selectedMediaSourceId ?? downloadedMediaSourceId ?? roomVersion?.sourceId ?? preferredVersion?.sourceId;
 
@@ -541,6 +561,7 @@ Future<bool?> navigateToVideoPlayer(
         watchTogetherCopy: watchTogetherCopy,
         initialPosition: initialPosition,
         strictMediaSelection: strictMediaSelection,
+        defaultCopyChoice: defaultCopyChoice,
         isLaunchCurrent: isLaunchCurrent,
         launchObserver: launchObserver,
       ),

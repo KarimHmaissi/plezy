@@ -58,12 +58,16 @@ class _CopyFallbackRun {
     serverIndex(source.copy.serverId);
   }
 
+  /// [source] failed. It is remembered ([BrokenCopies]) so Play's default
+  /// and later fallbacks skip it for a while, unless it was only skipped for
+  /// failing before: that must not keep it remembered for ever.
   void markFailed(CopySource source, CopyFallbackReason reason) {
     markTried(source);
     final serverId = source.copy.serverId;
     if (serverId != null) failedServerIds.add(serverId);
     lastFailed = source;
     lastReason = reason;
+    if (reason != CopyFallbackReason.remembered) unawaited(BrokenCopies.instance.markBroken(source.key));
   }
 }
 
@@ -210,7 +214,11 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
         serverIndex: run.serverIndex,
       ),
     );
-    _showCopyFallbackNotice(from: from, to: to);
+    // A default about to be skipped for failing recently gets its own
+    // notice from the skip; one here would only flash past.
+    if (!(widget.defaultCopyChoice && BrokenCopies.instance.isBroken(to.key))) {
+      _showCopyFallbackNotice(from: from, to: to);
+    }
     _startCopyLookup(run);
   }
 
@@ -219,7 +227,11 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
     final otherServer = to.copy.serverId != from.copy.serverId;
     final location = otherServer && to.copy.serverName != null ? to.copy.serverName! : copyLocationLabel(to.copy);
     final quality = copySourceQualityLabel(to);
-    final text = quality == null
+    final text = _copyFallback?.lastReason == CopyFallbackReason.remembered
+        ? quality == null
+              ? t.copies.skippingRememberedAnother(location: location)
+              : t.copies.skippingRemembered(quality: quality, location: location)
+        : quality == null
         ? t.copies.tryingAnother(location: location)
         : t.copies.trying(quality: quality, location: location);
     _toastController.show(Symbols.swap_horiz_rounded, text, duration: const Duration(seconds: 4));
@@ -323,6 +335,7 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
       referenceHeight: run.referenceHeight,
       tried: run.tried,
       failedServerIds: run.failedServerIds,
+      isRemembered: (source) => BrokenCopies.instance.isBroken(source.key),
     );
     return ordered.isEmpty ? null : ordered.first;
   }
@@ -381,7 +394,7 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
       context,
       item: run.origin,
       copies: [_currentItemWithVersions(), run.origin, ...copies],
-      didNotPlay: (source) => copySourceWasTried(source, run.tried),
+      didNotPlay: (source) => copySourceWasTried(source, run.tried) || BrokenCopies.instance.isBroken(source.key),
       include: (source) => source.copy.backend == MediaBackend.plex,
     );
     if (picked == null || !mounted || _shuttingDown) return false;
@@ -400,8 +413,41 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
     return true;
   }
 
+  /// Play's default landed on a file that failed to play recently (every
+  /// version of this copy did, or the server switched to one that did):
+  /// open the title's best other copy instead, when one has not failed too.
+  /// Returns true when the fallback took the open over. Only for Play's own
+  /// default ([VideoPlayerScreen.defaultCopyChoice]): a version picked or
+  /// remembered by hand is opened as asked.
+  Future<bool> _skipRememberedBrokenCopy() async {
+    if (!widget.defaultCopyChoice || !_copyFallbackAppliesNow) return false;
+    final current = _currentCopySource();
+    if (!BrokenCopies.instance.isBroken(current.key)) return false;
+    final run = _copyFallbackRunForCurrent();
+    _startCopyLookup(run);
+    final copies = await run.copies!;
+    if (!mounted || _shuttingDown || !identical(_copyFallback, run)) return false;
+    run.markTried(current);
+    final next = _nextCopyCandidate(run, copies);
+    if (next == null || BrokenCopies.instance.isBroken(next.key)) {
+      // Nothing better: open it as asked, and let a failure move on.
+      return false;
+    }
+    run.markFailed(current, CopyFallbackReason.remembered);
+    run.lastFailure = (action: PlaybackFailureAction.fatal, cause: null, message: t.messages.playbackFailed);
+    _hasFatalPlaybackError = true;
+    _abortCurrentOpen('copy fallback: skipping a copy that failed recently');
+    unawaited(_continueCopyFallback(run));
+    return true;
+  }
+
   /// The first frame of a file is on screen: a run that got here worked.
+  /// The file playing is forgotten as broken ([BrokenCopies]), whether or
+  /// not a run brought it here.
   void _onCopyFallbackFirstFrame() {
+    if (!widget.isLive && !_isOfflinePlayback) {
+      unawaited(BrokenCopies.instance.clear(_currentCopySource().key));
+    }
     final run = _copyFallback;
     if (run == null) return;
     if (run.attempts > 0 && run.itemKeys.contains(_currentMetadata.globalKey)) {
