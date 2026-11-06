@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/mpv/models.dart';
 import 'package:plezy/mpv/player/player.dart';
@@ -111,6 +112,15 @@ class FakeClipEngine implements ClipEngine {
     calls.add('dispose');
     await disposeGate?.future;
     disposed = true;
+  }
+}
+
+/// A core that throws on its open (it couldn't start, or refused the clip).
+class _RefusingEngine extends FakeClipEngine {
+  @override
+  Future<void> open(String uri) async {
+    calls.add('open $uri');
+    throw PlatformException(code: 'open', message: 'the core could not open the clip');
   }
 }
 
@@ -454,6 +464,27 @@ void main() {
         expect(clips.engine, same(built.last));
         expect(clips.phase.value, ClipPhase.loading);
       });
+    });
+
+    test('an open the core throws on fails the clip like one that never came back, and nothing escapes', () async {
+      final built = <FakeClipEngine>[];
+      clips = ClipPlayer(
+        engine: () {
+          final e = built.isEmpty ? _RefusingEngine() : FakeClipEngine();
+          built.add(e);
+          return engine = e;
+        },
+      );
+      await clips.play(_a, first: true);
+      expect(clips.phase.value, ClipPhase.failed);
+      expect(clips.current, _a, reason: 'the failure is read as this clip\'s');
+      expect(clips.engine, isNull);
+      await Future<void>.delayed(Duration.zero);
+      expect(built.first.disposed, isTrue);
+
+      await clips.play(_b);
+      expect(built, hasLength(2), reason: 'the next clip builds a fresh core');
+      expect(clips.phase.value, ClipPhase.loading);
     });
 
     test('a pause or a release on a core that never answers is given up on', () {

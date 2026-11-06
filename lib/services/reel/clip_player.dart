@@ -434,6 +434,17 @@ class ClipPlayer {
       _abandon(e);
       phase.value = ClipPhase.failed;
       return;
+    } catch (err) {
+      // The core threw on the open (it couldn't start, or refused the
+      // clip): read as an open that never came back, so the card falls back
+      // at once and the next clip builds a fresh core, instead of the error
+      // escaping into the card change that asked for it while the phase
+      // stays loading.
+      if (open != _opens || !identical(_engine, e)) return;
+      appLogger.w('Reel: clip open failed; the clip core is let go', error: err);
+      _abandon(e);
+      phase.value = ClipPhase.failed;
+      return;
     }
     if (open != _opens || !identical(_engine, e)) return;
     _perf.markOpened();
