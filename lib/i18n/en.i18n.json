@@ -1358,10 +1358,12 @@
     "noteHint": "For example: more anime at weekends, nothing over two hours on weeknights",
     "noteSaved": "Saved. Tomorrow's For You reads it, or rebuild today's now.",
     "noteRemoved": "Note removed",
+    "noteFailed": "Couldn't save the note. On a phone that uses the TV's data, connect to the TV first",
     "rebuild": "Rebuild today's For You",
     "rebuildSubtitle": "One new AI build for today, with your note as it is now",
     "rebuildHere": "Today's For You is cleared; the Reel builds a new one with your note",
-    "rebuildOnTv": "The TV rebuilds today's For You when its Reel next opens; this phone then takes it"
+    "rebuildOnTv": "The TV rebuilds today's For You when its Reel next opens; this phone then takes it",
+    "rebuildFailed": "Couldn't clear today's For You"
   },
   "backupTransfer": {
     "title": "Backup & transfer",

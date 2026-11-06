@@ -7,6 +7,7 @@ import '../../i18n/strings.g.dart';
 import '../../services/customisation/customisation_store.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/reel_app.dart';
+import '../../utils/app_logger.dart';
 import '../../utils/dialogs.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
@@ -84,6 +85,10 @@ class _ReelForYouTilesState extends State<ReelForYouTiles> {
       if (!mounted) return;
       setState(() => _note = note);
       showAppSnackBar(context, note == null ? t.reelForYou.noteRemoved : t.reelForYou.noteSaved);
+    } catch (e) {
+      // A phone mirroring a TV it isn't connected to can't write.
+      appLogger.w('Reel: For You note not saved', error: e);
+      if (mounted) showErrorSnackBar(context, t.reelForYou.noteFailed);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -95,6 +100,9 @@ class _ReelForYouTilesState extends State<ReelForYouTiles> {
       final here = await (widget.rebuild ?? ReelApp.rebuildForYouToday)();
       if (!mounted) return;
       showAppSnackBar(context, here ? t.reelForYou.rebuildHere : t.reelForYou.rebuildOnTv);
+    } catch (e) {
+      appLogger.w("Reel: today's For You not cleared", error: e);
+      if (mounted) showErrorSnackBar(context, t.reelForYou.rebuildFailed);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

@@ -3784,6 +3784,9 @@ class Translations$reelForYou$en {
 	/// en: 'Note removed'
 	String get noteRemoved => 'Note removed';
 
+	/// en: 'Couldn't save the note. On a phone that uses the TV's data, connect to the TV first'
+	String get noteFailed => 'Couldn\'t save the note. On a phone that uses the TV\'s data, connect to the TV first';
+
 	/// en: 'Rebuild today's For You'
 	String get rebuild => 'Rebuild today\'s For You';
 
@@ -3795,6 +3798,9 @@ class Translations$reelForYou$en {
 
 	/// en: 'The TV rebuilds today's For You when its Reel next opens; this phone then takes it'
 	String get rebuildOnTv => 'The TV rebuilds today\'s For You when its Reel next opens; this phone then takes it';
+
+	/// en: 'Couldn't clear today's For You'
+	String get rebuildFailed => 'Couldn\'t clear today\'s For You';
 }
 
 // Path: backupTransfer
@@ -10824,10 +10830,12 @@ extension on Translations {
 			'reelForYou.noteHint' => 'For example: more anime at weekends, nothing over two hours on weeknights',
 			'reelForYou.noteSaved' => 'Saved. Tomorrow\'s For You reads it, or rebuild today\'s now.',
 			'reelForYou.noteRemoved' => 'Note removed',
+			'reelForYou.noteFailed' => 'Couldn\'t save the note. On a phone that uses the TV\'s data, connect to the TV first',
 			'reelForYou.rebuild' => 'Rebuild today\'s For You',
 			'reelForYou.rebuildSubtitle' => 'One new AI build for today, with your note as it is now',
 			'reelForYou.rebuildHere' => 'Today\'s For You is cleared; the Reel builds a new one with your note',
 			'reelForYou.rebuildOnTv' => 'The TV rebuilds today\'s For You when its Reel next opens; this phone then takes it',
+			'reelForYou.rebuildFailed' => 'Couldn\'t clear today\'s For You',
 			'backupTransfer.title' => 'Backup & transfer',
 			'backupTransfer.settingsSubtitle' => 'Move your Home rows and Comfort settings to another device',
 			'backupTransfer.description' => 'Your Home rows, Comfort in/out-of-mix choices and other Plezy customisations are stored on this device. Export them to a file, then import that file on another device (PC or Shield).',
@@ -11104,10 +11112,10 @@ extension on Translations {
 			'navigation.libraries' => 'Libraries',
 			'navigation.downloads' => 'Downloads',
 			'navigation.liveTv' => 'Live TV',
-			'navigation.explore' => 'Explore',
-			'navigation.watchlist' => 'Watchlist',
 			_ => null,
 		} ?? switch (path) {
+			'navigation.explore' => 'Explore',
+			'navigation.watchlist' => 'Watchlist',
 			'navigation.comfort' => 'Comfort',
 			'navigation.reel' => 'Reel',
 			'navigation.history' => 'History',
@@ -11618,10 +11626,10 @@ extension on Translations {
 			'watchTogether.letEveryoneControl' => 'Let Everyone Control Playback',
 			'watchTogether.lockRoom' => 'Lock Room',
 			'watchTogether.lockRoomDescription' => 'Nobody new can join',
-			'watchTogether.leaveRoom' => 'Leave Room',
-			'watchTogether.leaveRoomQuestion' => 'Leave Room?',
 			_ => null,
 		} ?? switch (path) {
+			'watchTogether.leaveRoom' => 'Leave Room',
+			'watchTogether.leaveRoomQuestion' => 'Leave Room?',
 			'watchTogether.leaveRoomConfirm' => 'You can join again with the room code.',
 			'watchTogether.leave' => 'Leave',
 			'watchTogether.endRoom' => 'End Room',
@@ -12132,10 +12140,10 @@ extension on Translations {
 			'seerr.permissionRevoked' => 'You no longer have permission to request this',
 			'services.title' => 'Services',
 			'services.hubSubtitle' => 'Sync watch progress and request new titles.',
-			'services.integrations' => 'Integrations',
-			'services.notConnected' => 'Not connected',
 			_ => null,
 		} ?? switch (path) {
+			'services.integrations' => 'Integrations',
+			'services.notConnected' => 'Not connected',
 			'services.connectedAs' => ({required Object username}) => 'Connected as @${username}',
 			'services.scrobble' => 'Track progress automatically',
 			'services.scrobbleDescription' => 'Update your list when you finish an episode or movie.',

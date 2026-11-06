@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/screens/settings/reel_for_you_tiles.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
+import 'package:plezy/services/customisation/mirror_store.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/theme/mono_theme.dart';
 
@@ -99,17 +100,42 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('a note or rebuild that fails says so and leaves the tiles usable', (tester) async {
+    await pump(tester, rebuild: () async => throw StateError('no database'));
+    settings.failWrites = true;
+    await tester.tap(find.text('Tell For You in your own words'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'More harbor dramas');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining("Couldn't save the note"), findsOneWidget);
+    expect(find.text('No note yet: For You goes by what you watch'), findsOneWidget);
+
+    ScaffoldMessenger.of(tester.element(find.byType(ReelForYouTiles))).clearSnackBars();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Rebuild today's For You"));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text("Couldn't clear today's For You"), findsOneWidget);
+  });
 }
 
 class _MemoryCustomisationStore implements CustomisationStore {
   final Map<String, String> values = {};
 
+  /// A phone mirroring a TV it isn't connected to: writes throw.
+  bool failWrites = false;
+
   @override
   Future<String?> readSetting(String key) async => values[key];
 
   @override
-  Future<void> writeSetting(String key, String? value) async =>
-      value == null ? values.remove(key) : values[key] = value;
+  Future<void> writeSetting(String key, String? value) async {
+    if (failWrites) throw const MirrorReadOnlyException();
+    value == null ? values.remove(key) : values[key] = value;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
