@@ -173,6 +173,20 @@ object DoviBridge {
     return hdrTypes.isNotEmpty()
   }
 
+  /**
+   * The `Display.HdrCapabilities.HDR_TYPE_*` values the active display advertises, the same
+   * list [displaySupportsHdr] and [displaySupportsDolbyVision] read. Empty below API 24, with
+   * no active display, or when the query fails.
+   */
+  fun displayHdrTypes(context: Context): IntArray {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return IntArray(0)
+    val display = getCurrentDisplay(context) ?: return IntArray(0)
+    return runCatching { getDisplayHdrTypes(display) }.getOrElse { error ->
+      Log.w(TAG, "Display HDR types: failed to query", error)
+      IntArray(0)
+    }
+  }
+
   fun describeDisplayHdrCapabilities(context: Context): String {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return "HDR capabilities unavailable (API=${Build.VERSION.SDK_INT})"
     val display = getCurrentDisplay(context) ?: return "HDR capabilities unavailable (no active display)"

@@ -399,9 +399,9 @@ internal fun supportsDtsHdIecCarrier(context: Context): Boolean = dtsHdCarrierUs
 /** The mpv spdif table's DTS entries: the codecs [hdmiSinkDecodesDts] gates. */
 internal fun isDtsEncoding(encoding: Int): Boolean = encoding == C.ENCODING_DTS || encoding == C.ENCODING_DTS_HD
 
-private const val ENCODING_DTS_UHD_P1 = 27
-private const val ENCODING_DTS_HD_MA = 29
-private const val ENCODING_DTS_UHD_P2 = 30
+internal const val ENCODING_DTS_UHD_P1 = 27
+internal const val ENCODING_DTS_HD_MA = 29
+internal const val ENCODING_DTS_UHD_P2 = 30
 
 /**
  * Any DTS-family encoding an HDMI sink can list for a DTS short audio descriptor. The API 34
@@ -467,11 +467,11 @@ internal fun movieSinkEncodings(
     .map { it.encodings }
 }
 
-private fun isHdmiOutputType(type: Int): Boolean = type == AudioDeviceInfo.TYPE_HDMI ||
+internal fun isHdmiOutputType(type: Int): Boolean = type == AudioDeviceInfo.TYPE_HDMI ||
   type == AudioDeviceInfo.TYPE_HDMI_ARC ||
   (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && type == AudioDeviceInfo.TYPE_HDMI_EARC)
 
-private fun movieHdmiSinkEncodings(manager: AudioManager): List<IntArray> {
+internal fun movieHdmiSinkEncodings(manager: AudioManager): List<IntArray> {
   val outputs = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { device ->
     val address = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) device.address else ""
     AudioOutputRef(device.type, address, device.encodings)

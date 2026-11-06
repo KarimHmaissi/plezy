@@ -89,6 +89,25 @@ void main() {
     expect(VideoDecodeCapabilities.describeSync(), 'hevc=none av1=none');
   });
 
+  test('hardwareDecodes reports the probe itself, null where it never answered', () async {
+    expect(VideoDecodeCapabilities.hardwareDecodes(RankedVideoCodec.hevc), isNull);
+    expect(VideoDecodeCapabilities.hardwareDecodes(RankedVideoCodec.h264), isTrue);
+
+    stubProbe(<String, Object?>{'hevc': true, 'av1': false});
+    await VideoDecodeCapabilities.getInstance();
+
+    expect(VideoDecodeCapabilities.hardwareDecodes(RankedVideoCodec.hevc), isTrue);
+    expect(VideoDecodeCapabilities.hardwareDecodes(RankedVideoCodec.av1), isFalse);
+  });
+
+  test('hardwareDecodes stays null on an unanswered probe, where accepts() assumes yes', () async {
+    stubProbe(null);
+    await VideoDecodeCapabilities.getInstance();
+
+    expect(VideoDecodeCapabilities.hardwareDecodes(RankedVideoCodec.av1), isNull);
+    expect(acceptsAv1(), isTrue);
+  });
+
   group('user refusals (#2443)', () {
     setUp(() async {
       resetSharedPreferencesForTest();
