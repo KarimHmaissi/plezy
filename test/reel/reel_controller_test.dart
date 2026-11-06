@@ -472,6 +472,29 @@ void main() {
     link.dispose();
   });
 
+  test('moving to mobile data on Stills only mid-session releases the playing clip core', () async {
+    var onCellular = false;
+    final link = ValueNotifier(0);
+    final c = make(cellular: () => ReelCellular.stillsOnly, metered: () => onCellular, linkChanged: link);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final first = engine;
+    expect(first.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+
+    onCellular = true;
+    link.value++;
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(c.current.card?.id, 't2');
+    expect(first.disposed, isTrue, reason: 'the last clip stops with its preload');
+    final made = engines;
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(engines, made, reason: 'no new clip core on stills');
+    c.dispose();
+    link.dispose();
+  });
+
   test('Data saver on mobile data still plays the card and preloads the next', () async {
     final c = make(cellular: () => ReelCellular.dataSaver, metered: () => true);
     await c.start();

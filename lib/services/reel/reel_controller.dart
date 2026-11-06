@@ -657,6 +657,13 @@ class ReelController extends ChangeNotifier {
       // Low memory, or Stills only on mobile data: the backdrop as a still,
       // no clip core (and no clock).
       _sinceAiCard++;
+      // The ladder released the core on its way to level 2; a link that
+      // moved to mobile data mid-session hasn't, so the last clip and its
+      // preload stop here.
+      if (memoryLevel < 2) {
+        await clips.release();
+        _firstClip = true;
+      }
     } else {
       _sinceAiCard++;
       _cardClip = clip.source.uri;
