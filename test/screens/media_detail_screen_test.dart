@@ -29,6 +29,7 @@ import 'package:plezy/providers/watch_state_store.dart';
 import 'package:plezy/screens/media_detail_screen.dart';
 import 'package:plezy/models/download_models.dart';
 import 'package:plezy/navigation/profile_navigation_scope.dart';
+import 'package:plezy/services/broken_copies.dart';
 import 'package:plezy/services/plex_mappers.dart';
 
 import '../test_helpers/download_fixtures.dart';
@@ -1797,6 +1798,7 @@ void main() {
       String? initialEpisodeId,
       NavigatorObserver? observer,
       ThemeData? theme,
+      List<MediaServerClient> otherServers = const [],
     }) async {
       TvDetectionService.debugSetAppleTVOverride(false);
       await SettingsService.getInstance();
@@ -1820,7 +1822,7 @@ void main() {
       // testMultiServer disposes the manager as well as its provider;
       // MultiServerProvider does not own the manager, and manager.dispose() is
       // what closes its status/progress controllers and the registered client.
-      final multi = testMultiServer(clients: [client]);
+      final multi = testMultiServer(clients: [client, ...otherServers]);
       final multiServerProvider = multi.provider;
       final watchStateOverlay = WatchStateStore();
       final offlineWatch = OfflineWatchSyncService(database: db, serverManager: multi.manager);
@@ -2139,14 +2141,17 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // The existing version picker, listing every version. Scoped to the
-      // dialog: the hero's quality chip also renders the resolution label.
+      // The version picker, listing every version (fork: the copy picker,
+      // whose rows also name the server and mark Play's default). Scoped to
+      // the dialog: the hero's quality chip also renders the resolution label.
       Finder inDialog(String text) => find.descendant(of: find.byType(Dialog), matching: find.text(text));
-      expect(inDialog(t.mediaMenu.playVersion), findsOneWidget);
-      expect(inDialog(versions[0].displayLabel), findsOneWidget);
-      expect(inDialog(versions[1].displayLabel), findsOneWidget);
+      Finder rowInDialog(String text) => find.descendant(of: find.byType(Dialog), matching: find.textContaining(text));
+      expect(inDialog(t.copies.pickerTitle), findsOneWidget);
+      expect(rowInDialog(versions[0].displayLabel), findsOneWidget);
+      expect(rowInDialog(versions[1].displayLabel), findsOneWidget);
+      expect(rowInDialog(t.copies.defaultMark), findsOneWidget);
 
-      await tester.tap(inDialog(versions[1].displayLabel));
+      await tester.tap(rowInDialog(versions[1].displayLabel));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -2181,6 +2186,67 @@ void main() {
           matching: find.byIcon(Symbols.keyboard_arrow_down_rounded),
         ),
         findsNothing,
+      );
+    });
+
+    // Fork: with a second server online the segment shows for a single
+    // version too, and its picker lists the copy on the other server.
+    testWidgets('the split segment lists the copies on every server and opens the one picked', (tester) async {
+      final movie = testMediaItem(
+        id: 'harbor_a',
+        backend: MediaBackend.jellyfin,
+        kind: MediaKind.movie,
+        title: 'Harbor Lights',
+        serverId: 'server_1',
+        serverName: 'Server A',
+        mediaVersions: [MediaVersion(id: 'a4k', videoResolution: '4k', bitrate: 60000)],
+      );
+      final onB = testMediaItem(
+        id: 'harbor_b',
+        backend: MediaBackend.jellyfin,
+        kind: MediaKind.movie,
+        title: 'Harbor Lights',
+        serverId: 'server_2',
+        serverName: 'Server B',
+        mediaVersions: [MediaVersion(id: 'b1080', videoResolution: '1080', bitrate: 9000)],
+      );
+      final client = _FakeMediaServerClient(show: movie, childrenByParent: const {});
+      final observer = _RecordingNavigatorObserver(popVideoPlayerImmediately: true);
+      BrokenCopies.instance.resetForTesting();
+      addTearDown(BrokenCopies.instance.resetForTesting);
+      // The 4K failed to play recently.
+      await BrokenCopies.instance.markBroken('server_1|harbor_a|a4k');
+
+      await pumpPhoneDetail(tester, client, movie, observer: observer, otherServers: [_OtherCopyServer(onB)]);
+
+      final chevron = find.descendant(
+        of: find.byType(FocusableActionBar),
+        matching: find.byIcon(Symbols.keyboard_arrow_down_rounded),
+      );
+      expect(chevron, findsOneWidget);
+      await tester.tap(chevron);
+      for (var i = 0; i < 20 && find.text(t.copies.pickerTitle).evaluate().isEmpty; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      Finder rowInDialog(String text) => find.descendant(of: find.byType(Dialog), matching: find.textContaining(text));
+      expect(find.text(t.copies.pickerTitle), findsOneWidget);
+      expect(rowInDialog('Server A'), findsOneWidget);
+      expect(rowInDialog('Server B'), findsOneWidget);
+      expect(rowInDialog(t.copies.didNotPlayMark), findsOneWidget, reason: 'the 4K that failed is marked');
+
+      await tester.tap(rowInDialog('Server B'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.descendant(of: find.byType(Dialog), matching: find.text(t.videoControls.qualityOriginal)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(observer.pushedRouteNames, contains(kVideoPlayerRouteName));
+      expect(
+        await savedMediaVersionPreferenceFor(movie),
+        isNull,
+        reason: 'another copy was picked, not a version of this one',
       );
     });
 
@@ -3538,6 +3604,32 @@ class _FakeMediaServerClient implements MediaServerClient {
   @override
   void close() {}
 
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A second server holding another copy of the title; it answers the copy
+/// lookup's title search and nothing else.
+class _OtherCopyServer implements MediaServerClient {
+  _OtherCopyServer(this.copy);
+  final MediaItem copy;
+  @override
+  ServerId get serverId => ServerId(copy.serverId!);
+  @override
+  String get serverName => copy.serverName!;
+  @override
+  MediaBackend get backend => copy.backend;
+  @override
+  ServerCapabilities get capabilities => ServerCapabilities.jellyfin;
+  @override
+  Future<List<MediaItem>> searchItems(
+    String query, {
+    int limit = 100,
+    AbortController? abort,
+    Set<String> excludedLibraryIds = const {},
+  }) async => [copy];
+  @override
+  void close() {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

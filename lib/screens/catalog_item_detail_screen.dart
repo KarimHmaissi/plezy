@@ -28,6 +28,7 @@ import '../models/catalog/catalog_metadata.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../providers/seerr_account_provider.dart';
+import '../services/broken_copies.dart';
 import '../services/catalog/catalog_library_matcher.dart';
 import '../services/catalog/catalog_source.dart';
 import '../services/catalog/community_ratings.dart';
@@ -131,6 +132,12 @@ class _CatalogItemDetailScreenState extends State<CatalogItemDetailScreen> {
     _syncDetailCollections(widget.item);
     unawaited(_resolveMatches(widget.item));
     unawaited(_loadDetail());
+    // Fork: the copy rows mark copies that failed to play recently.
+    unawaited(
+      BrokenCopies.instance.ensureLoaded().then((_) {
+        if (mounted) setState(() {});
+      }),
+    );
     final sources = context.read<CatalogSourcesProvider>();
     _watchlistSource = sources.watchlistSourceFor(widget.item);
     final source = _watchlistSource;
@@ -653,7 +660,13 @@ class _CatalogItemDetailScreenState extends State<CatalogItemDetailScreen> {
     // Plex matches carry their library title; MediaBrowser search-based lookup
     // only does when the ancestors call succeeded, so fall back to the server
     // name alone. The subtitle carries whatever else tells two copies apart.
-    final details = [?libraryCopyQualityLabel(match), ?(match.libraryTitle == null ? null : match.serverName)];
+    // Fork: a copy whose every file failed to play recently says so, as the
+    // copy picker does.
+    final details = [
+      ?libraryCopyQualityLabel(match),
+      ?(match.libraryTitle == null ? null : match.serverName),
+      if (BrokenCopies.instance.isCopyBroken(match)) t.copies.didNotPlayMark,
+    ];
     return FocusableListTile(
       focusNode: _libraryMatchFocusNodes[index],
       leading: BackendBadge(backend: match.backend, size: 24),

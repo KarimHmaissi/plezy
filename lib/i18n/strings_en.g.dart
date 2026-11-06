@@ -7480,6 +7480,12 @@ class Translations$copies$en {
 
 	/// en: 'That copy didn't play recently — opening another copy on ${location}'
 	String skippingRememberedAnother({required Object location}) => 'That copy didn\'t play recently — opening another copy on ${location}';
+
+	/// en: 'Default'
+	String get defaultMark => 'Default';
+
+	/// en: 'Playing now'
+	String get playingMark => 'Playing now';
 }
 
 // Path: appIcon.names
@@ -12309,6 +12315,8 @@ extension on Translations {
 			'copies.didNotPlayMark' => 'Didn\'t play recently',
 			'copies.skippingRemembered' => ({required Object quality, required Object location}) => 'That copy didn\'t play recently — opening the ${quality} copy on ${location}',
 			'copies.skippingRememberedAnother' => ({required Object location}) => 'That copy didn\'t play recently — opening another copy on ${location}',
+			'copies.defaultMark' => 'Default',
+			'copies.playingMark' => 'Playing now',
 			_ => null,
 		};
 	}

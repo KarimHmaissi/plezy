@@ -132,6 +132,18 @@ Details of each are in the dated entries below.
   copy straight away ("That copy didn't play recently — opening the 4K
   copy on Server B"). A version picked or remembered by hand is still
   opened as asked. A copy that plays is forgotten at once.
+- **Every copy is one press away on the remote.** On a film or episode
+  page, the small ▾ segment right of Play (D-pad right from Play, then OK)
+  now shows whenever more than one server is online, not only for titles
+  with two versions, and opens **Choose a copy**: every version of every
+  copy on every online server and library, each row saying quality and
+  bitrate, HDR or Dolby Vision, size, library and server. Play's default is
+  marked and listed first (so OK there is the same as Play), and copies
+  that failed recently say "Didn't play recently". The long-press menu's
+  "Play Version..." opens the same list. In the player, the settings sheet
+  has **Choose another copy** (switches in place from the current
+  position), and the failure dialog and failure view offer it too. The
+  Explore page's copy list marks copies that failed recently.
 
 ## 2026-11-05
 

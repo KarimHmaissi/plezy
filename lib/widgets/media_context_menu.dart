@@ -815,7 +815,10 @@ class MediaContextMenuState extends State<MediaContextMenu> {
     // offering versions that can't play (issue #1440).
     final hasVersionChoice = (mediaItem.mediaVersions ?? const []).length > 1;
     return [
-      if (isMovieOrEpisode && (hasVersionChoice || menu.canTranscode) && menu.itemServerOnline)
+      // Fork: or another server may hold a copy (the picker lists them all).
+      if (isMovieOrEpisode &&
+          (hasVersionChoice || menu.canTranscode || mayHaveOtherCopies(context, mediaItem)) &&
+          menu.itemServerOnline)
         _MenuAction(value: 'play_version', icon: Symbols.video_file_rounded, label: t.mediaMenu.playVersion),
       // File Info — every file-backed leaf kind (movies, episodes, tracks,
       // clips). Backend-neutral: both PlexClient and JellyfinClient implement

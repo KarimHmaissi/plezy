@@ -413,6 +413,38 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
     return true;
   }
 
+  /// The settings sheet's "Choose another copy" while a file plays: the
+  /// copy picker, the file on screen marked and first; the pick opens in
+  /// place from the current position, keeping the viewer's audio and
+  /// subtitle choices.
+  Future<void> _chooseCopyWhilePlaying() async {
+    if (!mounted || _shuttingDown || !_offersCopyChoice) return;
+    final playing = _currentCopySource();
+    final picked = await showCopyPicker(
+      context,
+      item: playing.copy,
+      didNotPlay: (source) => BrokenCopies.instance.isBroken(source.key),
+      include: (source) => source.copy.backend == playing.copy.backend,
+      playing: playing,
+    );
+    if (picked == null || picked.key == playing.key || !mounted || _shuttingDown) return;
+    appLogger.i('[CopyFallback] chosen from the menu: ${copySourceQualityLabel(picked) ?? '?'}');
+    final version = picked.version;
+    await _reloadMediaInPlace(
+      metadata: picked.copy,
+      selectedMediaIndex: picked.versionIndex,
+      selectedMediaSourceId: version == null || version.id.isEmpty ? null : version.id,
+      qualityPreset: _selectedQualityPreset,
+      useCurrentAudioStreamSelection: false,
+      resumePosition: player?.state.position,
+      preserveCurrentTrackSelection: true,
+      preservedAudioTrack: _sessionAudioPreference ?? _preferredAudioTrack,
+      preservedSubtitleTrack: _sessionSubtitlePreference ?? _preferredSubtitleTrack,
+      preservedSecondarySubtitleTrack: _sessionSecondarySubtitlePreference ?? _preferredSecondarySubtitleTrack,
+      reason: 'copy chosen from the menu',
+    );
+  }
+
   /// Play's default landed on a file that failed to play recently (every
   /// version of this copy did, or the server switched to one that did):
   /// open the title's best other copy instead, when one has not failed too.

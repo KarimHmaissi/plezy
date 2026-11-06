@@ -851,6 +851,18 @@ class _VideoSettingsSheetState extends State<VideoSettingsSheet> {
             onTap: () => _navigateTo(_SettingsView.versionQuality),
           ),
 
+        // Fork: every copy of the title on every online server.
+        if (_state.onChooseCopy case final chooseCopy?)
+          _SettingsMenuItem(
+            icon: Symbols.swap_horiz_rounded,
+            title: t.copies.chooseAnother,
+            valueText: '',
+            onTap: () {
+              OverlaySheetController.of(context).close();
+              chooseCopy();
+            },
+          ),
+
         // Sleep Timer
         ListenableBuilder(
           listenable: sleepTimer,

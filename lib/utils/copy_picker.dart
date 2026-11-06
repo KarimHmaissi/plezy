@@ -69,7 +69,12 @@ String copyLocationLabel(MediaItem copy) {
 /// (45.0 Mbps)"), HDR or Dolby Vision, size, library and server, and the
 /// marks. Library names need not mention resolution, so the row states it
 /// (#1754), like the copy list on the Explore page.
-String copySourceChoiceLabel(CopySource source, {bool didNotPlay = false}) {
+String copySourceChoiceLabel(
+  CopySource source, {
+  bool didNotPlay = false,
+  bool isDefault = false,
+  bool isPlaying = false,
+}) {
   final version = source.version;
   final size = versionSizeBytes(version);
   return [
@@ -77,6 +82,7 @@ String copySourceChoiceLabel(CopySource source, {bool didNotPlay = false}) {
     ?versionDynamicRangeLabel(version),
     if (size != null) ByteFormatter.formatBytes(size),
     copyLocationLabel(source.copy),
+    if (isPlaying) t.copies.playingMark else if (isDefault) t.copies.defaultMark,
     if (didNotPlay) t.copies.didNotPlayMark,
   ].join(' • ');
 }
@@ -105,12 +111,18 @@ List<CopySource> copyPickerSources(Iterable<MediaItem> copies) {
 /// after a failed open); otherwise they are looked up behind a spinner.
 /// [didNotPlay] marks files that failed to open. [include] drops files the
 /// caller can't open (another backend, an offline server).
+///
+/// [playing] (the file on screen) or else [defaultSource] (what plain Play
+/// opens) is marked and listed first, so the remote's first focus is the
+/// file Play would have picked anyway.
 Future<CopySource?> showCopyPicker(
   BuildContext context, {
   required MediaItem item,
   List<MediaItem>? copies,
   bool Function(CopySource source)? didNotPlay,
   bool Function(CopySource source)? include,
+  CopySource? defaultSource,
+  CopySource? playing,
 }) async {
   var found = copies;
   if (found == null) {
@@ -132,6 +144,11 @@ Future<CopySource?> showCopyPicker(
       if (_online(multi, source.copy) && (include?.call(source) ?? true)) source,
   ];
   if (sources.isEmpty) return null;
+  final first = playing ?? defaultSource;
+  if (first != null) {
+    final index = sources.indexWhere((source) => source.key == first.key);
+    if (index > 0) sources.insert(0, sources.removeAt(index));
+  }
   return showOptionPickerDialog<CopySource>(
     context,
     title: t.copies.pickerTitle,
@@ -139,9 +156,17 @@ Future<CopySource?> showCopyPicker(
       for (final source in sources)
         () {
           final failed = didNotPlay?.call(source) ?? false;
+          final isPlaying = source.key == playing?.key;
+          final isDefault = source.key == defaultSource?.key;
           return (
-            icon: failed ? Symbols.error_rounded : Symbols.video_file_rounded,
-            label: copySourceChoiceLabel(source, didNotPlay: failed),
+            icon: failed
+                ? Symbols.error_rounded
+                : isPlaying
+                ? Symbols.play_circle_rounded
+                : isDefault
+                ? Symbols.star_rounded
+                : Symbols.video_file_rounded,
+            label: copySourceChoiceLabel(source, didNotPlay: failed, isDefault: isDefault, isPlaying: isPlaying),
             value: source,
           );
         }(),

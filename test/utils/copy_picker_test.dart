@@ -88,6 +88,14 @@ void main() {
     expect(copySourceChoiceLabel(CopySource(onA, 1), didNotPlay: true), endsWith(t.copies.didNotPlayMark));
   });
 
+  test("the file playing, else Play's default, is marked", () {
+    expect(copySourceChoiceLabel(CopySource(onA, 1), isDefault: true), endsWith('Server A • ${t.copies.defaultMark}'));
+    expect(
+      copySourceChoiceLabel(CopySource(onA, 1), isDefault: true, isPlaying: true),
+      endsWith('Server A • ${t.copies.playingMark}'),
+    );
+  });
+
   test('rows go highest bitrate first across every server', () {
     expect(copyPickerSources([onA, onB]).map((s) => s.key), [
       'server-a|101|a4k',
@@ -138,5 +146,35 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect((await picked)?.key, 'server-b|202|b4k');
+  });
+
+  testWidgets("Play's default is listed first, so the remote's first OK is the file Play would open", (tester) async {
+    final multi = testMultiServer(clients: [_Server('server-a'), _Server('server-b')]);
+    late BuildContext host;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<MultiServerProvider>.value(
+        value: multi.provider,
+        child: InputModeTracker(
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) {
+                host = context;
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+
+    // The 4K failed, so Play's default is Server A's 1080p.
+    final picked = showCopyPicker(host, item: onA, copies: [onA, onB], defaultSource: CopySource(onA, 1));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(t.copies.defaultMark), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect((await picked)?.key, 'server-a|101|a1080');
   });
 }

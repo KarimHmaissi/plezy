@@ -40,11 +40,15 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
     // would offer versions that can't play; see #1440). Transcode-only
     // quality picking deliberately stays in the ⋮ menu: a chevron on every
     // item would stop signaling "multiple versions exist".
+    //
+    // Fork: also while more than one server is online, since the segment
+    // opens the copy picker, which lists the title's copies on every server
+    // and library (the way to a working copy when Play's pick won't open).
     final itemServerId = serverIdOrNull(metadata.serverId);
     final showVersionSplit =
         !widget.isOffline &&
         (metadata.isMovie || metadata.isEpisode) &&
-        (metadata.mediaVersions?.length ?? 0) > 1 &&
+        ((metadata.mediaVersions?.length ?? 0) > 1 || mayHaveOtherCopies(context, metadata)) &&
         itemServerId != null &&
         context.read<MultiServerProvider>().serverManager.isClientOnline(itemServerId);
     // M3E split-button geometry: stadium outer corners, small joined inner
@@ -182,25 +186,25 @@ extension _MediaDetailActionButtons on _MediaDetailScreenState {
           longPress: false,
           borderRadius: BorderRadius.circular(actionSize / 2),
           child: SizedBox(
-          height: actionSize,
-          child: FilledButton(
-            onPressed: onPlayPressed,
-            style: actionButtonStyle(
-              showFocus: state.showFocus,
-              padding: .symmetric(horizontal: isTv ? 17 * tvScale : 16, vertical: isTv ? 9 * tvScale : 0),
-              shape: playShape,
+            height: actionSize,
+            child: FilledButton(
+              onPressed: onPlayPressed,
+              style: actionButtonStyle(
+                showFocus: state.showFocus,
+                padding: .symmetric(horizontal: isTv ? 17 * tvScale : 16, vertical: isTv ? 9 * tvScale : 0),
+                shape: playShape,
+              ),
+              child: playButtonLabel.isNotEmpty
+                  ? Row(
+                      mainAxisSize: .min,
+                      children: [
+                        playButtonIcon,
+                        SizedBox(width: isTv ? 7 * tvScale : 8),
+                        Text(playButtonLabel, style: playTextStyle),
+                      ],
+                    )
+                  : playButtonIcon,
             ),
-            child: playButtonLabel.isNotEmpty
-                ? Row(
-                    mainAxisSize: .min,
-                    children: [
-                      playButtonIcon,
-                      SizedBox(width: isTv ? 7 * tvScale : 8),
-                      Text(playButtonLabel, style: playTextStyle),
-                    ],
-                  )
-                : playButtonIcon,
-          ),
           ),
         ),
       );

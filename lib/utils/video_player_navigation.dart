@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../media/media_item.dart';
+import '../media/media_item_types.dart';
 import '../media/media_version.dart';
 import '../media/media_version_preference.dart';
 import '../mpv/mpv.dart';
@@ -32,12 +33,13 @@ import 'app_logger.dart';
 import 'dialogs.dart';
 import 'global_key_utils.dart';
 import 'platform_detector.dart';
-import 'download_version_utils.dart';
+import 'copy_picker.dart';
 import 'media_version_resolver.dart';
 import 'provider_extensions.dart';
 import 'snackbar_helper.dart';
 import 'quality_preset_labels.dart';
 import '../i18n/strings.g.dart';
+import '../media/copy_fallback.dart';
 import '../media/media_item_merge.dart';
 
 const String kVideoPlayerRouteName = '/video_player';
@@ -638,10 +640,27 @@ int? _versionSizeBytes(MediaVersion? version) {
   return total > 0 ? total : null;
 }
 
+/// Fork: whether [item]'s title may have copies on another server: a movie
+/// or episode while more than one server is online.
+bool mayHaveOtherCopies(BuildContext context, MediaItem item) {
+  if (!(item.isMovie || item.isEpisode)) return false;
+  try {
+    return context.read<MultiServerProvider>().onlineServerCount > 1;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// The shared "Play Version..." flow behind the detail screen's split Play
 /// segment and the context menu entry: pick a version when the item has a
 /// choice, pick a transcode quality when the backend can transcode, persist
 /// the pick, and launch playback.
+///
+/// Fork: the choice is the copy picker ([showCopyPicker]): every version of
+/// this item and, while more than one server is online, of every other copy
+/// of the title on every server and library, labelled with quality, HDR,
+/// size and server, Play's default and any file that failed to play
+/// recently marked. Picking another copy opens that copy.
 ///
 /// Returns true when playback navigation started; false when the user
 /// dismissed a picker or the context went away. The returned future completes
@@ -649,32 +668,52 @@ int? _versionSizeBytes(MediaVersion? version) {
 Future<bool> promptAndPlayVersion(BuildContext context, MediaItem item) async {
   final itemServerId = serverIdOrNull(item.serverId);
   final client = context.tryGetMediaClientForServer(itemServerId);
-  final itemServerOnline =
-      itemServerId != null && context.read<MultiServerProvider>().serverManager.isClientOnline(itemServerId);
-  // Same flag the in-player Version & Quality sheet reads — keeps both
-  // surfaces honest about what the active backend can actually do. Also
-  // requires a reachable server: capabilities are static, and a server
-  // dropping between surface build and tap must not offer transcodes.
-  final canTranscode = itemServerOnline && (client?.capabilities.videoTranscoding ?? false);
   final versions = client == null
       ? item.mediaVersions ?? const <MediaVersion>[]
       : await resolveMediaVersions(item, client);
   if (!context.mounted) return false;
+  final withVersions = versions.isEmpty ? item : item.copyWith(mediaVersions: versions);
+  await BrokenCopies.instance.ensureLoaded();
+  if (!context.mounted) return false;
 
-  int selectedVersionIndex = 0;
-  if (versions.length > 1) {
-    final picked = await showVersionPickerDialog(context, versions, t.mediaMenu.playVersion);
-    if (picked == null || !context.mounted) return false;
-    selectedVersionIndex = picked;
+  var picked = CopySource(withVersions, 0);
+  final otherCopies = mayHaveOtherCopies(context, item);
+  if (versions.length > 1 || otherCopies) {
+    final saved = await resolveSavedMediaVersionFor(withVersions);
+    if (!context.mounted) return false;
+    final defaultIndex =
+        saved?.index ??
+        bestVersionIndex(versions, isBroken: (v) => BrokenCopies.instance.isVersionBroken(withVersions, v));
+    final choice = await showCopyPicker(
+      context,
+      item: withVersions,
+      copies: otherCopies ? null : [withVersions],
+      didNotPlay: (source) => BrokenCopies.instance.isBroken(source.key),
+      defaultSource: CopySource(withVersions, defaultIndex),
+    );
+    if (choice == null || !context.mounted) return false;
+    picked = choice;
   }
 
-  final selectedVersion = selectedVersionIndex < versions.length ? versions[selectedVersionIndex] : null;
+  final pickedItem = picked.copy;
+  final pickedVersions = pickedItem.mediaVersions ?? const <MediaVersion>[];
+  final selectedVersionIndex = picked.versionIndex;
+  final selectedVersion = picked.version;
+  final pickedServerId = serverIdOrNull(pickedItem.serverId);
+  final pickedClient = pickedServerId == itemServerId ? client : context.tryGetMediaClientForServer(pickedServerId);
+  final pickedServerOnline =
+      pickedServerId != null && context.read<MultiServerProvider>().serverManager.isClientOnline(pickedServerId);
+  // Same flag the in-player Version & Quality sheet reads — keeps both
+  // surfaces honest about what the active backend can actually do. Also
+  // requires a reachable server: capabilities are static, and a server
+  // dropping between surface build and tap must not offer transcodes.
+  final canTranscode = pickedServerOnline && (pickedClient?.capabilities.videoTranscoding ?? false);
   TranscodeQualityPreset selectedQuality = TranscodeQualityPreset.original;
   if (canTranscode) {
     final picked = await showQualityPickerDialog(
       context,
       sourceBitrateKbps: selectedVersion?.bitrate,
-      sourceDurationMs: item.durationMs,
+      sourceDurationMs: pickedItem.durationMs ?? item.durationMs,
       sourceSizeBytes: _versionSizeBytes(selectedVersion),
     );
     if (picked == null || !context.mounted) return false;
@@ -682,17 +721,18 @@ Future<bool> promptAndPlayVersion(BuildContext context, MediaItem item) async {
   }
 
   // Remember the pick so Continue Watching / plain Play resume this version
-  // (#1492) — same store the in-player version switch writes.
-  if (versions.length > 1) {
-    await saveMediaVersionPreferenceFor(item, index: selectedVersionIndex, versions: versions);
+  // (#1492) — same store the in-player version switch writes. Kept per copy:
+  // another copy's pick is remembered for that copy.
+  if (pickedVersions.length > 1) {
+    await saveMediaVersionPreferenceFor(pickedItem, index: selectedVersionIndex, versions: pickedVersions);
     if (!context.mounted) return false;
   }
 
   await navigateToVideoPlayer(
     context,
-    metadata: item,
+    metadata: pickedItem,
     selectedMediaIndex: selectedVersionIndex,
-    selectedMediaSourceId: selectedVersion?.id,
+    selectedMediaSourceId: selectedVersion == null || selectedVersion.id.isEmpty ? null : selectedVersion.id,
     selectedQualityPreset: selectedQuality,
   );
   return true;

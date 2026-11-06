@@ -310,6 +310,7 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
                         sourcePartId: _currentMediaInfo?.partId,
                         onPlaybackSourceChanged: _switchPlaybackSource,
                         onTogglePIPMode: _togglePIPMode,
+                        onChooseCopy: _offersCopyChoice ? () => unawaited(_chooseCopyWhilePlaying()) : null,
                         boxFitMode: _videoFilterManager?.boxFitMode ?? 0,
                         videoZoomScale: _videoFilterManager?.zoomScale ?? 1.0,
                         onCycleBoxFitMode: _visualEffects.cycleBoxFitMode,
