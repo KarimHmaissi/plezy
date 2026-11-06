@@ -10,6 +10,7 @@ import 'clip_player.dart';
 import 'clip_resolver.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
+import 'reel_pool.dart';
 import 'reel_store.dart';
 
 /// Metadata and art for a card (one cheap read per card built), through the
@@ -72,6 +73,7 @@ class ReelController extends ChangeNotifier {
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
+    decks.forEach(_watchDeck);
   }
 
   final List<ReelDeck> decks;
@@ -116,7 +118,19 @@ class ReelController extends ChangeNotifier {
     final made = await deckFor?.call(id).catchError((Object _) => null);
     if (made == null) return -1;
     decks.add(made);
+    _watchDeck(made);
     return decks.length - 1;
+  }
+
+  /// Listeners on each deck's [ReelDeck.rebuilt], removed on dispose.
+  final Map<ReelDeck, VoidCallback> _rebuiltListeners = {};
+
+  void _watchDeck(ReelDeck d) {
+    final rebuilt = d.rebuilt;
+    if (rebuilt == null || _rebuiltListeners.containsKey(d)) return;
+    void listener() => unawaited(_onRebuilt(d));
+    _rebuiltListeners[d] = listener;
+    rebuilt.addListener(listener);
   }
 
   final DateTime Function() _clock;
@@ -125,6 +139,9 @@ class ReelController extends ChangeNotifier {
   final Map<String, List<ReelCardData>> _cards = {};
   final Map<String, int> _cursor = {};
   final Map<String, Future<List<ReelCardData>>> _loading = {};
+
+  /// The day ([ReelPool.dayKey]) each deck's list was loaded on.
+  final Map<String, String> _loadedOn = {};
   final Map<String, ResolvedClip?> _clip = {};
   final Set<String> _resolved = {};
   final Map<String, MediaItem?> _item = {};
@@ -199,6 +216,16 @@ class ReelController extends ChangeNotifier {
       final i = await _deckIndex(deckId);
       if (i >= 0) _deck = i;
     }
+    // A warm controller on a new day: daily decks (For You) load again, so
+    // today's pool (or yesterday's remainder while it builds) replaces the
+    // list kept from an earlier day.
+    final today = _today();
+    for (final d in decks) {
+      if (d.daily && _cards.containsKey(d.id) && _loadedOn[d.id] != today) {
+        _cards.remove(d.id);
+        _cursor.remove(d.id);
+      }
+    }
     await _ensureDeck(deck);
     if (!_active) return;
     await _show();
@@ -219,6 +246,7 @@ class ReelController extends ChangeNotifier {
     final have = _cards[d.id];
     if (have != null) return have;
     final f = _loading[d.id] ??= () async {
+      _loadedOn[d.id] = _today();
       try {
         final sw = Stopwatch()..start();
         final raw = await d.load();
@@ -239,6 +267,57 @@ class ReelController extends ChangeNotifier {
       }
     }();
     return f;
+  }
+
+  String _today() => ReelPool.dayKey(_clock());
+
+  /// A fresh build of [d] landed after its list was loaded. On screen, the
+  /// cards up to and including the one showing stay put and the new list
+  /// follows them (titles already there are left out), so the cursor and
+  /// the phone's page index don't move. A deck that isn't on screen just
+  /// takes the new list from its start. A deck not loaded yet reads the new
+  /// build when it loads.
+  Future<void> _onRebuilt(ReelDeck d) async {
+    if (_disposed) return;
+    final pending = _loading[d.id];
+    if (pending != null) await pending;
+    if (_disposed || !_cards.containsKey(d.id)) return;
+    final List<ReelCardData> fresh;
+    try {
+      fresh = await finishDeck(d, await d.load(), store: store, hasClip: (_) => true);
+    } catch (e) {
+      appLogger.w('Reel: deck ${d.id} rebuild failed to load', error: e);
+      return;
+    }
+    if (_disposed || fresh.isEmpty) return;
+    _loadedOn[d.id] = _today();
+    final old = _cards[d.id] ?? const <ReelCardData>[];
+    if (!identical(deck, d)) {
+      _cards[d.id] = fresh;
+      _cursor.remove(d.id);
+      appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${fresh.length} cards');
+      notifyListeners();
+      return;
+    }
+    final at = index;
+    final keep = old.take(at + 1).toList();
+    final kept = {for (final c in keep) c.id};
+    final list = [
+      ...keep,
+      for (final c in fresh)
+        if (!kept.contains(c.id)) c,
+    ];
+    _cards[d.id] = list;
+    appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${list.length} cards (new after card ${keep.length})');
+    if (at >= old.length) {
+      // It was at the end of the deck (or the deck was empty): the first new
+      // card comes on screen.
+      if (_active) return _show();
+      notifyListeners();
+      return;
+    }
+    notifyListeners();
+    if (_active) _prepareAhead(list, 1, _generation);
   }
 
   /// Next / previous card.
@@ -362,7 +441,11 @@ class ReelController extends ChangeNotifier {
       await clips.play(clip.source, first: _firstClip);
       _firstClip = false;
     }
-    // Two ahead: resolve; one ahead (in the swipe direction): preload.
+    _prepareAhead(list, direction, gen);
+  }
+
+  /// Two ahead: resolve; one ahead (in the swipe direction): preload.
+  void _prepareAhead(List<ReelCardData> list, int direction, int gen) {
     for (var k = 1; k <= 2; k++) {
       final j = index + k * (direction < 0 ? -1 : 1);
       if (j >= 0 && j < list.length) unawaited(_resolve(list[j]));
@@ -677,6 +760,10 @@ class ReelController extends ChangeNotifier {
     _generation++;
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);
+    for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
+      d.rebuilt?.removeListener(l);
+    }
+    _rebuiltListeners.clear();
     _stripTimer?.cancel();
     _toastTimer?.cancel();
     deckStrip.dispose();

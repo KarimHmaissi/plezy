@@ -55,7 +55,11 @@ class _Deck extends ReelDeck {
 
   @override
   final String id;
-  final List<String> ids;
+  List<String> ids;
+
+  /// Today's build landing.
+  @override
+  final ValueNotifier<int> rebuilt = ValueNotifier(0);
 
   @override
   String get name => 'Deck $id';
@@ -138,6 +142,7 @@ void main() {
   late List<MediaItem> opened;
   late int decksOpened, watched, sheets;
   late ValueNotifier<int> restored;
+  late _Deck first;
 
   setUp(() {
     db = ForkDatabase.memory();
@@ -148,7 +153,7 @@ void main() {
     restored = ValueNotifier(0);
     c = ReelController(
       decks: [
-        _Deck('a', ['1', '2', '3', '4']),
+        first = _Deck('a', ['1', '2', '3', '4']),
         _Deck('b', ['9']),
       ],
       resolver: ClipResolver(
@@ -248,6 +253,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(c.current.card?.id, 't2');
     expect(players.current, 't2');
+  });
+
+  testWidgets("today's build landing keeps the page on screen and follows it", (tester) async {
+    await pump(tester);
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.index, 1);
+
+    first.ids = ['7', '8'];
+    first.rebuilt.value++;
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.index, 1);
+    expect(c.current.card?.id, 't2');
+    expect(find.text('Title 2'), findsOneWidget);
+    expect(players.current, 't2');
+    expect(players.held, contains('t7'), reason: 'the new next card is parked');
+
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.current.card?.id, 't7');
+    expect(players.current, 't7');
   });
 
   testWidgets('swipe right hides the controls to watch; swipe left brings them back', (tester) async {

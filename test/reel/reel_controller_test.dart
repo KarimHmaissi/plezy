@@ -102,6 +102,52 @@ class _Deck extends ReelDeck {
   Future<List<ReelCardData>> load() async => cards;
 }
 
+class _CountingDeck extends _Deck {
+  _CountingDeck(super.id, super.cards, this.onLoad);
+
+  final void Function() onLoad;
+
+  @override
+  Future<List<ReelCardData>> load() {
+    onLoad();
+    return super.load();
+  }
+}
+
+/// A daily deck whose build can land after it loaded.
+class _DailyDeck extends ReelDeck {
+  _DailyDeck(this.id, this.cards);
+
+  @override
+  final String id;
+  List<ReelCardData> cards;
+  int loads = 0;
+
+  @override
+  String get name => 'Deck $id';
+  @override
+  bool get keepsSeen => true;
+  @override
+  bool get raw => true;
+  @override
+  bool get daily => true;
+
+  @override
+  final ValueNotifier<int> rebuilt = ValueNotifier(0);
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    loads++;
+    return cards;
+  }
+
+  /// Today's build lands: [next] is what the deck loads from now on.
+  void land(List<ReelCardData> next) {
+    cards = next;
+    rebuilt.value++;
+  }
+}
+
 IndexedTitle _copy(String id) => IndexedTitle(
   id: 's1:$id',
   serverId: 's1',
@@ -662,6 +708,126 @@ void main() {
       await Future.wait([c.step(1), c.step(-1), c.step(-1)]);
       expect(c.index, 0);
       expect(c.current.card?.id, 't1');
+      c.dispose();
+    });
+  });
+
+  group("today's build in a session already showing the deck", () {
+    Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 20));
+    List<String?> ids(ReelController c) => [for (final x in c.cards ?? const <ReelCardData>[]) x.id];
+
+    test('it follows the card on screen; the cursor and the card stay put', () async {
+      final d = _DailyDeck('fy', [_card('1'), _card('2'), _card('3')]);
+      final c = make(decks: [d]);
+      await c.start();
+      await c.step(1);
+      expect(c.current.card?.id, 't2');
+      d.land([_card('7'), _card('1'), _card('8'), _card('9')]);
+      await settle();
+      expect(ids(c), ['t1', 't2', 't7', 't8', 't9']);
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't2');
+      expect(engine.calls, contains('preload https://s1.example/services/iva/assets/7/video.mp4'));
+      await c.step(1);
+      expect(c.current.card?.id, 't7');
+      c.dispose();
+    });
+
+    test('a deck that is not on screen takes the new list from its start', () async {
+      final d = _DailyDeck('fy', [_card('1'), _card('2')]);
+      final c = make(
+        decks: [
+          d,
+          _Deck('b', [_card('5')]),
+        ],
+      );
+      await c.start();
+      await c.step(1);
+      await c.switchDeck(1);
+      d.land([_card('7'), _card('8')]);
+      await settle();
+      await c.switchDeck(-1);
+      expect(ids(c), ['t7', 't8']);
+      expect(c.index, 0);
+      c.dispose();
+    });
+
+    test('at the end of the deck, the first new card comes on screen', () async {
+      final d = _DailyDeck('fy', [_card('1')]);
+      final c = make(decks: [d]);
+      await c.start();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      d.land([_card('1'), _card('6')]);
+      await settle();
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
+
+    test('a build that lands empty leaves the list alone', () async {
+      final d = _DailyDeck('fy', [_card('1'), _card('2')]);
+      final c = make(decks: [d]);
+      await c.start();
+      d.land(const []);
+      await settle();
+      expect(ids(c), ['t1', 't2']);
+      c.dispose();
+    });
+
+    test('a deck that has not loaded yet reads the build when it loads', () async {
+      final d = _DailyDeck('fy', [_card('1')]);
+      final c = make(
+        decks: [
+          _Deck('b', [_card('5')]),
+          d,
+        ],
+      );
+      await c.start();
+      d.land([_card('4')]);
+      await settle();
+      expect(d.loads, 0);
+      await c.switchDeck(1);
+      expect(ids(c), ['t4']);
+      c.dispose();
+    });
+  });
+
+  group('a warm controller on a new day', () {
+    test('a daily deck loads again on start, from its first card', () async {
+      var now = DateTime(2026, 3, 10, 23);
+      final d = _DailyDeck('fy', [_card('1'), _card('2')]);
+      final keep = _Deck('b', [_card('5'), _card('6')]);
+      final c = make(decks: [d, keep], clock: () => now);
+      await c.start();
+      await c.step(1);
+      await c.suspend();
+      await c.start();
+      expect(d.loads, 1, reason: 'same day: the list is kept');
+      expect(c.index, 1);
+      await c.suspend();
+
+      now = DateTime(2026, 3, 11, 8);
+      d.cards = [_card('3'), _card('4')];
+      await c.start();
+      expect(d.loads, 2);
+      expect(c.index, 0);
+      expect(c.current.card?.id, 't3');
+      c.dispose();
+    });
+
+    test('decks that are not daily keep their list and place', () async {
+      var now = DateTime(2026, 3, 10, 23);
+      var loads = 0;
+      final keep = _CountingDeck('b', [_card('5'), _card('6')], () => loads++);
+      final c = make(decks: [keep], clock: () => now);
+      await c.start();
+      await c.step(1);
+      await c.suspend();
+      now = DateTime(2026, 3, 11, 8);
+      await c.start();
+      expect(loads, 1);
+      expect(c.current.card?.id, 't6');
       c.dispose();
     });
   });
