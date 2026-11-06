@@ -27,6 +27,8 @@ ReelCardData _card(
   String? summary,
   int? runtime,
   bool show = false,
+  SeenState seen = SeenState.unseen,
+  bool kids = false,
 }) => ReelCardData(
   title: ReelTitle(
     titleId: id,
@@ -38,7 +40,8 @@ ReelCardData _card(
   facts: TitleFacts(
     // A brain show id starts with "s:".
     ref: TitleRef(id: show ? 's:$id' : id, groupKey: 'g$id'),
-    seen: SeenState.unseen,
+    seen: seen,
+    inKidsLibrary: kids,
     imdb: imdb,
     tmdb: tmdb,
     audience: audience,
@@ -75,8 +78,11 @@ class _NoFacts implements TitleFactsSource {
 /// Maps entries straight onto invented cards (card id = rating key), each
 /// with its own words from [texts] when given.
 class _Library extends ReelLibrary {
-  _Library({this.texts = const {}, this.lengths = const {}})
+  _Library({this.texts = const {}, this.lengths = const {}, this.shows = const {}})
     : super(database: () => throw UnimplementedError(), facts: _NoFacts());
+
+  /// Shows by key: how far they got, and whether a Kids library has it.
+  final Map<String, ({SeenState seen, bool kids})> shows;
 
   final Map<String, ({String? tagline, String? summary})> texts;
 
@@ -92,7 +98,9 @@ class _Library extends ReelLibrary {
         tagline: texts[e.ratingKey]?.tagline,
         summary: texts[e.ratingKey]?.summary,
         runtime: lengths[e.ratingKey]?.minutes,
-        show: lengths[e.ratingKey]?.show ?? false,
+        show: lengths[e.ratingKey]?.show ?? shows.containsKey(e.ratingKey),
+        seen: shows[e.ratingKey]?.seen ?? SeenState.unseen,
+        kids: shows[e.ratingKey]?.kids ?? false,
       ),
   ];
 }
@@ -821,5 +829,190 @@ void main() {
   test('IMDb outranks the other scores when both are known', () {
     final kept = ForYouDeck.worthShowing([_card('a', imdb: 3.4, tmdb: 7.0)]);
     expect(kept, isEmpty);
+  });
+  group('Give it another go', () {
+    late ForkDatabase db;
+    late LocalCustomisationStore settings;
+    late ReelStore store;
+    late DateTime now;
+
+    setUp(() {
+      db = ForkDatabase.memory();
+      settings = LocalCustomisationStore(db);
+      now = DateTime(2026, 3, 10, 20);
+      store = ReelStore(database: () async => db, settings: () async => settings, clock: () => now);
+    });
+
+    tearDown(() async => db.close());
+
+    SeenState paused(DateTime last) => SeenState(kind: SeenKind.paused, last: last, eps: 3, total: 10);
+    SeenState sampled(DateTime? last) => SeenState(kind: SeenKind.sampled, last: last, eps: 1, total: 20);
+
+    /// Invented shows in every state the deck must tell apart.
+    final library = _Library(
+      shows: {
+        'harbor': (seen: paused(DateTime(2026, 1, 2)), kids: false),
+        'lantern': (seen: sampled(DateTime(2025, 2, 1)), kids: false),
+        'tide': (seen: paused(DateTime(2025, 12, 1)), kids: false),
+        'mill': (seen: sampled(null), kids: false),
+        'cartoon': (seen: paused(DateTime(2026, 1, 9)), kids: true),
+        'current': (seen: const SeenState(kind: SeenKind.inProgress, eps: 5, total: 10), kids: false),
+        'done': (seen: const SeenState(kind: SeenKind.finished, eps: 10, total: 10), kids: false),
+        'gone': (seen: const SeenState(kind: SeenKind.dropped, eps: 6, total: 30), kids: false),
+        'fresh': (seen: SeenState.unseen, kids: false),
+      },
+    );
+
+    TitleProfile watchedShow(String key) => TitleProfile(
+      id: 'p:$key',
+      kind: TitleKind.show,
+      title: 'Show $key',
+      serverId: 's1',
+      ratingKey: key,
+      inLibrary: true,
+      episodesWatched: 1,
+    );
+
+    PoolCandidate again(String key) => PoolCandidate(
+      entry: DeckEntry(serverId: 's1', ratingKey: key),
+      titleId: key,
+      score: 0,
+    );
+
+    ReelPool pool({PoolModel? model, bool host = true}) =>
+        ReelPool(store: store, library: library, model: model, host: host, clock: () => now);
+
+    test('the gather keeps sampled and paused shows only, paused first, newest first, never Kids', () async {
+      final brain = _SeededBrain(
+        watched: [
+          for (final k in ['lantern', 'harbor', 'mill', 'cartoon', 'current', 'done', 'gone', 'tide', 'fresh'])
+            watchedShow(k),
+          // A film is never offered, whatever its state.
+          _unseen('reel'),
+          // Not on the servers: nothing to play.
+          TitleProfile(id: 'p:away', kind: TitleKind.show, title: 'Show away', episodesWatched: 1),
+        ],
+        near: const {},
+      );
+      final got = await anotherGoCandidates(library: library, store: store, brain: brain);
+      expect(got.map((c) => c.titleId), ['harbor', 'tide', 'lantern', 'mill']);
+
+      await store.notForMe('tide');
+      final resting = await anotherGoCandidates(library: library, store: store, brain: brain);
+      expect(resting.map((c) => c.titleId), isNot(contains('tide')), reason: 'Not for me rests it here too');
+    });
+
+    test('the deck opens in code order, marks every card to resume, and keeps seen titles', () async {
+      final forYou = ForYouDeck(
+        pool: pool(),
+        library: library,
+        candidates: () async => const [],
+        facts: () async => '',
+        again: () async => [again('harbor'), again('lantern'), again('current'), again('cartoon')],
+      );
+      final deck = AnotherGoDeck(forYou: forYou, library: library);
+      final cards = await deck.load();
+      expect(cards.map((c) => c.id), ['harbor', 'lantern'], reason: 'picked up again or Kids: left out');
+      expect(cards.every((c) => c.resume), isTrue);
+      expect(deck.keepsSeen, isTrue);
+      expect(deck.daily, isTrue);
+      expect(deck.id, 'another-go');
+      expect(identical(deck.rebuilt, forYou.rebuilt), isTrue);
+    });
+
+    test('the For You call orders the deck through its optional another_go array, with no call of its own', () async {
+      var calls = 0;
+      String? user;
+      Map<String, Object?>? tool;
+      String? system;
+      final forYou = ForYouDeck(
+        pool: pool(
+          model: (s, u, t) async {
+            calls++;
+            system = s;
+            user = u;
+            tool = t;
+            return {
+              'cards': [
+                {'id': 'c1', 'cluster': 'harbor drama'},
+              ],
+              // Unknown ids, a For You id and a repeat are ignored.
+              'another_go': ['g3', 'g9', 'c1', 'g1', 'g3'],
+            };
+          },
+        ),
+        library: library,
+        candidates: () async => [_candidate('fresh')],
+        facts: () async => '',
+        again: () async => [again('harbor'), again('lantern'), again('tide')],
+      );
+      final deck = AnotherGoDeck(forYou: forYou, library: library);
+      var fired = 0;
+      deck.rebuilt.addListener(() => fired++);
+      expect((await deck.load()).map((c) => c.id), ['harbor', 'lantern', 'tide'], reason: 'code order first');
+      await forYou.building;
+      expect(calls, 1);
+      expect(fired, 1);
+      expect((await deck.load()).map((c) => c.id), ['tide', 'harbor']);
+      expect(calls, 1, reason: 'no second build once today is cached');
+
+      final lines = user!.split('\n');
+      final head = lines.indexWhere((l) => l.startsWith('Another go'));
+      expect(head, greaterThan(lines.indexOf('Candidates:')));
+      expect(lines.firstWhere((l) => l.startsWith('g1:')), contains('3/10 eps, paused'));
+      expect(lines.firstWhere((l) => l.startsWith('g1:')), contains('last watched Jan 2026'));
+      expect(lines.firstWhere((l) => l.startsWith('g2:')), contains('1/20 eps, sampled'));
+      expect(system, contains('another_go: optional'));
+      final props = (tool!['input_schema'] as Map)['properties'] as Map;
+      expect(props.containsKey('another_go'), isTrue);
+      expect((tool!['input_schema'] as Map)['required'], ['cards']);
+    });
+
+    test('a build with no another_go keeps code order, and no list means no section', () async {
+      String? user;
+      final forYou = ForYouDeck(
+        pool: pool(
+          model: (_, u, _) async {
+            user = u;
+            return {
+              'cards': [
+                {'id': 'c1', 'cluster': 'harbor drama'},
+              ],
+            };
+          },
+        ),
+        library: library,
+        candidates: () async => [_candidate('fresh')],
+        facts: () async => '',
+      );
+      await forYou.load();
+      await forYou.building;
+      expect(user, isNot(contains('Another go')));
+      expect(await store.cached(ReelPool.againKey(now)), isNull);
+      expect(await pool().cachedAgain(), isNull);
+    });
+
+    test("the TV shares the order with its pool; a phone reads it as the day's remainder", () async {
+      await pool(
+        model: (_, _, _) async => {
+          'cards': [
+            {'id': 'c1', 'cluster': 'harbor drama'},
+          ],
+          'another_go': ['g2', 'g1'],
+        },
+      ).build([_candidate('fresh')], facts: '', again: [again('harbor'), again('lantern')]);
+      final shared = jsonDecode((await settings.readSetting(ReelStore.poolKey))!) as Map;
+      expect((shared['again'] as List).map((j) => (j as Map)['rk']), ['lantern', 'harbor']);
+
+      // The phone: its own database, the same synced settings, no build of
+      // its own; the TV's order comes back as the day's remainder.
+      final phoneDb = ForkDatabase.memory();
+      addTearDown(phoneDb.close);
+      final phoneStore = ReelStore(database: () async => phoneDb, settings: () async => settings, clock: () => now);
+      final phone = ReelPool(store: phoneStore, library: library, host: false, clock: () => now);
+      expect((await phone.cachedAgain())?.map((e) => e.ratingKey), ['lantern', 'harbor']);
+      await phoneStore.record('lantern', ReelAction.sampled, deck: 'another-go');
+      expect((await phone.cachedAgain())?.map((e) => e.ratingKey), ['harbor'], reason: 'gone through today');
+    });
   });
 }

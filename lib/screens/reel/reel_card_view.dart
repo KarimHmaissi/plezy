@@ -234,8 +234,10 @@ class _Extras extends StatelessWidget {
         if (tv) ...[
           SizedBox(height: 10 * scale),
           Text(
-            // OK replays a held clip (ReelScreen's key map).
-            '${held ? 'OK replay' : 'OK watch'}  ·  ↓ next  ·  → next deck  ·  hold OK for more',
+            // OK replays a held clip (ReelScreen's key map); a resume card's
+            // OK plays the show's next episode.
+            '${held ? 'OK replay' : 'OK ${slot.resumeEpisode == null ? 'watch' : 'resume ${slot.resumeEpisode}'}'}'
+            '  ·  ↓ next  ·  → next deck  ·  hold OK for more',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
               fontSize: 14 * scale,

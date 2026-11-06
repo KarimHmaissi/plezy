@@ -88,11 +88,13 @@ abstract final class ReelApp {
       library: library,
       candidates: () => forYouCandidates(library: library, store: store),
       facts: () => forYouFacts(store: store, pool: pool),
+      again: () => anotherGoCandidates(library: library, store: store),
       sharedChanges: Customisation.changed,
     );
     final decks = <ReelDeck>[
       forYou,
       FitsTonightDeck(forYou: forYou),
+      AnotherGoDeck(forYou: forYou, library: library),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.
@@ -151,6 +153,9 @@ abstract final class ReelApp {
       externalClips: !PlatformDetector.isTV(),
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
+      // Give it another go: the card's one metadata read brings the show's
+      // next episode, so Watch can say which.
+      itemWithNext: media.itemWithNext,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
@@ -355,6 +360,15 @@ class _AppReelMedia implements ReelMedia {
     final c = _client(serverId);
     if (c == null) return null;
     return c.fetchItem(ratingKey).timeout(const Duration(seconds: 15));
+  }
+
+  /// The same single metadata read with the on-deck episode included (the
+  /// episode [ReelApp._playable] plays).
+  Future<({MediaItem? item, MediaItem? next})> itemWithNext(String serverId, String ratingKey) async {
+    final c = _client(serverId);
+    if (c == null) return (item: null, next: null);
+    final r = await c.fetchItemWithOnDeck(ratingKey).timeout(const Duration(seconds: 15));
+    return (item: r.item, next: r.onDeckEpisode);
   }
 
   @override

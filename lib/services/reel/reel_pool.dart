@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../../utils/app_logger.dart';
+import '../ai/facts/seen_state.dart';
 import 'reel_decay.dart';
 import 'reel_library.dart';
 import 'reel_premise.dart';
@@ -135,15 +136,22 @@ class ReelPool {
 
   static String dayKey(DateTime d) => 'pool:${dateOf(d)}';
 
+  /// The day's "Give it another go" order (the same build's `another_go`).
+  static String againKey(DateTime d) => 'again:${dateOf(d)}';
+
+  /// At most this many started-and-left shows go to the daily build.
+  static const int maxAgain = 40;
+
   /// Today's day key, by this pool's clock.
   String today() => dayKey(_clock());
 
   /// Now, by this pool's clock.
   DateTime now() => _clock();
 
-  /// The shared pool: its day (`YYYY-MM-DD`) and rows, or null when there is
-  /// none or it can't be read.
-  Future<({String day, List<Object?> rows})?> shared() async {
+  /// The shared pool: its day (`YYYY-MM-DD`), rows and "Give it another
+  /// go" rows (empty when the build gave none), or null when there is none
+  /// or it can't be read.
+  Future<({String day, List<Object?> rows, List<Object?> again})?> shared() async {
     final String? raw;
     try {
       raw = await store.sharedPool();
@@ -155,7 +163,11 @@ class ReelPool {
     try {
       final j = jsonDecode(raw);
       if (j is Map && j['day'] is String && j['entries'] is List) {
-        return (day: j['day'] as String, rows: j['entries'] as List<Object?>);
+        return (
+          day: j['day'] as String,
+          rows: j['entries'] as List<Object?>,
+          again: j['again'] is List ? j['again'] as List<Object?> : const <Object?>[],
+        );
       }
     } catch (_) {}
     return null;
@@ -169,12 +181,24 @@ class ReelPool {
   /// rather than starting over. Gone through is any recorded event except
   /// [ReelAction.unplayed], which is neutral. Rows written before the pool
   /// kept title ids are returned whole.
-  Future<List<DeckEntry>?> cachedPool() async {
+  Future<List<DeckEntry>?> cachedPool() => _remainder(dayKey, (share) => share.rows);
+
+  /// The "Give it another go" order from today's build, else the newest
+  /// earlier one, as its remainder, like [cachedPool]; null when no build
+  /// gave one (the deck falls back to code order).
+  Future<List<DeckEntry>?> cachedAgain() => _remainder(againKey, (share) => share.again.isEmpty ? null : share.again);
+
+  Future<List<DeckEntry>?> _remainder(
+    String Function(DateTime day) key,
+    List<Object?>? Function(({String day, List<Object?> rows, List<Object?> again}) share) sharedRows,
+  ) async {
     final now = _clock();
     final share = await shared();
     for (var back = 0; back < lookback; back++) {
       final day = now.subtract(Duration(days: back));
-      final rows = await _localRows(day) ?? (share != null && share.day == dateOf(day) ? _rows(share.rows) : null);
+      final rows =
+          await _localRows(day, key: key) ??
+          (share != null && share.day == dateOf(day) ? _rowsOrNull(sharedRows(share)) : null);
       if (rows == null) continue;
       final gone = await goneThrough(since: DateTime(day.year, day.month, day.day));
       return [
@@ -185,8 +209,11 @@ class ReelPool {
     return null;
   }
 
-  Future<List<({String? id, DeckEntry entry})>?> _localRows(DateTime day) async {
-    final raw = await store.cached(dayKey(day));
+  Future<List<({String? id, DeckEntry entry})>?> _localRows(
+    DateTime day, {
+    String Function(DateTime) key = dayKey,
+  }) async {
+    final raw = await store.cached(key(day));
     if (raw == null) return null;
     try {
       final j = jsonDecode(raw);
@@ -195,6 +222,8 @@ class ReelPool {
       return null;
     }
   }
+
+  static List<({String? id, DeckEntry entry})>? _rowsOrNull(List<Object?>? list) => list == null ? null : _rows(list);
 
   static List<({String? id, DeckEntry entry})> _rows(List<Object?> list) => [
     for (final j in list)
@@ -274,11 +303,23 @@ class ReelPool {
   /// not resting, not Kids) and caches it; the [host] also shares it.
   /// Returns null when there is no model or the call failed, leaving
   /// yesterday's pool in place.
-  Future<List<DeckEntry>?> build(List<PoolCandidate> candidates, {required String facts}) async {
+  ///
+  /// [again] are the shows they started and left ([anotherGoCandidates]):
+  /// the same call orders them in its optional `another_go` array, for the
+  /// "Give it another go" deck, with no call of its own. When the call
+  /// gives none, that deck keeps its code order.
+  Future<List<DeckEntry>?> build(
+    List<PoolCandidate> candidates, {
+    required String facts,
+    List<PoolCandidate> again = const [],
+  }) async {
     final call = model;
     if (call == null || candidates.isEmpty) return null;
     final list = candidates.take(maxCandidates).toList();
-    final cards = await library.cards([for (final c in list) c.entry]);
+    final againList = again.take(maxAgain).toList();
+    final cards = await library.cards([
+      for (final c in [...list, ...againList]) c.entry,
+    ]);
     final byRow = {for (final c in cards) c.best.id: c};
     final skips = await signals.quickSkips();
     final now = _clock();
@@ -320,8 +361,25 @@ class ReelPool {
       );
     }
     if (lines.isEmpty) return null;
+    final againLines = <String>[];
+    final againOf = <String, ReelCardData>{};
+    for (final (i, c) in againList.indexed) {
+      final card = byRow[c.entry.rowId];
+      if (card == null) continue;
+      final id = 'g${i + 1}';
+      againOf[id] = card;
+      againLines.add(againLine(id, card));
+    }
+    final user = StringBuffer('$facts\n\nCandidates:\n${lines.join('\n')}');
+    if (againLines.isNotEmpty) {
+      user.write(
+        '\n\nAnother go (shows they started and left, for the "Give it another go" deck only; '
+        'never For You cards):\n${againLines.join('\n')}',
+      );
+    }
     try {
-      final input = await call(_system, '$facts\n\nCandidates:\n${lines.join('\n')}', _tool);
+      final input = await call(_system, user.toString(), _tool);
+      await _keepAgain(input?['another_go'], againOf, now);
       final picked = input?['cards'];
       if (picked is! List) return null;
       final out = <DeckEntry>[];
@@ -353,7 +411,8 @@ class ReelPool {
       await store.cache(dayKey(now), jsonEncode(rows));
       if (host) {
         try {
-          await store.sharePool(jsonEncode({'day': dateOf(now), 'entries': rows}));
+          final againRows = await _againRows(now);
+          await store.sharePool(jsonEncode({'day': dateOf(now), 'entries': rows, 'again': ?againRows}));
         } catch (e) {
           appLogger.w('Reel: sharing the pool failed', error: e);
         }
@@ -361,6 +420,47 @@ class ReelPool {
       return out;
     } catch (e) {
       appLogger.w('Reel: daily build failed', error: e);
+      return null;
+    }
+  }
+
+  /// One "Another go" line: the show, its facts (the seen line says how far
+  /// they got) and when they last watched it.
+  static String againLine(String id, ReelCardData card) {
+    final last = card.facts.seen.last;
+    return [
+      '$id: ${card.title.title}${card.best.year == null ? '' : ' (${card.best.year})'}',
+      'show',
+      if (card.facts.genres.isNotEmpty) card.facts.genres.take(3).join('/'),
+      card.facts.modelLine(),
+      ?card.facts.lengthLine(),
+      if (card.title.anime) 'anime',
+      if (last != null) 'last watched ${SeenState.monthName(last.month)} ${last.year}',
+    ].join(' · ');
+  }
+
+  /// Keeps the call's `another_go` order (known `g` ids only, each once)
+  /// as today's [againKey]; nothing is kept when it gave none.
+  Future<void> _keepAgain(Object? ids, Map<String, ReelCardData> againOf, DateTime now) async {
+    if (ids is! List) return;
+    final used = <String>{};
+    final rows = [
+      for (final id in ids)
+        if (againOf['$id'] case final card? when used.add('$id'))
+          {'id': card.id, 'sv': card.best.serverId, 'rk': card.best.ratingKey},
+    ];
+    if (rows.isEmpty) return;
+    await store.cache(againKey(now), jsonEncode(rows));
+  }
+
+  /// Today's kept `another_go` rows, for the shared pool; null when none.
+  Future<List<Object?>?> _againRows(DateTime now) async {
+    final raw = await store.cached(againKey(now));
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw);
+      return j is List && j.isNotEmpty ? j : null;
+    } catch (_) {
       return null;
     }
   }
@@ -408,7 +508,8 @@ Choose about $target candidates and put them in the order you think they would m
 - why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence (a "similar to …" title, "similar to recent plays …" or "similar to Reel Saves …" title, "from their ask …" or "from the suggested list …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
 - anchor: the exact evidence title, ask or list your why line names.
 - cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.
-- hook: optional, at most ${ReelPremise.hookWords} words: what the title is about, for someone deciding whether to watch it. Write it only from that candidate's own "premise:" text, never from memory, and leave it out when the candidate has none. It is shown on screen, so it must not spoil: only the opening setup, never a twist, a death, an ending or who did it. No ratings or praise words.''';
+- hook: optional, at most ${ReelPremise.hookWords} words: what the title is about, for someone deciding whether to watch it. Write it only from that candidate's own "premise:" text, never from memory, and leave it out when the candidate has none. It is shown on screen, so it must not spoil: only the opening setup, never a twist, a death, an ending or who did it. No ratings or praise words.
+- another_go: optional, only when there is an "Another go" list. Those are shows they started and left: "sampled" (an episode or two, long ago) or "paused" (not watched for two to six months). Give the ids (g1, g2, …) of the ones worth another go today, in the order you would offer them, and leave out any their history says they gave up on for good. They are a separate deck: never put a g id in cards.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'reel_pool',
@@ -432,6 +533,11 @@ Choose about $target candidates and put them in the order you think they would m
             },
             'required': ['id', 'cluster'],
           },
+        },
+        'another_go': {
+          'type': 'array',
+          'description': 'Ids from the "Another go" list (e.g. g3), in the order to offer them; optional',
+          'items': {'type': 'string'},
         },
       },
       'required': ['cards'],

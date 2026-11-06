@@ -190,6 +190,21 @@ ReelCardData _card(String id) => ReelCardData(
   best: _copy(id),
 );
 
+/// A Give it another go card: Watch resumes the show.
+ReelCardData _resumeCard(String id) {
+  final c = _card(id);
+  return ReelCardData(title: c.title, facts: c.facts, best: c.best, resume: true);
+}
+
+/// The next episode the server has on deck for a show.
+MediaItem _episode(String show, {required int season, required int number}) => MediaItem.plex(
+  id: 'e$show',
+  kind: MediaKind.episode,
+  title: 'Harbor Lights $number',
+  parentIndex: season,
+  index: number,
+);
+
 void main() {
   late ForkDatabase db;
   late ReelStore store;
@@ -208,6 +223,7 @@ void main() {
     ReelWatchlist? addToWatchlist,
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
+    ReelItemWithNext? itemWithNext,
   }) => ReelController(
     decks:
         decks ??
@@ -234,6 +250,7 @@ void main() {
     reachesTvNow: reachesTvNow,
     externalClips: externalClips,
     memoryRestored: memoryRestored,
+    itemWithNext: itemWithNext,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -253,6 +270,56 @@ void main() {
 
   tearDown(() async {
     await db.close();
+  });
+
+  group('Give it another go', () {
+    test("a resume card's one metadata read brings its next episode, and Watch names it", () async {
+      final asked = <String>[];
+      final c = make(
+        decks: [
+          _Deck('a', [_resumeCard('1'), _card('2'), _resumeCard('3')]),
+        ],
+        itemWithNext: (serverId, ratingKey) async {
+          asked.add(ratingKey);
+          return (
+            item: await _Media().item(serverId, ratingKey),
+            next: ratingKey == '1' ? _episode('1', season: 1, number: 4) : _episode('3', season: 2, number: 3),
+          );
+        },
+      );
+      await c.start();
+      expect(c.current.item?.id, '1');
+      expect(c.current.resumeEpisode, 'E4');
+      await c.step(1);
+      expect(c.current.resumeEpisode, isNull, reason: 'not a resume card: Watch reads as usual');
+      await c.step(1);
+      expect(c.current.resumeEpisode, 'S2 E3');
+      expect(asked.toSet(), {'1', '3'}, reason: 'other cards read their metadata as before');
+      c.dispose();
+    });
+
+    test('with no next-episode read, or none on deck, a resume card reads Watch', () async {
+      final plain = make(
+        decks: [
+          _Deck('a', [_resumeCard('1')]),
+        ],
+      );
+      await plain.start();
+      expect(plain.current.item?.id, '1');
+      expect(plain.current.resumeEpisode, isNull);
+      plain.dispose();
+
+      final noneOnDeck = make(
+        decks: [
+          _Deck('a', [_resumeCard('1')]),
+        ],
+        itemWithNext: (serverId, ratingKey) async => (item: await _Media().item(serverId, ratingKey), next: null),
+      );
+      await noneOnDeck.start();
+      expect(noneOnDeck.current.item?.id, '1');
+      expect(noneOnDeck.current.resumeEpisode, isNull);
+      noneOnDeck.dispose();
+    });
   });
 
   test('the first card plays its trailer and the next one is preloaded', () async {

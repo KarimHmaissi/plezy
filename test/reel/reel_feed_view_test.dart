@@ -75,7 +75,7 @@ class _Deck extends ReelDeck {
   Future<List<ReelCardData>> load() async => [for (final i in ids) special[i] ?? _card(i)];
 }
 
-ReelCardData _card(String id, {String? hook, SeenState seen = SeenState.unseen}) => ReelCardData(
+ReelCardData _card(String id, {String? hook, SeenState seen = SeenState.unseen, bool resume = false}) => ReelCardData(
   title: ReelTitle(
     titleId: 't$id',
     groupKey: 'g$id',
@@ -107,6 +107,7 @@ ReelCardData _card(String id, {String? hook, SeenState seen = SeenState.unseen})
   ),
   why: 'Like the films you finish.',
   hook: hook,
+  resume: resume,
 );
 
 /// A player that is ready as soon as it opens.
@@ -176,6 +177,17 @@ void main() {
       externalClips: true,
       memoryRestored: restored,
       onOpen: (item) async => opened.add(item),
+      // A resume card's show has its fourth episode on deck.
+      itemWithNext: (serverId, ratingKey) async => (
+        item: await _Media().item(serverId, ratingKey),
+        next: MediaItem.plex(
+          id: 'e$ratingKey',
+          kind: MediaKind.episode,
+          title: 'Harbor Lights 4',
+          parentIndex: 1,
+          index: 4,
+        ),
+      ),
     );
     players = ReelFeedPlayers(create: (_) => _Video());
   });
@@ -342,6 +354,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('A lamp, a harbor and one long night'), findsOneWidget);
       expect(find.text(premise), findsNothing);
+    });
+
+    testWidgets('a Give it another go card reads Resume with its next episode', (tester) async {
+      first.special['1'] = _card('1', seen: const SeenState(kind: SeenKind.paused, eps: 3, total: 10), resume: true);
+      await pump(tester);
+      expect(find.text('Resume E4'), findsOneWidget);
+      expect(find.text('Started'), findsOneWidget);
     });
 
     testWidgets('a deck that keeps seen titles shows the seen badge', (tester) async {

@@ -31,11 +31,15 @@ typedef ReelWatch = Future<bool> Function(MediaItem item, {required bool onTv});
 /// Adds a title to the Plex watchlist (Save's mirror).
 typedef ReelWatchlist = Future<bool> Function(MediaItem item);
 
+/// A show's metadata and its next episode (the server's on-deck episode,
+/// the one Watch plays) from the card's one metadata read.
+typedef ReelItemWithNext = Future<({MediaItem? item, MediaItem? next})> Function(String serverId, String ratingKey);
+
 enum ReelSlotKind { card, poolEnd, empty, loading }
 
 /// A card as the views draw it.
 class ReelSlot {
-  const ReelSlot._(this.kind, {this.card, this.item, this.clip, this.resolved = false});
+  const ReelSlot._(this.kind, {this.card, this.item, this.clip, this.next, this.resolved = false});
 
   const ReelSlot.loading() : this._(ReelSlotKind.loading);
   const ReelSlot.poolEnd() : this._(ReelSlotKind.poolEnd);
@@ -46,10 +50,24 @@ class ReelSlot {
   final MediaItem? item;
   final ResolvedClip? clip;
 
+  /// A [ReelCardData.resume] card's next episode, once its metadata landed.
+  final MediaItem? next;
+
   /// The clip ladder ran (a null [clip] then means an AI card).
   final bool resolved;
 
   bool get isAiCard => resolved && clip == null;
+
+  /// The episode Watch resumes, for its label: "E4", or "S2 E3" past
+  /// season 1. Null when the card isn't a resume card or the episode isn't
+  /// known (Watch then reads as usual).
+  String? get resumeEpisode {
+    final e = next;
+    final n = e?.index;
+    if (card?.resume != true || e == null || n == null) return null;
+    final season = e.parentIndex;
+    return season == null || season <= 1 ? 'E$n' : 'S$season E$n';
+  }
 }
 
 /// The Reel's session: decks, the card cursor, resolving two cards ahead and
@@ -70,6 +88,7 @@ class ReelController extends ChangeNotifier {
     this.onOpen,
     this.externalClips = false,
     this.memoryRestored,
+    this.itemWithNext,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
@@ -109,6 +128,10 @@ class ReelController extends ChangeNotifier {
   /// degrade ladder back to 0.
   final Listenable? memoryRestored;
 
+  /// A [ReelCardData.resume] card's metadata read: the item and its next
+  /// episode in one request. Null: such cards read [ReelMedia.item].
+  final ReelItemWithNext? itemWithNext;
+
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
   final Future<ReelDeck?> Function(String id)? deckFor;
@@ -146,6 +169,7 @@ class ReelController extends ChangeNotifier {
   final Map<String, ResolvedClip?> _clip = {};
   final Set<String> _resolved = {};
   final Map<String, MediaItem?> _item = {};
+  final Map<String, MediaItem?> _next = {};
   final Map<String, Future<void>> _resolving = {};
   bool _active = false;
   bool _firstClip = true;
@@ -199,6 +223,7 @@ class ReelController extends ChangeNotifier {
       card: c,
       item: _item[c.id],
       clip: _clip[c.id],
+      next: _next[c.id],
       resolved: _resolved.contains(c.id),
     );
   }
@@ -397,10 +422,7 @@ class ReelController extends ChangeNotifier {
   /// Resolves (metadata + clip) a card once; the views redraw when it lands.
   Future<void> _resolve(ReelCardData c) => _resolving[c.id] ??= () async {
     try {
-      final (item, clip) = await (
-        media.item(c.best.serverId, c.best.ratingKey).catchError((Object _) => null),
-        resolver.resolve(c.title),
-      ).wait;
+      final (item, clip) = await (_metadata(c).catchError((Object _) => null), resolver.resolve(c.title)).wait;
       _item[c.id] = item;
       _clip[c.id] = clip;
     } catch (e) {
@@ -411,6 +433,15 @@ class ReelController extends ChangeNotifier {
       notifyListeners();
     }
   }();
+
+  /// A card's metadata; a resume card's next episode comes with it.
+  Future<MediaItem?> _metadata(ReelCardData c) async {
+    final withNext = itemWithNext;
+    if (!c.resume || withNext == null) return media.item(c.best.serverId, c.best.ratingKey);
+    final r = await withNext(c.best.serverId, c.best.ratingKey);
+    _next[c.id] = r.next;
+    return r.item;
+  }
 
   Future<void> _show({int direction = 1}) async {
     if (_disposed) return;

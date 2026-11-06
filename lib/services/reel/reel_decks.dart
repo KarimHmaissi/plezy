@@ -99,6 +99,7 @@ class ForYouDeck extends ReelDeck {
     required this.library,
     required this.candidates,
     required this.facts,
+    this.again,
     Listenable? sharedChanges,
   }) {
     _rebuilt = _PoolRebuilt(sharedChanges, () => unawaited(_onSharedChange()));
@@ -108,8 +109,13 @@ class ForYouDeck extends ReelDeck {
   final ReelLibrary library;
   final Future<List<PoolCandidate>> Function() candidates;
   final Future<String> Function() facts;
+
+  /// The shows they started and left ([anotherGoCandidates]): the same
+  /// daily build orders them for [AnotherGoDeck]. Null: no such deck.
+  final Future<List<PoolCandidate>> Function()? again;
   Future<void>? _building;
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
+  ({String day, Future<List<PoolCandidate>> list})? _again;
 
   /// The shared pool's day as last seen, so only a new one fires [rebuilt].
   String? _sharedDay;
@@ -133,7 +139,7 @@ class ForYouDeck extends ReelDeck {
   Future<List<ReelCardData>> load() async {
     _sharedDay = (await pool.shared())?.day;
     final cached = await pool.cachedPool();
-    if (await pool.shouldBuild()) _building ??= _buildToday();
+    await buildIfDue();
     if (cached != null && cached.isNotEmpty) return library.cards(cached);
     return worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
   }
@@ -173,6 +179,29 @@ class ForYouDeck extends ReelDeck {
     return list;
   }
 
+  /// [again], gathered once a day: [AnotherGoDeck]'s code order and the
+  /// build share it. A failed gather is an empty list and isn't kept.
+  Future<List<PoolCandidate>> todaysAgain() {
+    final gather = again;
+    if (gather == null) return Future.value(const []);
+    final day = pool.today();
+    final have = _again;
+    if (have != null && have.day == day) return have.list;
+    final list = gather().catchError((Object e) {
+      appLogger.d('Reel: another-go gather failed', error: e);
+      if (_again?.day == day) _again = null;
+      return const <PoolCandidate>[];
+    });
+    _again = (day: day, list: list);
+    return list;
+  }
+
+  /// Starts today's build when it is due (the first Reel open of the day,
+  /// on whichever of its decks it opens).
+  Future<void> buildIfDue() async {
+    if (await pool.shouldBuild()) _building ??= _buildToday();
+  }
+
   /// Today's gather, when the Reel will need it: started when today's build
   /// is due, or joined when already running. Completes when the gather (the
   /// brain's similarity reads among it) is done, so the app can wait for it
@@ -183,7 +212,7 @@ class ForYouDeck extends ReelDeck {
       if (have == null || have.day != pool.today()) {
         if (!await pool.shouldBuild()) return;
       }
-      await _todaysCandidates();
+      await (_todaysCandidates(), todaysAgain()).wait;
     } catch (e) {
       appLogger.d('Reel: For You gather failed', error: e);
     }
@@ -218,7 +247,7 @@ class ForYouDeck extends ReelDeck {
   /// once the TV's shared pool is stale); nothing schedules it.
   Future<void> _buildToday() async {
     try {
-      final built = await pool.build(await _todaysCandidates(), facts: await facts());
+      final built = await pool.build(await _todaysCandidates(), facts: await facts(), again: await todaysAgain());
       if (built != null) _rebuilt.bump();
     } catch (e) {
       appLogger.w('Reel: For You build failed', error: e);
@@ -284,6 +313,104 @@ class FitsTonightDeck extends ReelDeck {
     if (f.isShow) return m <= fitsTonightEpisodeMinutes ? '${m}m episodes' : null;
     return m <= fitsTonightFilmMinutes ? f.lengthLine() : null;
   }
+}
+
+/// Give it another go: shows they started and left, sampled (an episode or
+/// two, long ago) or paused (not watched for two to six months), seen ones
+/// kept and badged. Never a Kids title. Ordered by the daily build's
+/// optional `another_go` array (the For You call; no call of its own), else
+/// in code order ([anotherGoCandidates]). A show they have since picked up
+/// again, finished or dropped leaves the deck on its next load. Watch plays
+/// the show's next episode and reads "Resume E4" ([ReelCardData.resume]).
+/// Clips stay season 1's, as for every show (ClipFilter.showTrailer and
+/// AnimeThemes OP1). It follows For You's day and fresh builds.
+class AnotherGoDeck extends ReelDeck {
+  AnotherGoDeck({required this.forYou, required this.library});
+
+  final ForYouDeck forYou;
+  final ReelLibrary library;
+
+  @override
+  String get id => 'another-go';
+  @override
+  String get name => 'Give it another go';
+  @override
+  bool get keepsSeen => true;
+  @override
+  bool get daily => true;
+  @override
+  Listenable get rebuilt => forYou.rebuilt;
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    final ordered = await forYou.pool.cachedAgain();
+    // The first Reel open of the day may land here: it starts today's build
+    // (which orders this deck too) without waiting for it.
+    try {
+      await forYou.buildIfDue();
+    } catch (e) {
+      appLogger.d('Reel: build check failed', error: e);
+    }
+    final entries = ordered != null && ordered.isNotEmpty
+        ? ordered
+        : [for (final c in await forYou.todaysAgain()) c.entry];
+    return [
+      for (final c in await library.cards(entries))
+        if (fits(c.facts))
+          ReelCardData(
+            title: c.title,
+            facts: c.facts,
+            best: c.best,
+            chip: c.chip,
+            why: c.why,
+            cluster: c.cluster,
+            hook: c.hook,
+            resume: true,
+          ),
+    ];
+  }
+
+  /// A show in no Kids library, sampled or paused by its merged seen state.
+  static bool fits(TitleFacts f) =>
+      f.isShow && !f.inKidsLibrary && (f.seen.kind == SeenKind.sampled || f.seen.kind == SeenKind.paused);
+}
+
+/// The shows [AnotherGoDeck] offers, in code order: paused before sampled,
+/// the newest last watch first within each, at most [ReelPool.maxAgain].
+/// Facts only (from the brain's watched shows on the servers, checked
+/// against each card's merged seen state); not resting after Not for me.
+Future<List<PoolCandidate>> anotherGoCandidates({
+  required ReelLibrary library,
+  required ReelStore store,
+  HistoryBrain? brain,
+}) async {
+  final b = brain ?? HistoryBrain.instance;
+  final entries = [
+    for (final p in await b.watchedProfiles())
+      if (!p.isMovie && p.inLibrary && p.serverId != null && p.ratingKey != null)
+        DeckEntry(serverId: p.serverId, ratingKey: p.ratingKey, isShow: true),
+  ];
+  final excluded = await store.excluded();
+  final cards = [
+    for (final c in await library.cards(entries))
+      if (AnotherGoDeck.fits(c.facts) && !excluded.contains(c.id)) c,
+  ];
+  int rank(ReelCardData c) => c.facts.seen.kind == SeenKind.paused ? 0 : 1;
+  cards.sort((a, b) {
+    final r = rank(a).compareTo(rank(b));
+    if (r != 0) return r;
+    final la = a.facts.seen.last, lb = b.facts.seen.last;
+    if (la == null || lb == null) return la == null ? (lb == null ? 0 : 1) : -1;
+    return lb.compareTo(la);
+  });
+  return [
+    for (final c in cards.take(ReelPool.maxAgain))
+      PoolCandidate(
+        entry: DeckEntry(serverId: c.best.serverId, ratingKey: c.best.ratingKey),
+        titleId: c.id,
+        score: 0,
+      ),
+  ];
 }
 
 /// [ForYouDeck.rebuilt]: its own bumps, plus [source] (the synced data

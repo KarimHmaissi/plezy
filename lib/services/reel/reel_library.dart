@@ -54,6 +54,7 @@ class ReelCardData {
     this.why,
     this.cluster,
     this.hook,
+    this.resume = false,
   });
 
   final ReelTitle title;
@@ -68,6 +69,10 @@ class ReelCardData {
 
   /// What it is about, in a line (the daily build's, For You only).
   final String? hook;
+
+  /// A show taken up again (Give it another go): its card reads the next
+  /// episode with its metadata, and Watch says which ("Resume E4").
+  final bool resume;
 
   String get id => title.titleId;
 }

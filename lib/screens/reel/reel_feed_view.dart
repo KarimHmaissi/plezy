@@ -537,7 +537,12 @@ class _Info extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: onWatch,
                       icon: Icon(watchOnTv ? Symbols.tv_rounded : Symbols.play_arrow_rounded, fill: 1),
-                      label: Text(watchOnTv ? 'Watch on TV' : 'Watch', maxLines: 1),
+                      label: Text(
+                        watchOnTv
+                            ? 'Watch on TV'
+                            : (slot.resumeEpisode == null ? 'Watch' : 'Resume ${slot.resumeEpisode}'),
+                        maxLines: 1,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
