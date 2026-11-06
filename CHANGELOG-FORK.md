@@ -103,42 +103,6 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
-## 2026-11-04
-
-### Release builds no longer crash when the AI brain runs
-- R8 renamed ONNX Runtime's Java classes, which its native library finds by
-  name, so release builds aborted on the first embedding ("JNI DETECTED
-  ERROR … java_class == null in call to GetMethodID"). `proguard-rules.pro`
-  now keeps `ai.onnxruntime.**`. Debug and profile builds were never
-  affected (not minified).
-- The Shield and phone now run release builds (debug-key signed by
-  `tools/shield-install.sh`): first frame in about 0.6 s on the Shield
-  instead of about 2.5 s for a profile build.
-
-### Phone and TV catch up with each other on connecting
-- A phone working on its own data (the default) now swaps changes with the
-  TV whenever it connects through Companion Remote, and again after any
-  change while they stay connected. Home rows, Comfort pauses, the
-  Shortlist, AI answers and lists, and the AI and other fork settings all
-  travel; the newest edit of each piece wins wherever it was made, and a
-  removed AI answer is removed on the other device too. Both screens show
-  "Synced with <device>" when something moved.
-- Never synced: the API key (kept in secure storage, not this data), each
-  device's AI spend, the AI answer order (rebuilt newest first after a
-  sync), and caches.
-- Each piece now records when it last changed (new `sync_stamps` table in
-  the fork database, schema 2); data from before counts as the oldest
-  possible change, so a device with nothing takes it and any edit beats it.
-- New Companion Remote commands `catchUpOffer` / `catchUpReply` /
-  `catchUpPush` / `catchUpNudge`, appended so older builds ignore them.
-
-### The Shield hosts the companion remote out of the box
-- Phones on the same Plex account now find the Shield in Companion Remote
-  without turning anything on: "Companion Remote Server" defaults to on for
-  TVs as well as desktops (it was desktop-only, so the Shield never
-  advertised itself). An explicit off in Settings still wins.
-- Plezy now runs on the real Shield as a profile build (over Wi-Fi
-  adb); startup about 3.4 s vs about 7.6 s for a debug build.
 ## 2026-11-05
 
 ### Watch Next row on the Shield's home works again (A1)
@@ -252,6 +216,42 @@ Details of each are in the dated entries below.
   row stays short. Nothing it leaves out is remembered: a title skipped
   today can be picked tomorrow.
 
+## 2026-11-04
+
+### Release builds no longer crash when the AI brain runs
+- R8 renamed ONNX Runtime's Java classes, which its native library finds by
+  name, so release builds aborted on the first embedding ("JNI DETECTED
+  ERROR … java_class == null in call to GetMethodID"). `proguard-rules.pro`
+  now keeps `ai.onnxruntime.**`. Debug and profile builds were never
+  affected (not minified).
+- The Shield and phone now run release builds (debug-key signed by
+  `tools/shield-install.sh`): first frame in about 0.6 s on the Shield
+  instead of about 2.5 s for a profile build.
+
+### Phone and TV catch up with each other on connecting
+- A phone working on its own data (the default) now swaps changes with the
+  TV whenever it connects through Companion Remote, and again after any
+  change while they stay connected. Home rows, Comfort pauses, the
+  Shortlist, AI answers and lists, and the AI and other fork settings all
+  travel; the newest edit of each piece wins wherever it was made, and a
+  removed AI answer is removed on the other device too. Both screens show
+  "Synced with <device>" when something moved.
+- Never synced: the API key (kept in secure storage, not this data), each
+  device's AI spend, the AI answer order (rebuilt newest first after a
+  sync), and caches.
+- Each piece now records when it last changed (new `sync_stamps` table in
+  the fork database, schema 2); data from before counts as the oldest
+  possible change, so a device with nothing takes it and any edit beats it.
+- New Companion Remote commands `catchUpOffer` / `catchUpReply` /
+  `catchUpPush` / `catchUpNudge`, appended so older builds ignore them.
+
+### The Shield hosts the companion remote out of the box
+- Phones on the same Plex account now find the Shield in Companion Remote
+  without turning anything on: "Companion Remote Server" defaults to on for
+  TVs as well as desktops (it was desktop-only, so the Shield never
+  advertised itself). An explicit off in Settings still wins.
+- Plezy now runs on the real Shield as a profile build (over Wi-Fi
+  adb); startup about 3.4 s vs about 7.6 s for a debug build.
 ## 2026-11-03
 
 ### Better Tonight and Suggested picks (Sonnet chooses)
