@@ -15,7 +15,9 @@ import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
+import '../../services/reel/feed_players.dart';
 import 'reel_card_view.dart';
+import 'reel_feed_view.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
 
@@ -75,8 +77,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   String? _pendingDeck;
   final FocusNode _focus = FocusNode(debugLabel: 'reel');
   final DpadSelectLongPressController _longPress = DpadSelectLongPressController();
-  final PageController _pages = PageController();
   bool _sheetOpen = false;
+
+  /// Phone: the feed's players (the TV plays on the native clip core).
+  late final ReelFeedPlayers _players = ReelFeedPlayers(onLooped: (_) => _controller?.clipEnded());
 
   bool get _isTv => PlatformDetector.isTV();
 
@@ -106,7 +110,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _controller?.dispose();
     _focus.dispose();
     _longPress.dispose();
-    _pages.dispose();
+    _players.dispose();
     super.dispose();
   }
 
@@ -131,12 +135,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   }
 
   void _onChanged() {
-    if (!mounted) return;
-    final c = _controller;
-    if (c != null && !_isTv && _pages.hasClients && _pages.page?.round() != c.index) {
-      _pages.jumpToPage(c.index);
-    }
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   /// Opens a deck (deep link `plezy://reel?deck=…`, Reel it, On TV mode).
@@ -194,6 +193,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _shown = false;
     ReelScreen.showing.value = false;
     unawaited(_controller?.suspend());
+    unawaited(_players.releaseAll());
   }
 
   @override
@@ -206,6 +206,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (!_shown) return;
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       unawaited(_controller?.suspend());
+      unawaited(_players.releaseAll());
     } else if (state == AppLifecycleState.resumed) {
       unawaited(_start());
     }
@@ -215,6 +216,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final c = _controller;
     if (c == null) return;
     ReelScreen.showing.value = false;
+    // Two decoders never run at once: the feed lets go before real playback.
+    if (!onTv) await _players.releaseAll();
     final ok = await c.watch(onTv: onTv);
     // Back from the player: the shell's didPopNext shows the tab again,
     // which restarts the card (onTabShown). Casting never left the Reel.
@@ -246,6 +249,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         await c.spoiledMe();
       case ReelSheetAction.seenIt:
         await c.seenIt();
+      case ReelSheetAction.details:
+        await c.openDetails();
       case ReelSheetAction.deck:
         break;
       case null:
@@ -327,51 +332,15 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   );
 
   Widget _phone(ReelController c) {
-    final list = c.cards;
-    final count = list == null ? 1 : list.length + 1;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        NotificationListener<ScrollNotification>(
-          onNotification: (n) {
-            // The native surface can't slide with the page: hide it while a
-            // card is dragged; the next clip shows when the page settles.
-            if (n is ScrollStartNotification && n.dragDetails != null) unawaited(c.clips.setVisible(false));
-            if (n is ScrollEndNotification) unawaited(c.clips.setVisible(true));
-            return false;
-          },
-          child: PageView.builder(
-            controller: _pages,
-            scrollDirection: Axis.vertical,
-            itemCount: count,
-            onPageChanged: (i) => unawaited(c.step(i - c.index)),
-            itemBuilder: (context, i) => GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => unawaited(c.clips.muted ? c.setMuted(false) : c.togglePause()),
-              onDoubleTap: () {
-                HapticFeedback.mediumImpact();
-                unawaited(c.save());
-              },
-              onLongPress: () => unawaited(_openSheet()),
-              onHorizontalDragEnd: (d) {
-                final v = d.primaryVelocity ?? 0;
-                if (v.abs() > 300) unawaited(c.switchDeck(v < 0 ? 1 : -1));
-              },
-              child: ReelCardView(
-                controller: c,
-                slot: c.slotAt(i),
-                tv: false,
-                onReplay: c.replay,
-                onWatch: () => unawaited(_watch(onTv: true)),
-                onSave: () => unawaited(c.save()),
-                onRemote: _remoteMode(),
-              ),
-            ),
-          ),
-        ),
-        ReelDeckChips(controller: c),
-        ReelDeckStrip(controller: c),
-      ],
+    final onTv = _remoteMode() != null;
+    return ReelFeedView(
+      controller: c,
+      players: _players,
+      watchOnTv: onTv,
+      onWatch: () => unawaited(_watch(onTv: onTv)),
+      onSheet: () => unawaited(_openSheet()),
+      onDecks: () => unawaited(showReelDeckPicker(context, c)),
+      onRemote: _remoteMode(),
     );
   }
 }

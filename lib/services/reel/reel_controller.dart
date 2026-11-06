@@ -62,6 +62,8 @@ class ReelController extends ChangeNotifier {
     required this.addToWatchlist,
     this.onSaved,
     this.deckFor,
+    this.onOpen,
+    this.externalClips = false,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -75,6 +77,16 @@ class ReelController extends ChangeNotifier {
 
   /// After a Save: seats the Home row the first time (ReelApp).
   final Future<void> Function()? onSaved;
+
+  /// Opens the title's own page (the app's detail screen).
+  final Future<void> Function(MediaItem item)? onOpen;
+
+  /// Phone: the feed plays each card in its own page ([ReelFeedPlayers]),
+  /// so the controller keeps the cursor, resolving and signals but never
+  /// drives [clips]. It also never skips past a clip-less card: in a feed
+  /// you swipe through, a card that jumps away under your thumb is worse
+  /// than a still.
+  final bool externalClips;
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -101,6 +113,7 @@ class ReelController extends ChangeNotifier {
   final Map<String, Future<void>> _resolving = {};
   bool _active = false;
   bool _firstClip = true;
+  bool _clipEnded = false;
   DateTime? _cardSince;
   String? _cardShown;
   int _sinceAiCard = 99;
@@ -268,7 +281,7 @@ class ReelController extends ChangeNotifier {
     cardChanged.value++;
     final list = cards;
     if (list == null || index >= list.length) {
-      await clips.pause();
+      if (!externalClips) await clips.pause();
       return;
     }
     final c = list[index];
@@ -276,14 +289,21 @@ class ReelController extends ChangeNotifier {
     if (gen != _generation || !_active) return;
     // An AI card only with room (at most 1 in 6); otherwise the title waits
     // for another day and the feed moves on.
-    if (_clip[c.id] == null && _sinceAiCard < 6 && index + direction >= 0 && index + direction <= list.length) {
+    if (!externalClips &&
+        _clip[c.id] == null &&
+        _sinceAiCard < 6 &&
+        index + direction >= 0 &&
+        index + direction <= list.length) {
       _cursor[deck.id] = index + (direction == 0 ? 1 : direction);
       return _show(direction: direction == 0 ? 1 : direction);
     }
     _cardSince = _clock();
     _cardShown = c.id;
+    _clipEnded = false;
     final clip = _clip[c.id];
-    if (clip == null) {
+    if (externalClips) {
+      // The feed plays it; only the two ahead need resolving.
+    } else if (clip == null) {
       _sinceAiCard = 0;
       await clips.pause();
     } else if (memoryLevel >= 2) {
@@ -300,7 +320,7 @@ class ReelController extends ChangeNotifier {
       if (j >= 0 && j < list.length) unawaited(_resolve(list[j]));
     }
     final ahead = index + (direction < 0 ? -1 : 1);
-    if (memoryLevel == 0 && ahead >= 0 && ahead < list.length) {
+    if (!externalClips && memoryLevel == 0 && ahead >= 0 && ahead < list.length) {
       final next = list[ahead];
       unawaited(
         _resolve(next).then((_) {
@@ -319,7 +339,7 @@ class ReelController extends ChangeNotifier {
     if (id == null || since == null) return;
     final secs = _clock().difference(since).inMilliseconds / 1000;
     final deckId = deck.id;
-    if (clips.phase.value == ClipPhase.held) {
+    if (clips.phase.value == ClipPhase.held || _clipEnded) {
       await store.record(id, ReelAction.toEnd, deck: deckId, seconds: secs.round());
     } else if (secs < 2) {
       await store.record(id, ReelAction.quickSkip, deck: deckId);
@@ -420,6 +440,21 @@ class ReelController extends ChangeNotifier {
     for (final e in _cards.entries) {
       if (e.value.any((x) => x.id == c.id)) _cards[e.key] = [...e.value]..removeWhere((x) => x.id == c.id);
     }
+  }
+
+  /// Phone feed: the current card's clip played through once.
+  void clipEnded() => _clipEnded = true;
+
+  /// The title's own page.
+  Future<void> openDetails() async {
+    final s = current;
+    final c = s.card;
+    final open = onOpen;
+    if (c == null || open == null) return;
+    final item = s.item ?? await media.item(c.best.serverId, c.best.ratingKey);
+    if (item == null) return;
+    await store.record(c.id, ReelAction.details, deck: deck.id);
+    await open(item);
   }
 
   Future<void> togglePause() => clips.togglePause();

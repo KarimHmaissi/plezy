@@ -13,8 +13,10 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../screens/media_detail_screen.dart';
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
+import '../utils/platform_detector.dart';
 import '../utils/video_player_navigation.dart';
 import 'ai/ai_history.dart';
 import 'ai/ai_key_store.dart';
@@ -134,6 +136,13 @@ abstract final class ReelApp {
         return mutateWatchlistMembership(item.kind, plex, add: true);
       },
       onSaved: _seatHomeRow,
+      // The phone's feed plays each card in its own page; the TV keeps the
+      // native clip core.
+      externalClips: !PlatformDetector.isTV(),
+      onOpen: (item) async {
+        if (!navigatorContext.mounted) return;
+        await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
+      },
       deckFor: (id) async {
         if (!id.startsWith('ai:')) return null;
         final entry = await AiHistory.get(id.substring(3));

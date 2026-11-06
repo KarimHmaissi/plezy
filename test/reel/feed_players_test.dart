@@ -1,0 +1,166 @@
+import 'package:flutter/widgets.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:plezy/services/reel/feed_players.dart';
+
+/// A player that opens at once and remembers what was asked of it.
+class _FakeVideo extends ChangeNotifier implements FeedVideo {
+  _FakeVideo(this.uri);
+
+  final Uri uri;
+  final calls = <String>[];
+  bool _ready = false;
+  bool _playing = false;
+  bool disposed = false;
+  Duration _position = Duration.zero;
+
+  @override
+  bool get ready => _ready;
+  @override
+  bool get failed => false;
+  @override
+  double get aspectRatio => 16 / 9;
+  @override
+  Duration get position => _position;
+  @override
+  Duration get duration => const Duration(seconds: 90);
+  @override
+  bool get playing => _playing;
+
+  @override
+  Future<void> initialize() async {
+    calls.add('init');
+    _ready = true;
+  }
+
+  @override
+  Future<void> play() async {
+    calls.add('play');
+    _playing = true;
+  }
+
+  @override
+  Future<void> pause() async {
+    calls.add('pause');
+    _playing = false;
+  }
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    calls.add('seek ${position.inSeconds}');
+    _position = position;
+  }
+
+  @override
+  Future<void> setVolume(double volume) async => calls.add('volume $volume');
+
+  void tick(Duration to) {
+    _position = to;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposed = true;
+    super.dispose();
+  }
+
+  @override
+  Widget view() => const SizedBox();
+}
+
+FeedClip _clip(String id) => (id: id, uri: Uri.parse('https://cdn.example/$id.mp4'));
+
+Future<void> _settle() async {
+  for (var i = 0; i < 10; i++) {
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
+void main() {
+  late Map<String, _FakeVideo> made;
+  late List<String> looped;
+  late ReelFeedPlayers players;
+
+  setUp(() {
+    made = {};
+    looped = [];
+    players = ReelFeedPlayers(
+      create: (uri) => made[uri.pathSegments.last.split('.').first] = _FakeVideo(uri),
+      onLooped: looped.add,
+    );
+  });
+
+  tearDown(() => players.dispose());
+
+  test('the card on screen plays; the next ones open and wait on their first frame', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    await _settle();
+    expect(made.keys, ['a', 'b', 'c']);
+    expect(made['a']!.playing, isTrue);
+    expect(made['b']!.ready, isTrue);
+    expect(made['b']!.playing, isFalse);
+    expect(made['c']!.calls, isNot(contains('play')));
+    expect(players.videoFor('b'), isNotNull, reason: 'the next page already has a picture');
+  });
+
+  test('a swipe plays the parked player at once and rewinds the one left behind', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    await _settle();
+    made['a']!.tick(const Duration(seconds: 12));
+    players.sync(current: 'b', window: [_clip('b'), _clip('c'), _clip('d'), _clip('a')]);
+    await _settle();
+    expect(made['b']!.playing, isTrue);
+    expect(made['b']!.calls.where((c) => c == 'init'), hasLength(1), reason: 'not opened again');
+    expect(made['a']!.playing, isFalse);
+    expect(made['a']!.position, Duration.zero);
+    expect(made.keys, contains('d'));
+  });
+
+  test('players that leave the window are disposed', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')]);
+    await _settle();
+    players.sync(current: 'c', window: [_clip('c'), _clip('d'), _clip('e'), _clip('b')]);
+    await _settle();
+    expect(made['a']!.disposed, isTrue);
+    expect(players.held.toSet(), {'b', 'c', 'd', 'e'});
+  });
+
+  test('memory pressure keeps only the card on screen, then none', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')], memoryLevel: 1);
+    await _settle();
+    expect(players.held, ['a']);
+    players.sync(current: 'a', window: [_clip('a'), _clip('b'), _clip('c')], memoryLevel: 2);
+    await _settle();
+    expect(players.held, isEmpty);
+    expect(made['a']!.disposed, isTrue);
+  });
+
+  test('a tap pauses and resumes; mute reaches every player', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    await _settle();
+    await players.togglePause();
+    expect(made['a']!.playing, isFalse);
+    expect(players.paused, isTrue);
+    await players.togglePause();
+    expect(made['a']!.playing, isTrue);
+    await players.setMuted(true);
+    expect(made['a']!.calls.last, 'volume 0.0');
+    expect(made['b']!.calls.last, 'volume 0.0');
+  });
+
+  test('a loop back to the start counts as one play-through', () async {
+    players.sync(current: 'a', window: [_clip('a')]);
+    await _settle();
+    made['a']!.tick(const Duration(seconds: 80));
+    made['a']!.tick(const Duration(milliseconds: 200));
+    expect(looped, ['a']);
+  });
+
+  test('before real playback every decoder is let go', () async {
+    players.sync(current: 'a', window: [_clip('a'), _clip('b')]);
+    await _settle();
+    await players.releaseAll();
+    expect(made.values.every((v) => v.disposed), isTrue);
+    expect(players.held, isEmpty);
+  });
+}

@@ -5,7 +5,9 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/services/library_index/index_database.dart';
+import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
+import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
@@ -36,7 +38,13 @@ class _Servers implements ReelServers {
 
 class _Media implements ReelMedia {
   @override
-  Future<MediaItem?> item(String serverId, String ratingKey) async => null;
+  Future<MediaItem?> item(String serverId, String ratingKey) async => MediaItem(
+    id: ratingKey,
+    backend: MediaBackend.plex,
+    kind: MediaKind.movie,
+    title: 'Title $ratingKey',
+    serverId: serverId,
+  );
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
@@ -104,7 +112,7 @@ void main() {
   late int seated;
   late List<String> built;
 
-  ReelController make({List<ReelDeck>? decks}) => ReelController(
+  ReelController make({List<ReelDeck>? decks, bool externalClips = false, List<MediaItem>? opened}) => ReelController(
     decks:
         decks ??
         [
@@ -127,6 +135,8 @@ void main() {
     onWatch: (_, {required onTv}) async => false,
     addToWatchlist: (_) async => true,
     onSaved: () async => seated++,
+    externalClips: externalClips,
+    onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
       built.add(id);
       return id.startsWith('ai:') ? _Deck(id, [_card('9')]) : null;
@@ -224,6 +234,40 @@ void main() {
     expect(c.memoryLevel, 0);
     expect(engines, greaterThan(made), reason: 'the clip core is rebuilt');
     expect(engine.calls.where((x) => x.startsWith('open ')), isNotEmpty);
+    c.dispose();
+  });
+
+  test('in the phone feed the controller resolves ahead but never drives the clip core', () async {
+    final c = make(externalClips: true);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.current.clip, isNotNull);
+    expect(c.slotAt(1).resolved, isTrue, reason: 'the next card is resolved for its parked player');
+    expect(engines, 0, reason: 'the feed plays each page itself');
+    await c.step(1);
+    expect(c.current.card?.id, 't2');
+    expect(engines, 0);
+    c.dispose();
+  });
+
+  test('a clip the feed played through is recorded as watched to the end', () async {
+    final c = make(externalClips: true);
+    await c.start();
+    c.clipEnded();
+    await c.step(1);
+    final events = await store.events(since: DateTime(2000));
+    expect(events.map((e) => e.action), contains(ReelAction.toEnd.name));
+    c.dispose();
+  });
+
+  test('Details opens the title page and records it', () async {
+    final opened = <MediaItem>[];
+    final c = make(opened: opened);
+    await c.start();
+    await c.openDetails();
+    expect(opened.single.id, '1');
+    final events = await store.events(since: DateTime(2000));
+    expect(events.map((e) => e.action), contains(ReelAction.details.name));
     c.dispose();
   });
 

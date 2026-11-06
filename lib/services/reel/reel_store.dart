@@ -21,6 +21,9 @@ enum ReelAction {
   spoiled,
   seenIt,
   forKids,
+
+  /// Opened the title's own page from its card.
+  details,
 }
 
 /// One saved pick, waiting on the TV's Home for 3 days.

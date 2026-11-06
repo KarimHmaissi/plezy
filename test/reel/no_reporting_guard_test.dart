@@ -28,7 +28,12 @@ const _forbidden = {
 };
 
 /// What runs while a clip plays.
-const _clipPath = ['lib/services/reel/clip_player.dart', 'lib/services/reel/clip_filter.dart'];
+const _clipPath = [
+  'lib/services/reel/clip_player.dart',
+  'lib/services/reel/clip_filter.dart',
+  // The phone feed's players.
+  'lib/services/reel/feed_players.dart',
+];
 
 List<String> _reelFiles() => [
   for (final dir in ['lib/screens/reel', 'lib/services/reel'])

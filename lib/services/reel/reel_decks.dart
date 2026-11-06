@@ -6,6 +6,7 @@ import '../../media/media_kind.dart';
 import '../../utils/app_logger.dart';
 import '../ai/ai_briefing.dart';
 import '../ai/ai_history.dart';
+import '../ai/facts/title_facts.dart';
 import '../brain/history_brain.dart';
 import '../library_index/index_database.dart';
 import 'reel_decay.dart';
@@ -96,7 +97,32 @@ class ForYouDeck extends ReelDeck {
     final cached = await pool.cachedPool();
     if (!await pool.hasToday()) _building ??= _buildToday();
     if (cached != null && cached.isNotEmpty) return library.cards(cached);
-    return library.cards(await pool.codeOrder(await candidates()));
+    return worthShowing(await library.cards(await pool.codeOrder(await candidates())));
+  }
+
+  /// The public's verdict, 0-10: IMDb, else TMDB, RT audience or the Plex
+  /// audience score. Null when nothing rates it.
+  static double? publicScore(TitleFacts f) => f.imdb ?? f.tmdb ?? f.rtAudience ?? f.audience;
+
+  /// Below this the code-order stopgap leaves a title out.
+  static const double qualityFloor = 6.0;
+
+  /// Code order (before today's build lands) has no judge: similarity alone
+  /// put 2-to-3-star titles on top. It keeps to titles the public rates at
+  /// least [qualityFloor], in similarity order, with unrated titles after
+  /// the rated ones. The daily build decides for itself from the same
+  /// ratings.
+  static List<ReelCardData> worthShowing(List<ReelCardData> cards) {
+    final rated = <ReelCardData>[], unrated = <ReelCardData>[];
+    for (final c in cards) {
+      final score = publicScore(c.facts);
+      if (score == null) {
+        unrated.add(c);
+      } else if (score >= qualityFloor) {
+        rated.add(c);
+      }
+    }
+    return [...rated, ...unrated];
   }
 
   /// The first Reel open of the day starts the build; nothing schedules it.

@@ -69,7 +69,7 @@ class ReelCardView extends StatelessWidget {
             slot.clip != null &&
             (phase == ClipPhase.playing || phase == ClipPhase.paused || phase == ClipPhase.held);
         final held = isCurrent && phase == ClipPhase.held;
-        return tv ? _tv(context, showingClip: showingClip, held: held) : _phone(context, showingClip, held);
+        return _tv(context, showingClip: showingClip, held: held);
       },
     );
   }
@@ -120,104 +120,6 @@ class ReelCardView extends StatelessWidget {
           fontWeight: FontWeight.w700,
         ),
       ),
-    );
-  }
-
-  Widget _phone(BuildContext context, bool showingClip, bool held) {
-    final theme = Theme.of(context);
-    final bg = theme.scaffoldBackgroundColor;
-    final card = slot.card!;
-    final item = slot.item;
-    final art = item == null
-        ? null
-        : controller.media.imageUrl(card.best.serverId, item.artPath ?? item.thumbPath, width: 900);
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        AnimatedOpacity(
-          opacity: showingClip ? 0 : 1,
-          duration: const Duration(milliseconds: 320),
-          child: ColoredBox(
-            color: bg,
-            child: art == null
-                ? const SizedBox.expand()
-                : Image.network(
-                    art,
-                    fit: BoxFit.cover,
-                    cacheWidth: 900,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, _, _) => const SizedBox.expand(),
-                  ),
-          ),
-        ),
-        Positioned.fill(
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0, 0.2, 0.5, 0.75, 1],
-                  colors: [
-                    Colors.black.withValues(alpha: 0.5),
-                    Colors.transparent,
-                    Colors.transparent,
-                    bg.withValues(alpha: 0.72),
-                    bg.withValues(alpha: 0.97),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          left: 20,
-          right: 20,
-          bottom: 24,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                card.title.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              ReelMetadataLine(item: item, year: card.best.year, fontSize: 14),
-              const SizedBox(height: 10),
-              _Extras(controller: controller, slot: slot, held: held, tv: false, onReplay: onReplay),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  FilledButton.icon(
-                    onPressed: onWatch,
-                    icon: const Icon(Symbols.tv_rounded),
-                    label: const Text('Watch on TV'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: onSave,
-                    icon: const Icon(Symbols.bookmark_add_rounded),
-                    label: const Text('Save'),
-                  ),
-                  if (onRemote != null)
-                    OutlinedButton.icon(
-                      onPressed: onRemote,
-                      icon: const Icon(Symbols.settings_remote_rounded),
-                      label: const Text('On TV'),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 
@@ -347,11 +249,12 @@ class _Extras extends StatelessWidget {
 
 /// An empty deck or the end of one.
 class ReelMessage extends StatelessWidget {
-  const ReelMessage({super.key, required this.icon, required this.title, required this.body});
+  const ReelMessage({super.key, required this.icon, required this.title, required this.body, this.action});
 
   final IconData icon;
   final String title;
   final String body;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -371,6 +274,7 @@ class ReelMessage extends StatelessWidget {
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
+            if (action case final a?) ...[const SizedBox(height: 20), a],
           ],
         ),
       ),
@@ -426,35 +330,5 @@ class ReelDeckStrip extends StatelessWidget {
         ),
       );
     },
-  );
-}
-
-/// Fold: the deck chips along the top.
-class ReelDeckChips extends StatelessWidget {
-  const ReelDeckChips({super.key, required this.controller});
-
-  final ReelController controller;
-
-  @override
-  Widget build(BuildContext context) => Positioned(
-    top: MediaQuery.paddingOf(context).top + 8,
-    left: 0,
-    right: 0,
-    height: 40,
-    child: ListView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      children: [
-        for (final (i, d) in controller.decks.indexed)
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              label: Text(d.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-              selected: i == controller.deckIndex,
-              onSelected: (_) => controller.openDeck(d.id),
-            ),
-          ),
-      ],
-    ),
   );
 }

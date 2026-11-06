@@ -112,7 +112,8 @@ Details of each are in the dated entries below.
   rail; on phones it takes Explore's bottom-bar slot (Explore moves to the
   drawer).
 - Decks, like channels: **For You** (one daily Sonnet build over the taste
-  pool, code order meanwhile), **Anime openings**, **Most Watched** (the
+  pool, code order meanwhile, which keeps to titles the public rates 6+;
+  the build itself is told to leave poorly rated titles out), **Anime openings**, **Most Watched** (the
   Trakt charts, raw; offered only while Trakt is connected), and every saved AI answer (**Reel it** on the answer's
   menu, on the AI tab or on Home).
 - TV: Up/Down next or previous card, Left/Right another deck, OK = Watch,
@@ -120,7 +121,14 @@ Details of each are in the dated entries below.
   and the deck list, in the app's own menu sheet. The TV card is Home's
   spotlight (logo, ratings line, summary) over the playing clip, with the
   app's chips, buttons and snackbars: no look of its own.
-  Phone: swipe, double-tap to Save, long-press for the sheet.
+  Phone: a feed you thumb through, the TikTok way. Each card plays in its
+  own page (the clip is drawn into the page by `video_player`, so it slides
+  with your thumb), and the cards around it are already open and parked on
+  their first frame, so a swipe brings a live picture in with no flash.
+  Swipe right hides everything to just watch, swipe left brings it back.
+  **Watch** and **Details** (the title's own page) are the two primary
+  buttons; Save and More sit beside them; tap pauses, double-tap Saves. The
+  deck is picked from its own button at the top.
 - **Save** is one action: the title waits in a new Home row, "From the
   Reel" (seated once at the top, 3 days, at most 3), and goes to the Plex
   watchlist.
