@@ -1826,6 +1826,45 @@ void main() {
       c.dispose();
     });
 
+    test('a first frame that lands in a pause settles the card; the clock starts when it plays on', () async {
+      final c = make(clock: clock);
+      c.stuckAfter = const Duration(milliseconds: 20);
+      await c.start();
+      // Paused while it opened (the viewer, or an `inactive` app); its first
+      // frame lands in the pause.
+      await c.clips.pause();
+      engine.firstFrameCtl.add(null);
+      expect(c.clips.phase.value, ClipPhase.paused);
+      expect(c.stage, ReelStage.playing, reason: 'its first frame showed');
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(c.stuck.value, isNull, reason: 'a card that showed a frame is not stuck');
+      // The time paused isn't watching.
+      now = now.add(const Duration(seconds: 30));
+      await c.clips.resume();
+      now = now.add(const Duration(seconds: 9));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.action, ReelAction.sampled.name);
+      expect(events.last.seconds, 9);
+      c.dispose();
+    });
+
+    test('a clip resumed before its first frame is timed from that frame', () async {
+      final c = make(clock: clock);
+      await c.start();
+      await c.clips.pause();
+      await c.clips.resume();
+      now = now.add(const Duration(seconds: 2));
+      engine.firstFrameCtl.add(null);
+      expect(c.stage, ReelStage.playing);
+      now = now.add(const Duration(seconds: 9));
+      await c.step(1);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.last.action, ReelAction.sampled.name);
+      expect(events.last.seconds, 9);
+      c.dispose();
+    });
+
     test('a TV clip that failed records nothing about the title', () async {
       final c = make(clock: clock);
       await c.start();

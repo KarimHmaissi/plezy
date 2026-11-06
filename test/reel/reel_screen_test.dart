@@ -17,6 +17,7 @@ import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
+import 'package:plezy/services/reel/feed_players.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
@@ -53,6 +54,56 @@ class _Media implements ReelMedia {
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) => null;
+}
+
+/// A phone feed player that opens at once and whose picture moves once it
+/// plays (the plugin's players can't open a clip in a widget test).
+class _MovingVideo extends ChangeNotifier implements FeedVideo {
+  bool _ready = false, _playing = false;
+  Duration _position = Duration.zero;
+  @override
+  bool get ready => _ready;
+  @override
+  bool get failed => false;
+  @override
+  double get aspectRatio => 16 / 9;
+  @override
+  Duration get position => _position;
+  @override
+  Duration get duration => const Duration(seconds: 60);
+  @override
+  bool get playing => _playing;
+  @override
+  bool get buffering => false;
+  @override
+  bool get completed => false;
+  @override
+  Duration get buffered => duration;
+  @override
+  Future<void> initialize() async => _ready = true;
+  @override
+  Future<void> play() async {
+    _playing = true;
+    _position += const Duration(milliseconds: 500);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> pause() async {
+    _playing = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> seekTo(Duration position) async => _position = position;
+  @override
+  Future<void> setVolume(double volume) async {}
+  @override
+  Future<void> setLooping(bool looping) async {}
+  @override
+  Future<void> dispose() async => super.dispose();
+  @override
+  Widget view() => const SizedBox.shrink();
 }
 
 /// A card's text that lands only when [gate] opens.
@@ -142,7 +193,7 @@ void main() {
     await db.close();
   });
 
-  ReelController make({ReelMedia? media}) => ReelController(
+  ReelController make({ReelMedia? media, bool externalClips = false}) => ReelController(
     decks: [
       _Deck(['1', '2']),
     ],
@@ -157,6 +208,7 @@ void main() {
     media: media ?? _Media(),
     onWatch: (_, {required onTv}) async => false,
     addToWatchlist: (_) async => true,
+    externalClips: externalClips,
   );
 
   Future<GlobalKey<ReelScreenState>> pump(
@@ -381,6 +433,112 @@ void main() {
     expect(c.active, isTrue);
     media.gate.complete();
     await settle(tester);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+  });
+
+  testWidgets('phone: the shade pulled down and back (inactive, resumed) leaves the playing card as it was', (
+    tester,
+  ) async {
+    ReelScreen.debugFeedVideo = (_) => _MovingVideo();
+    addTearDown(() => ReelScreen.debugFeedVideo = null);
+    final c = make(externalClips: true);
+    final key = await pump(tester, (_) async => c);
+    key.currentState!.onTabShown();
+    for (var i = 0; i < 4; i++) {
+      await settle(tester);
+    }
+    expect(c.stage, ReelStage.playing, reason: 'the card on screen is playing');
+    final card = c.current.card!.id;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await settle(tester);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    await settle(tester);
+    await tester.pump(ReelController.defaultStuckAfter + const Duration(seconds: 1));
+    expect(c.stuck.value, isNull, reason: 'nothing was let go, so nothing waits on a first frame');
+    expect(c.stage, ReelStage.playing);
+    expect(c.current.card!.id, card);
+    expect(find.text('This is taking a while'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+  });
+
+  testWidgets('TV: a clip the viewer paused stays paused through a focus-only interruption', (tester) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
+    final c = make();
+    final key = await pump(tester, (_) async => c);
+    key.currentState!.onTabShown();
+    await settle(tester);
+    final e = engine!;
+    e.firstFrameCtl.add(null);
+    await tester.pump();
+    await c.togglePause();
+    expect(c.clips.phase.value, ClipPhase.paused);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await settle(tester);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    expect(identical(engine, e), isTrue);
+    expect(e.calls.where((x) => x.startsWith('open')), hasLength(1), reason: 'the card is not opened again');
+    expect(c.clips.phase.value, ClipPhase.paused, reason: "the viewer's pause holds");
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+  });
+
+  testWidgets('TV: resumed before the inactive pause has landed, the clip still plays on', (tester) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
+    final c = make();
+    final key = await pump(tester, (_) async => c);
+    key.currentState!.onTabShown();
+    await settle(tester);
+    final e = engine!;
+    e.firstFrameCtl.add(null);
+    await tester.pump();
+    expect(c.clips.phase.value, ClipPhase.playing);
+
+    final gate = e.pauseGate = Completer<void>();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    gate.complete();
+    await settle(tester);
+    expect(c.clips.phase.value, ClipPhase.playing, reason: 'the pause landed after the resume and is undone');
+    expect(e.calls.last, 'play');
+    expect(e.calls.where((x) => x.startsWith('open')), hasLength(1));
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+  });
+
+  testWidgets('TV: inactive while a clip opens, its first frame in the pause: back, it plays and is not stuck', (
+    tester,
+  ) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
+    final c = make();
+    final key = await pump(tester, (_) async => c);
+    key.currentState!.onTabShown();
+    await settle(tester);
+    final e = engine!;
+    expect(c.clips.phase.value, ClipPhase.loading);
+
+    // The screensaver comes in while the clip opens; its first frame lands
+    // in the pause.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await settle(tester);
+    expect(c.clips.phase.value, ClipPhase.paused);
+    e.firstFrameCtl.add(null);
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    expect(c.clips.phase.value, ClipPhase.playing);
+    await tester.pump(ReelController.defaultStuckAfter + const Duration(seconds: 1));
+    expect(c.stuck.value, isNull, reason: 'its first frame showed: nothing is stuck');
+    expect(c.stage, ReelStage.playing);
+    expect(find.text('This is taking a while'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await settle(tester);
   });

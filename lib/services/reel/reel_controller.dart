@@ -278,6 +278,7 @@ class ReelController extends ChangeNotifier {
        _prefetch = prefetcher ?? ReelPrefetcher(),
        deckPrefsChanged = deckPrefsChanged ?? Listenable.merge([ReelStore.deckPrefsChanged, Customisation.changed]) {
     clips.phase.addListener(_onPhase);
+    clips.onScreen.addListener(_onClipOnScreen);
     memoryRestored?.addListener(_onMemoryRestored);
     resolver.profile?.addListener(_onProfile);
     ReelStore.picksChanged.addListener(_onPicksChanged);
@@ -1767,8 +1768,10 @@ class ReelController extends ChangeNotifier {
     return since >= ReelDecay.aiCardEvery;
   }
 
-  /// TV: the clock starts on this card's first frame (the core moves from
-  /// loading to playing only then; a resume from pause doesn't count).
+  /// TV: the clock starts when this card's clip first plays with its own
+  /// picture up: from its opening, or from a pause that came while it opened
+  /// (the viewer's, or one held for an `inactive` app), whose first frame
+  /// landed in the pause; a later resume doesn't count again.
   /// With Next card (Lean back, V2-47), a clip that played out moves on to
   /// the next card with a clip, until [leanBackIdle] passes with no input;
   /// then it holds with Replay like Twice then hold.
@@ -1779,13 +1782,27 @@ class ReelController extends ChangeNotifier {
     if (externalClips || _cardShown == null || uri == null || clips.current?.uri != uri) return;
     if (now == ClipPhase.failed) {
       unawaited(clipFailed(_cardShown!));
-    } else if (was == ClipPhase.loading && now == ClipPhase.playing && _cardSince == null && !_cardFailed) {
+    } else if (now == ClipPhase.playing && _cardSince == null && !_cardFailed && clips.onScreen.value?.uri == uri) {
       _cardSince = _clock();
       _settle(_generation, playing: true);
       _syncHold();
     } else if (now == ClipPhase.held && was != ClipPhase.held && _active) {
       if (clipEnd == ReelClipEnd.nextCard && mayRollOn) unawaited(step(1, skipAi: true));
     }
+  }
+
+  /// TV: this card's clip showed its first frame ([ClipPlayer.onScreen]),
+  /// playing or paused: the card has shown something, so the stuck-card
+  /// watchdog stands down. A clip resumed before its first frame is already
+  /// playing when that frame lands, so its clock starts here ([_onPhase]
+  /// sees no phase change then).
+  void _onClipOnScreen() {
+    final uri = _cardClip;
+    if (externalClips || _cardShown == null || uri == null || _cardFailed) return;
+    if (clips.onScreen.value?.uri != uri) return;
+    if (clips.phase.value == ClipPhase.playing) _cardSince ??= _clock();
+    _settle(_generation, playing: true);
+    _syncHold();
   }
 
   /// Phone feed: [cardId]'s player is playing (its position has moved).
@@ -2403,6 +2420,7 @@ class ReelController extends ChangeNotifier {
     _setActive(false);
     _generation++;
     clips.phase.removeListener(_onPhase);
+    clips.onScreen.removeListener(_onClipOnScreen);
     memoryRestored?.removeListener(_onMemoryRestored);
     resolver.profile?.removeListener(_onProfile);
     ReelStore.picksChanged.removeListener(_onPicksChanged);

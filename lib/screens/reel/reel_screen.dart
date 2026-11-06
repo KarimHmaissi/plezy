@@ -179,6 +179,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// TV: the clip was paused (not released) for an `inactive` app, and
   /// plays on when the app is resumed.
   bool _heldInactive = false;
+
+  /// TV: that pause, which may still be on its way when the app is resumed.
+  Future<void> _holding = Future<void>.value();
   bool _shown = false;
   String? _pendingDeck;
   String? _pendingCard;
@@ -675,12 +678,15 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         // only takes focus costs no cold open when it goes.
         if (_isTv) unawaited(_holdForInactive(c));
       case AppLifecycleState.resumed:
-        if (_heldInactive) {
-          _heldInactive = false;
-          if (c != null && c.active && c.clips.phase.value == ClipPhase.paused) {
-            unawaited(c.clips.resume());
-            return;
-          }
+        final held = _heldInactive;
+        _heldInactive = false;
+        // Nothing was let go (only the focus went: the shade, an overlay, a
+        // screensaver): the card goes on as it was. Starting it again would
+        // open its clip afresh over the viewer's own pause, and the phone
+        // would wait on a first frame its player had already shown.
+        if (c != null && c.active) {
+          if (held) unawaited(_playOnAfterHold(c));
+          return;
         }
         unawaited(_visit());
     }
@@ -691,7 +697,15 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final phase = c.clips.phase.value;
     if (phase != ClipPhase.playing && phase != ClipPhase.loading) return;
     _heldInactive = true;
-    await c.clips.pause();
+    await (_holding = c.clips.pause());
+  }
+
+  /// TV, back from `inactive`: the clip held for it plays on once that pause
+  /// has landed, unless something else moved it meanwhile.
+  Future<void> _playOnAfterHold(ReelController c) async {
+    await _holding;
+    if (!mounted || !_shown || !c.active || c.clips.phase.value != ClipPhase.paused) return;
+    await c.clips.resume();
   }
 
   Future<void> _watch({bool onTv = false}) async {

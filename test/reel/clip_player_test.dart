@@ -31,6 +31,9 @@ class FakeClipEngine implements ClipEngine {
   /// Holds every open until completed (a slow, or never-finishing, open).
   Completer<void>? openGate;
 
+  /// Holds every pause until completed (a pause still on its way).
+  Completer<void>? pauseGate;
+
   @override
   Player get player => throw UnimplementedError();
 
@@ -50,7 +53,10 @@ class FakeClipEngine implements ClipEngine {
   Future<void> play() async => calls.add('play');
 
   @override
-  Future<void> pause() async => calls.add('pause');
+  Future<void> pause() async {
+    calls.add('pause');
+    await pauseGate?.future;
+  }
 
   @override
   Future<void> seek(Duration position) async => calls.add('seek ${position.inSeconds}');
