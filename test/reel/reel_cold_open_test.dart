@@ -15,6 +15,7 @@ import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
+import 'package:plezy/services/reel/reel_cursor.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_head.dart';
 import 'package:plezy/services/reel/reel_library.dart';
@@ -197,6 +198,7 @@ void main() {
     bool Function()? metered,
     ReelWatch? onWatch,
     Future<ReelDeck?> Function(String id)? deckFor,
+    bool keepCursor = false,
   }) => ReelController(
     decks:
         decks ??
@@ -228,6 +230,7 @@ void main() {
     cellular: cellular,
     metered: metered,
     deckFor: deckFor,
+    keepCursor: keepCursor,
   );
 
   setUp(() {
@@ -599,6 +602,205 @@ void main() {
       expect(c.current.isAiCard, isTrue);
       expect(c.decks.map((d) => d.id), ['a', 'ai:x', 'ai:y']);
       c.dispose();
+    });
+  });
+
+  group('the cursor kept per deck and day (V2-14)', () {
+    final day1 = DateTime(2026, 3, 10, 21);
+
+    Future<ReelCursor?> keptFor(String deck, [DateTime? at]) async =>
+        ReelCursor.decode(await store.cached(ReelStore.cursorKey(deck, at ?? day1)));
+
+    /// A session on deck 'a' (cards 1-5) that steps [steps] times and is
+    /// left; its cursor writes are waited for.
+    Future<void> leaveAfter(int steps, {DateTime? at, bool daily = false}) async {
+      final c = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3', '4', '5']), isDaily: daily),
+        ],
+        keepCursor: true,
+        clock: () => at ?? day1,
+      );
+      await c.start();
+      for (var i = 0; i < steps; i++) {
+        await c.step(1);
+      }
+      await c.suspend();
+      await c.cursorWritten;
+      c.dispose();
+      MemoryLogOutput.clearLogs();
+    }
+
+    test('every card change keeps the cursor; the next session carries on from it', () async {
+      await leaveAfter(2);
+      final kept = await keptFor('a');
+      expect(kept?.id, 't3');
+      expect(kept?.after, 't4');
+
+      final c = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3', '4', '5'])),
+        ],
+        keepCursor: true,
+        clock: () => day1,
+      );
+      await c.start();
+      expect(c.index, 2);
+      expect(c.current.card!.id, 't3');
+      expect(engines.last.calls.where((x) => x.startsWith('open')), ['open ${_clip('3')}']);
+      expect(_log('[ReelDeck] a: carries on at card 2 of 5'), hasLength(1));
+      await c.step(1);
+      expect(c.current.card!.id, 't4');
+      c.dispose();
+    });
+
+    test('a held key: five quick steps keep the card they land on', () async {
+      final c = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3', '4', '5', '6', '7'])),
+        ],
+        keepCursor: true,
+        clock: () => day1,
+      );
+      await c.start();
+      await c.cursorWritten;
+      final steps = [for (var i = 0; i < 5; i++) c.step(1)];
+      await Future.wait(steps);
+      await c.cursorWritten;
+      expect((await keptFor('a'))?.id, 't6');
+      c.dispose();
+    });
+
+    test('the card left the list (Not for me): the next one is where it carries on', () async {
+      await leaveAfter(2);
+      await store.notForMe('t3');
+      final c = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3', '4', '5'])),
+        ],
+        keepCursor: true,
+        clock: () => day1,
+      );
+      await c.start();
+      expect(c.current.card!.id, 't4');
+      c.dispose();
+    });
+
+    test("the end of the deck is kept as the end; a daily deck doesn't carry yesterday's cursor", () async {
+      await leaveAfter(5, daily: true);
+      expect((await keptFor('a'))?.past, isTrue);
+      final c = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3', '4', '5']), isDaily: true),
+        ],
+        keepCursor: true,
+        clock: () => day1,
+      );
+      await c.start();
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      c.dispose();
+
+      final next = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3', '4', '5']), isDaily: true),
+        ],
+        keepCursor: true,
+        clock: () => day1.add(const Duration(days: 1)),
+      );
+      await next.start();
+      expect(next.current.card!.id, 't1');
+      next.dispose();
+    });
+
+    test("another deck carries yesterday's cursor on", () async {
+      await leaveAfter(1);
+      final c = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3', '4', '5'])),
+        ],
+        keepCursor: true,
+        clock: () => day1.add(const Duration(days: 1)),
+      );
+      await c.start();
+      expect(c.current.card!.id, 't2');
+      c.dispose();
+    });
+
+    test('a cursor past the first cards: the rest is loaded before the first card shows', () async {
+      await leaveAfter(4);
+      final deck = _PartsDeck('a', _cards(['1', '2', '3', '4', '5']));
+      final c = make(decks: [deck], keepCursor: true, clock: () => day1);
+      await c.start();
+      expect(deck.restCalls, 1);
+      expect(c.cards!.map((x) => x.id), ['t1', 't2', 't3', 't4', 't5']);
+      expect(c.current.card!.id, 't5');
+      expect(engines.last.calls.where((x) => x.startsWith('open')), ['open ${_clip('5')}'], reason: 'no card 1 first');
+      c.dispose();
+    });
+
+    test('a cursor within the first cards waits for nothing more', () async {
+      await leaveAfter(1);
+      final deck = _PartsDeck('a', _cards(['1', '2', '3', '4', '5']))..restGate = Completer<void>();
+      final c = make(decks: [deck], keepCursor: true, clock: () => day1);
+      await c.start();
+      expect(c.current.card!.id, 't2');
+      deck.restGate!.complete();
+      await pumpEventQueue();
+      expect(c.cards, hasLength(5));
+      expect(c.current.card!.id, 't2');
+      c.dispose();
+    });
+
+    test('TV: a replayed head card takes its own place when the list lands, so the cards after it come next', () async {
+      final first = make(head: headCard, keepCursor: true, clock: () => day1);
+      await first.start();
+      await first.step(1);
+      await first.suspend();
+      await first.cursorWritten;
+      first.dispose();
+
+      final deck = _Deck('a', _cards(['1', '2', '3']))..gate = Completer<void>();
+      final c = make(decks: [deck], head: headCard, keepCursor: true, clock: () => day1);
+      await c.start();
+      expect(c.cards!.map((x) => x.id), ['t2']);
+      deck.gate!.complete();
+      await pumpEventQueue();
+      expect(c.cards!.map((x) => x.id), ['t1', 't2', 't3']);
+      expect(c.index, 1);
+      expect(c.current.card!.id, 't2');
+      expect(_log('[ReelDeck] a: the replayed card is card 1 of 3'), hasLength(1));
+      await c.step(1);
+      expect(c.current.card!.id, 't3');
+      c.dispose();
+    });
+
+    test('off: nothing is kept and every load starts on the first card', () async {
+      final c = make(
+        decks: [
+          _Deck('a', _cards(['1', '2', '3'])),
+        ],
+        clock: () => day1,
+      );
+      await c.start();
+      await c.step(1);
+      await c.cursorWritten;
+      expect(await keptFor('a'), isNull);
+      c.dispose();
+    });
+
+    test('the kept row round-trips and lands by id, then by the card after it', () {
+      final list = _cards(['1', '2', '3']);
+      expect(ReelCursor.at(list, 1)?.encode(), '{"id":"t2","after":"t3"}');
+      expect(ReelCursor.at(list, 3)?.past, isTrue);
+      expect(ReelCursor.at(const [], 0), isNull);
+      final back = ReelCursor.decode(ReelCursor.at(list, 1)!.encode())!;
+      expect(back.seekIn(list), 1);
+      expect(back.seekIn(_cards(['3', '1'])), 0, reason: 't2 gone: on t3');
+      expect(back.seekIn(_cards(['7'])), isNull);
+      expect(ReelCursor.decode(ReelCursor.at(list, 3)!.encode())!.seekIn(list), 3);
+      expect(ReelCursor.decode(''), isNull);
+      expect(ReelCursor.decode('{"after":"t3"}'), isNull);
+      expect(ReelCursor.decode('not json'), isNull);
     });
   });
 }

@@ -68,6 +68,18 @@ void main() {
     expect(await store.fatigueOf('other'), 0);
   });
 
+  test('V2-14: used since a time: any event counts, unplayed included', () async {
+    final week = now.subtract(const Duration(days: 7));
+    expect(await store.usedSince(week), isFalse);
+    await ReelStore(
+      database: () async => db,
+      clock: () => now.subtract(const Duration(days: 8)),
+    ).record('t', ReelAction.sampled);
+    expect(await store.usedSince(week), isFalse);
+    await store.record('t', ReelAction.unplayed);
+    expect(await store.usedSince(week), isTrue);
+  });
+
   test('cache entries expire after their ttl', () async {
     await store.cache('src:g1', '{"k":"plex:1"}');
     expect(await store.cached('src:g1', ttl: ReelStore.sourceTtl), isNotNull);
@@ -133,6 +145,19 @@ void main() {
         ReelStore.sweptKey,
       });
       expect((await store.events(since: DateTime.utc(2000))).map((e) => e.titleId), ['t-old']);
+    });
+
+    test("V2-14: a deck's cursor and kept list rows go with the day rows", () async {
+      final old = ReelStore(database: () async => db, clock: () => now.subtract(const Duration(days: 4)));
+      final then = now.subtract(const Duration(days: 4));
+      await old.cache(ReelStore.cursorKey('for-you', then), '{"id":"t1"}');
+      await old.cache(ReelStore.deckKey('for-you', then), '[]');
+      await store.cache(ReelStore.cursorKey('for-you', now), '{"id":"t2"}');
+      expect(ReelStore.cursorKey('for-you', now), 'cursor:for-you:2026-11-06');
+      expect(ReelStore.deckKey('for-you', now), 'deck:for-you:2026-11-06');
+      final swept = await store.sweep();
+      expect(swept?.days, 2);
+      expect(await keys(), {ReelStore.cursorKey('for-you', now), ReelStore.sweptKey});
     });
 
     test('runs once a day; calls made together share one run', () async {

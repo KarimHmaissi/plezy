@@ -58,6 +58,7 @@ import '../services/comfort/comfort_shows_controller.dart';
 import '../services/continue_watching/continue_watching_classifier.dart';
 import '../services/customisation/customisation_store.dart';
 import '../services/reel/reel_home_row.dart';
+import '../services/reel_app.dart';
 import '../services/reel/reel_store.dart';
 import 'reel/reel_screen.dart';
 import '../services/settings_service.dart';
@@ -708,6 +709,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         trakt: () => _catalogSources?.connectedSources.whereType<TraktCatalogSource>().firstOrNull?.client,
       );
       _startOwnAi();
+      // TV: the Reel's warm start before its tab opens (V2-14).
+      ReelApp.warmBeforeOpen(context);
     });
     // A phone switched to running its own AI: start its index now.
     PhoneMode.changed.addListener(_startOwnAi);

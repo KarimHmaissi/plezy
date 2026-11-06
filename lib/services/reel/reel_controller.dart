@@ -16,6 +16,7 @@ import 'reel_data_budget.dart';
 import 'reel_decay.dart';
 import 'reel_deck_prefs.dart';
 import 'reel_decks.dart';
+import 'reel_cursor.dart';
 import 'reel_head.dart';
 import 'reel_library.dart';
 import 'reel_playback_profile.dart';
@@ -278,6 +279,7 @@ class ReelController extends ChangeNotifier {
     this.warmClipCore = false,
     this.headCard,
     this.moreDecks,
+    this.keepCursor = false,
     Listenable? deckPrefsChanged,
     ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
@@ -421,6 +423,13 @@ class ReelController extends ChangeNotifier {
   /// already there (opened by id meanwhile) isn't added again.
   final Future<List<ReelDeck>> Function()? moreDecks;
   bool _moreDecksAsked = false;
+
+  /// V2-14: each deck's cursor is kept per day on this device ([ReelCursor],
+  /// written on every card change), and a deck's list carries on from it
+  /// when it next loads. A head card a cold start replayed ([headCard])
+  /// takes its own place in the deck's list when that lands. Off: every
+  /// load starts on the first card.
+  final bool keepCursor;
 
   /// Fires when the deck prefs change (a picker or the Decks screen on this
   /// device, or the other device's arrangement arriving): the pickers and
@@ -1350,16 +1359,37 @@ class ReelController extends ChangeNotifier {
     if (_failed.remove(d.id)) notifyListeners();
     try {
       final sw = Stopwatch()..start();
+      // V2-14: the cursor kept for the deck is read alongside its load.
+      final keptCursor = keepCursor ? _readCursor(d) : Future<ReelCursor?>.value();
       // The first entries only (V2-04): the first card waits for these, and
       // the rest of the list is appended when it lands.
       final parts = await d.loadParts(ReelDeck.headEntries).timeout(timeouts.deck);
       final loadMs = sw.elapsedMilliseconds;
-      final loaded = await _finish(d, parts.head).timeout(timeouts.deck);
-      final rest = parts.rest;
+      var loaded = await _finish(d, parts.head).timeout(timeouts.deck);
+      var rest = parts.rest;
       appLogger.i(
         '[ReelDeck] ${d.id}: ${loaded.length} cards (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)'
         '${rest == null ? '' : ', the rest to follow'}',
       );
+      // V2-14: the card the list carries on from: a replayed head card, else
+      // the kept cursor. When the first cards don't have it, the rest is
+      // loaded now (bounded), so the cursor never jumps once a card shows.
+      final head = _provisional.contains(d.id) ? _cards[d.id]?.firstOrNull : null;
+      final target = !keepCursor
+          ? null
+          : head != null
+          ? ReelCursor(id: head.id)
+          : _cards.containsKey(d.id)
+          ? null
+          : await keptCursor;
+      final more = rest;
+      if (target != null && more != null && target.seekIn(loaded) == null) {
+        final whole = await _wholeList(d, loaded, more);
+        if (whole != null) {
+          loaded = whole;
+          rest = null;
+        }
+      }
       // The first list to land is the deck's (a load a suspend dropped
       // included); a later one never swaps the list under the cursor. A
       // replayed head card is followed by the list instead.
@@ -1367,9 +1397,10 @@ class ReelController extends ChangeNotifier {
       if (kept != null && !_provisional.contains(d.id)) return kept;
       if (kept == null) {
         _cards[d.id] = loaded;
+        if (target != null) _carryOn(d, loaded, target);
       } else {
         _provisional.remove(d.id);
-        _append(d, loaded);
+        if (!_followHead(d, kept, loaded)) _append(d, loaded);
       }
       // One AnimeThemes batch for the deck's anime shows (plan V2-12);
       // the first card waits for it rather than asking on its own.
@@ -1390,6 +1421,130 @@ class ReelController extends ChangeNotifier {
   }
 
   String _today() => ReelPool.dayKey(_clock());
+
+  /// V2-14: the cursor kept for [d] ([ReelCursor.read]); null when there is
+  /// none or it can't be read in time.
+  Future<ReelCursor?> _readCursor(ReelDeck d) async {
+    try {
+      return await ReelCursor.read(store, d.id, daily: d.daily, now: _clock()).timeout(timeouts.store);
+    } catch (e) {
+      appLogger.d('Reel: the kept cursor could not be read (${e.runtimeType})');
+      return null;
+    }
+  }
+
+  /// [first] with the rest of [d]'s list ([ReelDeckParts.rest]) after it,
+  /// leaving out titles already there; null when the rest fails or takes
+  /// longer than [ReelTimeouts.store] (it then follows as usual).
+  Future<List<ReelCardData>?> _wholeList(
+    ReelDeck d,
+    List<ReelCardData> first,
+    Future<List<ReelCardData>> Function() rest,
+  ) async {
+    try {
+      final more = await _finish(d, await rest().timeout(timeouts.store)).timeout(timeouts.store);
+      final ids = {for (final c in first) c.id};
+      final groups = {for (final c in first) c.title.groupKey};
+      return [
+        ...first,
+        for (final c in more)
+          if (ids.add(c.id) && groups.add(c.title.groupKey)) c,
+      ];
+    } catch (e) {
+      appLogger.d('Reel: the rest of deck ${d.id} was not there in time for its cursor (${e.runtimeType})');
+      return null;
+    }
+  }
+
+  /// V2-14: a fresh list of [d] carries on from [target] (the cursor kept
+  /// for it), unless something has moved the cursor meanwhile.
+  void _carryOn(ReelDeck d, List<ReelCardData> list, ReelCursor target) {
+    if (_cursor.containsKey(d.id)) return;
+    final at = target.seekIn(list);
+    if (at == null || at == 0) {
+      appLogger.i('[ReelDeck] ${d.id}: kept cursor ${at == null ? 'not in the list' : 'on the first card'}');
+      return;
+    }
+    _cursor[d.id] = at;
+    _onDecide.remove(d.id);
+    _spans?.note('cursor', '$at');
+    appLogger.i('[ReelDeck] ${d.id}: carries on at card $at of ${list.length} (kept cursor)');
+  }
+
+  /// V2-14: the deck's list lands after a replayed head card ([kept], the
+  /// head alone) and has that card: the list takes the place of the head,
+  /// and the cursor stays on it at its own place in the list, so the cards
+  /// after it come next rather than the ones before. False when it doesn't
+  /// apply ([keepCursor] off, the cursor moved on, or the list doesn't have
+  /// the card): the list is appended after the head instead.
+  bool _followHead(ReelDeck d, List<ReelCardData> kept, List<ReelCardData> loaded) {
+    if (!keepCursor || kept.length != 1 || (_cursor[d.id] ?? 0) != 0 || _onDecide.contains(d.id)) return false;
+    final head = kept.single;
+    final at = loaded.indexWhere((c) => c.id == head.id);
+    if (at < 0) return false;
+    final list = [...loaded]..[at] = head;
+    _cards[d.id] = list;
+    _cursor[d.id] = at;
+    appLogger.i('[ReelDeck] ${d.id}: the replayed card is card $at of ${list.length}');
+    notifyListeners();
+    if (identical(deck, d) && _active) {
+      _plan(list, _generation);
+      _preloadNext(list, _generation);
+      _keepCursor();
+    }
+    return true;
+  }
+
+  /// V2-14: per cursor row, the value waiting to be written.
+  final Map<String, String> _cursorNext = {};
+
+  /// The value last written (or waiting) per cursor row, so an unchanged
+  /// cursor isn't written again.
+  final Map<String, String> _cursorLast = {};
+  Future<void>? _cursorWriting;
+
+  /// V2-14 ([keepCursor]): keeps the cursor of the deck on screen as
+  /// today's row ([ReelStore.cursorKey]). Writes are queued one at a time,
+  /// and only the latest value per row is written, so a held key's steps
+  /// cost one write. Each write is bounded; one that fails is let go.
+  void _keepCursor() {
+    if (!keepCursor || decks.isEmpty) return;
+    final list = cards;
+    if (list == null) return;
+    final row = ReelCursor.at(list, index);
+    if (row == null) return;
+    final key = ReelStore.cursorKey(deck.id, _clock());
+    final value = row.encode();
+    if (_cursorLast[key] == value) return;
+    _cursorLast[key] = value;
+    _cursorNext[key] = value;
+    _cursorWriting ??= _writeCursors();
+  }
+
+  Future<void> _writeCursors() async {
+    try {
+      while (_cursorNext.isNotEmpty) {
+        final key = _cursorNext.keys.first;
+        final value = _cursorNext.remove(key)!;
+        try {
+          await store.cache(key, value).timeout(timeouts.store);
+        } catch (e) {
+          appLogger.d('Reel: the cursor was not kept (${e.runtimeType})');
+          if (_cursorLast[key] == value) _cursorLast.remove(key);
+        }
+      }
+    } finally {
+      _cursorWriting = null;
+    }
+  }
+
+  /// Tests: waits for the cursor writes queued so far.
+  @visibleForTesting
+  Future<void> get cursorWritten async {
+    while (_cursorWriting != null) {
+      await _cursorWriting;
+    }
+  }
 
   /// Loads the rest of [d]'s list ([ReelDeckParts.rest]) and appends it,
   /// unless a fresh build or a new day's list has replaced the list by
@@ -1809,6 +1964,8 @@ class ReelController extends ChangeNotifier {
     _arm();
     notifyListeners();
     cardChanged.value++;
+    // V2-14: every card change keeps the cursor for the next load.
+    _keepCursor();
     final list = cards;
     if (list != null && _onDecideNow) return _showDecide(list, gen);
     if (list == null || index >= list.length) {

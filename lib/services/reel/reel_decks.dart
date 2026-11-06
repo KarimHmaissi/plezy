@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/foundation.dart';
@@ -190,31 +191,108 @@ class ForYouDeck extends ReelDeck {
 
   @override
   Future<List<ReelCardData>> load() async {
-    final cached = await _poolEntries();
-    if (cached != null) return library.cards(cached);
+    final (:pooled, :kept) = await _entries();
+    if (pooled != null) return library.cards(pooled);
+    if (kept != null) return library.cards(kept);
     return _codeOrder();
   }
 
   /// Today's pool (or yesterday's remainder) splits: its first entries are
-  /// matched first. Code order ranks the whole list, so it loads whole.
+  /// matched first, and so does today's kept code order ([snapshotKey]).
+  /// Code order worked out now ranks the whole list, so it loads whole.
   @override
   Future<ReelDeckParts> loadParts(int head) async {
-    final cached = await _poolEntries();
-    if (cached != null) return ReelDeckParts.split(cached, head, library.cards);
+    final (:pooled, :kept) = await _entries();
+    if (pooled != null) return ReelDeckParts.split(pooled, head, library.cards);
+    if (kept != null) return ReelDeckParts.split(kept, head, library.cards);
     return ReelDeckParts(await _codeOrder());
   }
 
-  /// The cached pool's entries, or null when there is none and code order
-  /// stands in. Starts today's build when it is due.
-  Future<List<DeckEntry>?> _poolEntries() async {
+  /// The cached pool's entries ([pooled]), else today's kept code order
+  /// ([kept], [snapshotKey]); both null when code order is worked out now.
+  /// With [build], starts today's build when it is due, as the last step:
+  /// code order straight after it joins the build's gather.
+  Future<({List<DeckEntry>? pooled, List<DeckEntry>? kept})> _entries({bool build = true}) async {
     _sharedSeen = _seen(await pool.shared());
     final cached = await pool.cachedPool();
-    await buildIfDue();
-    return cached != null && cached.isNotEmpty ? cached : null;
+    final pooled = cached != null && cached.isNotEmpty ? cached : null;
+    final kept = pooled == null ? await _snapshot() : null;
+    if (build) await buildIfDue();
+    return (pooled: pooled, kept: kept);
   }
 
-  Future<List<ReelCardData>> _codeOrder() async =>
-      worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
+  /// The row keeping today's code order (V2-14): For You's cards in the
+  /// order code gave them, for the day, so a later load (the Reel's open
+  /// after the warm start, or a reopen) skips the gather. Read only while
+  /// there is no pool; swept with the day rows.
+  String snapshotKey() => ReelStore.deckKey(id, pool.now());
+
+  /// Code order: worked out from today's gather, and kept for the day
+  /// ([snapshotKey]). An empty order isn't kept, so the next load gathers
+  /// again.
+  Future<List<ReelCardData>> _codeOrder() async {
+    final cards = worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
+    if (cards.isNotEmpty) {
+      try {
+        await pool.store.cache(snapshotKey(), _encodeSnapshot(cards));
+      } catch (e) {
+        appLogger.d('Reel: For You code order not kept', error: e);
+      }
+    }
+    return cards;
+  }
+
+  static String _encodeSnapshot(List<ReelCardData> cards) => jsonEncode([
+    for (final c in cards) {'id': c.id, 'sv': c.best.serverId, 'rk': c.best.ratingKey},
+  ]);
+
+  /// Today's kept code order ([snapshotKey]), or null when there is none.
+  Future<List<DeckEntry>?> _snapshot() async {
+    final String? raw;
+    try {
+      raw = await pool.store.cached(snapshotKey());
+    } catch (e) {
+      appLogger.d('Reel: For You code order unavailable', error: e);
+      return null;
+    }
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw);
+      if (j is! List) return null;
+      final entries = [
+        for (final r in j)
+          if (r is Map && r['sv'] is String && r['rk'] is String)
+            DeckEntry(serverId: r['sv'] as String, ratingKey: r['rk'] as String),
+      ];
+      return entries.isEmpty ? null : entries;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The warm start (V2-14, ReelWarmer): makes sure today's list is ready
+  /// before the Reel opens, without starting a build. Returns what it found:
+  /// `pool` (today's pool or an earlier one's remainder), `kept` (today's
+  /// code order was already kept), `kept N` (code order worked out now and
+  /// kept, N cards) or `empty`.
+  Future<String> keepToday() async {
+    final (:pooled, :kept) = await _entries(build: false);
+    if (pooled != null) return 'pool';
+    if (kept != null) return 'kept';
+    final cards = await _codeOrder();
+    return cards.isEmpty ? 'empty' : 'kept ${cards.length}';
+  }
+
+  /// The warm start: the first [n] cards of today's list as the Reel's open
+  /// will load them (the pool, else the kept code order), matched from the
+  /// index only. Never starts a build or a gather: empty when neither is
+  /// there.
+  Future<List<ReelCardData>> firstCards(int n) async {
+    final (:pooled, :kept) = await _entries(build: false);
+    final entries = pooled ?? kept;
+    if (entries == null) return const [];
+    return library.cards(entries.take(n).toList());
+  }
 
   /// The synced data changed (a sync or a TV snapshot): when it brought the
   /// shared pool for today, and this device has no pool of its own for

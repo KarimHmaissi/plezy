@@ -166,6 +166,15 @@ class ReelStore {
   /// been written for [daysKept] days.
   static String headKey(String deckId) => 'head:$deckId';
 
+  /// Where the cursor was in [deckId] on [day] (V2-14, ReelCursor): written
+  /// on every card change, read when the deck's list next loads. Swept with
+  /// the day rows once it hasn't been written for [daysKept] days.
+  static String cursorKey(String deckId, DateTime day) => 'cursor:$deckId:${dayStamp(day)}';
+
+  /// A deck's list kept for [day] (V2-14): For You's code order, so a
+  /// later load skips the gather. Swept with the day rows.
+  static String deckKey(String deckId, DateTime day) => 'deck:$deckId:${dayStamp(day)}';
+
   /// The cache row holding the day ([dayStamp]) the sweep last ran on.
   static const String sweptKey = 'sweep:day';
 
@@ -218,6 +227,19 @@ class ReelStore {
           ..where((e) => e.at.isBiggerOrEqualValue(since.millisecondsSinceEpoch))
           ..orderBy([(e) => OrderingTerm.asc(e.at)]))
         .get();
+  }
+
+  /// Whether this device recorded anything in the Reel since [since] (any
+  /// action, [ReelAction.unplayed] included: the Reel was opened). One row
+  /// read at most.
+  Future<bool> usedSince(DateTime since) async {
+    final db = await _database();
+    final row =
+        await (db.select(db.reelEvents)
+              ..where((e) => e.at.isBiggerOrEqualValue(since.millisecondsSinceEpoch))
+              ..limit(1))
+            .getSingleOrNull();
+    return row != null;
   }
 
   /// Keeps the log small: events older than [keep] are dropped.
