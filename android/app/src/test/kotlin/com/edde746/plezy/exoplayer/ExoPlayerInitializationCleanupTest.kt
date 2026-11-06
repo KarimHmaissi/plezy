@@ -1,10 +1,15 @@
 package com.edde746.plezy.exoplayer
 
 import android.app.Activity
+import android.media.MediaFormat
 import android.os.Looper
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
+import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -69,6 +74,50 @@ class ExoPlayerInitializationCleanupTest {
       cores.forEach { it.dispose() }
       shadowOf(Looper.getMainLooper()).idle()
       Thread.setDefaultUncaughtExceptionHandler(original)
+    }
+  }
+
+  @Test
+  fun aClipCoreCountsItsCodecsAndReportsThemWhenReleased() {
+    PlayerCoreCounts.resetForTest()
+    val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+    activity.setContentView(FrameLayout(activity))
+    val core = ExoPlayerCore(activity)
+    try {
+      assertTrue(core.initialize(clipMode = true))
+      assertEquals(
+        "cores created=1 released=0 live=1 codecs=0 codecsOnReleasedCores=0",
+        PlayerCoreCounts.summary()
+      )
+
+      // The playback thread opening one video and one audio codec through the core's factory.
+      val factory = core.getPrivateField("renderersFactory") as PlezyRenderersFactory
+      val hook = checkNotNull(factory.onCodecCreated)
+      hook(codecConfiguration(MimeTypes.VIDEO_H264))
+      hook(codecConfiguration(MimeTypes.AUDIO_AAC))
+
+      core.dispose()
+      shadowOf(Looper.getMainLooper()).idle()
+
+      assertEquals(2, PlayerCoreCounts.codecsOnReleasedCores)
+      assertEquals(
+        "cores created=1 released=1 live=0 codecs=2 codecsOnReleasedCores=2",
+        PlayerCoreCounts.summary()
+      )
+    } finally {
+      core.dispose()
+      shadowOf(Looper.getMainLooper()).idle()
+      PlayerCoreCounts.resetForTest()
+    }
+  }
+
+  private fun codecConfiguration(mimeType: String): MediaCodecAdapter.Configuration {
+    val info = MediaCodecInfo.newInstance("test.decoder", mimeType, mimeType, null, false, false, false, false, false)
+    val format = Format.Builder().setSampleMimeType(mimeType).build()
+    return if (MimeTypes.isVideo(mimeType)) {
+      MediaCodecAdapter.Configuration.createForVideoDecoding(info, MediaFormat.createVideoFormat(mimeType, 1920, 1080), format, null, null)
+    } else {
+      MediaCodecAdapter.Configuration.createForAudioDecoding(info, MediaFormat.createAudioFormat(mimeType, 48000, 2), format, null, null)
     }
   }
 

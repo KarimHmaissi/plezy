@@ -83,6 +83,7 @@ import com.edde746.plezy.shared.FrameRateManager
 import com.edde746.plezy.shared.PlayerSurfaceHost
 import com.edde746.plezy.shared.SurfacePlayerCore
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetProvider
@@ -399,6 +400,13 @@ class ExoPlayerCore(private val activity: Activity) :
   var clipMode = false
     private set
   private var preloadManager: DefaultPreloadManager? = null
+
+  /** This core's `[ReelCore]` serial number; 0 until a player is built. */
+  private var coreSerial = 0
+
+  /** MediaCodecs this core's renderers made (see [PlayerCoreCounts]); bumped on the playback thread. */
+  private val coreVideoCodecs = AtomicInteger()
+  private val coreAudioCodecs = AtomicInteger()
   private val preloadItems = LinkedHashMap<String, MediaItem>()
   private var preloadRank = 0
   private var currentMediaUri: String? = null
@@ -709,7 +717,17 @@ class ExoPlayerCore(private val activity: Activity) :
       val audioAttributes = buildMovieAudioAttributes()
 
       // Use DefaultRenderersFactory with FFmpeg fallback for unsupported or blocked audio codecs.
+      coreVideoCodecs.set(0)
+      coreAudioCodecs.set(0)
       val renderersFactory = PlezyRenderersFactory(activity).apply {
+        onCodecCreated = { configuration ->
+          if (MimeTypes.isVideo(configuration.format.sampleMimeType)) {
+            coreVideoCodecs.incrementAndGet()
+          } else {
+            coreAudioCodecs.incrementAndGet()
+          }
+          PlayerCoreCounts.onCodecCreated()
+        }
         audioDiagnosticsLogger = { level, prefix, message -> emitLog(level, prefix, message) }
         videoDiagnosticsLogger = { level, prefix, message -> emitLog(level, prefix, message) }
         shouldBlockDirectAudioOutput = { format -> this@ExoPlayerCore.shouldBlockDirectAudioOutput(format, "sink support") }
@@ -889,6 +907,8 @@ class ExoPlayerCore(private val activity: Activity) :
       } else {
         playerBuilder.build()
       }
+      coreSerial = PlayerCoreCounts.onCreated()
+      emitLog("info", "ReelCore", "create core#$coreSerial clip=$clipMode ${PlayerCoreCounts.summary()}")
 
       // Add ASS overlay view to the full-screen surfaceContainer (NOT the zoom-scaled
       // videoAspectContainer): the libass frame = screen, and mpv-style ass_set_margins
@@ -4428,6 +4448,24 @@ class ExoPlayerCore(private val activity: Activity) :
     }
   }
 
+  /**
+   * The `[ReelCore]` release line, after the player's release has returned. `codecs` is how many
+   * MediaCodecs this core made: on the Shield each one leaves a display listener on the now-dead
+   * playback thread (see [PlayerCoreCounts]), so a wake's dead-thread handler count should match
+   * the running `codecsOnReleasedCores`.
+   */
+  private fun logCoreReleased() {
+    val video = coreVideoCodecs.get()
+    val audio = coreAudioCodecs.get()
+    PlayerCoreCounts.onReleased(video + audio)
+    emitLog(
+      "info",
+      "ReelCore",
+      "release core#$coreSerial clip=$clipMode codecs=${video + audio} (video=$video audio=$audio) " +
+        PlayerCoreCounts.summary()
+    )
+  }
+
   fun dispose() {
     if (disposing) return
     disposing = true
@@ -4492,7 +4530,10 @@ class ExoPlayerCore(private val activity: Activity) :
     subtitleTrackGroupMap.clear()
     exoPlayer?.clearVideoSurface()
     exoPlayer?.removeListener(this)
-    exoPlayer?.release()
+    exoPlayer?.let { player ->
+      player.release()
+      logCoreReleased()
+    }
     exoPlayer = null
     renderersFactory = null
     trackSelector = null
