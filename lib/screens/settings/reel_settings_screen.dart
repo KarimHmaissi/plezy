@@ -117,32 +117,26 @@ class ReelSettingsScreen extends StatelessWidget {
   static String cellularSubtitle(ReelCellular v) =>
       v == ReelCellular.dataSaver ? t.reel.settings.cellularDataSaverSubtitle : cellularLabel(v);
 
-  /// How a visit's sound starts. The TV starts muted unless changed (it
-  /// can't tell other audio apart, so it offers only the two); the phone
-  /// starts with sound and offers all three.
+  /// How a visit's sound starts. The TV has its own pref, start muted unless
+  /// changed (it can't tell other audio apart, so it offers only the two);
+  /// the phone's starts with sound.
   Widget _startSound({required bool tv}) {
     final s = t.reel.settings;
-    final muted = DialogOption(
-      value: ReelStartSound.muted,
-      title: s.startSoundMuted,
-      subtitle: s.startSoundMutedDescription,
-    );
     return SettingSelectionTile<ReelStartSound>(
-      pref: SettingsService.reelStartSound,
+      pref: tv ? SettingsService.reelTvStartSound : SettingsService.reelStartSound,
       icon: Symbols.volume_up_rounded,
       title: s.startSound,
       subtitleBuilder: startSoundLabel,
       options: [
-        if (tv) muted,
+        if (tv)
+          DialogOption(value: ReelStartSound.muted, title: s.startSoundMuted, subtitle: s.startSoundMutedDescription),
         DialogOption(value: ReelStartSound.sound, title: s.startSoundOn),
-        if (!tv) ...[
+        if (!tv)
           DialogOption(
             value: ReelStartSound.mutedIfOtherAudio,
             title: s.startSoundMutedIfOtherAudio,
             subtitle: s.startSoundMutedIfOtherAudioDescription,
           ),
-          muted,
-        ],
       ],
     );
   }

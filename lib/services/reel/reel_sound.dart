@@ -13,14 +13,15 @@ import '../settings_service.dart';
 /// (media3 does both once `mixWithOthers` is off). With
 /// [ReelStartSound.mutedIfOtherAudio] the players mix with other audio
 /// instead, and a visit starts muted while other audio is playing, so the
-/// music carries on. [ReelStartSound.muted] mixes too, and every visit
-/// starts muted.
+/// music carries on. [ReelStartSound.muted] (the TV's) would mix too, and
+/// start every visit muted.
 ///
-/// TV: [ReelStartSound.muted] is its default, so the Reel never comes up
-/// loud: every visit (the app opened or brought back, the Shield woken, the
-/// tab chosen, a link) starts muted, and the card says how to turn the
-/// sound on. Only Back from a page the Reel opened (Watch, Details) carries
-/// on as the viewer left it ([tvVisitStart]).
+/// TV: its own pref ([SettingsService.reelTvStartSound]) starts muted
+/// unless "With sound" is chosen there, so the Reel never comes up loud:
+/// every visit (the app opened or brought back, the Shield woken, the tab
+/// chosen, a link) starts muted, and the card says how to turn the sound
+/// on. Only Back from a page the Reel opened (Watch, Details) carries on as
+/// the viewer left it ([tvVisitStart]).
 abstract final class ReelSound {
   /// Whether the feed's players mix with other audio rather than take audio
   /// focus. `video_player_android` hands this to media3 as
@@ -42,10 +43,9 @@ abstract final class ReelSound {
   /// How a TV visit starts its sound, and why (the `[ReelSound]` log).
   /// [muted] null: Back from a page the Reel opened ([backFromPage]), which
   /// keeps the sound as the viewer left it. Otherwise the visit is muted
-  /// unless the pref is [ReelStartSound.sound] (a phone's "Muted if other
-  /// audio is playing", carried over by a settings import, reads as muted:
-  /// the TV doesn't mix), and with sound it still starts muted when the mute
-  /// was kept ([saved]) or a screen reader is on (V2-54).
+  /// unless the pref is [ReelStartSound.sound] (anything else reads as
+  /// muted: the TV doesn't mix), and with sound it still starts muted when
+  /// the mute was kept ([saved]) or a screen reader is on (V2-54).
   static ({bool? muted, String why}) tvVisitStart({
     required ReelStartSound pref,
     required bool saved,

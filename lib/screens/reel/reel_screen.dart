@@ -238,11 +238,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// Phone: the screen held on while a card plays (V2-22).
   final WakelockController _awake = WakelockController();
 
-  /// This device's sound pref: start muted on the TV, with sound on the
-  /// phone, unless changed on the Reel's settings page.
-  ReelStartSound get _startSoundPref =>
-      SettingsService.instanceOrNull?.read(SettingsService.reelStartSound) ??
-      (_isTv ? ReelStartSound.muted : ReelStartSound.sound);
+  /// This device's sound pref: the TV's own (start muted) or the phone's
+  /// (with sound), unless changed on the Reel's settings page.
+  ReelStartSound get _startSoundPref {
+    final pref = _isTv ? SettingsService.reelTvStartSound : SettingsService.reelStartSound;
+    return SettingsService.instanceOrNull?.read(pref) ?? pref.resolvedDefault;
+  }
 
   bool get _isTv => PlatformDetector.isTV();
 

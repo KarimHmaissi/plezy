@@ -81,32 +81,35 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('TV: Start muted or With sound; muted if other audio is the phone\'s', (tester) async {
+    testWidgets('TV: Start muted or With sound, on its own pref; muted if other audio is the phone\'s', (tester) async {
+      // A "With sound" an older build stored under the phone's pref.
+      await settings.write(SettingsService.reelStartSound, ReelStartSound.sound);
       await pump(tester, tv: true);
+      expect(find.text(s.startSoundMuted), findsOneWidget, reason: 'the TV starts muted, whatever that pref holds');
       await openSound(tester);
 
       expect(find.text(s.startSoundMuted), findsWidgets);
       expect(find.text(s.startSoundMutedDescription), findsOneWidget);
-      expect(find.text(s.startSoundOn), findsWidgets);
+      expect(find.text(s.startSoundOn), findsOneWidget);
       expect(find.text(s.startSoundMutedIfOtherAudio), findsNothing, reason: 'the TV can\'t tell other audio apart');
 
-      await tester.tap(find.text(s.startSoundOn).last);
+      await tester.tap(find.text(s.startSoundOn));
       await tester.pumpAndSettle();
-      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.sound);
       expect(find.text(s.startSoundOn), findsOneWidget, reason: 'the row\'s subtitle follows the pick');
     });
 
-    testWidgets('phone: all three, and Start muted can be picked', (tester) async {
+    testWidgets('phone: as before, With sound or muted if other audio, on its own pref', (tester) async {
       await pump(tester, tv: false);
+      expect(find.text(s.startSoundOn), findsOneWidget, reason: 'the phone starts with sound');
       await openSound(tester);
 
-      expect(find.text(s.startSoundMutedIfOtherAudio), findsOneWidget);
-      expect(find.text(s.startSoundMuted), findsOneWidget);
-      await tester.tap(find.text(s.startSoundMuted));
+      expect(find.text(s.startSoundMuted), findsNothing);
+      await tester.tap(find.text(s.startSoundMutedIfOtherAudio));
       await tester.pumpAndSettle();
 
-      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.muted);
-      expect(find.text(s.startSoundMuted), findsOneWidget, reason: 'the row\'s subtitle follows the pick');
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.mutedIfOtherAudio);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.muted, reason: 'the TV\'s is its own');
     });
   });
 

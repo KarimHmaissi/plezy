@@ -314,8 +314,16 @@ void main() {
       expect(c.clips.muted, isTrue);
     });
 
-    testWidgets('"With sound" on the TV: the visit has sound, unless the mute was kept', (tester) async {
+    testWidgets('a "With sound" stored before this change (the old page offered it on the TV, and a phone\'s comes '
+        'in with a settings import) still starts muted', (tester) async {
       await settings.write(SettingsService.reelStartSound, ReelStartSound.sound);
+      await showTv(tester);
+      expect(c.clips.muted, isTrue);
+      expect(soundOff, findsOneWidget);
+    });
+
+    testWidgets('"With sound" on the TV: the visit has sound, unless the mute was kept', (tester) async {
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
       final reel = await showTv(tester);
       expect(c.clips.muted, isFalse);
       expect(soundOff, findsNothing);
@@ -354,7 +362,7 @@ void main() {
     });
 
     testWidgets('back from Watch keeps a mute too', (tester) async {
-      await settings.write(SettingsService.reelStartSound, ReelStartSound.sound);
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
       final reel = await showTv(tester);
       expect(c.clips.muted, isFalse);
       ReelScreen.remoteAction('mute');
