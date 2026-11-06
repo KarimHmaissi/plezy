@@ -442,8 +442,12 @@ class ReelController extends ChangeNotifier {
   }
 
   /// Next / previous deck (wraps), with the deck strip.
+  ///
+  /// Like [step], it bumps the generation first, so a card of the old deck
+  /// still resolving never plays once the deck has changed.
   Future<void> switchDeck(int dir) async {
     if (decks.length < 2) return;
+    _generation++;
     _clearPrefetch();
     await _leaveCard();
     _deck = (_deck + dir) % decks.length;
@@ -457,6 +461,7 @@ class ReelController extends ChangeNotifier {
   Future<void> openDeck(String id) async {
     final i = await _deckIndex(id);
     if (i < 0 || i == _deck) return;
+    _generation++;
     _clearPrefetch();
     await _leaveCard();
     _deck = i;

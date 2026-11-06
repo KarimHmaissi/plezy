@@ -187,7 +187,7 @@ abstract final class ReelApp {
       if (s == null) return;
       appLogger.i(
         '[ReelCache] daily sweep: ${s.pools} pool, ${s.days} deck/cursor, '
-        '${s.sources} source rows, ${s.events} events',
+        '${s.sources} source rows, ${s.metas} metadata rows, ${s.events} events',
       );
     } catch (e) {
       appLogger.w('[ReelCache] daily sweep failed', error: e);

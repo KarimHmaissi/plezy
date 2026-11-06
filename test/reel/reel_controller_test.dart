@@ -227,6 +227,19 @@ class _CountingDeck extends _Deck {
   }
 }
 
+/// A deck whose load lands only when the test says so.
+class _SlowDeck extends _Deck {
+  _SlowDeck(super.id, super.cards);
+
+  final gate = Completer<void>();
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    await gate.future;
+    return super.load();
+  }
+}
+
 /// A daily deck whose build can land after it loaded.
 class _DailyDeck extends ReelDeck {
   _DailyDeck(this.id, this.cards);
@@ -583,6 +596,35 @@ void main() {
     expect(c.deck.id, 'ai:42');
     c.dispose();
   });
+
+  for (final viaOpen in [false, true]) {
+    test('a card still resolving when the deck changes never plays (${viaOpen ? 'openDeck' : 'switchDeck'})', () async {
+      final servers = _GatedServers('2');
+      final slow = _SlowDeck('b', [_card('5')]);
+      final c = make(
+        servers: servers,
+        decks: [
+          _Deck('a', [_card('1'), _card('2')]),
+          slow,
+        ],
+      );
+      await c.start();
+      final stepping = c.step(1); // card 2 waits on its server
+      await Future<void>.delayed(Duration.zero);
+      final switching = viaOpen ? c.openDeck('b') : c.switchDeck(1); // deck b waits on its load
+      await Future<void>.delayed(Duration.zero);
+      servers.gate.complete();
+      await stepping;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      slow.gate.complete();
+      await switching;
+      expect(engine.calls, isNot(contains('open https://s1.example/services/iva/assets/2/video.mp4')));
+      expect(c.deck.id, 'b');
+      expect(c.current.card?.id, 't5');
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/5/video.mp4'));
+      c.dispose();
+    });
+  }
 
   test('memory pressure drops the preload, then releases the core for stills', () async {
     final c = make();

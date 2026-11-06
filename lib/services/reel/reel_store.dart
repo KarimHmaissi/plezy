@@ -33,8 +33,8 @@ enum ReelAction {
 }
 
 /// What one daily [ReelStore.sweep] deleted: old pool rows, `deck:` and
-/// `cursor:` rows, expired `src:` rows, and old events.
-typedef ReelSweep = ({int pools, int days, int sources, int events});
+/// `cursor:` rows, expired `src:` rows, old `meta:` rows, and old events.
+typedef ReelSweep = ({int pools, int days, int sources, int metas, int events});
 
 /// One saved pick, waiting on the TV's Home for 3 days.
 class ReelPick {
@@ -131,6 +131,11 @@ class ReelStore {
   /// How long a clip asset identity (or a miss) is trusted.
   static const Duration sourceTtl = Duration(days: 30);
 
+  /// How long a card's own lean metadata row (`meta:`, ReelMetadata) is
+  /// kept. It is shown fresh for 7 days and kept longer only as the
+  /// fallback when a read fails; the daily [sweep] deletes older ones.
+  static const Duration metadataKept = Duration(days: 30);
+
   /// Day-scoped cache rows (`pool:<day>`, `deck:…:<day>`, `cursor:…:<day>`)
   /// are read for today and the 2 days before at most (ReelPool.cachedPool);
   /// the daily [sweep] deletes older ones.
@@ -222,8 +227,8 @@ class ReelStore {
 
   /// The daily sweep, at most once per day on this device: pool rows older
   /// than [daysKept] days, `deck:` and `cursor:` rows not written for
-  /// [daysKept] days, `src:` rows past [sourceTtl], and old events
-  /// ([prune]). Returns what it deleted, or null when it already ran today.
+  /// [daysKept] days, `src:` rows past [sourceTtl], `meta:` rows not
+  /// written for [metadataKept], and old events ([prune]). Returns what it deleted, or null when it already ran today.
   /// Calls made while one runs share it.
   Future<ReelSweep?> sweep() => _sweeping ??= _sweep().whenComplete(() => _sweeping = null);
 
@@ -248,9 +253,12 @@ class ReelStore {
     final sources = await (db.delete(
       db.reelCache,
     )..where((c) => c.key.like('src:%') & c.updatedAt.isSmallerThanValue(nowMs - sourceTtl.inMilliseconds))).go();
+    final metas = await (db.delete(
+      db.reelCache,
+    )..where((c) => c.key.like('meta:%') & c.updatedAt.isSmallerThanValue(nowMs - metadataKept.inMilliseconds))).go();
     final events = await prune();
     await cache(sweptKey, today);
-    return (pools: pools, days: days, sources: sources, events: events);
+    return (pools: pools, days: days, sources: sources, metas: metas, events: events);
   }
 
   // ---- old one-setting format (read for one release) ----

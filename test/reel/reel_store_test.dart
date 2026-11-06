@@ -78,7 +78,7 @@ void main() {
   group('daily sweep', () {
     Future<Set<String>> keys() async => {for (final r in await db.select(db.reelCache).get()) r.key};
 
-    test('drops pools past the 3 days read, stale deck and cursor rows, expired sources and old events', () async {
+    test('drops old pools, stale day rows, expired sources, old metadata and old events', () async {
       // Written over the past days, each on its own day.
       for (var back = 0; back < 5; back++) {
         final then = now.subtract(Duration(days: back));
@@ -89,17 +89,19 @@ void main() {
       }
       final old = ReelStore(database: () async => db, clock: () => now.subtract(const Duration(days: 31)));
       await old.cache('src:g-old', '{"miss":true}');
+      await old.cache('meta:s1:old', '{}');
       await old.record('t-old', ReelAction.sampled);
       await ReelStore(
         database: () async => db,
         clock: () => now.subtract(const Duration(days: 401)),
       ).record('t-ancient', ReelAction.sampled);
       await store.cache('src:g-new', '{"k":"plex:1"}');
+      await store.cache('meta:s1:new', '{}');
       await store.cache('other', 'kept');
 
       final swept = await store.sweep();
 
-      expect(swept, (pools: 2, days: 2, sources: 1, events: 1));
+      expect(swept, (pools: 2, days: 2, sources: 1, metas: 1, events: 1));
       expect(await keys(), {
         for (var back = 0; back < 3; back++) ...[
           'pool:${ReelStore.dayStamp(now.subtract(Duration(days: back)))}',
@@ -110,6 +112,7 @@ void main() {
         'deck:for-you:${ReelStore.dayStamp(now.subtract(const Duration(days: 3)))}',
         'cursor:ai:a1:${ReelStore.dayStamp(now.subtract(const Duration(days: 3)))}',
         'src:g-new',
+        'meta:s1:new',
         'other',
         ReelStore.sweptKey,
       });
