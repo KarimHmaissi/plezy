@@ -145,6 +145,18 @@ Details of each are in the dated entries below.
 - The startup log now counts how often Android killed Plezy for memory
   while it was in the background (`[LmkCounter]`), to check that staying
   warm is not costing it.
+### TMDB key slot (Settings ▸ AI)
+- Settings ▸ AI has a **TMDB** section under the Anthropic key: paste the
+  TMDB key, receive it from a phone over the home network (the same
+  one-time "Send from phone" page, now worded for TMDB), test it, or
+  remove it. Either TMDB credential works: the 32-character API key or the
+  long API Read Access Token. It's checked against TMDB's validate-key
+  endpoint before it's saved (saved anyway if TMDB can't be reached), shown
+  only as its last four characters, and the last check's result is shown
+  next to it.
+- Stored like the Anthropic key (`TmdbKeyStore`): encrypted on the device,
+  registered as a credential, so it is never exported, backed up or
+  logged. Nothing uses it yet; it's ready for the Reel.
 
 ## 2026-11-03
 
