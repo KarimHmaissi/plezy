@@ -19,6 +19,7 @@ import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/widgets/stat_chip.dart';
 import 'package:plezy/widgets/tv_spotlight_background.dart';
 
 import '../test_helpers/prefs.dart';
@@ -50,6 +51,7 @@ class _Media implements ReelMedia {
     kind: MediaKind.movie,
     title: _titles[ratingKey],
     year: 2020,
+    summary: 'A lighthouse keeper finds a map in the fog and follows it out along the coast.',
   );
 
   @override
@@ -57,9 +59,10 @@ class _Media implements ReelMedia {
 }
 
 class _Deck extends ReelDeck {
-  _Deck(this.ids);
+  _Deck(this.ids, {this.cardOf = _card});
 
   final List<String> ids;
+  final ReelCardData Function(String id) cardOf;
 
   @override
   String get id => 'a';
@@ -70,7 +73,7 @@ class _Deck extends ReelDeck {
   @override
   bool get raw => true;
   @override
-  Future<List<ReelCardData>> load() async => [for (final i in ids) _card(i)];
+  Future<List<ReelCardData>> load() async => [for (final i in ids) cardOf(i)];
 }
 
 ReelCardData _card(String id) => ReelCardData(
@@ -105,8 +108,110 @@ ReelCardData _card(String id) => ReelCardData(
   ),
 );
 
+/// An anime show with a deck chip, a seen badge and a long why line: the
+/// tallest extras block the TV card draws.
+ReelCardData _animeCard(String id) => ReelCardData(
+  title: ReelTitle(
+    titleId: 't$id',
+    groupKey: 'g$id',
+    title: _titles[id]!,
+    isShow: true,
+    anime: true,
+    tvdbId: 1,
+    copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+  ),
+  facts: TitleFacts(
+    ref: TitleRef(id: 't$id', groupKey: 'g$id'),
+    seen: const SeenState(kind: SeenKind.inProgress),
+  ),
+  best: _card(id).best,
+  chip: '#1 show this week',
+  why:
+      'Because the harbour towns and slow storms of your recent watches run all the way through this one, '
+      'and its opening is the one people keep coming back to.',
+);
+
+Future<Map<int, Map<String, dynamic>>> _animeThemes(List<int> ids) async => {
+  101: {
+    'animethemes': [
+      {
+        'type': 'OP',
+        'sequence': 1,
+        'animethemeentries': [
+          {
+            'episodes': '1-12',
+            'videos': [
+              {'id': 9, 'link': 'https://v.animethemes.moe/Show-OP1.webm', 'nc': true, 'resolution': 1080},
+            ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
 const _a = ClipSource(uri: 'https://cdn.example/a.mp4', origin: ClipOrigin.plexExtra);
 const _b = ClipSource(uri: 'https://cdn.example/b.mp4', origin: ClipOrigin.plexExtra);
+
+ReelController _controller(ForkDatabase db, ReelDeck deck, void Function(FakeClipEngine) onEngine) {
+  resetSharedPreferencesForTest();
+  SettingsService.resetForTesting();
+  LocaleSettings.setLocaleSync(AppLocale.en);
+  final settings = LocalCustomisationStore(db);
+  final store = ReelStore(database: () async => db, settings: () async => settings);
+  return ReelController(
+    decks: [deck],
+    resolver: ClipResolver(
+      servers: _Servers(),
+      store: store,
+      aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+      animeThemes: _animeThemes,
+    ),
+    clips: ClipPlayer(
+      engine: () {
+        final e = FakeClipEngine();
+        onEngine(e);
+        return e;
+      },
+    ),
+    store: store,
+    media: _Media(),
+    onWatch: (_, {required onTv}) async => true,
+    addToWatchlist: (_) async => true,
+  );
+}
+
+/// The TV card at [size] logical pixels (960 x 540 is the 0.85 scale clamp).
+Future<void> _pumpTv(
+  WidgetTester tester,
+  ReelController c, {
+  Size size = const Size(1920, 1080),
+  bool reduceMotion = false,
+}) async {
+  await tester.runAsync(SettingsService.getInstance);
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  await tester.runAsync(c.start);
+  await tester.pumpWidget(
+    TranslationProvider(
+      child: MaterialApp(
+        theme: ThemeData.dark(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(disableAnimations: reduceMotion),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: c,
+            builder: (context, _) => ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pump();
+}
 
 void main() {
   group('ReelCardView.clipState (V2-01)', () {
@@ -190,28 +295,8 @@ void main() {
     late FakeClipEngine engine;
 
     setUp(() async {
-      resetSharedPreferencesForTest();
-      SettingsService.resetForTesting();
-      LocaleSettings.setLocaleSync(AppLocale.en);
       db = ForkDatabase.memory();
-      final settings = LocalCustomisationStore(db);
-      final store = ReelStore(database: () async => db, settings: () async => settings);
-      c = ReelController(
-        decks: [
-          _Deck(['1', '2', '3']),
-        ],
-        resolver: ClipResolver(
-          servers: _Servers(),
-          store: store,
-          aniList: (_) async => null,
-          animeThemes: (_) async => const {},
-        ),
-        clips: ClipPlayer(engine: () => engine = FakeClipEngine()),
-        store: store,
-        media: _Media(),
-        onWatch: (_, {required onTv}) async => true,
-        addToWatchlist: (_) async => true,
-      );
+      c = _controller(db, _Deck(['1', '2', '3']), (e) => engine = e);
     });
 
     tearDown(() async {
@@ -225,27 +310,7 @@ void main() {
         )
         .opacity;
 
-    Future<void> pump(WidgetTester tester) async {
-      await tester.runAsync(SettingsService.getInstance);
-      tester.view.physicalSize = const Size(1920, 1080);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      await tester.runAsync(c.start);
-      await tester.pumpWidget(
-        TranslationProvider(
-          child: MaterialApp(
-            theme: ThemeData.dark(),
-            home: Scaffold(
-              body: ListenableBuilder(
-                listenable: c,
-                builder: (context, _) => ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pump();
-    }
+    Future<void> pump(WidgetTester tester) => _pumpTv(tester, c);
 
     Future<void> nextCard(WidgetTester tester) async {
       await tester.runAsync(() => c.step(1));
@@ -283,6 +348,118 @@ void main() {
       engine.firstFrameCtl.add(null);
       await tester.pump();
       expect(artOpacity(tester), 0);
+    });
+  });
+
+  group('TV info block (V2-25)', () {
+    late ForkDatabase db;
+    late ReelController c;
+    late FakeClipEngine engine;
+
+    setUp(() async {
+      db = ForkDatabase.memory();
+      c = _controller(db, _Deck(['1', '2'], cardOf: _animeCard), (e) => engine = e);
+    });
+
+    tearDown(() async {
+      c.dispose();
+      await db.close();
+    });
+
+    TvSpotlightBackground spotlight(WidgetTester tester) =>
+        tester.widget<TvSpotlightBackground>(find.byType(TvSpotlightBackground));
+
+    Finder extras(String id) => find.byKey(ValueKey('extras:t$id'));
+
+    Future<void> hold(WidgetTester tester) async {
+      for (var i = 0; i < 4 && c.clips.phase.value != ClipPhase.held; i++) {
+        engine.completedCtl.add(true);
+        await tester.pump();
+      }
+      expect(c.clips.phase.value, ClipPhase.held);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the clip kind is on the metadata line and the credit has its own line', (tester) async {
+      await _pumpTv(tester, c);
+      engine.firstFrameCtl.add(null);
+      await tester.pumpAndSettle();
+
+      expect(spotlight(tester).metadataTrailing, isNotNull);
+      final kind = find.byKey(const ValueKey('reel-clip-kind'));
+      expect(find.descendant(of: find.byType(TvSpotlightBackground), matching: kind), findsOneWidget);
+      expect(find.descendant(of: kind, matching: find.text('Opening 1')), findsOneWidget);
+      expect(find.descendant(of: extras('1'), matching: find.text('Opening 1')), findsNothing);
+
+      final credit = find.text('Theme via AnimeThemes');
+      expect(credit, findsOneWidget);
+      expect(find.ancestor(of: credit, matching: find.byType(Wrap)), findsNothing);
+      expect(find.text('#1 show this week'), findsOneWidget);
+      expect(find.text('Watching'), findsOneWidget);
+    });
+
+    testWidgets('the chips scale with the TV scale, at the compact spotlight metadata size', (tester) async {
+      await _pumpTv(tester, c, size: const Size(960, 540));
+      engine.firstFrameCtl.add(null);
+      await tester.pumpAndSettle();
+      final chips = tester.widgetList<StatChip>(find.byType(StatChip));
+      expect(chips, hasLength(2));
+      for (final chip in chips) {
+        expect(chip.fontSize, closeTo(TvSpotlightBackground.metadataFontSize(0.85, compact: true), 1e-9));
+      }
+    });
+
+    testWidgets('a held anime card at the 0.85 clamp fits, with the info block right above the extras', (tester) async {
+      const scale = 0.85;
+      await _pumpTv(tester, c, size: const Size(960, 540));
+      engine.firstFrameCtl.add(null);
+      await tester.pumpAndSettle();
+      final playingBottom = spotlight(tester).contentBottom;
+      // The measured height is the drawn one: the info block ends 20*scale
+      // above the extras' real top.
+      expect(540 - playingBottom + 20 * scale, closeTo(tester.getRect(extras('1')).top, 0.5));
+
+      await hold(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Replay'), findsOneWidget);
+      final heldBottom = spotlight(tester).contentBottom;
+      expect(heldBottom - playingBottom, closeTo(58 * scale, 1e-9));
+      final box = tester.getRect(extras('1'));
+      expect(540 - heldBottom + 20 * scale, closeTo(box.top, 0.5));
+      expect(box.bottom, closeTo(540 - 24 * scale, 0.5));
+      expect(tester.getRect(find.text('Replay')).bottom, lessThanOrEqualTo(box.bottom));
+    });
+
+    testWidgets('the extras cross-fade with the card instead of cutting', (tester) async {
+      await _pumpTv(tester, c);
+      engine.firstFrameCtl.add(null);
+      await tester.pumpAndSettle();
+      expect(extras('1'), findsOneWidget);
+
+      await tester.runAsync(() => c.step(1));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(extras('1'), findsOneWidget, reason: 'the old block is still fading out');
+      expect(extras('2'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(extras('1'), findsNothing);
+      expect(extras('2'), findsOneWidget);
+    });
+
+    testWidgets('with animations off, the card change and Replay land at once', (tester) async {
+      await _pumpTv(tester, c, size: const Size(960, 540), reduceMotion: true);
+      engine.firstFrameCtl.add(null);
+      await tester.pumpAndSettle();
+      await hold(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Replay'), findsOneWidget);
+      expect(find.byType(AnimatedSize), findsNothing);
+
+      await tester.runAsync(() => c.step(1));
+      await tester.pump();
+      await tester.pump();
+      expect(extras('1'), findsNothing);
+      expect(extras('2'), findsOneWidget);
     });
   });
 }

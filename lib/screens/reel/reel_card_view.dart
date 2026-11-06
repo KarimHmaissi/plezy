@@ -6,11 +6,14 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
 import '../../services/reel/clip_player.dart';
+import '../../services/device_performance.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../theme/fork_motion.dart';
 import '../../utils/content_utils.dart';
 import '../../utils/formatters.dart';
 import '../../utils/layout_constants.dart';
 import '../../utils/provider_extensions.dart';
+import '../../widgets/app_icon.dart';
 import '../../widgets/fitted_metadata_line.dart';
 import '../../widgets/media_rating_badge.dart';
 import '../../widgets/stat_chip.dart';
@@ -113,7 +116,20 @@ class ReelCardView extends StatelessWidget {
   Widget _tv(BuildContext context, {required bool showArtwork, required bool showInfo, required bool held}) {
     final scale = TvLayoutConstants.scaleOf(context);
     final client = context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId));
-    final extrasHeight = 150 * scale;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final right = screenWidth * 0.43;
+    // V2-25: the extras sit on the bottom edge at their own height (no fixed
+    // box), and the spotlight's info block starts just above them.
+    final extras = _ExtrasLayout.of(
+      context,
+      controller: controller,
+      slot: slot,
+      held: held,
+      width: screenWidth - TvLayoutConstants.horizontalInset - right,
+    );
+    final extrasBottom = 24 * scale;
+    final extrasTop = extrasBottom + extras.height;
+    final duration = _infoFade(context);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -123,22 +139,60 @@ class ReelCardView extends StatelessWidget {
           showArtwork: showArtwork,
           showInfo: showInfo,
           artworkCurve: Easing.emphasizedDecelerate,
-          contentBottom: extrasHeight + 44 * scale,
+          metadataTrailing: _clipKind(context, scale),
+          contentBottom: extrasTop + 20 * scale,
           contentTop: 120 * scale,
         ),
         if (showInfo) ...[
-          if (slot.item == null) _titleOnly(context, scale, bottom: extrasHeight + 24 * scale),
+          if (slot.item == null) _titleOnly(context, scale, bottom: extrasTop),
           Positioned(
             left: TvLayoutConstants.horizontalInset,
-            right: MediaQuery.sizeOf(context).width * 0.43,
-            bottom: 24 * scale,
-            height: extrasHeight,
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: _Extras(controller: controller, slot: slot, held: held, tv: true, onReplay: onReplay),
+            right: right,
+            bottom: extrasBottom,
+            // The spotlight's own info cross-fade, so the two change together.
+            child: AnimatedSwitcher(
+              duration: duration,
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeOutCubic,
+              layoutBuilder: (currentChild, previousChildren) =>
+                  Stack(alignment: Alignment.bottomLeft, children: [...previousChildren, ?currentChild]),
+              child: _Extras(
+                key: ValueKey('extras:${slot.card!.id}'),
+                layout: extras,
+                resize: duration,
+                onReplay: onReplay,
+              ),
             ),
           ),
         ],
+      ],
+    );
+  }
+
+  /// The spotlight's 280 ms info cross-fade (none on the reduced tier or
+  /// with animations turned off).
+  static Duration _infoFade(BuildContext context) => ForkMotion.reduceMotion(context)
+      ? Duration.zero
+      : DevicePerformance.reducedDuration(const Duration(milliseconds: 280));
+
+  /// The clip's kind (Trailer, Opening 1) as the last fact on the
+  /// spotlight's metadata line, in the line's own style.
+  Widget? _clipKind(BuildContext context, double scale) {
+    final clip = slot.clip;
+    if (clip == null) return null;
+    final style = TvSpotlightBackground.metadataTextStyle(context);
+    return Row(
+      key: const ValueKey('reel-clip-kind'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AppIcon(
+          clip.source.origin == ClipOrigin.animeTheme ? Symbols.music_note_rounded : Symbols.movie_rounded,
+          size: style.fontSize,
+          fill: 1,
+          color: style.color,
+        ),
+        SizedBox(width: 4 * scale),
+        Text(clip.label, maxLines: 1, style: style),
       ],
     );
   }
@@ -260,91 +314,216 @@ class ReelMetadataLine extends StatelessWidget {
   }
 }
 
-/// What the Reel adds under the title block: its labels (deck chip, seen,
-/// clip kind), the why line, the theme credit, Replay, and the TV key hints.
-class _Extras extends StatelessWidget {
-  const _Extras({
-    required this.controller,
-    required this.slot,
+/// What the Reel adds under the spotlight on the TV, and its height before
+/// layout (V2-25): its labels (deck chip, seen) sized in the TV scale, the
+/// why line, the theme credit on its own line, Replay when the clip is held,
+/// and the key hints. The block has no fixed height: [height] is what it
+/// will take at [width], so the spotlight's info block can sit right above.
+class _ExtrasLayout {
+  _ExtrasLayout._({
+    required this.scale,
+    required this.width,
     required this.held,
-    required this.tv,
-    required this.onReplay,
+    required this.chips,
+    required this.chipFontSize,
+    required this.why,
+    required this.whyStyle,
+    required this.credit,
+    required this.creditStyle,
+    required this.hints,
+    required this.hintStyle,
+    required this.height,
   });
 
-  final ReelController controller;
-  final ReelSlot slot;
+  factory _ExtrasLayout.of(
+    BuildContext context, {
+    required ReelController controller,
+    required ReelSlot slot,
+    required bool held,
+    required double width,
+  }) {
+    final theme = Theme.of(context);
+    final scale = TvLayoutConstants.scaleOf(context);
+    final card = slot.card!;
+    final badge = card.facts.seen.badge;
+    final chips = <({IconData? icon, String label})>[
+      if (card.chip case final chip?) (icon: null, label: chip),
+      if (badge != null && controller.deck.keepsSeen) (icon: Symbols.check_rounded, label: badge),
+    ];
+    // The compact spotlight's metadata size, so the labels scale with it.
+    final chipFontSize = TvSpotlightBackground.metadataFontSize(scale, compact: true);
+    final whyStyle = theme.textTheme.bodyLarge?.copyWith(
+      color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
+      fontSize: 18 * scale,
+    );
+    final hintStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontSize: hintSize * scale,
+    );
+    final creditStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontSize: hintSize * scale,
+    );
+    final credit = slot.clip?.source.origin == ClipOrigin.animeTheme ? 'Theme via AnimeThemes' : null;
+    // OK replays a held clip (ReelScreen's key map).
+    final hints = '${held ? 'OK replay' : 'OK watch'}  ·  ↓ next  ·  → next deck  ·  hold OK for more';
+
+    var height = 0.0;
+    if (chips.isNotEmpty) height += _chipsHeight(context, chips, chipFontSize, scale, width);
+    if (card.why case final why?) {
+      if (height > 0) height += whyGap * scale;
+      height += _textHeight(context, why, whyStyle, width, maxLines: 2);
+    }
+    if (credit != null) {
+      if (height > 0) height += creditGap * scale;
+      height += _textHeight(context, credit, creditStyle, width);
+    }
+    if (held) height += heldExtra * scale;
+    height += sectionGap * scale + _textHeight(context, hints, hintStyle, width);
+
+    return _ExtrasLayout._(
+      scale: scale,
+      width: width,
+      held: held,
+      chips: chips,
+      chipFontSize: chipFontSize,
+      why: card.why,
+      whyStyle: whyStyle,
+      credit: credit,
+      creditStyle: creditStyle,
+      hints: hints,
+      hintStyle: hintStyle,
+      height: height,
+    );
+  }
+
+  static const double whyGap = 8;
+  static const double creditGap = 6;
+  static const double sectionGap = 10;
+  static const double hintSize = 14;
+  static const double chipSpacing = 8;
+  static const double chipRunSpacing = 6;
+
+  /// Replay's gap and button, the room a held clip adds.
+  static const double replayHeight = 48;
+  static const double heldExtra = sectionGap + replayHeight;
+
+  final double scale;
+  final double width;
   final bool held;
-  final bool tv;
+  final List<({IconData? icon, String label})> chips;
+  final double chipFontSize;
+  final String? why;
+  final TextStyle? whyStyle;
+  final String? credit;
+  final TextStyle? creditStyle;
+  final String hints;
+  final TextStyle? hintStyle;
+
+  /// What the block takes at [width], Replay included when [held].
+  final double height;
+
+  /// The chips as [Wrap] lays them out at [width].
+  static double _chipsHeight(
+    BuildContext context,
+    List<({IconData? icon, String label})> chips,
+    double fontSize,
+    double scale,
+    double width,
+  ) {
+    var total = 0.0;
+    var runWidth = 0.0;
+    var runHeight = 0.0;
+    var runs = 0;
+    for (final c in chips) {
+      final size = StatChip.sizeFor(context, c.label, icon: c.icon != null, fontSize: fontSize);
+      if (runs > 0 && runWidth + chipSpacing * scale + size.width > width + 1e-10) {
+        total += runHeight + chipRunSpacing * scale;
+        runWidth = size.width;
+        runHeight = size.height;
+      } else {
+        runWidth += (runs > 0 ? chipSpacing * scale : 0) + size.width;
+        runHeight = runHeight > size.height ? runHeight : size.height;
+      }
+      runs++;
+    }
+    return total + runHeight;
+  }
+
+  static double _textHeight(BuildContext context, String text, TextStyle? style, double width, {int? maxLines}) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: DefaultTextStyle.of(context).style.merge(style)),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: maxLines,
+      ellipsis: maxLines == null ? null : '…',
+    )..layout(maxWidth: width);
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+}
+
+class _Extras extends StatelessWidget {
+  const _Extras({super.key, required this.layout, required this.resize, required this.onReplay});
+
+  final _ExtrasLayout layout;
+
+  /// How long Replay takes to open its room: the spotlight's glide, so the
+  /// info block above moves up with it.
+  final Duration resize;
   final VoidCallback onReplay;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scale = tv ? TvLayoutConstants.scaleOf(context) : 1.0;
-    final card = slot.card!;
-    final badge = card.facts.seen.badge;
-    final bodySize = (tv ? 18 : 15) * scale;
-    return Column(
-      key: ValueKey('extras:${card.id}'),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 6,
-          children: [
-            if (slot.clip != null)
-              StatChip(
-                icon: slot.clip!.source.origin == ClipOrigin.animeTheme
-                    ? Symbols.music_note_rounded
-                    : Symbols.movie_rounded,
-                label: slot.clip!.label,
+    final l = layout;
+    final s = l.scale;
+    final hasChips = l.chips.isNotEmpty;
+    final replay = l.held
+        ? Padding(
+            padding: EdgeInsets.only(top: _ExtrasLayout.sectionGap * s),
+            child: SizedBox(
+              height: _ExtrasLayout.replayHeight * s,
+              child: FilledButton.icon(
+                // The Reel's own focus node keeps the keys; OK replays here.
+                onPressed: onReplay,
+                icon: const Icon(Symbols.replay_rounded),
+                label: const Text('Replay'),
               ),
-            if (card.chip case final chip?) StatChip(label: chip),
-            if (badge != null && controller.deck.keepsSeen) StatChip(icon: Symbols.check_rounded, label: badge),
-            if (slot.clip?.source.origin == ClipOrigin.animeTheme)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Theme via AnimeThemes',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ),
+            ),
+          )
+        : const SizedBox.shrink();
+    return SizedBox(
+      width: l.width,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (hasChips) ...[
+            Wrap(
+              spacing: _ExtrasLayout.chipSpacing * s,
+              runSpacing: _ExtrasLayout.chipRunSpacing * s,
+              children: [for (final c in l.chips) StatChip(icon: c.icon, label: c.label, fontSize: l.chipFontSize)],
+            ),
           ],
-        ),
-        if (card.why case final why?) ...[
-          SizedBox(height: 8 * scale),
-          Text(
-            why,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
-              fontSize: bodySize,
-            ),
-          ),
+          if (l.why case final why?) ...[
+            if (hasChips) SizedBox(height: _ExtrasLayout.whyGap * s),
+            Text(why, maxLines: 2, overflow: TextOverflow.ellipsis, style: l.whyStyle),
+          ],
+          if (l.credit case final credit?) ...[
+            if (hasChips || l.why != null) SizedBox(height: _ExtrasLayout.creditGap * s),
+            Text(credit, style: l.creditStyle),
+          ],
+          // AnimatedSize cannot run at zero length (it re-dirties itself
+          // mid-layout), so reduced motion places Replay directly.
+          if (resize == Duration.zero)
+            replay
+          else
+            AnimatedSize(duration: resize, curve: Curves.easeOutCubic, alignment: Alignment.topLeft, child: replay),
+          SizedBox(height: _ExtrasLayout.sectionGap * s),
+          Text(l.hints, style: l.hintStyle),
         ],
-        if (held) ...[
-          SizedBox(height: 10 * scale),
-          FilledButton.icon(
-            // The Reel's own focus node keeps the keys; OK replays here.
-            onPressed: onReplay,
-            icon: const Icon(Symbols.replay_rounded),
-            label: const Text('Replay'),
-          ),
-        ],
-        if (tv) ...[
-          SizedBox(height: 10 * scale),
-          Text(
-            // OK replays a held clip (ReelScreen's key map).
-            '${held ? 'OK replay' : 'OK watch'}  ·  ↓ next  ·  → next deck  ·  hold OK for more',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontSize: 14 * scale,
-            ),
-          ),
-        ],
-      ],
+      ),
     );
   }
 }

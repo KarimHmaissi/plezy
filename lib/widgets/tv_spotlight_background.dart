@@ -376,14 +376,8 @@ class TvSpotlightBackground extends StatelessWidget {
 
   Widget _buildMetadataLine(BuildContext context, MediaItem media) {
     final scale = _scale(context);
-    final colorScheme = Theme.of(context).colorScheme;
     final episodeLabel = formatSeasonEpisodeLabel(media.parentIndex, media.index);
-    final textStyle = TextStyle(
-      color: colorScheme.onSurface,
-      fontSize: _metadataFontSize(scale),
-      fontWeight: .w700,
-      letterSpacing: 0.1,
-    );
+    final textStyle = metadataTextStyle(context, compact: compact);
 
     final parts = <MetadataLinePart>[];
     if (media.isEpisode && episodeLabel != null) parts.add(MetadataLineText(episodeLabel, dropPriority: 0));
@@ -443,7 +437,18 @@ class TvSpotlightBackground extends StatelessWidget {
 
   double _titleFontSize(double scale) => (compact ? 36 : 54) * scale;
 
-  double _metadataFontSize(double scale) => (compact ? 16 : 18) * scale;
+  /// The metadata line's size at [scale] (the compact spotlight's when
+  /// [compact]); public so a caller's own facts can match it.
+  static double metadataFontSize(double scale, {bool compact = false}) => (compact ? 16 : 18) * scale;
+
+  /// The metadata line's text style, for a [metadataTrailing] that should
+  /// read as part of the line.
+  static TextStyle metadataTextStyle(BuildContext context, {bool compact = false}) => TextStyle(
+    color: Theme.of(context).colorScheme.onSurface,
+    fontSize: metadataFontSize(TvLayoutConstants.scaleOf(context), compact: compact),
+    fontWeight: .w700,
+    letterSpacing: 0.1,
+  );
 
   double _summaryFontSize(double scale) => (compact ? 18 : 20) * scale;
 }
