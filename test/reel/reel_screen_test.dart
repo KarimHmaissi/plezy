@@ -55,6 +55,17 @@ class _Media implements ReelMedia {
   String? imageUrl(String serverId, String? path, {required int width}) => null;
 }
 
+/// A card's text that lands only when [gate] opens.
+class _HangingMedia extends _Media {
+  final gate = Completer<void>();
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) async {
+    await gate.future;
+    return super.item(serverId, ratingKey);
+  }
+}
+
 class _Deck extends ReelDeck {
   _Deck(this.ids);
 
@@ -131,7 +142,7 @@ void main() {
     await db.close();
   });
 
-  ReelController make() => ReelController(
+  ReelController make({ReelMedia? media}) => ReelController(
     decks: [
       _Deck(['1', '2']),
     ],
@@ -143,7 +154,7 @@ void main() {
     ),
     clips: ClipPlayer(engine: () => engine = FakeClipEngine()),
     store: store,
-    media: _Media(),
+    media: media ?? _Media(),
     onWatch: (_, {required onTv}) async => false,
     addToWatchlist: (_) async => true,
   );
@@ -191,6 +202,13 @@ void main() {
     expect(calls, 2);
     expect(find.text("The Reel didn't open"), findsNothing);
     expect(find.byType(ReelCurtain), findsOneWidget);
+
+    // A build that never lands is given up on: the message and Retry again,
+    // not a curtain for good.
+    await tester.pump(ReelScreen.createLimit);
+    await tester.pump();
+    expect(find.text("The Reel didn't open"), findsOneWidget);
+    expect(find.byType(ReelCurtain), findsNothing);
   });
 
   testWidgets('V2-60: the tab shown again after a failed open tries again', (tester) async {
@@ -268,6 +286,101 @@ void main() {
     await settle(tester);
     expect(c.active, isTrue);
     expect(find.text("You're offline"), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+  });
+
+  testWidgets('TV: back after a long standby starts afresh instead of playing the paused core on', (tester) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
+    var now = DateTime(2026, 1, 1, 9);
+    ReelScreen.clock = () => now;
+    addTearDown(() => ReelScreen.clock = DateTime.now);
+    final c = make();
+    final key = await pump(tester, (_) async => c);
+    key.currentState!.onTabShown();
+    await settle(tester);
+    final e = engine!;
+    e.firstFrameCtl.add(null);
+    await tester.pump();
+
+    // The screensaver, then the TV's standby: only inactive arrives.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await settle(tester);
+    expect(c.clips.phase.value, ClipPhase.paused);
+    expect(e.disposed, isFalse);
+
+    now = now.add(ReelScreen.longAway + const Duration(minutes: 1));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    await settle(tester);
+    expect(e.disposed, isTrue, reason: 'the core from before the standby is let go');
+    expect(identical(engine, e), isFalse, reason: 'a fresh core opens the card');
+    expect(engine!.calls.where((x) => x.startsWith('open')), hasLength(1));
+    expect(c.active, isTrue);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+  });
+
+  testWidgets('TV: a short time away still plays the paused core on', (tester) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
+    var now = DateTime(2026, 1, 1, 9);
+    ReelScreen.clock = () => now;
+    addTearDown(() => ReelScreen.clock = DateTime.now);
+    final c = make();
+    final key = await pump(tester, (_) async => c);
+    key.currentState!.onTabShown();
+    await settle(tester);
+    final e = engine!;
+    e.firstFrameCtl.add(null);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await settle(tester);
+    now = now.add(ReelScreen.longAway - const Duration(minutes: 1));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    expect(identical(engine, e), isTrue);
+    expect(e.disposed, isFalse);
+    expect(c.clips.phase.value, ClipPhase.playing);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+  });
+
+  testWidgets('TV: a card that shows nothing in time says so over its art, and OK starts it afresh', (tester) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
+    // Its text never lands either (a stale connection).
+    final media = _HangingMedia();
+    final c = make(media: media);
+    final key = await pump(tester, (_) async => c);
+    key.currentState!.onTabShown();
+    await settle(tester);
+    key.currentState!.focusActiveTabIfReady();
+    await tester.pump();
+    final e = engine!;
+    expect(find.text('This is taking a while'), findsNothing);
+
+    expect(find.byKey(const ValueKey('spotlight-pending-skeleton')), findsOneWidget);
+
+    // No first frame: the watchdog runs out.
+    await tester.pump(ReelController.defaultStuckAfter);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(c.stuck.value?.stage, ReelStage.frame);
+    expect(find.text('This is taking a while'), findsOneWidget);
+    expect(find.text('Press OK to try again, or ↓ for the next card.'), findsOneWidget);
+    // The card's own title shows, not the skeleton.
+    expect(find.text('Harbor Lights'), findsWidgets);
+    expect(find.byKey(const ValueKey('spotlight-pending-skeleton')), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await settle(tester);
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(c.stuck.value, isNull);
+    expect(find.text('This is taking a while'), findsNothing);
+    expect(e.disposed, isTrue);
+    expect(identical(engine, e), isFalse, reason: 'started afresh on a new core');
+    expect(c.active, isTrue);
+    media.gate.complete();
+    await settle(tester);
     await tester.pumpWidget(const SizedBox());
     await settle(tester);
   });

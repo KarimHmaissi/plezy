@@ -1771,7 +1771,11 @@
       "openFailedTitle": "The Reel didn't open",
       "openFailedBodyTv": "Press OK to try again.",
       "openFailedBodyPhone": "Something went wrong getting it ready.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "stuckTitle": "This is taking a while",
+      "stuckBodyTv": "Press OK to try again, or ↓ for the next card.",
+      "stuckBodyTvLoading": "Press OK to try again.",
+      "stuckBodyPhone": "Tap to try again."
     },
     "remote": {
       "title": "The Reel",

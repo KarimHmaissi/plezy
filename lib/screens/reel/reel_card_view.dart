@@ -143,7 +143,7 @@ class ReelCardView extends StatelessWidget {
     final isCurrent = identical(controller.current.card, card);
     final clips = controller.clips;
     return ListenableBuilder(
-      listenable: Listenable.merge([clips.phase, clips.onScreen, ?leanBack]),
+      listenable: Listenable.merge([clips.phase, clips.onScreen, controller.stuck, ?leanBack]),
       builder: (context, _) {
         final state = ReelCardView.clipState(
           clip: slot.clip?.source,
@@ -248,8 +248,9 @@ class ReelCardView extends StatelessWidget {
           // cross-fades in over it in place.
           pendingTitle: slot.card!.title.title,
           // The skeleton stays until the item lands or its read comes back
-          // empty; the clip's answer no longer waits on it (V2-03).
-          pendingSkeleton: !slot.itemMissed,
+          // empty; the clip's answer no longer waits on it (V2-03). A stuck
+          // card ([ReelController.stuck]) shows what it has instead.
+          pendingSkeleton: !slot.itemMissed && controller.stuck.value == null,
           quiet: quiet,
           quietFade: quietFade,
         ),

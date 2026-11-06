@@ -214,4 +214,23 @@ void main() {
       );
     });
   });
+
+  test('a task that never comes back frees its lane after the cap, so the cards behind it still load', () {
+    fakeAsync((async) {
+      final capped = ReelPrefetcher(taskCap: const Duration(seconds: 60));
+      capped.schedule(1, [task('c3', 0), task('c4', 1)]);
+      async.flushMicrotasks();
+      expect(started, ['c3/resolve'], reason: 'c4 waits for c3 on Server A');
+      var behind = false;
+      capped.done('c4/resolve').then((_) => behind = true);
+      async.elapse(const Duration(seconds: 59));
+      expect(started, ['c3/resolve']);
+      async.elapse(const Duration(seconds: 1));
+      expect(started, ['c3/resolve', 'c4/resolve']);
+      gates['c4/resolve']!.complete();
+      async.flushMicrotasks();
+      expect(behind, isTrue);
+      capped.dispose();
+    });
+  });
 }

@@ -213,6 +213,8 @@ class ClipPlayer {
     ReelPerf? perf,
     WakelockController? wakelock,
     this._muted = false,
+    this.openLimit = defaultOpenLimit,
+    this.callLimit = defaultCallLimit,
   }) : _create = engine ?? ExoClipEngine.new,
        _plays = plays ?? _twice,
        _perf = perf ?? ReelPerf.instance,
@@ -241,6 +243,31 @@ class ClipPlayer {
   static const Duration externalPauseGrace = Duration(milliseconds: 250);
 
   static int? _twice() => 2;
+
+  /// The longest a clip's open may take. The core's open returns once the
+  /// clip is handed to the player (buffering comes after), so an open still
+  /// waiting after this means the core is wedged (its thread gone after a
+  /// long standby): the core is let go and the clip reads as failed, so the
+  /// card falls back and the next clip builds a fresh core.
+  static const Duration defaultOpenLimit = Duration(seconds: 10);
+
+  /// The longest any other call to the core may take (pause, play, seek,
+  /// preload, dispose): a wedged core never holds up a card change or a
+  /// release.
+  static const Duration defaultCallLimit = Duration(seconds: 5);
+
+  final Duration openLimit;
+  final Duration callLimit;
+
+  /// [call], given up on after [callLimit] (a wedged core).
+  Future<void> _bounded(Future<void>? call, String what) async {
+    if (call == null) return;
+    try {
+      await call.timeout(callLimit);
+    } on TimeoutException {
+      appLogger.w('Reel: clip core $what timed out after ${callLimit.inMilliseconds}ms');
+    }
+  }
 
   final ClipEngine Function() _create;
 
@@ -399,7 +426,15 @@ class ClipPlayer {
     } else {
       unawaited(_fadeTo(0, outgoingFade));
     }
-    await e.open(source.uri);
+    try {
+      await e.open(source.uri).timeout(openLimit);
+    } on TimeoutException {
+      if (open != _opens || !identical(_engine, e)) return;
+      appLogger.w('Reel: clip open timed out after ${openLimit.inMilliseconds}ms; the clip core is let go');
+      _abandon(e);
+      phase.value = ClipPhase.failed;
+      return;
+    }
     if (open != _opens || !identical(_engine, e)) return;
     _perf.markOpened();
     if (_muted) return;
@@ -413,17 +448,17 @@ class ClipPlayer {
     final e = _ensure();
     if (next == null || !next.preloadable) {
       _preloaded = null;
-      await e.clearPreloads();
+      await _bounded(e.clearPreloads(), 'clearPreloads');
       return;
     }
     _preloaded = next.uri;
-    await e.preload(next.uri);
+    await _bounded(e.preload(next.uri), 'preload');
   }
 
   /// Memory pressure: drop the buffered next card without building a core.
   Future<void> dropPreload() async {
     _preloaded = null;
-    await _engine?.clearPreloads();
+    await _bounded(_engine?.clearPreloads(), 'clearPreloads');
   }
 
   Future<void> pause() async {
@@ -433,7 +468,7 @@ class ClipPlayer {
     _wantPlaying = false;
     _pausedExternally = false;
     _cancelExternalPause();
-    await _engine?.pause();
+    await _bounded(_engine?.pause(), 'pause');
     if (phase.value == ClipPhase.playing || phase.value == ClipPhase.loading) phase.value = ClipPhase.paused;
   }
 
@@ -444,7 +479,7 @@ class ClipPlayer {
     // After a lost focus the system keeps the clip silent until the focus
     // is asked for again.
     _takeFocus();
-    await _engine?.play();
+    await _bounded(_engine?.play(), 'play');
     if (phase.value == ClipPhase.paused) phase.value = ClipPhase.playing;
   }
 
@@ -457,8 +492,8 @@ class ClipPlayer {
     _wantPlaying = true;
     _pausedExternally = false;
     _takeFocus();
-    await e.seek(Duration.zero);
-    await e.play();
+    await _bounded(e.seek(Duration.zero), 'seek');
+    await _bounded(e.play(), 'play');
     if (onScreen.value != null) progress.value = ClipProgress(Duration.zero, _length);
     phase.value = ClipPhase.playing;
   }
@@ -468,7 +503,7 @@ class ClipPlayer {
     final e = _engine;
     if (e == null) return;
     final to = e.position + delta;
-    await e.seek(to < Duration.zero ? Duration.zero : to);
+    await _bounded(e.seek(to < Duration.zero ? Duration.zero : to), 'seek');
   }
 
   Future<void> setMuted(bool muted) async {
@@ -480,7 +515,7 @@ class ClipPlayer {
   }
 
   /// Hide the native surface while a card is dragged (it can't slide).
-  Future<void> setVisible(bool visible) async => _engine?.setVisible(visible);
+  Future<void> setVisible(bool visible) => _bounded(_engine?.setVisible(visible), 'setVisible');
 
   /// Releases the core and awaits its dispose, so the real player can open
   /// right after (two decoders never run at once on the 3 GB Shield).
@@ -511,21 +546,58 @@ class ClipPlayer {
     final subs = List.of(_subs);
     _subs.clear();
     for (final s in subs) {
-      await s.cancel();
+      await _bounded(s.cancel(), 'unsubscribe');
     }
     onScreen.value = null;
     phase.value = ClipPhase.idle;
     // Both are let go before the core goes, so the main player's own focus
     // and wakelock (after Watch) start from a clean slate.
-    await _wakelock?.setEnabled(false);
-    if (e != null && focusAsked) {
+    await _bounded(_wakelock?.setEnabled(false), 'wakelock');
+    if (e != null) await _letGo(e, focusAsked: focusAsked);
+  }
+
+  /// Gives back [e]'s audio focus (when it was asked for) and disposes it,
+  /// each bounded by [callLimit].
+  Future<void> _letGo(ClipEngine e, {required bool focusAsked}) async {
+    if (focusAsked) {
       try {
-        await e.abandonAudioFocus();
+        await _bounded(e.abandonAudioFocus(), 'abandonAudioFocus');
       } catch (err) {
         appLogger.w('Reel: abandoning audio focus failed', error: err);
       }
     }
-    if (e != null) await e.dispose();
+    await _bounded(e.dispose(), 'dispose');
+  }
+
+  /// The core's open never came back: it is let go (in the background,
+  /// bounded) and the next [play] builds a fresh one. [current] stays, so
+  /// the failure is read as this clip's.
+  void _abandon(ClipEngine e) {
+    if (!identical(_engine, e)) return;
+    _cancelFade();
+    _cancelExternalPause();
+    final focusAsked = _focusAsked;
+    _focus = false;
+    _focusAsked = false;
+    _wantPlaying = false;
+    _enginePlaying = false;
+    _engineBuffering = false;
+    _engine = null;
+    _preloaded = null;
+    _openKey = null;
+    _ttff = null;
+    _level = 0;
+    onScreen.value = null;
+    final subs = List.of(_subs);
+    _subs.clear();
+    unawaited(
+      () async {
+        for (final s in subs) {
+          await _bounded(s.cancel(), 'unsubscribe');
+        }
+        await _letGo(e, focusAsked: focusAsked);
+      }().catchError((Object err) => appLogger.w('Reel: letting a wedged clip core go failed', error: err)),
+    );
   }
 
   void _onFirstFrame() {

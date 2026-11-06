@@ -8612,6 +8612,18 @@ class Translations$reel$status$en {
 
 	/// en: 'Retry'
 	String get retry => 'Retry';
+
+	/// en: 'This is taking a while'
+	String get stuckTitle => 'This is taking a while';
+
+	/// en: 'Press OK to try again, or ↓ for the next card.'
+	String get stuckBodyTv => 'Press OK to try again, or ↓ for the next card.';
+
+	/// en: 'Press OK to try again.'
+	String get stuckBodyTvLoading => 'Press OK to try again.';
+
+	/// en: 'Tap to try again.'
+	String get stuckBodyPhone => 'Tap to try again.';
 }
 
 // Path: reel.remote
@@ -11760,6 +11772,10 @@ extension on Translations {
 			'reel.status.openFailedBodyTv' => 'Press OK to try again.',
 			'reel.status.openFailedBodyPhone' => 'Something went wrong getting it ready.',
 			'reel.status.retry' => 'Retry',
+			'reel.status.stuckTitle' => 'This is taking a while',
+			'reel.status.stuckBodyTv' => 'Press OK to try again, or ↓ for the next card.',
+			'reel.status.stuckBodyTvLoading' => 'Press OK to try again.',
+			'reel.status.stuckBodyPhone' => 'Tap to try again.',
 			'reel.remote.title' => 'The Reel',
 			'reel.remote.onTv' => ({required Object tv}) => 'On ${tv}',
 			'reel.remote.theTv' => 'the TV',
@@ -12190,12 +12206,12 @@ extension on Translations {
 			'collections.addedToCollection' => 'Added to collection',
 			'collections.errorAddingToCollection' => 'Failed to add to collection',
 			'collections.created' => 'Collection created',
+			_ => null,
+		} ?? switch (path) {
 			'collections.removeFromCollection' => 'Remove from collection',
 			'collections.removeFromCollectionConfirm' => ({required Object title}) => 'Remove "${title}" from this collection?',
 			'collections.removedFromCollection' => 'Removed from collection',
 			'collections.removeFromCollectionFailed' => 'Failed to remove from collection',
-			_ => null,
-		} ?? switch (path) {
 			'collections.removeFromCollectionError' => ({required Object error}) => 'Error removing from collection: ${error}',
 			'collections.searchCollections' => 'Search collections...',
 			'playlists.title' => 'Playlists',
@@ -12704,12 +12720,12 @@ extension on Translations {
 			'externalPlayer.playerUrlScheme' => 'URL Scheme',
 			'externalPlayer.off' => 'Off',
 			'externalPlayer.launchFailed' => 'Failed to open external player',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} is not installed',
 			'externalPlayer.playInExternalPlayer' => 'Play in External Player',
 			'metadataEdit.editMetadata' => 'Edit...',
 			'metadataEdit.screenTitle' => 'Edit Metadata',
-			_ => null,
-		} ?? switch (path) {
 			'metadataEdit.basicInfo' => 'Basic Info',
 			'metadataEdit.artwork' => 'Artwork',
 			'metadataEdit.advancedSettings' => 'Advanced Settings',

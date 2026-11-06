@@ -330,6 +330,9 @@ void main() {
       clipEnd: () => clipEnd,
       clock: () => DateTime.now().add(skew),
     );
+    // No stuck-card watchdog here either (a timer left behind); its own
+    // tests arm it.
+    c.stuckAfter = null;
     videos = {};
     ratios = {};
     opening = null;

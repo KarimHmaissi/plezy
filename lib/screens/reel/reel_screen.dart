@@ -44,6 +44,7 @@ import 'reel_lean_back.dart';
 import 'reel_intro.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
+import 'reel_stuck.dart';
 
 /// Fork: The Reel. A full-screen feed of trailers and anime openings from
 /// the servers, one title per card, grouped into decks like channels.
@@ -137,13 +138,39 @@ class ReelScreen extends StatefulWidget {
   @visibleForTesting
   static FeedVideo Function(Uri uri)? debugFeedVideo;
 
+  /// Back after longer than this away (a long standby): the Reel starts
+  /// afresh, as a tab hidden and shown again does, rather than resuming a
+  /// clip core and connections that may have died meanwhile.
+  static const Duration longAway = Duration(minutes: 30);
+
+  /// The longest building the session may take before the screen says it
+  /// couldn't open, with Retry. A build that lands later is still taken.
+  static const Duration createLimit = Duration(seconds: 30);
+
+  /// The wall clock the away time is read from (tests).
+  @visibleForTesting
+  static DateTime Function() clock = DateTime.now;
+
   @override
   State<ReelScreen> createState() => ReelScreenState();
 }
 
 class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, TabVisibilityAware, FocusableTab {
   ReelController? _controller;
-  Future<ReelController>? _creating;
+
+  /// The session build in flight, and when it began. Each start waits on
+  /// it bounded by what is left of [ReelScreen.createLimit], so no start
+  /// (after a suspend, a resume or a retry) waits on it for good; once it
+  /// is that old, the next start builds afresh, and the old build, should
+  /// it ever land, is let go.
+  ({Future<ReelController> made, DateTime at})? _building;
+
+  /// When the app last left the foreground (any state but resumed), until
+  /// it is back ([ReelScreen.longAway]).
+  DateTime? _awaySince;
+
+  /// TV: OK pressed to retry a stuck card; its key up is this screen's too.
+  bool _retryKeyDown = false;
 
   /// The last attempt to build the session failed: a message with Retry
   /// shows instead of a curtain that never lifts.
@@ -303,34 +330,63 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   Future<ReelController> _ensure() {
     final c = _controller;
     if (c != null) return Future.value(c);
-    return _creating ??= widget
-        .create(context)
-        .then(
-          (c) {
-            if (!mounted) {
-              c.dispose();
-              return c;
-            }
-            setState(() => _controller = c..addListener(_onChanged));
-            c.toast.addListener(_onToast);
-            // TV: the next two cards' spotlight art is warmed ahead (plan V2-13);
-            // the phone feed registers its own, sized to its pages.
-            if (_isTv) {
-              c.artPrecache = _precacheTvArt;
-              c.clips.phase.addListener(_onPhase);
-              _onPhase();
-            }
-            return c;
-          },
-          onError: (Object e, StackTrace s) {
-            // A failed build is not kept: the next start (Retry, the tab shown
-            // again, the app resumed) tries again.
-            _creating = null;
-            appLogger.w('[ReelLife] the Reel could not open', error: e);
-            if (mounted) setState(() => _createFailed = true);
-            Error.throwWithStackTrace(e, s);
-          },
-        );
+    final now = ReelScreen.clock();
+    var b = _building;
+    if (b == null || now.difference(b.at) >= ReelScreen.createLimit) {
+      late final Future<ReelController> made;
+      made = widget
+          .create(context)
+          .then(
+            (c) {
+              if (identical(_building?.made, made)) _building = null;
+              return _adopt(c);
+            },
+            onError: (Object e, StackTrace s) {
+              // A failed build is not kept: the next start (Retry, the tab shown
+              // again, the app resumed) tries again.
+              if (identical(_building?.made, made)) _building = null;
+              Error.throwWithStackTrace(e, s);
+            },
+          );
+      b = _building = (made: made, at: now);
+    }
+    final bounded = b.made.timeout(ReelScreen.createLimit - now.difference(b.at));
+    unawaited(
+      bounded.then<void>(
+        (_) {},
+        onError: (Object e) {
+          appLogger.w('[ReelLife] the Reel could not open', error: e);
+          if (mounted && _controller == null) setState(() => _createFailed = true);
+        },
+      ),
+    );
+    return bounded;
+  }
+
+  /// A session build landed: it is the screen's, unless the screen has gone
+  /// or another build landed first (then it is let go). One that lands
+  /// after the screen gave up on it starts the visit it was built for.
+  ReelController _adopt(ReelController c) {
+    final have = _controller;
+    if (!mounted || have != null) {
+      if (!identical(have, c)) c.dispose();
+      return have ?? c;
+    }
+    final late = _createFailed;
+    setState(() {
+      _controller = c..addListener(_onChanged);
+      _createFailed = false;
+    });
+    c.toast.addListener(_onToast);
+    // TV: the next two cards' spotlight art is warmed ahead (plan V2-13);
+    // the phone feed registers its own, sized to its pages.
+    if (_isTv) {
+      c.artPrecache = _precacheTvArt;
+      c.clips.phase.addListener(_onPhase);
+      _onPhase();
+    }
+    if (late && _shown) unawaited(_start());
+    return c;
   }
 
   /// Retry after a failed open.
@@ -360,6 +416,17 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     unawaited(_controller?.suspend());
     unawaited(_players.releaseAll());
     ReelArt.evict();
+  }
+
+  /// Starts the Reel afresh, as a tab hidden and shown again does: every
+  /// player is let go, nothing still in flight is joined, and the session
+  /// starts again on its deck and card. The stuck card's retry, and a
+  /// resume after [ReelScreen.longAway].
+  void _restart(String why) {
+    if (!_shown || widget.offline || _intro) return;
+    appLogger.i('[ReelLife] starting afresh ($why)');
+    _release();
+    unawaited(_visit());
   }
 
   Future<void> _precacheTvArt(ReelCardData card, MediaItem item, {required bool clip}) async {
@@ -575,13 +642,28 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// (https://api.flutter.dev/flutter/dart-ui/AppLifecycleState.html).
   /// Each state is logged so a device session can see which ones the TV's
   /// screensaver sends.
+  ///
+  /// Back after [ReelScreen.longAway] or more (a long standby), the Reel
+  /// starts afresh instead of resuming in place.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final c = _controller;
     appLogger.i(
       '[ReelLife] app ${state.name} (shown=$_shown, phase=${c?.clips.phase.value.name ?? 'none'}, tv=$_isTv)',
     );
+    Duration? away;
+    if (state == AppLifecycleState.resumed) {
+      final since = _awaySince;
+      _awaySince = null;
+      if (since != null) away = ReelScreen.clock().difference(since);
+    } else {
+      _awaySince ??= ReelScreen.clock();
+    }
     if (!_shown) return;
+    if (away != null && away >= ReelScreen.longAway) {
+      _restart('back after ${away.inMinutes} min');
+      return;
+    }
     switch (state) {
       case AppLifecycleState.paused || AppLifecycleState.hidden || AppLifecycleState.detached:
         _release();
@@ -717,6 +799,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Any key is someone there: Lean back's idle stop counts from it (V2-47).
     if (event is KeyDownEvent || event is KeyRepeatEvent) c.noteInput();
     if (_isTv) {
+      final retry = _stuckKey(c, event);
+      if (retry != null) return retry;
       // V2-50: the remote's and the CEC bridge's codes, for the device
       // session (recorded only with the overlay's tape on).
       if (event is KeyDownEvent && _perf.recording) appLogger.d(reelKeyLogLine(event));
@@ -787,6 +871,26 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     return KeyEventResult.handled;
   }
 
+  /// TV, on a stuck card ([ReelController.stuck]): OK starts afresh, and ↓
+  /// goes on to the next card (or starts afresh when the deck never loaded,
+  /// so there is no next card). The OK's key up is swallowed with it. Null:
+  /// the key goes on as usual.
+  KeyEventResult? _stuckKey(ReelController c, KeyEvent event) {
+    final key = event.logicalKey;
+    if (_retryKeyDown && key.isSelectKey) {
+      if (event is KeyUpEvent) _retryKeyDown = false;
+      if (event is! KeyDownEvent) return KeyEventResult.handled;
+      // A fresh press: the last one's key up never came here.
+      _retryKeyDown = false;
+    }
+    if (c.stuck.value == null || event is! KeyDownEvent || _sheetOpen) return null;
+    final down = key == LogicalKeyboardKey.arrowDown;
+    if (!key.isSelectKey && !(down && c.cards == null)) return null;
+    _retryKeyDown = key.isSelectKey;
+    _restart('retry');
+    return KeyEventResult.handled;
+  }
+
   /// TV keys under the intro: a fresh OK press starts the Reel (on the
   /// press, so the release of the OK that opened the tab can't), the
   /// d-pad stays here, and Back goes on to the shell.
@@ -818,6 +922,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
             fit: StackFit.expand,
             children: [
               _isTv ? _tv(c) : _phone(c),
+              // The stuck-card watchdog's notice and retry.
+              ReelStuckLayer(controller: c, tv: _isTv, onRetry: () => _restart('retry')),
               ValueListenableBuilder<bool>(
                 valueListenable: _perf.overlay,
                 builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),

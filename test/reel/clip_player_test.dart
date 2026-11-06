@@ -108,6 +108,17 @@ class FakeClipEngine implements ClipEngine {
   }
 }
 
+/// A core whose pause never answers while [hangPause] is set.
+class _SilentEngine extends FakeClipEngine {
+  bool hangPause = false;
+
+  @override
+  Future<void> pause() async {
+    calls.add('pause');
+    if (hangPause) await Completer<void>().future;
+  }
+}
+
 const _a = ClipSource(uri: 'https://cdn.example/a.mp4', origin: ClipOrigin.plexExtra);
 const _b = ClipSource(uri: 'https://v.example/b.webm', origin: ClipOrigin.animeTheme);
 
@@ -399,6 +410,64 @@ void main() {
     expect(engine.disposed, isTrue);
     expect(engine.calls.where((c) => c == 'dispose'), hasLength(1));
     expect(clips.phase.value, ClipPhase.idle);
+  });
+
+  group('a wedged core (the Shield after a long standby)', () {
+    test('an open that never comes back fails the clip, lets the core go, and the next clip builds a fresh one', () {
+      fakeAsync((async) {
+        final built = <FakeClipEngine>[];
+        final wedged = Completer<void>();
+        clips = ClipPlayer(
+          engine: () {
+            final e = FakeClipEngine()..openGate = built.isEmpty ? wedged : null;
+            built.add(e);
+            return engine = e;
+          },
+        );
+        var done = false;
+        clips.play(_a, first: true).then((_) => done = true);
+        async.elapse(ClipPlayer.defaultOpenLimit - const Duration(milliseconds: 1));
+        expect(done, isFalse);
+        expect(clips.phase.value, ClipPhase.loading);
+        async.elapse(const Duration(milliseconds: 1));
+        expect(done, isTrue, reason: 'the open is never waited on for good');
+        expect(clips.phase.value, ClipPhase.failed);
+        expect(clips.current, _a, reason: 'the failure is read as this clip\'s');
+        expect(clips.engine, isNull);
+        async.flushMicrotasks();
+        expect(built.first.disposed, isTrue);
+
+        clips.play(_b);
+        async.flushMicrotasks();
+        expect(built, hasLength(2));
+        expect(built.last.calls, contains('open ${_b.uri}'));
+        expect(clips.phase.value, ClipPhase.loading);
+        // The wedged open landing late changes nothing.
+        wedged.complete();
+        async.flushMicrotasks();
+        expect(clips.engine, same(built.last));
+        expect(clips.phase.value, ClipPhase.loading);
+      });
+    });
+
+    test('a pause or a release on a core that never answers is given up on', () {
+      fakeAsync((async) {
+        final stuck = _SilentEngine();
+        clips = ClipPlayer(engine: () => engine = stuck);
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        var paused = false, released = false;
+        stuck.hangPause = true;
+        clips.pause().then((_) => paused = true);
+        async.elapse(ClipPlayer.defaultCallLimit);
+        expect(paused, isTrue);
+        stuck.disposeGate = Completer<void>();
+        clips.release().then((_) => released = true);
+        async.elapse(ClipPlayer.defaultCallLimit * 3);
+        expect(released, isTrue);
+        expect(clips.phase.value, ClipPhase.idle);
+      });
+    });
   });
 
   test('FF/RW move 10 s within the clip, never before 0', () async {

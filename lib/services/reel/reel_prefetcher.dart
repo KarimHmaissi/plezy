@@ -65,7 +65,7 @@ class ReelPrefetchTask {
 /// - **Clear.** On Watch, suspend, a deck change or memory pressure the
 ///   queue empties ([clear]).
 class ReelPrefetcher {
-  ReelPrefetcher({this.holdCap = const Duration(seconds: 4)});
+  ReelPrefetcher({this.holdCap = const Duration(seconds: 4), this.taskCap = const Duration(seconds: 60)});
 
   /// The queue's order, by distance from the card on screen.
   static const List<int> offsets = [0, 1, -1, 2];
@@ -81,6 +81,12 @@ class ReelPrefetcher {
   /// The longest a loading clip holds the lookahead: a clip that never shows
   /// a frame mustn't starve the cards after it.
   final Duration holdCap;
+
+  /// The longest a task holds its lane: one that never comes back (a read
+  /// on a connection that died in a long standby) frees the lane after this,
+  /// so the cards behind it are never stuck waiting on it. The tasks bound
+  /// their own waits well inside it; this is the backstop.
+  final Duration taskCap;
 
   static String keyOf(String cardId, ReelPrefetchStage stage) => '$cardId/${stage.name}';
 
@@ -224,19 +230,20 @@ class ReelPrefetcher {
     _running[t.key] = t;
     _busy.update(t.lane, (n) => n + 1, ifAbsent: () => 1);
     unawaited(
-      Future<void>.sync(
-        t._run,
-      ).catchError((Object e) => appLogger.d('[ReelPrefetch] ${t.stage.name} failed', error: e)).whenComplete(() {
-        if (identical(_running[t.key], t)) _running.remove(t.key);
-        final n = (_busy[t.lane] ?? 1) - 1;
-        if (n <= 0) {
-          _busy.remove(t.lane);
-        } else {
-          _busy[t.lane] = n;
-        }
-        t._finish(true);
-        _pump();
-      }),
+      Future<void>.sync(t._run)
+          .timeout(taskCap)
+          .catchError((Object e) => appLogger.d('[ReelPrefetch] ${t.stage.name} failed', error: e))
+          .whenComplete(() {
+            if (identical(_running[t.key], t)) _running.remove(t.key);
+            final n = (_busy[t.lane] ?? 1) - 1;
+            if (n <= 0) {
+              _busy.remove(t.lane);
+            } else {
+              _busy[t.lane] = n;
+            }
+            t._finish(true);
+            _pump();
+          }),
     );
   }
 }
