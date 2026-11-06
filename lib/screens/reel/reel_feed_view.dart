@@ -47,6 +47,17 @@ class ReelFeedTheme extends StatelessWidget {
 /// the cards off screen rewound only once the page settles, so a wobble or a
 /// half swipe never snaps the outgoing picture back to its first frame. The
 /// pages either side are built ahead (`allowImplicitScrolling`).
+///
+/// A screen switch (V2-65): the Fold moving between its screens, or turning,
+/// changes the window's size without recreating the activity
+/// (`android:configChanges` covers it) and without touching the players'
+/// surfaces (`video_player_android` 2.12.2 drops a texture's surface only on
+/// a background memory trim, and hands it back itself on resume). So the
+/// feed keeps its card and re-syncs its window: the page under the thumb
+/// keeps playing mid-swipe and the step still commits on the settle; at
+/// rest the page is put back on the controller's cursor if it slid. The
+/// cursor is the page's one source: the [PageController] keeps nothing in
+/// page storage, so a rebuilt feed always opens where the controller is.
 class ReelFeedView extends StatefulWidget {
   const ReelFeedView({
     super.key,
@@ -57,6 +68,7 @@ class ReelFeedView extends StatefulWidget {
     required this.onSheet,
     required this.onDecks,
     this.onRemote,
+    this.onResize,
   });
 
   final ReelController controller;
@@ -71,12 +83,22 @@ class ReelFeedView extends StatefulWidget {
   /// On TV mode, offered while this phone is a connected remote.
   final VoidCallback? onRemote;
 
+  /// The window changed size under the feed (V2-65), told after the feed has
+  /// re-synced its players (the `[ReelPerf]` fold sample starts here).
+  final VoidCallback? onResize;
+
   @override
   State<ReelFeedView> createState() => _ReelFeedViewState();
 }
 
 class _ReelFeedViewState extends State<ReelFeedView> {
-  late final PageController _pages = PageController(initialPage: widget.controller.index);
+  // keepPage off (V2-65): under a PageStorageKey, page storage would reopen
+  // a rebuilt feed on the page it last settled on, not the controller's
+  // cursor.
+  late final PageController _pages = PageController(initialPage: widget.controller.index, keepPage: false);
+
+  /// The window's size, to tell a screen switch from other metrics changes.
+  Size? _size;
 
   /// The page under the thumb: it runs ahead of the controller's cursor
   /// from the middle of a swipe until the page settles.
@@ -93,6 +115,36 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     _deck = _c.deck.id;
     _c.addListener(_onController);
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final size = MediaQuery.sizeOf(context);
+    final was = _size;
+    _size = size;
+    if (was != null && was != size) {
+      // After this frame's layout, when the page view has its new size.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _resized());
+    }
+  }
+
+  /// The window changed size (V2-65): re-sync the players for the window as
+  /// it stands, then, at rest, put the page back on the controller's cursor.
+  /// Mid-swipe (or under a finger) the page is left alone: the settle
+  /// commits whichever card it lands on, as for any swipe.
+  void _resized() {
+    if (!mounted) return;
+    if (_pages.hasClients && !_pages.position.isScrollingNotifier.value) {
+      final page = _pages.page;
+      final atRest = page != null && (page - page.round()).abs() <= 0.01;
+      if (atRest) {
+        _page = _c.index;
+        if (page.round() != _c.index) _pages.jumpToPage(_c.index);
+      }
+    }
+    _sync();
+    widget.onResize?.call();
   }
 
   @override

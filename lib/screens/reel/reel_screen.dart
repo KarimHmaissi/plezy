@@ -443,6 +443,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onSheet: () => unawaited(_openSheet()),
       onDecks: () => unawaited(showReelDeckPicker(context, c)),
       onRemote: remote,
+      // V2-65: a Fold screen switch is timed to the picture moving again.
+      onResize: () => _feedProbe?.screenChanged(),
     );
   }
 }

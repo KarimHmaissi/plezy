@@ -27,6 +27,11 @@ enum ReelPerfTrigger {
 
   /// The Reel opened or came back (no input to measure from).
   open,
+
+  /// Phone: the window changed size under the card on screen (the Fold
+  /// moved between its screens, or turned), timed to the picture moving
+  /// again (V2-65).
+  fold,
 }
 
 /// One card change, from its trigger to the first frame on screen. The
@@ -510,12 +515,32 @@ class ReelFeedProbe {
       perf.markResolved(preloaded: players.videoFor(cur) != null, origin: origin?.call());
     }
     final v = players.videoFor(cur);
-    if (v != null && _video == null && !_done) {
-      perf.markOpened();
-      _video = v;
-      _from = v.position;
-      v.addListener(_onVideo);
-    }
+    if (v != null && _video == null && !_done) _attach(v);
+  }
+
+  /// The window changed size (V2-65): the card on screen is the same, so
+  /// this is timed from the change to its picture moving again, the "same
+  /// card, picture back" figure. An unfinished swipe is replaced: mid-swipe
+  /// the card under the thumb is the one timed.
+  void screenChanged() {
+    final cur = players.current;
+    if (cur == null) return;
+    _detach();
+    _card = cur;
+    _done = false;
+    _resolved = true;
+    perf.begin(ReelPerfTrigger.fold);
+    final v = players.videoFor(cur);
+    perf.markResolved(preloaded: v != null, origin: origin?.call());
+    // Not open yet: [_onPlayers] takes it when it has a picture.
+    if (v != null) _attach(v);
+  }
+
+  void _attach(FeedVideo v) {
+    perf.markOpened();
+    _video = v;
+    _from = v.position;
+    v.addListener(_onVideo);
   }
 
   void _onVideo() {

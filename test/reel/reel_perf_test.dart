@@ -312,5 +312,50 @@ void main() {
       expect(perf.last!.trigger, ReelPerfTrigger.open);
       expect(perf.samples, hasLength(3));
     });
+
+    test('a screen switch is a fold sample: same card, timed to its picture moving again', () async {
+      players.sync(current: 'a', window: [clip('a'), clip('b')]);
+      await _settle();
+      made['a']!.tick(const Duration(seconds: 2));
+      expect(perf.samples, hasLength(1));
+
+      at(5000);
+      probe.screenChanged();
+      at(5100);
+      made['a']!.tick(const Duration(seconds: 2));
+      expect(perf.samples, hasLength(1), reason: 'the picture has not moved yet');
+      at(5240);
+      made['a']!.tick(const Duration(seconds: 2, milliseconds: 100));
+      final s = perf.last!;
+      expect(s.trigger, ReelPerfTrigger.fold);
+      expect(s.totalMs, 240);
+      expect(s.preloaded, isTrue);
+      expect(s.origin, 'plexExtra');
+      expect(s.logLine(), startsWith('[ReelPerf] fold=240ms'));
+
+      // The next swipe is a swipe again.
+      players.sync(current: 'b', window: [clip('b'), clip('a')]);
+      await _settle();
+      made['b']!.tick(const Duration(milliseconds: 80));
+      expect(perf.last!.trigger, ReelPerfTrigger.swipe);
+    });
+
+    test('a screen switch before the card has a picture waits for it', () async {
+      at(0);
+      players.sync(current: 'a', window: [clip('a')]);
+      probe.screenChanged();
+      expect(perf.samples, isEmpty);
+      await _settle();
+      at(300);
+      made['a']!.tick(const Duration(milliseconds: 100));
+      expect(perf.last!.trigger, ReelPerfTrigger.fold);
+      expect(perf.last!.totalMs, 300);
+    });
+
+    test('a screen switch with nothing on screen records nothing', () {
+      probe.screenChanged();
+      at(100);
+      expect(perf.samples, isEmpty);
+    });
   });
 }

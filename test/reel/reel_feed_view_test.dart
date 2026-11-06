@@ -159,7 +159,7 @@ void main() {
   late Map<String, _Video> videos;
   late ReelStore store;
   late List<MediaItem> opened;
-  late int decksOpened, watched, sheets;
+  late int decksOpened, watched, sheets, resized;
   late ValueNotifier<int> restored;
   late _Deck first;
 
@@ -168,7 +168,7 @@ void main() {
     final settings = LocalCustomisationStore(db);
     store = ReelStore(database: () async => db, settings: () async => settings);
     opened = [];
-    decksOpened = watched = sheets = 0;
+    decksOpened = watched = sheets = resized = 0;
     restored = ValueNotifier(0);
     c = ReelController(
       decks: [
@@ -208,6 +208,7 @@ void main() {
     onWatch: () => watched++,
     onSheet: () => sheets++,
     onDecks: () => decksOpened++,
+    onResize: () => resized++,
   );
 
   Future<void> pump(WidgetTester tester, {ThemeData? appTheme, MonoPalette? palette, bool themed = false}) async {
@@ -389,6 +390,121 @@ void main() {
       expect(find.ancestor(of: title, matching: find.byType(RepaintBoundary)), findsWidgets);
       final page = find.ancestor(of: title, matching: find.byType(ValueListenableBuilder<FeedCardState>));
       expect(page, findsOneWidget, reason: 'the page listens to its own card, not every player');
+    });
+  });
+
+  group('V2-65: a screen switch keeps the card', () {
+    // The Fold's cover screen, then its inner screen.
+    const cover = Size(420, 860);
+    const inner = Size(840, 760);
+
+    Future<void> flush(WidgetTester tester) async {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+
+    Future<void> resize(WidgetTester tester, Size to) async {
+      tester.view.physicalSize = to;
+      await tester.pump();
+      await flush(tester);
+    }
+
+    double? page(WidgetTester tester) => tester.widget<PageView>(find.byType(PageView)).controller!.page;
+
+    Future<void> swipeToNext(WidgetTester tester) async {
+      await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('at rest: same card, same cursor, and the window is synced again', (tester) async {
+      await pump(tester);
+      await swipeToNext(tester);
+      expect(c.index, 1);
+      expect(players.current, 't2');
+      // Let the step's own work finish, so nothing but the resize syncs.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pumpAndSettle();
+      // Something outside the feed stopped the card on screen.
+      await videos['2']!.pause();
+
+      await resize(tester, inner);
+      expect(resized, 1);
+      expect(c.index, 1);
+      expect(page(tester), closeTo(1, 0.001));
+      expect(find.text('Title 2'), findsOneWidget);
+      expect(players.current, 't2');
+      expect(videos['2']!.playing, isTrue, reason: 'the window was synced again');
+      expect(players.held, containsAll(['t1', 't2', 't3']));
+      for (final id in ['1', '3']) {
+        expect(videos[id]!.playing, isFalse, reason: 'no sound from card $id off screen');
+      }
+
+      await resize(tester, cover);
+      expect(resized, 2);
+      expect(c.index, 1);
+      expect(page(tester), closeTo(1, 0.001));
+      expect(players.current, 't2');
+    });
+
+    testWidgets('mid-swipe: the card under the thumb keeps playing and the step still commits on the settle', (
+      tester,
+    ) async {
+      await pump(tester);
+      final g = await tester.startGesture(tester.getCenter(find.byType(PageView)));
+      for (var i = 0; i < 10; i++) {
+        await g.moveBy(const Offset(0, -50));
+        await tester.pump();
+      }
+      await flush(tester);
+      expect(players.current, 't2');
+      expect(c.index, 0);
+      await videos['2']!.pause();
+
+      await resize(tester, inner);
+      expect(players.current, 't2', reason: 'the page under the thumb is still the one playing');
+      expect(videos['2']!.playing, isTrue, reason: 'the window was synced again');
+      expect(videos['1']!.playing, isFalse, reason: 'no sound from the card being left');
+      expect(c.index, 0, reason: 'the step still waits for the settle');
+      expect(page(tester), greaterThan(0.5), reason: 'the page kept its place mid-swipe');
+
+      await g.up();
+      await tester.pumpAndSettle();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(c.index, 1);
+      expect(page(tester), closeTo(1, 0.001));
+      expect(players.current, 't2');
+      expect(find.text('Title 2'), findsOneWidget);
+    });
+
+    testWidgets('a feed built again opens on the controller cursor, not on stored page state', (tester) async {
+      Widget under(Widget child) => MaterialApp(
+        theme: ThemeData.dark(),
+        home: Scaffold(
+          body: KeyedSubtree(key: const PageStorageKey('reel'), child: child),
+        ),
+      );
+      tester.view.physicalSize = cover;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.runAsync(c.start);
+      await tester.pumpWidget(under(feed()));
+      await flush(tester);
+      await swipeToNext(tester);
+      expect(c.index, 1);
+
+      // The feed goes away; the cursor moves on without it (the TV, a dropped card).
+      await tester.pumpWidget(under(const SizedBox.shrink()));
+      await tester.runAsync(() => c.step(1));
+      expect(c.index, 2);
+
+      await tester.pumpWidget(under(feed()));
+      expect(page(tester), closeTo(2, 0.001), reason: 'from its first frame');
+      await flush(tester);
+      expect(page(tester), closeTo(2, 0.001));
+      expect(find.text('Title 3'), findsOneWidget);
+      expect(players.current, 't3');
     });
   });
 
