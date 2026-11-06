@@ -285,7 +285,11 @@ class ClipResolver {
 
   final Set<String> _slowServers = {};
   final Map<String, Future<bool>> _waits = {};
-  Future<void> _queue = Future.value();
+
+  /// Per server (and one for AnimeThemes), the tail of its requests: one in
+  /// flight at a time (§9), and a server never waits on another. The order
+  /// the cards ask in is the prefetcher's (plan V2-11).
+  final Map<String, Future<void>> _lanes = {};
 
   /// Season 1 OP1's files per AniList id, as AnimeThemes answered this
   /// session; an empty list is a sure "no opening". Failed lookups are never
@@ -296,7 +300,8 @@ class ClipResolver {
   /// for the batch rather than asking AnimeThemes about the one title.
   final Map<String, Future<void>> _warming = {};
 
-  /// Servers whose extras call timed out this session.
+  /// Servers whose extras call timed out this session. Their clips are
+  /// never preloaded ([ClipSource.preloadable]).
   Set<String> get slowServers => Set.unmodifiable(_slowServers);
 
   /// The Reel came back (a resume or tab show): a server that wasn't
@@ -333,10 +338,10 @@ class ClipResolver {
         if (hit != null) return ClipLookup.found(hit);
       }
     }
-    var run = await _serial(() => _ladder(t, banned));
+    var run = await _ladder(t, banned);
     if (run.answer == ClipAnswer.unknown && run.offline.isNotEmpty) {
       final back = await Future.wait([for (final s in run.offline) _awaitServer(s)]);
-      if (back.contains(true)) run = await _serial(() => _ladder(t, banned));
+      if (back.contains(true)) run = await _ladder(t, banned);
     }
     final hit = run.hit;
     if (hit != null) {
@@ -547,7 +552,7 @@ class ClipResolver {
     final pick = playback.pick(clip.candidates);
     if (pick == null || pick.assetId == clip.assetId) return clip;
     return ResolvedClip(
-      source: ClipSource(uri: pick.uri, origin: clip.source.origin),
+      source: ClipSource(uri: pick.uri, origin: clip.source.origin, preloadable: clip.source.preloadable),
       assetId: pick.assetId,
       label: clip.label,
       serverId: clip.serverId,
@@ -560,7 +565,7 @@ class ClipResolver {
     final url = servers.clipUrl(serverId, partKey);
     if (url == null) return null;
     return ResolvedClip(
-      source: ClipSource(uri: url, origin: ClipOrigin.plexExtra),
+      source: ClipSource(uri: url, origin: ClipOrigin.plexExtra, preloadable: !_slowServers.contains(serverId)),
       assetId: asset,
       label: label,
       serverId: serverId,
@@ -575,11 +580,22 @@ class ClipResolver {
     return _waits[serverId] ??= wait(serverId).catchError((Object _) => false);
   }
 
-  Future<T> _serial<T>(Future<T> Function() run) {
-    final next = _queue.then((_) => run());
-    _queue = next.then((_) {}, onError: (_) {});
-    return next;
+  /// Runs [request] after every earlier request in [lane] has settled.
+  Future<T> _inLane<T>(String lane, Future<T> Function() request) {
+    final before = _lanes[lane] ?? Future<void>.value();
+    final run = before.then((_) => request());
+    final tail = run.then<void>((_) {}, onError: (Object _) {});
+    _lanes[lane] = tail;
+    unawaited(
+      tail.whenComplete(() {
+        if (identical(_lanes[lane], tail)) _lanes.remove(lane);
+      }),
+    );
+    return run;
   }
+
+  /// The AnimeThemes lane's key (Plex machine ids are alphanumeric).
+  static const String _animeThemesLane = ':animethemes';
 
   Future<_Run> _ladder(ReelTitle t, Set<String> banned) async {
     var sure = true;
@@ -605,7 +621,7 @@ class ClipResolver {
       }
       List<PlexExtraClip> extras;
       try {
-        extras = await servers.extras(c.serverId, c.ratingKey, timeout: firstTry);
+        extras = await _inLane(c.serverId, () => servers.extras(c.serverId, c.ratingKey, timeout: firstTry));
       } on ReelServerUnavailable {
         sure = false;
         offline.add(c.serverId);
@@ -653,7 +669,7 @@ class ClipResolver {
       final id = await aniList(t);
       if (id == null) return (const <AnimeOpening>[], true);
       if (_openingsById[id] case final known?) return (known, true);
-      final anime = (await _animeThemes([id]))[id];
+      final anime = (await _inLane(_animeThemesLane, () => _animeThemes([id])))[id];
       final ops = anime == null ? const <AnimeOpening>[] : ClipFilter.openings(anime);
       _openingsById[id] = ops;
       return (ops, true);

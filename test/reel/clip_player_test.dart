@@ -143,6 +143,13 @@ void main() {
     expect(engine.calls, ['preload ${_b.uri}', 'clearPreloads']);
   });
 
+  test('a clip off a server marked slow is never preloaded (V2-11)', () async {
+    await clips.preload(
+      const ClipSource(uri: 'https://cdn.example/c.mp4', origin: ClipOrigin.plexExtra, preloadable: false),
+    );
+    expect(engine.calls, ['clearPreloads']);
+  });
+
   test('muted stays muted across cards', () async {
     await clips.setMuted(true);
     await clips.play(_a);

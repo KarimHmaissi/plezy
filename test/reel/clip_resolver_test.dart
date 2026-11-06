@@ -26,10 +26,14 @@ class FakeServers implements ReelServers {
   final Map<String, Object> failWith = {};
   final List<String> calls = [];
 
+  /// Reads that answer only when the test completes their gate.
+  final Map<String, Completer<void>> gates = {};
+
   @override
   Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
     if (offline.contains(serverId)) throw ReelServerUnavailable(serverId);
     calls.add('$serverId:$ratingKey');
+    await gates['$serverId:$ratingKey']?.future;
     if (slow.contains(serverId)) throw TimeoutException('slow', timeout);
     if (failWith[serverId] case final e?) throw e;
     return extrasByKey['$serverId:$ratingKey'] ?? const [];
@@ -959,6 +963,69 @@ void main() {
       expect(await store.cached('src:tvdb:1'), isNull);
       expect((await r.lookup(anime(1))).clip?.assetId, 'plex:91');
       expect(batches, hasLength(1));
+    });
+  });
+
+  group('one request at a time per server, AnimeThemes apart (V2-11)', () {
+    ReelTitle on(String server, String rk) => ReelTitle(
+      titleId: 'm:$server$rk',
+      groupKey: 'g:$server$rk',
+      title: 'Harbor Lights $rk',
+      isShow: false,
+      copies: [ReelCopy(serverId: server, ratingKey: rk)],
+    );
+
+    test('a second title on a server waits for the read in flight; another server does not', () async {
+      for (final k in ['a:1', 'a:2', 'b:3']) {
+        servers.extrasByKey[k] = [_x('x${k.substring(2)}', 'Official Trailer')];
+      }
+      final gate = servers.gates['a:1'] = Completer<void>();
+      final first = resolver.resolve(on('a', '1'));
+      final second = resolver.resolve(on('a', '2'));
+      expect((await resolver.resolve(on('b', '3')))?.assetId, 'plex:x3');
+      await pumpEventQueue();
+      expect(servers.calls, containsAll(['a:1', 'b:3']));
+      expect(servers.calls, isNot(contains('a:2')), reason: 'one read in flight per server');
+
+      gate.complete();
+      expect((await first)?.assetId, 'plex:x1');
+      expect((await second)?.assetId, 'plex:x2');
+      expect(servers.calls.last, 'a:2');
+    });
+
+    test('an anime opening never waits behind a server read in flight', () async {
+      final gate = servers.gates['a:1'] = Completer<void>();
+      final film = resolver.resolve(on('a', '1'));
+      final opening = await resolver.resolve(
+        const ReelTitle(
+          titleId: 's:tvdb:1',
+          groupKey: 'tvdb:1',
+          title: 'Harbor Lights',
+          isShow: true,
+          anime: true,
+          tvdbId: 1,
+          copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+        ),
+      );
+      expect(opening?.assetId, 'at:9');
+      gate.complete();
+      await film;
+    });
+
+    test('a clip on a server marked slow is not preloadable; one elsewhere is', () async {
+      servers.extrasByKey['b:2'] = [_x('80', 'Teaser')];
+      servers.extrasByKey['c:4'] = [_x('81', 'Teaser')];
+      expect((await resolver.resolve(on('b', '2')))?.source.preloadable, isTrue);
+
+      // Another title's read on the same server times out: it is slow now.
+      servers.slow.add('b');
+      await resolver.resolve(on('b', '3'));
+      expect(resolver.slowServers, {'b'});
+
+      final cached = await resolver.resolve(on('b', '2'));
+      expect(cached?.assetId, 'plex:80', reason: 'its cached identity still plays');
+      expect(cached?.source.preloadable, isFalse, reason: 'but only once its card is on screen');
+      expect((await resolver.resolve(on('c', '4')))?.source.preloadable, isTrue);
     });
   });
 }

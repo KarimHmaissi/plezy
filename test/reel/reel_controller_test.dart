@@ -154,6 +154,33 @@ class _GatedServers extends _Servers {
   }
 }
 
+/// Records which cards' extras and metadata were read, in order; one
+/// card's extras can be held until the test says.
+class _RecordingServers extends _Servers {
+  _RecordingServers({this.gated});
+
+  final String? gated;
+  final gate = Completer<void>();
+  final reads = <String>[];
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async {
+    reads.add(ratingKey);
+    if (ratingKey == gated) await gate.future;
+    return super.extras(serverId, ratingKey, timeout: timeout);
+  }
+}
+
+class _RecordingMedia extends _Media {
+  final reads = <String>[];
+
+  @override
+  Future<MediaItem?> item(String serverId, String ratingKey) {
+    reads.add(ratingKey);
+    return super.item(serverId, ratingKey);
+  }
+}
+
 class _Deck extends ReelDeck {
   _Deck(this.id, this.cards);
 
@@ -326,12 +353,15 @@ void main() {
     await db.close();
   });
 
-  test('the first card plays its trailer and the next one is preloaded', () async {
+  test('the first card plays its trailer and the next one is preloaded after its first frame', () async {
     final c = make();
     await c.start();
     await Future<void>.delayed(Duration.zero);
     expect(c.current.card?.id, 't1');
     expect(engine.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+    expect(engine.calls.where((x) => x.startsWith('preload ')), isEmpty, reason: 'the lookahead waits for the frame');
+    engine.firstFrameCtl.add(null);
+    await pumpEventQueue();
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
     c.dispose();
   });
@@ -485,6 +515,7 @@ void main() {
       var reads = 0;
       final c = make(media: _CountingMedia(() => reads++));
       await c.start();
+      engine.firstFrameCtl.add(null);
       await pumpEventQueue();
       expect(reads, 3, reason: 'the card on screen and the two ahead');
       await c.step(1);
@@ -565,6 +596,8 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(engines, greaterThan(made), reason: 'the clip core is rebuilt');
     expect(engine.calls.where((x) => x.startsWith('open ')), isNotEmpty);
+    engine.firstFrameCtl.add(null);
+    await pumpEventQueue();
     expect(engine.calls.where((x) => x.startsWith('preload ')), isNotEmpty);
     c.dispose();
     restored.value++;
@@ -775,7 +808,8 @@ void main() {
     await c.start();
     await c.step(1);
     await c.step(1);
-    await Future<void>.delayed(Duration.zero);
+    engine.firstFrameCtl.add(null);
+    await pumpEventQueue();
     expect(c.current.card?.id, 't3');
     expect(c.slotAt(3).clip?.assetId, 'at:4');
     expect(batches, [
@@ -957,6 +991,8 @@ void main() {
 
       await Future.wait([for (var k = 0; k < 5; k++) c.step(1)]);
       await Future<void>.delayed(Duration.zero);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
 
       expect(c.index, 5);
       expect(c.current.card?.id, 't6');
@@ -1019,6 +1055,7 @@ void main() {
       await c.start();
       await c.step(1);
       expect(c.current.card?.id, 't2');
+      engine.firstFrameCtl.add(null);
       d.land([_card('7'), _card('1'), _card('8'), _card('9')]);
       await settle();
       expect(ids(c), ['t1', 't2', 't7', 't8', 't9']);
@@ -1197,6 +1234,124 @@ void main() {
       await c.start();
       await pumpEventQueue();
       expect(servers.reads, reads);
+      c.dispose();
+    });
+  });
+
+  group('one prefetch queue (V2-11)', () {
+    List<ReelDeck> deckOf(int n) => [
+      _Deck('a', [for (var i = 1; i <= n; i++) _card('$i')]),
+    ];
+
+    test('on the TV the cards around wait for the first frame of the one on screen', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4));
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, ['1']);
+      expect(c.prefetcher.held, isTrue);
+
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(c.prefetcher.held, isFalse);
+      expect(servers.reads, ['1', '2', '3']);
+      c.dispose();
+    });
+
+    test('after five fast steps the landed card is read first, then +1, -1 and +2', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(9));
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      servers.reads.clear();
+
+      await Future.wait([for (var k = 0; k < 5; k++) c.step(1)]);
+      await pumpEventQueue();
+      expect(servers.reads, ['6'], reason: 'cards passed over are never read');
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['6', '7', '5', '8']);
+      c.dispose();
+    });
+
+    test('back up the deck, the window leans the other way', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(9));
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      await Future.wait([for (var k = 0; k < 6; k++) c.step(1)]);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      servers.reads.clear();
+
+      await c.step(-1);
+      await c.step(-1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['5', '4'], reason: 'the card on screen and the one above it, then two above');
+      c.dispose();
+    });
+
+    for (final (name, leave) in [
+      ('Watch', (ReelController c) => c.watch()),
+      ('suspend', (ReelController c) => c.suspend()),
+    ]) {
+      test('$name clears the queue: no Reel read follows it', () async {
+        final servers = _RecordingServers(gated: '2');
+        final media = _RecordingMedia();
+        final c = make(servers: servers, media: media, decks: deckOf(4), onWatch: (_, {required onTv}) async => true);
+        await c.start();
+        engine.firstFrameCtl.add(null);
+        await pumpEventQueue();
+        expect(servers.reads, ['1', '2'], reason: "card 2's read is in flight");
+
+        await leave(c);
+        servers.gate.complete();
+        await pumpEventQueue();
+        expect(servers.reads, ['1', '2'], reason: 'the read in flight finishes; nothing queued starts');
+        expect(media.reads, ['1']);
+        expect(c.prefetcher.queued, isEmpty);
+        c.dispose();
+      });
+    }
+
+    test('on mobile data only the card on screen and the next are fetched', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      addTearDown(profile.dispose);
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), profile: profile);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2']);
+      expect(c.slotAt(2).resolved, isFalse);
+      c.dispose();
+    });
+
+    test('memory pressure narrows the queue to the card on screen and the next', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4));
+      await c.start();
+      await pumpEventQueue();
+      await c.trimMemory();
+      expect(c.memoryLevel, 1);
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2']);
+      c.dispose();
+    });
+
+    test('the phone feed never holds the queue: its parked players need the cards ahead', () async {
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), externalClips: true);
+      await c.start();
+      await pumpEventQueue();
+      expect(c.prefetcher.held, isFalse);
+      expect(servers.reads, ['1', '2', '3']);
       c.dispose();
     });
   });

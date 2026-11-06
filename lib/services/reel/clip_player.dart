@@ -13,15 +13,16 @@ import 'reel_perf.dart';
 enum ClipOrigin { plexExtra, animeTheme }
 
 class ClipSource {
-  const ClipSource({required this.uri, required this.origin, this.length});
+  const ClipSource({required this.uri, required this.origin, this.length, this.preloadable = true});
 
   final String uri;
   final ClipOrigin origin;
   final Duration? length;
 
-  /// Whether the next card may preload this clip (spec §8: a slow guest
-  /// server's sources would not be).
-  bool get preloadable => true;
+  /// Whether the next card may preload this clip. False for a clip on a
+  /// server marked slow this session (spec §8: never preloaded off a slow
+  /// guest server); it streams only when its card is on screen.
+  final bool preloadable;
 
   @override
   bool operator ==(Object other) => other is ClipSource && other.uri == uri;
