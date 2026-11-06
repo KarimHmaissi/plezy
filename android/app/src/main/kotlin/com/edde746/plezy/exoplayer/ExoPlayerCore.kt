@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.SurfaceView
@@ -52,12 +53,15 @@ import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.analytics.PlayerId
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
+import androidx.media3.exoplayer.source.preload.PreloadException
+import androidx.media3.exoplayer.source.preload.PreloadManagerListener
 import androidx.media3.exoplayer.source.preload.TargetPreloadStatusControl
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -414,8 +418,16 @@ class ExoPlayerCore(private val activity: Activity) :
   /** MediaCodecs this core's renderers made (see [PlayerCoreCounts]); bumped on the playback thread. */
   private val coreVideoCodecs = AtomicInteger()
   private val coreAudioCodecs = AtomicInteger()
+
+  /** Clip mode: every clip in the preload manager, by URI: the ranked ones and the one playing. */
   private val preloadItems = LinkedHashMap<String, MediaItem>()
-  private var preloadRank = 0
+
+  /** Clip mode (V2-09): the clip each [ClipPreloadRank] holds, by URI. */
+  private val preloadSlots = java.util.EnumMap<ClipPreloadRank, String>(ClipPreloadRank::class.java)
+  private var preloadSerial = 0
+
+  /** When each preload (by mediaId) was handed to the manager, for its `[ReelPreload] ready` line. */
+  private val preloadAskedAt = HashMap<String, Long>()
   private var currentMediaUri: String? = null
   private var currentHeaders: Map<String, String>? = null
   private var currentMediaIsLive: Boolean = false
@@ -865,6 +877,8 @@ class ExoPlayerCore(private val activity: Activity) :
       val loadControl = if (clipMode) {
         DefaultLoadControl.Builder()
           .setTargetBufferBytes(LoadControlPolicy.CLIP_TARGET_BYTES)
+          // V2-09: every preload together, or media3's own preload entry (137.5 MiB) applies.
+          .setPlayerTargetBufferBytes(PlayerId.PRELOAD.name, LoadControlPolicy.CLIP_PRELOAD_TARGET_BYTES)
           .setPrioritizeTimeOverSizeThresholds(false)
           .setBufferDurationsMs(
             bufferDurations.minBufferMs,
@@ -908,9 +922,10 @@ class ExoPlayerCore(private val activity: Activity) :
       exoPlayer = if (clipMode) {
         // The preload manager and the player share the playback thread, load control,
         // renderers and bandwidth meter, so a preloaded source plays without re-preparing.
-        // Every item it holds is the next card: keep its first seconds in memory.
-        val statusControl = TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> {
-          DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(LoadControlPolicy.CLIP_PRELOAD_MS)
+        // Each item is added with its rank's ranking data (V2-09): the next card keeps 3 s, the
+        // card behind 1 s and a neighbouring deck's head 2 s, in memory.
+        val statusControl = TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> { rankingData ->
+          ClipPreloadRank.status(rankingData)
         }
         // buildExoPlayer replaces the ExoPlayer.Builder's track selector with one from the
         // preload manager's factory, and build() makes a second one for preloading (media3
@@ -925,7 +940,10 @@ class ExoPlayerCore(private val activity: Activity) :
         playerBuilder.setVideoChangeFrameRateStrategy(ClipCorePolicy.VIDEO_CHANGE_FRAME_RATE_STRATEGY)
         builder.buildExoPlayer(playerBuilder).also { player ->
           trackSelector = selectorFactory.created.lastOrNull()
-          preloadManager = builder.build()
+          preloadManager = builder.build().also { manager ->
+            manager.setCurrentPlayingIndex(ClipPreloadRank.PLAYING_INDEX)
+            manager.addListener(preloadListener)
+          }
           preloadTrackSelector = selectorFactory.created.lastOrNull()?.takeIf { it !== trackSelector }
           player.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
           emitLog("info", "init", "Clip mode: preload manager on, buffer ${bufferDurations.minBufferMs}-${bufferDurations.maxBufferMs}ms")
@@ -2902,7 +2920,15 @@ class ExoPlayerCore(private val activity: Activity) :
     if (clipMode) {
       val item = preloadItems[uri]
       val preloaded = item?.let { preloadManager?.getMediaSource(it) }
-      emitLog("info", "clip", "Open clip: preloaded=${preloaded != null}")
+      // The clip leaves its rank as it starts playing: the rank is free for the next ask, and
+      // the item stays in the manager (it is the player's source now) until the next prune.
+      val rank = preloadSlots.entries.firstOrNull { it.value == uri }?.key
+      if (rank != null) preloadSlots.remove(rank)
+      emitLog(
+        "info",
+        "clip",
+        "Open clip: preloaded=${preloaded != null} rank=${rank?.wire ?: "none"} held=${preloadSummary()}"
+      )
       if (item != null && preloaded != null) {
         // The preloaded item was built before this open, so its mediaId is "clip:N", not the
         // generation; map it, or every generation-gated event (first frame, decoder checks) for
@@ -4477,24 +4503,102 @@ class ExoPlayerCore(private val activity: Activity) :
 
   // Cleanup
 
-  /**
-   * Clip mode: buffer the first seconds of [uri] for the next card, dropping any older
-   * preload (only the next card is ever held). No-op outside clip mode.
-   */
   /** Clip mode: the generation each preloaded item was opened under (its mediaId is "clip:N"). */
   private val clipGenerations = HashMap<String, Int>()
 
-  fun preloadClip(uri: String) {
+  /**
+   * Clip mode (V2-09): buffer the first seconds of [uri] as [rank] (the next card, the card behind
+   * or a neighbouring deck's head), in place of whatever that rank held. At most one clip per
+   * rank, so at most four. A clip already held at another rank moves to this one with what it
+   * has buffered (it keeps its first rank's range); the clip playing is never preloaded.
+   * [origin] (`plexExtra` / `animeTheme`) is for the log line only. No-op outside clip mode.
+   */
+  internal fun preloadClip(uri: String, rank: ClipPreloadRank = ClipPreloadRank.NEXT, origin: String? = null) {
     val manager = preloadManager ?: return
-    if (!clipMode || preloadItems.containsKey(uri)) return
-    clearPreloads(keep = currentMediaUri)
-    // No headers: clips carry no request headers at all (they are shared across every source
-    // on this core, and an AnimeThemes request must never see a Plex header).
-    val item = MediaItem.Builder().setUri(uri).setMediaId("clip:${++preloadRank}").build()
-    preloadItems[uri] = item
-    manager.add(item, preloadRank)
-    manager.setCurrentPlayingIndex(preloadRank - 1)
+    if (!clipMode) return
+    if (uri == currentMediaUri) {
+      emitLog("info", "ReelPreload", "skip rank=${rank.wire}: it is the clip playing")
+      return
+    }
+    if (preloadSlots[rank] == uri) return
+    val heldAt = preloadSlots.entries.firstOrNull { it.value == uri }?.key
+    // Drop the rank's old clip, and any source of this clip no rank holds (the one the player
+    // played before: a clip played, then preloaded again as the card behind, starts afresh).
+    preloadSlots.remove(rank)
+    prunePreloads()
+    if (heldAt != null) preloadSlots.remove(heldAt)
+    preloadSlots[rank] = uri
+    val item = preloadItems[uri] ?: MediaItem.Builder()
+      // No headers: clips carry no request headers at all (they are shared across every source
+      // on this core, and an AnimeThemes request must never see a Plex header).
+      .setUri(uri)
+      .setMediaId("clip:${++preloadSerial}")
+      .build()
+      .also {
+        preloadItems[uri] = it
+        preloadAskedAt[it.mediaId] = SystemClock.elapsedRealtime()
+        manager.add(it, rank.rankingData)
+      }
     manager.invalidate()
+    emitLog(
+      "info",
+      "ReelPreload",
+      "hold rank=${rank.wire} ${item.mediaId}${if (heldAt != null) " (moved from ${heldAt.wire})" else ""} " +
+        "origin=${origin ?: "?"} held=${preloadSummary()}"
+    )
+  }
+
+  /**
+   * Clip mode: drop [rank]'s preload, or every rank's when null. The clip playing stays in the
+   * manager: it is the player's source.
+   */
+  internal fun clearPreloads(rank: ClipPreloadRank? = null) {
+    if (preloadManager == null) return
+    val had = preloadSlots.size
+    if (rank == null) preloadSlots.clear() else preloadSlots.remove(rank)
+    prunePreloads()
+    if (had != preloadSlots.size) {
+      emitLog("info", "ReelPreload", "clear rank=${rank?.wire ?: "all"} held=${preloadSummary()}")
+    }
+  }
+
+  /** Releases every source in the manager that no rank holds and isn't the clip playing. */
+  private fun prunePreloads() {
+    val manager = preloadManager ?: return
+    val keep = preloadSlots.values.toHashSet()
+    currentMediaUri?.let(keep::add)
+    for (u in preloadItems.keys.filter { it !in keep }) {
+      preloadItems.remove(u)?.let {
+        manager.remove(it)
+        clipGenerations.remove(it.mediaId)
+        preloadAskedAt.remove(it.mediaId)
+      }
+    }
+  }
+
+  /** The ranks held and the sources in the manager, for the `[ReelPreload]` lines. */
+  private fun preloadSummary(): String = "[${preloadSlots.keys.joinToString(",") { it.wire }}] sources=${preloadItems.size}"
+
+  /** `[ReelPreload] ready` / `failed` lines: how long each rank's preload took to land. */
+  private val preloadListener = object : PreloadManagerListener {
+    override fun onCompleted(mediaItem: MediaItem) {
+      if (disposing) return
+      val askedAt = preloadAskedAt.remove(mediaItem.mediaId) ?: return
+      val rank = preloadSlots.entries.firstOrNull { preloadItems[it.value] == mediaItem }?.key
+      emitLog(
+        "info",
+        "ReelPreload",
+        "ready rank=${rank?.wire ?: "none"} ${mediaItem.mediaId} after=${SystemClock.elapsedRealtime() - askedAt}ms"
+      )
+    }
+
+    override fun onError(error: PreloadException) {
+      if (disposing) return
+      val mediaItem = error.mediaItem
+      preloadAskedAt.remove(mediaItem.mediaId)
+      val rank = preloadSlots.entries.firstOrNull { preloadItems[it.value] == mediaItem }?.key
+      emitLog("info", "ReelPreload", "failed rank=${rank?.wire ?: "none"} ${mediaItem.mediaId}: ${error.cause?.javaClass?.simpleName ?: error.message}")
+    }
   }
 
   /**
@@ -4518,18 +4622,6 @@ class ExoPlayerCore(private val activity: Activity) :
         selectorAttached = trackSelector != null && player.trackSelector === trackSelector
       )
     )
-  }
-
-  /** Clip mode: release every preloaded source except [keep]'s. */
-  fun clearPreloads(keep: String? = null) {
-    val manager = preloadManager ?: return
-    val drop = preloadItems.keys.filter { it != keep }
-    for (u in drop) {
-      preloadItems.remove(u)?.let {
-        manager.remove(it)
-        clipGenerations.remove(it.mediaId)
-      }
-    }
   }
 
   /**
@@ -4556,6 +4648,8 @@ class ExoPlayerCore(private val activity: Activity) :
     check(Looper.myLooper() == Looper.getMainLooper())
     Log.d(TAG, "Disposing")
     preloadItems.clear()
+    preloadSlots.clear()
+    preloadAskedAt.clear()
     preloadManager?.release()
     preloadManager = null
 

@@ -34,14 +34,33 @@ class ClipSource {
   int get hashCode => uri.hashCode;
 }
 
+/// What a preloaded clip is to the card on screen (plan V2-09). The TV's
+/// clip core holds at most one clip per rank: the next card in the direction
+/// of travel keeps its first 3 s, the card behind 1 s, and the head of each
+/// neighbouring deck (the card → or ← lands on) 2 s, all in memory.
+enum ClipPreloadRank {
+  next,
+  previous,
+  deckNext,
+  deckPrevious;
+
+  /// A neighbouring deck's head (plan D15: AnimeThemes, or a clip on disk).
+  bool get deckHead => this == deckNext || this == deckPrevious;
+}
+
 /// The few things the Reel asks of a native player. The app's [Player]
 /// carries every watch-state side effect only through the video player
 /// screen, which the Reel never opens; this interface keeps it that way.
 abstract interface class ClipEngine {
   Player get player;
   Future<void> open(String uri);
-  Future<void> preload(String uri);
-  Future<void> clearPreloads();
+
+  /// Buffers [uri]'s first seconds as [rank], in place of what that rank
+  /// held (V2-09).
+  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin});
+
+  /// Drops [rank]'s preload, or every one when null.
+  Future<void> clearPreloads({ClipPreloadRank? rank});
   Future<void> play();
   Future<void> pause();
   Future<void> seek(Duration position);
@@ -106,10 +125,11 @@ class ExoClipEngine implements ClipEngine {
   Future<void> open(String uri) => _p.open(Media(uri), play: true);
 
   @override
-  Future<void> preload(String uri) => _p.preloadClip(uri);
+  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin}) =>
+      _p.preloadClip(uri, rank: rank.name, origin: origin?.name);
 
   @override
-  Future<void> clearPreloads() => _p.clearPreloads();
+  Future<void> clearPreloads({ClipPreloadRank? rank}) => _p.clearPreloads(rank: rank?.name);
 
   @override
   Future<void> play() => _p.play();
@@ -351,13 +371,17 @@ class ClipPlayer {
   Stopwatch? _ttff;
   bool _openPreloaded = false;
 
+  /// The rank the clip opening came from, for its `[ReelTTFF]` line.
+  ClipPreloadRank? _openRank;
+
   /// The press that asked for the next card ([markKey]), until a clip
   /// opens for it; then the open's, until its first frame.
   ({Stopwatch watch, String trigger})? _key;
   ({Stopwatch watch, String trigger})? _openKey;
 
-  /// The clip last handed to the core's preload, until it is used or cleared.
-  String? _preloaded;
+  /// The clip each rank of the core's preload holds (V2-09), until it is
+  /// played or cleared.
+  final Map<ClipPreloadRank, String> _preloaded = {};
 
   final ValueNotifier<ClipPhase> phase = ValueNotifier(ClipPhase.idle);
 
@@ -376,6 +400,9 @@ class ClipPlayer {
   Duration _length = Duration.zero;
 
   ClipEngine? get engine => _engine;
+
+  /// The clips the core holds preloaded, by rank.
+  Map<ClipPreloadRank, String> get preloaded => Map.unmodifiable(_preloaded);
   ClipSource? get current => _current;
   bool get muted => _muted;
 
@@ -435,9 +462,13 @@ class ClipPlayer {
     final e = _ensure();
     syncNormalization();
     final open = ++_opens;
-    _openPreloaded = _preloaded == source.uri;
+    // The core takes the clip out of its rank as it opens it; the other
+    // ranks keep theirs.
+    final rank = _preloaded.entries.where((e) => e.value == source.uri).firstOrNull?.key;
+    if (rank != null) _preloaded.remove(rank);
+    _openPreloaded = rank != null;
+    _openRank = rank;
     _perf.markResolved(preloaded: _openPreloaded, origin: source.origin.name);
-    _preloaded = null;
     final key = _key;
     _key = null;
     _openKey = key != null && key.watch.elapsed < staleKey ? key : null;
@@ -489,21 +520,30 @@ class ClipPlayer {
     unawaited(_fadeTo(100, first ? firstFadeIn : fadeIn));
   }
 
-  /// Buffers the next card's opening seconds on the same core.
-  Future<void> preload(ClipSource? next) async {
+  /// Buffers [source]'s opening seconds on the same core as [rank] (the
+  /// next card by default), in place of what that rank held. Null, or a
+  /// clip that may not be preloaded ([ClipSource.preloadable]), empties the
+  /// rank. A clip the rank already holds is left as it is.
+  Future<void> preload(ClipSource? source, {ClipPreloadRank rank = ClipPreloadRank.next}) async {
+    if (source == null || !source.preloadable) return clearPreload(rank);
+    if (_preloaded[rank] == source.uri) return;
     final e = _ensure();
-    if (next == null || !next.preloadable) {
-      _preloaded = null;
-      await _bounded(e.clearPreloads(), 'clearPreloads');
-      return;
-    }
-    _preloaded = next.uri;
-    await _bounded(e.preload(next.uri), 'preload');
+    // A clip held at another rank moves to this one (the core does the same).
+    _preloaded.removeWhere((_, uri) => uri == source.uri);
+    _preloaded[rank] = source.uri;
+    await _bounded(e.preload(source.uri, rank: rank, origin: source.origin), 'preload');
   }
 
-  /// Memory pressure: drop the buffered next card without building a core.
+  /// Empties [rank]'s preload; nothing to do when it holds nothing.
+  Future<void> clearPreload(ClipPreloadRank rank) async {
+    final e = _engine;
+    if (_preloaded.remove(rank) == null || e == null) return;
+    await _bounded(e.clearPreloads(rank: rank), 'clearPreloads');
+  }
+
+  /// Memory pressure: drop every preload without building a core.
   Future<void> dropPreload() async {
-    _preloaded = null;
+    _preloaded.clear();
     await _bounded(_engine?.clearPreloads(), 'clearPreloads');
   }
 
@@ -608,7 +648,7 @@ class ClipPlayer {
     _ended = false;
     _engine = null;
     _current = null;
-    _preloaded = null;
+    _preloaded.clear();
     _key = null;
     _openKey = null;
     _ttff = null;
@@ -658,7 +698,7 @@ class ClipPlayer {
     _enginePlaying = false;
     _engineBuffering = false;
     _engine = null;
-    _preloaded = null;
+    _preloaded.clear();
     _openKey = null;
     _ttff = null;
     _level = 0;
@@ -684,6 +724,7 @@ class ClipPlayer {
       final keyMs = key == null ? 'none' : '${key.watch.elapsedMilliseconds}ms';
       appLogger.i(
         '[ReelTTFF] key=$keyMs open=${sw.elapsedMilliseconds}ms preloaded=$_openPreloaded'
+        ' rank=${_openRank?.name ?? 'none'}'
         '${key == null ? '' : ' trigger=${key.trigger}'} origin=${_current?.origin.name}',
       );
       _ttff = null;
@@ -709,7 +750,8 @@ class ClipPlayer {
   /// lines (forwarded only while the player's debug log is on).
   void _onLog(PlayerLog log) {
     if (log.prefix == 'clip' && log.text.startsWith('Open clip: preloaded=')) {
-      _perf.markPreloaded(log.text.endsWith('true'));
+      // `Open clip: preloaded=true rank=next held=[…]` (V2-09).
+      _perf.markPreloaded(log.text.startsWith('Open clip: preloaded=true'));
     } else if (log.prefix == 'decoder-hang' && log.text.startsWith('Decoder initialized')) {
       _perf.markDecoder();
     }

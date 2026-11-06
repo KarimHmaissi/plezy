@@ -1236,7 +1236,7 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
     if (_active) {
       _plan(list, _generation);
-      _preloadNext(list, _generation);
+      _trimPreloads(_generation);
     }
   }
 
@@ -1514,6 +1514,7 @@ class ReelController extends ChangeNotifier {
       _prefetch.release();
       if (list != null) _plan(list, gen);
       if (!externalClips) await clips.pause();
+      _trimPreloads(gen);
       _settleStrip(gen);
       return;
     }
@@ -1583,7 +1584,7 @@ class ReelController extends ChangeNotifier {
       if (gen == _generation && _stage == ReelStage.open) _stage = ReelStage.frame;
     }
     _syncHold();
-    _preloadNext(list, gen);
+    _trimPreloads(gen);
     _settleStrip(gen);
   }
 
@@ -1608,6 +1609,7 @@ class ReelController extends ChangeNotifier {
     _prefetch.release();
     _plan(list, gen);
     if (!externalClips) await clips.pause();
+    _trimPreloads(gen);
     _settleStrip(gen);
   }
 
@@ -1618,6 +1620,12 @@ class ReelController extends ChangeNotifier {
   /// only the card on screen and the next; under memory pressure no art is
   /// decoded ahead.
   ///
+  /// TV (plans V2-09 and V2-11 Wave B): the clip core preloads +1 (rank
+  /// next) and -1 (rank previous) once each is resolved, and after +2 the
+  /// heads of the neighbouring decks ([_deckHeads]), only once the card on
+  /// screen has shown its first frame. A lean step keeps the next card only;
+  /// memory pressure or Stills only keeps none.
+  ///
   /// The decision card a page or two ahead has its picks' metadata read, and
   /// on the phone a card ahead that turns out to be an AI card with no room
   /// is held back once its clip answer is in ([_holdBackAhead]).
@@ -1626,6 +1634,8 @@ class ReelController extends ChangeNotifier {
     final at = _decideAt(deck.id, list);
     if (at != null && at > index && at - index <= 2) _readPicks();
     final lean = memoryLevel >= 1 || resolver.playback.link != ReelLink.unmetered;
+    final preloads = _mayPreload;
+    final wanted = <ClipPreloadRank>{};
     final tasks = <ReelPrefetchTask>[];
     final answered = <ReelCardData>[];
     final window = <String>[];
@@ -1669,7 +1679,39 @@ class ReelController extends ChangeNotifier {
           ),
         );
       }
+      if (preloads && (offset == 1 || offset == -1)) {
+        final rank = offset == 1 ? ClipPreloadRank.next : ClipPreloadRank.previous;
+        wanted.add(rank);
+        tasks.add(
+          ReelPrefetchTask(
+            cardId: c.id,
+            offset: offset,
+            stage: ReelPrefetchStage.preload,
+            lane: ReelPrefetcher.preloadLaneOf(rank.name),
+            run: () => _preloadNear(c),
+          ),
+        );
+      }
     }
+    if (preloads && !lean) {
+      for (final (rank, c) in _deckHeads()) {
+        wanted.add(rank);
+        tasks.add(
+          ReelPrefetchTask(
+            cardId: '$_headKey${c.id}',
+            offset: ReelPrefetcher.deckHead,
+            stage: ReelPrefetchStage.preload,
+            // An anime show's head may ask AnimeThemes: it waits its turn
+            // there. Any other asks nothing over the network.
+            lane: c.title.anime && c.title.isShow
+                ? ReelPrefetcher.animeThemesLane
+                : ReelPrefetcher.preloadLaneOf(rank.name),
+            run: () => _preloadHead(c),
+          ),
+        );
+      }
+    }
+    _preloadRanks = wanted;
     _prefetch.schedule(gen, tasks);
     // The art budget keeps the same window: on a lean step (memory
     // pressure, a metered link) only this card and the next.
@@ -1713,20 +1755,108 @@ class ReelController extends ChangeNotifier {
     }
   }
 
-  /// TV: the next card in the direction of travel is preloaded on the clip
-  /// core once the queue has resolved it (unless its server is slow:
-  /// [ClipSource.preloadable]).
-  void _preloadNext(List<ReelCardData> list, int gen) {
-    final ahead = index + _direction;
-    if (externalClips || memoryLevel != 0 || !_budget.clips || ahead < 0 || ahead >= list.length) return;
-    final next = list[ahead];
-    unawaited(
-      _prefetch.done(ReelPrefetcher.keyOf(next.id, ReelPrefetchStage.resolve)).then((_) {
-        if (gen != _generation || !_active || memoryLevel != 0 || !_budget.clips) return;
-        if (!_resolved.contains(next.id)) return;
-        unawaited(clips.preload(_clip[next.id]?.source));
-      }),
-    );
+  /// The preload ranks the window last planned ([_plan]); the others are
+  /// emptied once the card on screen has opened ([_trimPreloads]).
+  Set<ClipPreloadRank> _preloadRanks = const {};
+
+  /// A deck head's prefetch key prefix: its card may also sit in the deck
+  /// on screen, whose tasks for it are another card's.
+  static const String _headKey = 'head:';
+
+  /// TV: the clip core may preload now (not on the phone, whose feed keeps
+  /// its own players; not under memory pressure or with Stills only).
+  bool get _mayPreload => !_disposed && _active && !externalClips && memoryLevel == 0 && _budget.clips;
+
+  /// TV: [c] (+1 or -1 when planned) is preloaded on the clip core once the
+  /// queue has resolved it, as the rank its place says when the task runs
+  /// (the window may have moved on), unless its server is slow
+  /// ([ClipSource.preloadable]) or it is an AI card, which empties the rank.
+  Future<void> _preloadNear(ReelCardData c) async {
+    final cleared = _cleared;
+    await _prefetch.done(ReelPrefetcher.keyOf(c.id, ReelPrefetchStage.resolve));
+    if (cleared != _cleared || !_mayPreload || !_resolved.contains(c.id)) return;
+    final rank = _nearRank(c);
+    if (rank == null) return;
+    await clips.preload(_clip[c.id]?.source, rank: rank);
+  }
+
+  /// [c]'s preload rank where it sits now: the next card in the direction
+  /// of travel, or the one behind when the window keeps it.
+  ClipPreloadRank? _nearRank(ReelCardData c) {
+    final list = cards;
+    if (list == null) return null;
+    final j = list.indexWhere((x) => x.id == c.id);
+    if (j < 0) return null;
+    return switch ((j - index) * _direction) {
+      1 => ClipPreloadRank.next,
+      -1 when _preloadRanks.contains(ClipPreloadRank.previous) => ClipPreloadRank.previous,
+      _ => null,
+    };
+  }
+
+  /// TV: the card each neighbouring deck opens on (→ and ←, as the deck
+  /// strip shows them), from decks whose list this session has loaded: a
+  /// deck is never loaded only for its head (a load can start the day's
+  /// build). A deck whose cursor is on the decision card has no head.
+  List<(ClipPreloadRank, ReelCardData)> _deckHeads() {
+    final shown = shownDecks;
+    final n = shown.length;
+    final at = shown.indexOf(deck);
+    if (n < 2 || at < 0) return const [];
+    final out = <(ClipPreloadRank, ReelCardData)>[];
+    void add(ClipPreloadRank rank, ReelDeck d) {
+      final list = _cards[d.id];
+      if (list == null || identical(d, deck)) return;
+      final i = _cursor[d.id] ?? 0;
+      if (i >= list.length || (_onDecide.contains(d.id) && _decideAt(d.id, list) == i)) return;
+      out.add((rank, list[i]));
+    }
+
+    add(ClipPreloadRank.deckNext, shown[(at + 1) % n]);
+    if (n > 2) add(ClipPreloadRank.deckPrevious, shown[(at - 1 + n) % n]);
+    return out;
+  }
+
+  /// [c]'s rank as a neighbouring deck's head now, or null.
+  ClipPreloadRank? _headRank(ReelCardData c) {
+    for (final (rank, head) in _deckHeads()) {
+      if (head.id == c.id) return rank;
+    }
+    return null;
+  }
+
+  /// TV: a neighbouring deck's head [c] is preloaded only within plan D15:
+  /// no Plex read outside the two cards ahead. Its clip comes from
+  /// [ClipResolver.lookupWithoutServers]: an AnimeThemes opening (cached, or
+  /// asked of AnimeThemes), or a Plex clip already on disk. Any other head
+  /// empties its rank.
+  Future<void> _preloadHead(ReelCardData c) async {
+    final cleared = _cleared;
+    if (_headRank(c) == null || !_mayPreload) return;
+    ResolvedClip? clip;
+    try {
+      clip = await resolver
+          .lookupWithoutServers(c.title, exclude: _excluded[c.id] ?? const {})
+          .timeout(timeouts.lookup);
+    } catch (e) {
+      appLogger.d('Reel: deck head lookup failed (${e.runtimeType})');
+    }
+    // The deck order, the head or the Reel may have moved on meanwhile.
+    final rank = _headRank(c);
+    if (cleared != _cleared || rank == null || !_mayPreload) return;
+    if (clip == null) appLogger.d('[ReelPreload] ${rank.name}: head has no clip to preload without a Plex read');
+    await clips.preload(clip?.source, rank: rank);
+  }
+
+  /// TV: empties the preload ranks the window doesn't use (the edge of a
+  /// deck, a lean step, no neighbouring deck loaded). Run once the card on
+  /// screen has opened, so a rank holding its clip is never emptied before
+  /// the core takes it.
+  void _trimPreloads(int gen) {
+    if (externalClips || _disposed || gen != _generation) return;
+    for (final rank in clips.preloaded.keys.toList()) {
+      if (!_preloadRanks.contains(rank)) unawaited(clips.clearPreload(rank));
+    }
   }
 
   /// TV: the lookahead goes on once the card on screen's clip shows its
@@ -2251,7 +2381,7 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
     if (_active) {
       _plan(next, _generation);
-      _preloadNext(next, _generation);
+      _trimPreloads(_generation);
     }
   }
 

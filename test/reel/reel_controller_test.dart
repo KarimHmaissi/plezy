@@ -29,6 +29,7 @@ import 'package:plezy/services/reel/reel_playback_profile.dart';
 import 'package:plezy/services/reel/reel_prefetcher.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/utils/app_logger.dart';
 
 import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
@@ -931,6 +932,11 @@ void main() {
     await c.step(1);
     await Future<void>.delayed(Duration.zero);
     expect(engine.calls, contains('open https://s1.example/services/iva/assets/2/video.mp4'));
+    // Already resolved, the next card still waits for this one's first
+    // frame before the core buffers it (V2-09, V2-11 Wave B).
+    expect(engine.calls, isNot(contains('preload https://s1.example/services/iva/assets/3/video.mp4')));
+    engine.firstFrameCtl.add(null);
+    await Future<void>.delayed(Duration.zero);
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/3/video.mp4'));
     c.dispose();
     link.dispose();
@@ -3092,6 +3098,240 @@ void main() {
       expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'most-watched', 'ai:7']);
       expect(c.toast.value, ReelController.notConnected);
       c.dispose();
+    });
+  });
+
+  group('TV preload ranks (V2-09, V2-11 Wave B)', () {
+    String clip(String id) => 'https://s1.example/services/iva/assets/$id/video.mp4';
+    const opening = 'https://v.animethemes.moe/Harbor-Lights-OP1.webm';
+
+    /// An anime show whose opening AnimeThemes has (AniList 101).
+    ReelCardData animeCard(String id) {
+      final c = _card(id);
+      return ReelCardData(
+        title: ReelTitle(
+          titleId: 't$id',
+          groupKey: 'g$id',
+          title: 'Harbor Lights',
+          isShow: true,
+          anime: true,
+          tvdbId: 1,
+          copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+        ),
+        facts: c.facts,
+        best: c.best,
+      );
+    }
+
+    late List<List<int>> atAsks;
+    Future<Map<int, Map<String, dynamic>>> themes(List<int> ids) async {
+      atAsks.add(ids);
+      return {
+        101: {
+          'animethemes': [
+            {
+              'type': 'OP',
+              'sequence': 1,
+              'animethemeentries': [
+                {
+                  'episodes': '1-12',
+                  'videos': [
+                    {'id': 9, 'link': opening, 'nc': true, 'resolution': 1080, 'overlap': 'NONE'},
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+
+    setUp(() => atAsks = []);
+
+    Future<void> frame() async {
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+    }
+
+    test('the card behind is kept with the next one, so a reversal opens a preload', () async {
+      MemoryLogOutput.clearLogs();
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+      );
+      await c.start();
+      await frame();
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')});
+      await c.step(1);
+      expect(engine.calls, contains('open ${clip('2')}'));
+      await frame();
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('3'), ClipPreloadRank.previous: clip('1')});
+      expect(engine.calls, contains('preload ${clip('1')} as previous'));
+
+      await c.step(-1);
+      expect(engine.calls.last, 'clearPreloads next', reason: 'nothing above card 1: card 3 is let go once 1 opened');
+      expect(engine.calls, contains('open ${clip('1')}'));
+      await frame();
+      final ttff = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).first;
+      expect(ttff, contains('preloaded=true rank=previous'));
+      expect(c.clips.preloaded, {
+        ClipPreloadRank.previous: clip('2'),
+      }, reason: 'travelling up, the card behind is the one below');
+      c.dispose();
+    });
+
+    test('preloads wait for the first frame of the card on screen', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.clips.preloaded, isEmpty);
+      await frame();
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')});
+      c.dispose();
+    });
+
+    test('on mobile data only the next card is preloaded, and no deck head', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      final c = make(
+        profile: profile,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+          _Deck('b', [animeCard('50')]),
+        ],
+        aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+        animeThemes: themes,
+      );
+      await c.start();
+      await frame();
+      await c.switchDeck(1);
+      await c.switchDeck(-1);
+      await frame();
+      await c.step(1);
+      await frame();
+      expect(c.clips.preloaded.keys, [ClipPreloadRank.next]);
+      c.dispose();
+      profile.dispose();
+    });
+
+    test('memory pressure drops every rank and plans none', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await frame();
+      await c.step(1);
+      await frame();
+      expect(c.clips.preloaded, hasLength(2));
+      await c.trimMemory();
+      expect(c.clips.preloaded, isEmpty);
+      await c.step(1);
+      await frame();
+      expect(c.clips.preloaded, isEmpty);
+      c.dispose();
+    });
+
+    group('neighbouring deck heads (D15)', () {
+      test("an anime deck's head is preloaded after the first frame, and → opens it preloaded", () async {
+        MemoryLogOutput.clearLogs();
+        final servers = _RecordingServers();
+        final c = make(
+          servers: servers,
+          decks: [
+            _Deck('a', [_card('1'), _card('2')]),
+            _Deck('b', [animeCard('50'), _card('51')]),
+            _Deck('c', [_card('60')]),
+          ],
+          aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+          animeThemes: themes,
+        );
+        await c.start();
+        await frame();
+        expect(c.clips.preloaded.keys, [ClipPreloadRank.next], reason: 'no other deck is loaded yet');
+        // Visit b and c once, then come back to a: b's head is the anime show.
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        expect(c.deck.id, 'a');
+        expect(c.clips.preloaded.containsKey(ClipPreloadRank.deckNext), isFalse, reason: 'not before the first frame');
+        servers.reads.clear();
+        await frame();
+        expect(c.clips.preloaded[ClipPreloadRank.deckNext], opening);
+        expect(engine.calls, contains('preload $opening as deckNext'));
+        expect(
+          c.clips.preloaded.containsKey(ClipPreloadRank.deckPrevious),
+          isFalse,
+          reason: "c's head is a Plex clip that isn't on disk",
+        );
+        expect(servers.reads, isEmpty, reason: 'no Plex read for a head (card 2 was read on the first visit)');
+
+        await c.switchDeck(1);
+        expect(c.deck.id, 'b');
+        expect(engine.calls, contains('open $opening'));
+        await frame();
+        final ttff = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).first;
+        expect(ttff, contains('preloaded=true rank=deckNext'));
+        c.dispose();
+      });
+
+      test('a Plex head is never read for and its rank stays empty; a cached opening asks nothing', () async {
+        final servers = _RecordingServers();
+        final c = make(
+          servers: servers,
+          decks: [
+            _Deck('a', [_card('1')]),
+            _Deck('b', [_card('5')]),
+            _Deck('c', [animeCard('50')]),
+          ],
+          aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+          animeThemes: themes,
+        );
+        await c.start();
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        expect(c.deck.id, 'a');
+        servers.reads.clear();
+        atAsks.clear();
+        await frame();
+        expect(servers.reads, isEmpty, reason: "b's head (a Plex clip) is never read for");
+        expect(atAsks, isEmpty, reason: "c's opening is cached from its visit");
+        expect(c.clips.preloaded[ClipPreloadRank.deckPrevious], opening);
+        expect(c.clips.preloaded.containsKey(ClipPreloadRank.deckNext), isFalse);
+        c.dispose();
+      });
+
+      test('with two decks there is one neighbour: → and ← are the same deck', () async {
+        final c = make(
+          decks: [
+            _Deck('a', [_card('1')]),
+            _Deck('b', [animeCard('50')]),
+          ],
+          aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+          animeThemes: themes,
+        );
+        await c.start();
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        expect(c.clips.preloaded, {ClipPreloadRank.deckNext: opening});
+        c.dispose();
+      });
     });
   });
 }

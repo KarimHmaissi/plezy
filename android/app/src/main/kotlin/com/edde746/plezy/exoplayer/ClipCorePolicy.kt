@@ -6,6 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.trackselection.TrackSelector
 
@@ -86,6 +87,47 @@ internal object ClipCorePolicy {
     return "clip gen=$generation video=[$v] range=${dynamicRange(video)} dv=${dvMode.name} " +
       "frameRate=${frameRateStrategyName(frameRateStrategy)} audio=[$a] output=[$audioOutput] audioTrackInits=$audioTrackInits " +
       "selector=${if (selectorAttached) "attached" else "DETACHED"}"
+  }
+}
+
+/**
+ * What a preloaded clip is to the card on screen (V2-09). The clip core holds at most one clip
+ * per rank, so at most four preloads.
+ *
+ * [rankingData] is what the clip is added to media3's preload manager with. The manager's
+ * `SimpleRankingDataComparator` orders sources by `abs(rankingData - currentPlayingIndex)`
+ * (media3 1.11.0, javap), and the clip core keeps the playing index at 0, so the next card
+ * loads first, then the card behind, then the deck heads. The preload status asked for each
+ * one is [loadMs] of its start, kept in memory ([status]).
+ */
+@OptIn(UnstableApi::class)
+internal enum class ClipPreloadRank(val wire: String, val rankingData: Int, val loadMs: Long) {
+  /** The next card in the direction of travel. */
+  NEXT("next", 1, LoadControlPolicy.CLIP_PRELOAD_MS),
+
+  /** The card behind (↑ after ↓, or a reversal). */
+  PREVIOUS("previous", 2, LoadControlPolicy.CLIP_PRELOAD_PREVIOUS_MS),
+
+  /** The head of the deck → goes to. */
+  DECK_NEXT("deckNext", 3, LoadControlPolicy.CLIP_PRELOAD_DECK_HEAD_MS),
+
+  /** The head of the deck ← goes to. */
+  DECK_PREVIOUS("deckPrevious", 4, LoadControlPolicy.CLIP_PRELOAD_DECK_HEAD_MS);
+
+  companion object {
+    /** The preload manager's current playing index: every rank sorts by its distance from it. */
+    const val PLAYING_INDEX = 0
+
+    /** A rank from the method channel; a missing one is [NEXT] (the only preload before V2-09). */
+    fun fromWire(wire: String?): ClipPreloadRank? = if (wire == null) NEXT else entries.firstOrNull { it.wire == wire }
+
+    fun ofRankingData(rankingData: Int): ClipPreloadRank? = entries.firstOrNull { it.rankingData == rankingData }
+
+    /**
+     * The preload manager's target for a source added with [rankingData]: its rank's range,
+     * loaded into memory. Anything else (it can't happen) gets the next card's.
+     */
+    fun status(rankingData: Int): DefaultPreloadManager.PreloadStatus = DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(ofRankingData(rankingData)?.loadMs ?: LoadControlPolicy.CLIP_PRELOAD_MS)
   }
 }
 

@@ -244,18 +244,20 @@ class PlayerAndroid extends PlayerBase {
     }
   }
 
-  /// Clip mode: buffer the first seconds of [uri] for the next card (only
-  /// one preload is held). Initializes the core if needed.
-  Future<void> preloadClip(String uri) async {
+  /// Clip mode: buffer the first seconds of [uri] as [rank] (`next`,
+  /// `previous`, `deckNext` or `deckPrevious`; the core holds one clip per
+  /// rank, V2-09). [origin] is for the core's log line. Initializes the core
+  /// if needed.
+  Future<void> preloadClip(String uri, {String rank = 'next', String? origin}) async {
     if (disposed || !clipMode) return;
     await _ensureInitialized();
-    await invoke('preloadClip', {'uri': uri});
+    await invoke('preloadClip', {'uri': uri, 'rank': rank, 'origin': ?origin});
   }
 
-  /// Clip mode: drop any preloaded next card.
-  Future<void> clearPreloads() async {
+  /// Clip mode: drop [rank]'s preload, or every one when null.
+  Future<void> clearPreloads({String? rank}) async {
     if (disposed || !clipMode || !initialized) return;
-    await invoke('clearPreloads');
+    await invoke('clearPreloads', {'rank': ?rank});
   }
 
   @override

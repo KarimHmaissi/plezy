@@ -356,6 +356,45 @@ class ClipResolver {
     return const ClipLookup.unknown();
   }
 
+  /// A neighbouring deck's head (plans V2-09 and D15): its clip from what
+  /// needs no Plex server, or null. Never reads extras, never waits for a
+  /// server, and never caches a miss:
+  /// - a cached opening (AnimeThemes) is used as is;
+  /// - a cached Plex clip only when [onDisk] says its bytes are already on
+  ///   this device (nothing does until the disk cache, V2-10);
+  /// - an anime show with no cached row asks AnimeThemes for its openings
+  ///   (a deck's batch in flight is waited for), and an opening found is
+  ///   cached as the ladder caches it.
+  ///
+  /// [exclude] as for [lookup].
+  Future<ResolvedClip?> lookupWithoutServers(
+    ReelTitle t, {
+    Set<String> exclude = const {},
+    bool Function(ResolvedClip clip)? onDisk,
+  }) async {
+    final banned = {...await store.spoiledAssets(t.titleId), ...exclude};
+    final key = 'src:${t.groupKey}';
+    final cached = await store.cached(key, ttl: ReelStore.sourceTtl);
+    final entry = cached == null ? null : _entry(cached);
+    if (entry != null) {
+      if (entry['miss'] == true) return null;
+      final assets = _assets(entry);
+      if (assets.isEmpty || assets.any(banned.contains)) return null;
+      final hit = _fromCache(entry);
+      if (hit == null) return null;
+      if (hit.source.origin == ClipOrigin.animeTheme) return hit;
+      return onDisk != null && onDisk(hit) ? hit : null;
+    }
+    if (!(t.anime && t.isShow)) return null;
+    final (ops, _) = await _openings(t);
+    final candidates = [for (final op in ops) ClipCandidate.opening(op)];
+    if (candidates.any((c) => banned.contains(c.assetId))) return null;
+    final clip = _opening1('Opening 1', candidates);
+    if (clip == null) return null;
+    if (exclude.isEmpty) await store.cache(key, jsonEncode(_openingRow(clip, candidates)));
+    return clip;
+  }
+
   /// A definitive miss in the current [sourceFormat].
   static const String missRow = '{"v":$sourceFormat,"miss":true}';
 

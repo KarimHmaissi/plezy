@@ -157,6 +157,62 @@ void main() {
     });
   });
 
+  group('native preload and deck heads (V2-09, V2-11 Wave B)', () {
+    test("a card's preload stage goes after its art, in its rank's own lane", () async {
+      q.schedule(1, [
+        task('c3', 0),
+        task('c4', 1, stage: ReelPrefetchStage.preload, lane: ReelPrefetcher.preloadLaneOf('next')),
+        task('c2', -1, stage: ReelPrefetchStage.preload, lane: ReelPrefetcher.preloadLaneOf('previous')),
+        task('c4', 1, stage: ReelPrefetchStage.art, lane: ReelPrefetcher.artLaneOf('Server A')),
+      ]);
+      expect(started, ['c3/resolve', 'c4/art', 'c4/preload', 'c2/preload']);
+    });
+
+    test('deck heads queue after +2', () {
+      q.hold();
+      q.schedule(1, [
+        task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload),
+        task('c5', 2),
+        task('c4', 1),
+      ]);
+      expect([for (final t in q.queued) t.cardId], ['c4', 'c5', 'h1']);
+    });
+
+    test('deck heads wait for the first frame; the hold cap lets only the deck on screen go', () {
+      fakeAsync((async) {
+        final capped = ReelPrefetcher(holdCap: const Duration(seconds: 4));
+        capped
+          ..hold()
+          ..schedule(1, [
+            task('c3', 0),
+            task('c4', 1, lane: 'Server B'),
+            task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload, lane: 'Server C'),
+          ]);
+        expect(capped.headsHeld, isTrue);
+        async.elapse(const Duration(seconds: 5));
+        expect(started, ['c3/resolve', 'c4/resolve'], reason: 'no first frame yet: the head waits');
+        capped.release();
+        async.flushMicrotasks();
+        expect(started, ['c3/resolve', 'c4/resolve', 'h1/preload']);
+        expect(capped.headsHeld, isFalse);
+        capped.dispose();
+      });
+    });
+
+    test('a release lets the heads go even after the cap lifted the hold', () async {
+      q.hold();
+      q.schedule(1, [task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload)]);
+      expect(started, isEmpty);
+      q.release();
+      expect(started, ['h1/preload']);
+    });
+
+    test('with no hold (the phone, or a card that showed a still) heads run in turn', () async {
+      q.schedule(1, [task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload)]);
+      expect(started, ['h1/preload']);
+    });
+  });
+
   test('clear drops everything queued; nothing starts after it', () async {
     q.schedule(1, window());
     final queued = q.done('c4/metadata');
