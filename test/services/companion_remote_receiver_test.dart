@@ -115,4 +115,42 @@ void main() {
       expect(seeks, 1);
     });
   });
+
+  test('fork: On TV mode commands reach the Reel callbacks', () {
+    final receiver = CompanionRemoteReceiver.instance;
+    final got = <String>[];
+    receiver.onTabReel = () => got.add('tab');
+    receiver.onReelOpen = (d) => got.add('open ${d['deck']}');
+    receiver.onReelStep = (d) => got.add('step ${d['dir']}');
+    receiver.onReelAction = (a) => got.add('action $a');
+    addTearDown(() {
+      receiver.onTabReel = null;
+      receiver.onReelOpen = null;
+      receiver.onReelStep = null;
+      receiver.onReelAction = null;
+    });
+
+    receiver.handleCommand(const RemoteCommand(type: RemoteCommandType.tabReel), null);
+    receiver.handleCommand(const RemoteCommand(type: RemoteCommandType.reelOpen, data: {'deck': 'for-you'}), null);
+    receiver.handleCommand(const RemoteCommand(type: RemoteCommandType.reelStep, data: {'dir': 1}), null);
+    receiver.handleCommand(const RemoteCommand(type: RemoteCommandType.reelAction, data: {'action': 'save'}), null);
+    receiver.handleCommand(const RemoteCommand(type: RemoteCommandType.reelAction), null);
+    receiver.handleCommand(const RemoteCommand(type: RemoteCommandType.reelState, data: {'active': true}), null);
+
+    expect(got, ['tab', 'open for-you', 'step 1', 'action save']);
+  });
+
+  test('fork: Reel commands are appended, so older peers keep their indexes', () {
+    final values = RemoteCommandType.values;
+    expect(values.indexOf(RemoteCommandType.catchUpNudge), lessThan(values.indexOf(RemoteCommandType.tabReel)));
+    expect(values.sublist(values.length - 5), [
+      RemoteCommandType.tabReel,
+      RemoteCommandType.reelOpen,
+      RemoteCommandType.reelStep,
+      RemoteCommandType.reelAction,
+      RemoteCommandType.reelState,
+    ]);
+    final json = const RemoteCommand(type: RemoteCommandType.reelState).toJson();
+    expect(RemoteCommand.fromJson(json).type, RemoteCommandType.reelState);
+  });
 }

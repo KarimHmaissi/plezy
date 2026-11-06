@@ -1221,6 +1221,7 @@
     "moreLikeThis": "More like this",
     "moreLike": "more like ${title}",
     "findMore": "Find more (add titles)",
+    "reelIt": "Reel it",
     "findingMore": "more: ${request}",
     "noMoreMatches": "No more matches for ${request}",
     "addedMore": "${count} more picks added: ${request}",
@@ -1665,6 +1666,7 @@
     "explore": "Explore",
     "watchlist": "Watchlist",
     "comfort": "Comfort",
+    "reel": "Reel",
     "history": "History"
   },
   "history": {

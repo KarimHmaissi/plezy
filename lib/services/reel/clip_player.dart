@@ -171,6 +171,9 @@ class ClipPlayer {
     await e.preload(next.uri);
   }
 
+  /// Memory pressure: drop the buffered next card without building a core.
+  Future<void> dropPreload() async => _engine?.clearPreloads();
+
   Future<void> pause() async {
     await _engine?.pause();
     if (phase.value == ClipPhase.playing || phase.value == ClipPhase.loading) phase.value = ClipPhase.paused;

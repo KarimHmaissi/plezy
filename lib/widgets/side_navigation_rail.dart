@@ -469,6 +469,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
   }
 
   static const _kHome = 'home';
+  static const _kReel = 'reel';
   static const _kExplore = 'explore';
   static const _kWatchlist = 'watchlist';
   static const _kComfort = 'comfort';
@@ -624,12 +625,17 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
   /// gone and the request goes nowhere.
   static bool _isMounted(FocusNode node) => node.context?.mounted ?? false;
 
+  /// Fork: The Reel is Android only (its clip core is ExoPlayer).
+  static bool get _hasReel => Platform.isAndroid;
+
   /// Derive a focus key from the current selection state (tab + library).
   /// Returns null if no meaningful selected item exists.
   String? _resolveSelectedFocusKey() {
     switch (widget.selectedTab) {
       case NavigationTabId.discover:
         return _kHome;
+      case NavigationTabId.reel:
+        return _hasReel ? _kReel : null;
       case NavigationTabId.explore:
         return _kExplore;
       case NavigationTabId.watchlist:
@@ -696,6 +702,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
   }) {
     return {
       _kHome,
+      if (_hasReel) _kReel,
       if (hasNowPlaying) _kNowPlaying,
       _kLibraries,
       if (hasExplore) _kExplore,
@@ -786,6 +793,7 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
       if (widget.isOfflineMode && widget.onReconnect != null) _kReconnect,
       if (!widget.isOfflineMode) ...[
         _kHome,
+        if (_hasReel) _kReel,
         if (hasNowPlaying) _kNowPlaying,
         if (hasLiveTv) 'liveTv',
         if (hasExplore) _kExplore,
@@ -1063,6 +1071,19 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
                                         isCollapsed: isCollapsed,
                                       ),
                                       const SizedBox(height: _itemGap),
+                                      // Fork: The Reel, directly under Home.
+                                      if (_hasReel) ...[
+                                        _buildNavItem(
+                                          icon: Symbols.movie_rounded,
+                                          selectedIcon: Symbols.movie_rounded,
+                                          label: Translations.of(context).navigation.reel,
+                                          isSelected: widget.selectedTab == NavigationTabId.reel,
+                                          onTap: () => widget.onDestinationSelected(NavigationTabId.reel),
+                                          focusNode: _focusTracker.get(_kReel),
+                                          isCollapsed: isCollapsed,
+                                        ),
+                                        const SizedBox(height: _itemGap),
+                                      ],
                                       // Now Playing — only while a music session is live.
                                       if (nowPlayingTrack != null && musicService != null) ...[
                                         _buildNowPlayingItem(nowPlayingTrack, musicService, isCollapsed: isCollapsed),

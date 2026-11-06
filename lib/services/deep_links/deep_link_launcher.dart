@@ -13,6 +13,7 @@ import '../../models/livetv_channel.dart';
 import '../../providers/catalog_sources_provider.dart';
 import '../../providers/download_provider.dart';
 import '../../providers/multi_server_provider.dart';
+import '../../screens/reel/reel_screen.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/global_key_utils.dart';
 import '../../utils/live_tv_player_navigation.dart';
@@ -33,6 +34,9 @@ Future<void> launchDeepLink(BuildContext context, DeepLink link, {required bool 
   switch (link) {
     case OpenLink() || ExternalPlayerReturnLink():
       return;
+    case ReelLink(:final deck):
+      // Fork: the shell owns the Reel tab.
+      ReelScreen.open(context, deck: deck);
     case PlayLink():
       await _launchPlayLink(context, link, isOffline: isOffline);
     case LiveLink():

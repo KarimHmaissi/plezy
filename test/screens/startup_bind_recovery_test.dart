@@ -140,7 +140,9 @@ void main() {
     });
 
     test('mobile bar is Home, Comfort, Explore, Watchlist, AI; Libraries lives in the drawer', () {
-      final visible = allNavigationTabs.where((tab) => tab.id != NavigationTabId.liveTv).toList();
+      final visible = allNavigationTabs
+          .where((tab) => tab.id != NavigationTabId.liveTv && tab.id != NavigationTabId.reel)
+          .toList();
       for (final current in [NavigationTabId.discover, NavigationTabId.libraries]) {
         final tabs = mainScreenBottomNavigationTabs(
           visibleTabs: visible,
@@ -156,6 +158,22 @@ void main() {
           NavigationTabId.ai,
         ]);
       }
+    });
+
+    test('fork: with the Reel (Android) it takes Explore\'s slot; Explore shows only while open', () {
+      final visible = allNavigationTabs.where((tab) => tab.id != NavigationTabId.liveTv).toList();
+      List<NavigationTabId> bar(NavigationTabId current) => _ids(
+        mainScreenBottomNavigationTabs(visibleTabs: visible, isMobile: true, isOffline: false, currentTab: current),
+      );
+      expect(bar(NavigationTabId.discover), [
+        NavigationTabId.discover,
+        NavigationTabId.comfort,
+        NavigationTabId.reel,
+        NavigationTabId.watchlist,
+        NavigationTabId.ai,
+      ]);
+      expect(bar(NavigationTabId.explore), contains(NavigationTabId.explore));
+      expect(bar(NavigationTabId.reel), isNot(contains(NavigationTabId.explore)));
     });
 
     test('mobile offline includes Downloads and Settings', () {

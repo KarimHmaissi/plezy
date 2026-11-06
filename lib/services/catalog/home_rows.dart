@@ -7,8 +7,10 @@ import '../../media/media_item.dart';
 import '../../media/media_server_client.dart';
 import '../../models/catalog/catalog_item.dart';
 import '../../providers/catalog_sources_provider.dart';
+import '../../utils/app_logger.dart';
 import '../ai/ai_history.dart';
 import '../comfort/comfort_shows_controller.dart';
+import '../reel/reel_store.dart';
 import 'catalog_source.dart';
 import 'home_pins.dart';
 import 'trakt_catalog_source.dart';
@@ -198,6 +200,19 @@ class HomeRowResolver {
       case 'ai':
         // A saved AI answer: its stored picks, no server calls.
         items = (await AiHistory.get(rest))?.items;
+      case HomeRowIds.reelPicks:
+        // Fork: the Reel's fresh Saves, newest first, from the copy saved.
+        items = [];
+        for (final pick in await ReelStore.instance.freshPicks()) {
+          final client = clientFor(ServerId(pick.serverId));
+          if (client == null) continue;
+          try {
+            final item = await client.fetchItem(pick.ratingKey);
+            if (item != null) items.add(item);
+          } catch (e) {
+            appLogger.d('Home: Reel pick unavailable', error: e);
+          }
+        }
       default:
         return null;
     }

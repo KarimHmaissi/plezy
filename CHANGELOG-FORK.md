@@ -105,6 +105,37 @@ Details of each are in the dated entries below.
 
 ## 2026-11-06
 
+### The Reel v1: a feed of trailers and anime openings (Android)
+- New **Reel** tab (Android only): one title per card, trailers from the
+  servers' own extras and first openings from AnimeThemes. No episode
+  footage and no recaps of any kind. On the Shield it sits under Home in the
+  rail; on phones it takes Explore's bottom-bar slot (Explore moves to the
+  drawer).
+- Decks, like channels: **For You** (one daily Sonnet build over the taste
+  pool, code order meanwhile), **Anime openings**, **Most Watched** (the
+  Trakt charts, raw), and every saved AI answer (**Reel it** on the answer's
+  menu, on the AI tab or on Home).
+- TV: Up/Down next or previous card, Left/Right another deck, OK = Watch,
+  long OK or ≡ = Save / Not for me / Spoiled me / Seen it and the deck list.
+  Phone: swipe, double-tap to Save, long-press for the sheet.
+- **Save** is one action: the title waits in a new Home row, "From the
+  Reel" (seated once at the top, 3 days, at most 3), and goes to the Plex
+  watchlist.
+- **On TV mode** (Fold): the phone drives the Shield's Reel (current card and
+  the next three, swipe to step, Watch / Save / Not for me / Pause) and
+  plays nothing. Five new companion commands, appended so older peers ignore
+  them.
+- Clips play on one ExoPlayer core in clip mode (`DefaultPreloadManager`,
+  the next card's first 3 s preloaded, PCM, no tunnelling or frame-rate
+  switching). They never report anything: no timeline, scrobble, tracker,
+  history or now-playing updates. `test/reel/no_reporting_guard_test.dart`
+  keeps it that way.
+- `plezy://reel[?deck=<id>]` opens the Reel (adb testing now, Arc later).
+- Memory: while the Reel plays the brain's indexer rests and its ONNX session
+  is released; memory pressure first drops the preload, then shows stills.
+- Fork database schema 3: `ReelEvents` and `ReelCache`. Picks and vetoes are
+  synced settings (`reel.picks`, `reel.vetoes`).
+
 ### Straight Facts: honest per-title facts and one trustworthy seen state (recommender v2 §3)
 - New `lib/services/ai/facts/`: the frozen interfaces the Reel and the
   recommender read. `TitleFacts` (scores with their real source, certificate,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show TapGestureRecognizer;
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import 'reel/reel_screen.dart';
 import '../widgets/phone_nav_drawer.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/hub_vertical_navigation.dart';
@@ -818,6 +820,13 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 onSelected: () => showAppSnackBar(context, t.aiTab.homeFull),
               )
             : e,
+      // Fork: the answer's picks as a Reel deck (Android).
+      if (Platform.isAndroid)
+        MediaMenuExtraEntry(
+          icon: Symbols.movie_rounded,
+          label: t.aiTab.reelIt,
+          onSelected: () => ReelScreen.open(context, deck: 'ai:${entry.id}'),
+        ),
       MediaMenuExtraEntry(
         icon: Symbols.playlist_add_rounded,
         label: t.aiTab.findMore,

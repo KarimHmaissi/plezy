@@ -52,6 +52,10 @@ abstract final class HomeRowIds {
   /// A saved answer from the AI tab (its snapshot of picks).
   static String ai(String historyId) => 'ai:$historyId';
 
+  /// Fork: titles saved in The Reel, each for 3 days (at most 3). Seated
+  /// once at the top of Home by the first Save; empty means hidden.
+  static const String reelPicks = 'reel.picks';
+
   static String watchlist(String shelfId, {CatalogSourceId? source}) =>
       source == null ? 'wl:$shelfId' : 'wl:${source.name}:$shelfId';
 }
@@ -339,6 +343,15 @@ class HomePinsController extends ChangeNotifier {
     if (fresh.isEmpty) return 0;
     await _replace((rows: [..._layout.rows, ...fresh], curated: _layout.curated));
     return fresh.length;
+  }
+
+  /// Fork: put [row] at the top of Home unless it is already on it. Returns
+  /// whether it was added.
+  Future<bool> insertFirst(HomeRowEntry row) async {
+    await ensureLoaded();
+    if (contains(row.id)) return false;
+    await _replace((rows: [row, ..._layout.rows], curated: _layout.curated));
+    return true;
   }
 
   Future<void> remove(Iterable<String> ids) async {

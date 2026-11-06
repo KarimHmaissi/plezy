@@ -1910,7 +1910,10 @@ class PlexClient
   /// Fork (Reel): a title's extras as lean clip rows for the Reel's ladder.
   /// One request, no cache fallback (a stale part key is useless), and a
   /// caller-chosen [timeout] because some servers' extras calls hang.
-  Future<List<PlexExtraClip>> fetchExtraClips(String ratingKey, {Duration timeout = const Duration(seconds: 30)}) async {
+  Future<List<PlexExtraClip>> fetchExtraClips(
+    String ratingKey, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     final response = await _http.get('/library/metadata/$ratingKey/extras', timeout: timeout);
     final rows = _getMediaContainer(response)?['Metadata'];
     if (rows is! List) return const [];
