@@ -354,8 +354,9 @@ class ClipResolver {
 }
 
 /// AnimeThemes couldn't answer: rate limited (429 with Retry-After, or this
-/// client's own cap), a non-200, or a response that no longer has the
-/// expected shape. The resolver counts it as unknown, never a miss.
+/// client's own cap), a non-200 (a 404 or 410 once an endpoint is retired),
+/// GraphQL errors, or a response that no longer has the expected shape. The
+/// resolver counts it as unknown, never a miss.
 class AnimeThemesUnavailable implements Exception {
   const AnimeThemesUnavailable(this.reason);
 
@@ -365,13 +366,19 @@ class AnimeThemesUnavailable implements Exception {
   String toString() => 'AnimeThemesUnavailable: $reason';
 }
 
-/// AnimeThemes (volunteer-run): batched lookups by AniList id, under 90
-/// requests a minute, honouring Retry-After
-/// (https://api-docs.animethemes.moe/intro/ratelimiting/). Throws
-/// [AnimeThemesUnavailable] when it can't answer, so a blocked or failed
-/// lookup never reads as "no record". Fields verified against a live
-/// `/anime` response (animethemes[].type/sequence, animethemeentries[]
-/// .episodes/spoiler/nsfw, videos[].link/nc/resolution/size).
+/// AnimeThemes (volunteer-run) over its GraphQL API, which replaces the
+/// deprecated JSON:API: batched lookups by AniList id through
+/// `findAnimeByExternalSite`, under 90 requests a minute, honouring
+/// Retry-After (https://api-docs.animethemes.moe/graphql/intro/ratelimiting/).
+/// Throws [AnimeThemesUnavailable] when it can't answer, so a blocked or
+/// failed lookup never reads as "no record".
+///
+/// The query's fields come from the live schema and one recorded response
+/// (test/reel/fixtures/animethemes_graphql_op.json). Each anime is returned
+/// in the record shape [ClipFilter.firstOpening] reads: `animethemes[]`
+/// .type/sequence/song.title, `animethemeentries[]`.episodes/spoiler/nsfw,
+/// `videos[]`.id/link/nc/resolution/size, plus overlap/lyrics/subbed/source
+/// as the API spells them (`NONE`/`TRANS`/`OVER`, `BD`, `WEB`, …).
 class AnimeThemesClient {
   AnimeThemesClient({http.Client? client}) : _client = client ?? http.Client();
 
@@ -381,22 +388,54 @@ class AnimeThemesClient {
 
   static const int perMinute = 80;
 
+  /// Ids per request; a longer list is split into requests of this size.
+  static const int maxBatch = 50;
+
+  static final Uri endpoint = Uri.https('graphql.animethemes.moe', '/');
+
+  /// Openings only: the ladder never plays an ED or an insert song.
+  static const String query = r'''
+query ReelOpenings($ids: [Int!]) {
+  findAnimeByExternalSite(site: ANILIST, id: $ids) {
+    resources(site: ANILIST) { nodes { site externalId } }
+    animethemes(type: OP) {
+      type
+      sequence
+      song { title { romaji } }
+      animethemeentries {
+        episodes
+        spoiler
+        nsfw
+        videos { nodes { id link nc resolution size overlap lyrics subbed source } }
+      }
+    }
+  }
+}''';
+
   Future<Map<int, Map<String, dynamic>>> fetch(List<int> anilistIds) async {
-    if (anilistIds.isEmpty) return const {};
+    final ids = anilistIds.toSet().toList();
+    final out = <int, Map<String, dynamic>>{};
+    for (var i = 0; i < ids.length; i += maxBatch) {
+      out.addAll(await _fetchBatch(ids.sublist(i, (i + maxBatch).clamp(0, ids.length))));
+    }
+    return out;
+  }
+
+  Future<Map<int, Map<String, dynamic>>> _fetchBatch(List<int> ids) async {
     final now = DateTime.now();
     if (_blockedUntil != null && now.isBefore(_blockedUntil!)) throw const AnimeThemesUnavailable('blocked');
     _recent.removeWhere((t) => now.difference(t) > const Duration(minutes: 1));
     if (_recent.length >= perMinute) throw const AnimeThemesUnavailable('local cap');
     _recent.add(now);
-    final uri = Uri.https('api.animethemes.moe', '/anime', {
-      'filter[has]': 'resources',
-      'filter[site]': 'AniList',
-      'filter[external_id]': anilistIds.join(','),
-      'include': 'resources,animethemes.animethemeentries.videos,animethemes.song',
-      'page[size]': '${anilistIds.length.clamp(1, 50)}',
-    });
     final res = await _client
-        .get(uri, headers: const {'Accept': 'application/json', 'User-Agent': 'Plezy'})
+        .post(
+          endpoint,
+          headers: const {'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Plezy'},
+          body: jsonEncode({
+            'query': query,
+            'variables': {'ids': ids},
+          }),
+        )
         .timeout(const Duration(seconds: 20));
     if (res.statusCode == 429) {
       final wait = int.tryParse(res.headers['retry-after'] ?? '') ?? 60;
@@ -410,15 +449,61 @@ class AnimeThemesClient {
     } on FormatException {
       throw const AnimeThemesUnavailable('not JSON');
     }
-    final list = body is Map ? body['anime'] : null;
+    if (body is! Map) throw const AnimeThemesUnavailable('not an object');
+    // Validation, depth and complexity errors come back as a 200 with
+    // `errors`; a partial answer is no answer.
+    final errors = body['errors'];
+    if (errors is List && errors.isNotEmpty) throw const AnimeThemesUnavailable('GraphQL errors');
+    final data = body['data'];
+    final list = data is Map ? data['findAnimeByExternalSite'] : null;
     if (list is! List) throw const AnimeThemesUnavailable('no anime list');
     final out = <int, Map<String, dynamic>>{};
     for (final a in list) {
-      if (a is! Map<String, dynamic>) continue;
-      for (final r in (a['resources'] as List? ?? const [])) {
-        if (r is Map && r['site'] == 'AniList' && r['external_id'] is int) out[r['external_id'] as int] = a;
+      final record = _record(a);
+      for (final r in _nodes((a as Map)['resources'])) {
+        if (r['site'] == 'ANILIST' && r['externalId'] is int) out[r['externalId'] as int] = record;
       }
     }
     return out;
   }
+
+  /// One GraphQL anime as the record [ClipFilter.firstOpening] reads. Any
+  /// part not shaped as queried throws: a changed schema must never read as
+  /// "this title has no opening".
+  static Map<String, dynamic> _record(Object? a) {
+    if (a is! Map) throw const AnimeThemesUnavailable('anime not an object');
+    final themes = a['animethemes'];
+    if (themes is! List) throw const AnimeThemesUnavailable('no animethemes list');
+    return {
+      'animethemes': [
+        for (final t in themes)
+          if (t is Map)
+            {
+              'type': t['type'],
+              'sequence': t['sequence'],
+              'song': {'title': ((t['song'] as Map?)?['title'] as Map?)?['romaji']},
+              'animethemeentries': [
+                for (final e in _list(t['animethemeentries'], 'animethemeentries'))
+                  {
+                    'episodes': e['episodes'],
+                    'spoiler': e['spoiler'],
+                    'nsfw': e['nsfw'],
+                    'videos': [for (final v in _nodes(e['videos'])) Map<String, dynamic>.from(v)],
+                  },
+              ],
+            },
+      ],
+    };
+  }
+
+  static List<Map> _list(Object? v, String what) {
+    if (v is! List) throw AnimeThemesUnavailable('no $what list');
+    return [
+      for (final x in v)
+        if (x is Map) x,
+    ];
+  }
+
+  /// A connection's `nodes`.
+  static List<Map> _nodes(Object? connection) => _list(connection is Map ? connection['nodes'] : null, 'nodes');
 }

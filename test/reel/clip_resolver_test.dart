@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -359,10 +361,84 @@ void main() {
     });
   });
 
-  group('AnimeThemesClient', () {
-    test('a 503 throws instead of answering "no record"', () async {
-      final client = AnimeThemesClient(client: MockClient((_) async => http.Response('down', 503)));
-      await expectLater(client.fetch([101]), throwsA(isA<AnimeThemesUnavailable>()));
+  group('AnimeThemesClient (GraphQL)', () {
+    // A live findAnimeByExternalSite response, recorded once with the
+    // client's query; ids, title, link and size replaced with invented ones.
+    final fixture = File('test/reel/fixtures/animethemes_graphql_op.json').readAsStringSync();
+
+    test('posts the query to the GraphQL endpoint with the AniList ids as variables', () async {
+      late http.Request sent;
+      final client = AnimeThemesClient(
+        client: MockClient((req) async {
+          sent = req;
+          return http.Response(fixture, 200);
+        }),
+      );
+      await client.fetch([101, 102]);
+      expect(sent.method, 'POST');
+      expect(sent.url, Uri.parse('https://graphql.animethemes.moe/'));
+      expect(sent.headers['Content-Type'], startsWith('application/json'));
+      final body = jsonDecode(sent.body) as Map<String, dynamic>;
+      expect(body['query'], contains('findAnimeByExternalSite(site: ANILIST, id: \$ids)'));
+      expect(body['variables'], {
+        'ids': [101, 102],
+      });
+    });
+
+    test('the recorded response maps to its AniList id and yields the opening', () async {
+      final client = AnimeThemesClient(client: MockClient((_) async => http.Response(fixture, 200)));
+      final records = await client.fetch([101, 102]);
+      expect(records.keys, [101], reason: 'an id missing from the answer has no record');
+      final op = ClipFilter.firstOpening(records[101]!);
+      expect(op?.url, 'https://v.animethemes.moe/HarborLights-OP1.webm');
+      expect(op?.videoId, 9001);
+      expect(op?.song, 'Harbor Lights');
+      expect(op?.resolution, 720);
+      final video = (((records[101]!['animethemes'] as List).single as Map)['animethemeentries'] as List).single as Map;
+      expect((video['videos'] as List).single, containsPair('overlap', 'NONE'));
+    });
+
+    test('the recorded response resolves an anime title end to end', () async {
+      final client = AnimeThemesClient(client: MockClient((_) async => http.Response(fixture, 200)));
+      final r = await ClipResolver(servers: servers, store: store, aniList: (_) async => 101, animeThemes: client.fetch)
+          .lookup(
+            const ReelTitle(
+              titleId: 's:tvdb:7',
+              groupKey: 'tvdb:7',
+              title: 'Harbor Lights',
+              isShow: true,
+              anime: true,
+              tvdbId: 7,
+              copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+            ),
+          );
+      expect(r.clip?.assetId, 'at:9001');
+      expect(servers.calls, isEmpty);
+    });
+
+    for (final status in [404, 410, 503]) {
+      test('a $status throws instead of answering "no record"', () async {
+        final client = AnimeThemesClient(client: MockClient((_) async => http.Response('gone', status)));
+        await expectLater(client.fetch([101]), throwsA(isA<AnimeThemesUnavailable>()));
+      });
+    }
+
+    test('a retired endpoint leaves an anime title unknown, never a cached miss', () async {
+      final client = AnimeThemesClient(client: MockClient((_) async => http.Response('gone', 410)));
+      final r = await ClipResolver(servers: servers, store: store, aniList: (_) async => 101, animeThemes: client.fetch)
+          .lookup(
+            const ReelTitle(
+              titleId: 's:tvdb:7',
+              groupKey: 'tvdb:7',
+              title: 'Harbor Lights',
+              isShow: true,
+              anime: true,
+              tvdbId: 7,
+              copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+            ),
+          );
+      expect(r.answer, ClipAnswer.unknown);
+      expect(await store.cached('src:tvdb:7'), isNull);
     });
 
     test('a 429 throws and blocks for Retry-After without another request', () async {
@@ -378,14 +454,54 @@ void main() {
       expect(requests, 1);
     });
 
-    test('a response without the anime list throws', () async {
-      final client = AnimeThemesClient(client: MockClient((_) async => http.Response('{"data":[]}', 200)));
+    test('GraphQL errors on a 200 throw, even with partial data', () async {
+      final client = AnimeThemesClient(
+        client: MockClient(
+          (_) async => http.Response(
+            '{"errors":[{"message":"Max query complexity should be 10000"}],"data":{"findAnimeByExternalSite":[]}}',
+            200,
+          ),
+        ),
+      );
       await expectLater(client.fetch([101]), throwsA(isA<AnimeThemesUnavailable>()));
     });
 
+    for (final (name, body) in [
+      ('without the anime list', '{"data":{}}'),
+      ('in the old JSON:API shape', '{"anime":[]}'),
+      ('with an anime without its themes list', '{"data":{"findAnimeByExternalSite":[{"resources":{"nodes":[]}}]}}'),
+      (
+        'with videos not shaped as a connection',
+        '{"data":{"findAnimeByExternalSite":[{"resources":{"nodes":[{"site":"ANILIST","externalId":101}]},'
+            '"animethemes":[{"type":"OP","sequence":1,"animethemeentries":[{"episodes":"1","videos":[]}]}]}]}}',
+      ),
+      ('that is not JSON', '<html>'),
+    ]) {
+      test('a response $name throws (a changed schema is never "no opening")', () async {
+        final client = AnimeThemesClient(client: MockClient((_) async => http.Response(body, 200)));
+        await expectLater(client.fetch([101]), throwsA(isA<AnimeThemesUnavailable>()));
+      });
+    }
+
     test('an empty anime list is a sure "no record"', () async {
-      final client = AnimeThemesClient(client: MockClient((_) async => http.Response('{"anime":[]}', 200)));
+      final client = AnimeThemesClient(
+        client: MockClient((_) async => http.Response('{"data":{"findAnimeByExternalSite":[]}}', 200)),
+      );
       expect(await client.fetch([101]), isEmpty);
+    });
+
+    test('more than 50 ids go in requests of 50; none makes no request', () async {
+      final batches = <List<Object?>>[];
+      final client = AnimeThemesClient(
+        client: MockClient((req) async {
+          batches.add(((jsonDecode(req.body) as Map)['variables'] as Map)['ids'] as List<Object?>);
+          return http.Response('{"data":{"findAnimeByExternalSite":[]}}', 200);
+        }),
+      );
+      expect(await client.fetch(const []), isEmpty);
+      expect(batches, isEmpty);
+      await client.fetch([for (var i = 1; i <= 120; i++) i]);
+      expect(batches.map((b) => b.length), [50, 50, 20]);
     });
   });
 }
