@@ -208,7 +208,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// the controller in [_start] before its first card plays. It is kept
   /// while the build runs, so a build that lands after the screen gave up
   /// on it ([ReelScreen.createLimit]), or the one Retry makes, still starts
-  /// the way the visit settled; it is let go with the visit ([_release]).
+  /// the way the visit settled. [_release] keeps it too: a build that lands
+  /// while the app is away still starts the session, and the resume that
+  /// follows finds it playing and settles no sound of its own. The next
+  /// visit settles it afresh ([_visit]).
   bool? _visitMuted;
 
   /// TV: bumped each time the viewer turns the sound on, for the badge's
@@ -439,7 +442,6 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// image cache that Home's artwork shares.
   void _release() {
     _heldInactive = false;
-    _visitMuted = null;
     _held.cancel();
     unawaited(_controller?.suspend());
     unawaited(_players.releaseAll());

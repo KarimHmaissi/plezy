@@ -331,6 +331,39 @@ void main() {
         await settle(tester);
       });
     }
+
+    testWidgets("a build that lands while the app is away still starts with the visit's mute", (tester) async {
+      ReelScreen.debugFeedVideo = (_) => _MovingVideo();
+      addTearDown(() => ReelScreen.debugFeedVideo = null);
+      final c = make(externalClips: true);
+      final slow = Completer<ReelController>();
+      final key = await pumpPhone(tester, (_) => slow.future);
+      key.currentState!.onTabShown();
+      await settle(tester);
+
+      // The app goes away while the session builds: the Reel is let go.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await settle(tester);
+      slow.complete(c);
+      for (var i = 0; i < 4; i++) {
+        await settle(tester);
+      }
+      expect(c.active, isTrue, reason: 'the build that landed starts the visit it was built for');
+      expect(c.muted, isTrue, reason: 'never with sound the visit did not settle, even while away');
+
+      // Back: the visit's sound is settled again.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      for (var i = 0; i < 4; i++) {
+        await settle(tester);
+      }
+      expect(c.muted, isTrue, reason: "the screen reader's visit mute survives the app going away");
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+    });
   });
 
   testWidgets('V2-60: the tab shown again after a failed open tries again', (tester) async {
