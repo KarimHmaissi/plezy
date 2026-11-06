@@ -205,8 +205,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _ownPage = false;
 
   /// How the next visit's sound starts, settled in [_visit] and taken by
-  /// the controller in [_start] before its first card plays (a late build
-  /// and Retry included).
+  /// the controller in [_start] before its first card plays. It is kept
+  /// while the build runs, so a build that lands after the screen gave up
+  /// on it ([ReelScreen.createLimit]), or the one Retry makes, still starts
+  /// the way the visit settled; it is let go with the visit ([_release]).
   bool? _visitMuted;
 
   /// TV: bumped each time the viewer turns the sound on, for the badge's
@@ -437,6 +439,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// image cache that Home's artwork shares.
   void _release() {
     _heldInactive = false;
+    _visitMuted = null;
     _held.cancel();
     unawaited(_controller?.suspend());
     unawaited(_players.releaseAll());
@@ -537,9 +540,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Under the intro the session is ready but waits; a requested deck is
     // kept for when it ends.
     if (!mounted || !_shown || widget.offline || _intro) return;
-    final visitMuted = _visitMuted;
-    _visitMuted = null;
-    if (visitMuted != null) await c.setMuted(visitMuted, remember: false);
+    final muted = _visitMuted;
+    if (muted != null) {
+      _visitMuted = null;
+      appLogger.d('[ReelLife] the visit starts ${muted ? 'muted' : 'with sound'}');
+      await c.setMuted(muted, remember: false);
+    }
     if (!mounted || !_shown) return;
     final deck = _pendingDeck, card = _pendingCard;
     _pendingDeck = null;

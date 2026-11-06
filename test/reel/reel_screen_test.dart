@@ -263,6 +263,76 @@ void main() {
     expect(find.byType(ReelCurtain), findsNothing);
   });
 
+  group('phone: a build that lands after the screen gave up on it', () {
+    Future<GlobalKey<ReelScreenState>> pumpPhone(
+      WidgetTester tester,
+      Future<ReelController> Function(BuildContext) create,
+    ) async {
+      tester.view.physicalSize = const Size(420, 860);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final key = GlobalKey<ReelScreenState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          // A screen reader on: the visit starts muted (V2-54).
+          builder: (context, child) =>
+              MediaQuery(data: MediaQuery.of(context).copyWith(accessibleNavigation: true), child: child!),
+          home: Scaffold(
+            body: ReelScreen(key: key, create: create),
+          ),
+        ),
+      );
+      return key;
+    }
+
+    for (final viaRetry in [false, true]) {
+      testWidgets('starts with the visit\'s start mute${viaRetry ? ' (Retry builds again)' : ''}', (tester) async {
+        ReelScreen.debugFeedVideo = (_) => _MovingVideo();
+        addTearDown(() => ReelScreen.debugFeedVideo = null);
+        // The build's age, as the screen reads it.
+        var now = DateTime(2026);
+        ReelScreen.clock = () => now;
+        addTearDown(() => ReelScreen.clock = DateTime.now);
+        final c = make(externalClips: true);
+        expect(c.muted, isFalse, reason: 'the session is built with the kept (unmuted) sound');
+        final late = Completer<ReelController>();
+        var calls = 0;
+        final key = await pumpPhone(tester, (_) {
+          calls++;
+          return calls == 1 ? late.future : Future.value(c);
+        });
+        key.currentState!.onTabShown();
+        await settle(tester);
+        // The screen gives up on the build: the message and Retry.
+        now = now.add(ReelScreen.createLimit);
+        await tester.pump(ReelScreen.createLimit);
+        await tester.pump();
+        expect(find.text("The Reel didn't open"), findsOneWidget);
+
+        if (viaRetry) {
+          await tester.tap(find.text('Retry'));
+        } else {
+          late.complete(c);
+        }
+        for (var i = 0; i < 4; i++) {
+          await settle(tester);
+        }
+        expect(calls, viaRetry ? 2 : 1);
+        expect(key.currentState!.controller, same(c));
+        expect(c.active, isTrue, reason: 'the late build starts the visit it was built for');
+        expect(c.muted, isTrue, reason: "the visit's start mute reaches the late session");
+        expect(
+          SettingsService.instanceOrNull?.read(SettingsService.reelMuted),
+          isFalse,
+          reason: 'a visit mute is never kept',
+        );
+        await tester.pumpWidget(const SizedBox());
+        await settle(tester);
+      });
+    }
+  });
+
   testWidgets('V2-60: the tab shown again after a failed open tries again', (tester) async {
     var calls = 0;
     final key = await pump(tester, (_) {
