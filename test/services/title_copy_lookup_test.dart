@@ -9,7 +9,7 @@ import 'package:plezy/utils/media_server_http_client.dart';
 
 LibraryLookupResult _result(
   List<MediaItem> items, {
-  Set<String> succeeded = const {'main', 'xtra'},
+  Set<String> succeeded = const {'server-a', 'server-b'},
   Set<String> failed = const {},
   Set<String> cancelled = const {},
   Set<String> unqueried = const {},
@@ -37,15 +37,15 @@ class _FakeFinder {
 }
 
 void main() {
-  final mainCopy = MediaItem.plex(id: '101', kind: MediaKind.movie, title: 'Sinners', year: 2025, serverId: 'main');
-  final xtraCopy = MediaItem.plex(id: '9001', kind: MediaKind.movie, title: 'Sinners', year: 2025, serverId: 'xtra');
+  final copyA = MediaItem.plex(id: '101', kind: MediaKind.movie, title: 'Low Tide', year: 2025, serverId: 'server-a');
+  final copyB = MediaItem.plex(id: '9001', kind: MediaKind.movie, title: 'Low Tide', year: 2025, serverId: 'server-b');
 
   test('a movie by its ids is one lookup and returns the copies across servers', () async {
-    final finder = _FakeFinder(_result([mainCopy, xtraCopy]));
+    final finder = _FakeFinder(_result([copyA, copyB]));
     final abort = AbortController();
 
     final result = await TitleCopies(finder.call).movie(
-      title: 'Sinners',
+      title: 'Low Tide',
       year: 2025,
       ids: const ExternalIds(tmdb: 1233413, imdb: 'tt31193180'),
       abort: abort,
@@ -54,11 +54,11 @@ void main() {
     expect(finder.queries, hasLength(1));
     final query = finder.queries.single;
     expect(query.kind, MediaKind.movie);
-    expect(query.title, 'Sinners');
+    expect(query.title, 'Low Tide');
     expect(query.year, 2025);
     expect(query.ids.tmdb, 1233413);
     expect(finder.aborts.single, same(abort));
-    expect([for (final item in result.items) item.serverId], ['main', 'xtra']);
+    expect([for (final item in result.items) item.serverId], ['server-a', 'server-b']);
     expect(result.isComplete, isTrue);
   });
 
@@ -66,7 +66,7 @@ void main() {
     final finder = _FakeFinder(_result(const []));
 
     await TitleCopies(finder.call).episode(
-      showTitle: 'The Expanse',
+      showTitle: 'Distant Orbit',
       showYear: 2015,
       showIds: const ExternalIds(tvdb: 280619),
       season: 3,
@@ -75,7 +75,7 @@ void main() {
 
     final query = finder.queries.single;
     expect(query.kind, MediaKind.episode);
-    expect(query.showTitle, 'The Expanse');
+    expect(query.showTitle, 'Distant Orbit');
     expect(query.showYear, 2015);
     expect(query.showIds.tvdb, 280619);
     expect(query.season, 3);
@@ -84,23 +84,23 @@ void main() {
 
   group('forItem', () {
     test('a library movie goes by its Plex guid, title and year', () async {
-      final finder = _FakeFinder(_result([mainCopy]));
+      final finder = _FakeFinder(_result([copyA]));
       final item = MediaItem.plex(
         id: '101',
         kind: MediaKind.movie,
         guid: 'plex://movie/5d776d1847dd6e001f6f00a1',
-        title: 'Sinners',
+        title: 'Low Tide',
         year: 2025,
-        serverId: 'main',
+        serverId: 'server-a',
       );
 
       final result = await TitleCopies(finder.call).forItem(item);
 
       final query = finder.queries.single;
       expect(query.plexGuid, 'plex://movie/5d776d1847dd6e001f6f00a1');
-      expect(query.title, 'Sinners');
+      expect(query.title, 'Low Tide');
       expect(query.year, 2025);
-      expect(result!.items.single, same(mainCopy));
+      expect(result!.items.single, same(copyA));
     });
 
     test('a non-Plex guid is not passed as a Plex guid', () {
@@ -113,8 +113,8 @@ void main() {
       final item = MediaItem.plex(
         id: '55',
         kind: MediaKind.episode,
-        title: 'Assured Destruction',
-        grandparentTitle: 'The Expanse',
+        title: 'Second Signal',
+        grandparentTitle: 'Distant Orbit',
         parentIndex: 3,
         index: 7,
       );
@@ -122,7 +122,7 @@ void main() {
       final query = TitleCopies.queryFor(item, showIds: const ExternalIds(tvdb: 280619))!;
 
       expect(query.kind, MediaKind.episode);
-      expect(query.showTitle, 'The Expanse');
+      expect(query.showTitle, 'Distant Orbit');
       expect(query.showIds.tvdb, 280619);
       expect(query.season, 3);
       expect(query.episode, 7);
@@ -133,15 +133,15 @@ void main() {
       final copies = TitleCopies(finder.call);
 
       expect(copies.forItem(MediaItem.plex(id: '1', kind: MediaKind.episode, grandparentTitle: 'X', index: 2)), isNull);
-      expect(copies.forItem(MediaItem.plex(id: '2', kind: MediaKind.show, title: 'The Expanse')), isNull);
+      expect(copies.forItem(MediaItem.plex(id: '2', kind: MediaKind.show, title: 'Distant Orbit')), isNull);
       expect(finder.queries, isEmpty);
     });
   });
 
   test('a lookup with a failed, cancelled or offline server is not complete', () {
-    expect(_result(const [], failed: {'xtra'}).isComplete, isFalse);
-    expect(_result(const [], cancelled: {'xtra'}).isComplete, isFalse);
-    expect(_result(const [], unqueried: {'xtra'}).isComplete, isFalse);
+    expect(_result(const [], failed: {'server-b'}).isComplete, isFalse);
+    expect(_result(const [], cancelled: {'server-b'}).isComplete, isFalse);
+    expect(_result(const [], unqueried: {'server-b'}).isComplete, isFalse);
     expect(_result(const []).isComplete, isTrue);
   });
 }

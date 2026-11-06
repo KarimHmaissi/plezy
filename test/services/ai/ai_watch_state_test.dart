@@ -13,9 +13,9 @@ import 'package:plezy_brain/plezy_brain.dart';
 /// The three films the item names: bulk-watched in the brain (one logged
 /// play, no date), view_count NULL on every copy.
 const _bulkWatched = [
-  ('1', 'The Prestige', 2006, 'tt0482571'),
-  ('2', 'Ex Machina', 2014, 'tt0470752'),
-  ('3', 'The Departed', 2006, 'tt0407887'),
+  ('1', 'The Glass Orchard', 2006, 'tt9000001'),
+  ('2', 'Night Harbour', 2014, 'tt9000002'),
+  ('3', 'Paper Lanterns', 2006, 'tt9000003'),
 ];
 
 void main() {
@@ -71,12 +71,12 @@ void main() {
     brain = HistoryBrain(folder: () async => dir);
     final store = await brain.store;
     for (final (key, title, year, imdb) in _bulkWatched) {
-      // Two copies each (Main and Xtra), neither with a play count.
+      // Two copies each (on two servers), neither with a play count.
       await add(key, title, year: year, imdb: imdb);
       await add(key, title, year: year, imdb: imdb, server: 'x');
     }
-    await add('4', 'Arrival', year: 2016, imdb: 'tt2543164');
-    await add('5', 'Dark', type: 'show', imdb: 'tt5753856', leafCount: 26, viewedLeafCount: 0);
+    await add('4', 'Second Light', year: 2016, imdb: 'tt9000004');
+    await add('5', 'Hollow Pines', type: 'show', imdb: 'tt9000005', leafCount: 26, viewedLeafCount: 0);
     store.putProfiles([
       for (final (_, title, year, imdb) in _bulkWatched)
         TitleProfile(
@@ -89,10 +89,10 @@ void main() {
           bulkPlays: 1,
         ),
       TitleProfile(
-        id: 's:imdb:tt5753856',
+        id: 's:imdb:tt9000005',
         kind: TitleKind.show,
-        title: 'Dark',
-        imdb: 'tt5753856',
+        title: 'Hollow Pines',
+        imdb: 'tt9000005',
         inLibrary: true,
         watches: [DateTime.utc(2025, 3, 2), DateTime.utc(2025, 3, 9)],
         episodesWatched: 12,
@@ -107,7 +107,7 @@ void main() {
 
   Future<IndexedTitle> row(String id) => (db.select(db.indexTitles)..where((r) => r.id.equals(id))).getSingle();
 
-  test('The Prestige, Ex Machina and The Departed read as seen, though no copy counts a play', () async {
+  test('The Glass Orchard, Night Harbour and Paper Lanterns read as seen, though no copy counts a play', () async {
     final watch = await WatchStates.load(brain);
     for (final key in ['s:1', 'x:1', 's:2', 's:3']) {
       final t = await row(key);
@@ -140,26 +140,26 @@ void main() {
   test('search_library watch:unwatched drops brain-watched titles, over-fetching to fill', () async {
     final tools = AiTools(index: index, watch: await WatchStates.load(brain));
     final result = await tools.run('search_library', {'watch': 'unwatched', 'limit': 1});
-    expect(result, contains('Arrival'));
+    expect(result, contains('Second Light'));
     for (final (_, title, _, _) in _bulkWatched) {
       expect(result, isNot(contains(title)));
     }
-    expect(result, isNot(contains('Dark')));
+    expect(result, isNot(contains('Hollow Pines')));
     // Any watch state still lists them, described as seen (rewatch asks).
     final any = await tools.run('search_library', {'limit': 10});
-    expect(any, contains('The Prestige (2006) | movie | Drama | ★8.0 | seen (logged, no date)'));
+    expect(any, contains('The Glass Orchard (2006) | movie | Drama | ★8.0 | seen (logged, no date)'));
   });
 
   test('find_titles describes seen titles as seen', () async {
     final tools = AiTools(index: index, watch: await WatchStates.load(brain));
     final result = await tools.run('find_titles', {
       'titles': [
-        {'title': 'Ex Machina', 'year': 2014},
-        {'title': 'Arrival'},
+        {'title': 'Night Harbour', 'year': 2014},
+        {'title': 'Second Light'},
       ],
     });
-    expect(result, contains('Ex Machina (2014) | movie | Drama | ★8.0 | seen (logged, no date)'));
-    expect(result, contains('Arrival (2016) | movie | Drama | ★8.0 | unwatched'));
+    expect(result, contains('Night Harbour (2014) | movie | Drama | ★8.0 | seen (logged, no date)'));
+    expect(result, contains('Second Light (2016) | movie | Drama | ★8.0 | unwatched'));
   });
 
   test('suggested lists leave out brain-watched titles', () async {
@@ -169,7 +169,7 @@ void main() {
       }))
         t.title,
     ];
-    expect(titles, ['Arrival']);
+    expect(titles, ['Second Light']);
   });
 
   test('top-up candidates come from find_titles and search_library only', () {

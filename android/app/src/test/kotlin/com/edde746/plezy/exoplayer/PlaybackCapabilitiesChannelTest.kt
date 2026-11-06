@@ -15,7 +15,7 @@ class PlaybackCapabilitiesChannelTest {
 
   @Test
   fun sinkEncodingsAreNamedOnceInFirstSeenOrder() {
-    // The Mi Box S in front of the Samsung QE55S95F + HW-Q930F lists these on HDMI.
+    // An Android TV box in front of a 4K HDR TV and an Atmos soundbar lists these on HDMI.
     val miBox = intArrayOf(
       AudioFormat.ENCODING_PCM_16BIT,
       AudioFormat.ENCODING_E_AC3_JOC,

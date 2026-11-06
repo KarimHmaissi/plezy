@@ -72,19 +72,19 @@ void main() {
     dir = Directory.systemTemp.createTempSync('ai_agent_topup_test');
     brain = HistoryBrain(folder: () async => dir);
     // Bulk-watched (Trakt marks): no play count on the copy.
-    await add('1', 'The Prestige', imdb: 'tt0482571');
-    await add('2', 'Ex Machina', imdb: 'tt0470752');
-    await add('3', 'The Departed', imdb: 'tt0407887');
+    await add('1', 'The Glass Orchard', imdb: 'tt9000001');
+    await add('2', 'Night Harbour', imdb: 'tt9000002');
+    await add('3', 'Paper Lanterns', imdb: 'tt9000003');
     await add('10', 'Picked Film');
     await add('11', 'Unrated Gem', rating: null);
     await add('12', 'Weak Film', rating: 5.5);
-    await add('13', 'Hot Wheels Turbo', library: 'Kids Movies');
+    await add('13', 'Toy Racers Turbo', library: 'Kids Movies');
     await add('14', 'Heist In Orbit', summary: 'A daring heist on a space station.');
     (await brain.store).putProfiles([
       for (final (title, imdb) in [
-        ('The Prestige', 'tt0482571'),
-        ('Ex Machina', 'tt0470752'),
-        ('The Departed', 'tt0407887'),
+        ('The Glass Orchard', 'tt9000001'),
+        ('Night Harbour', 'tt9000002'),
+        ('Paper Lanterns', 'tt9000003'),
       ])
         TitleProfile(
           id: 'm:imdb:$imdb',
@@ -163,23 +163,23 @@ void main() {
     turns
       ..add([
         ...find([
-          'The Prestige',
-          'Ex Machina',
-          'The Departed',
+          'The Glass Orchard',
+          'Night Harbour',
+          'Paper Lanterns',
           'Picked Film',
           'Unrated Gem',
           'Weak Film',
-          'Hot Wheels Turbo',
+          'Toy Racers Turbo',
         ]),
         use('t', 'text_search', {'query': 'heist'}),
       ])
       ..add(showPicks(['s:10']));
-    final answer = await agent().ask('a film I haven\'t seen, like Inception');
+    final answer = await agent().ask('a film I haven\'t seen, like a twisty sci-fi thriller');
 
     expect(titlesOf(answer), ['Picked Film', 'Unrated Gem']);
     // The model was told the three are seen, not unwatched.
     final results = jsonEncode((jsonDecode(sent[1]) as Map)['messages']);
-    for (final t in ['The Prestige', 'Ex Machina', 'The Departed']) {
+    for (final t in ['The Glass Orchard', 'Night Harbour', 'Paper Lanterns']) {
       expect(results, contains('$t (2010) | movie | Science Fiction | ★8.0 | seen (logged, no date)'));
     }
   });
@@ -199,16 +199,20 @@ void main() {
   test('Kids-library titles can fill a row the model already chose Kids titles for', () async {
     await add('15', 'Kids Pick', library: 'Kids Movies');
     turns
-      ..add(find(['Kids Pick', 'Hot Wheels Turbo']))
+      ..add(find(['Kids Pick', 'Toy Racers Turbo']))
       ..add(showPicks(['s:15']));
-    expect(titlesOf(await agent().ask('films for the kids')), ['Kids Pick', 'Hot Wheels Turbo']);
+    expect(titlesOf(await agent().ask('films for the kids')), ['Kids Pick', 'Toy Racers Turbo']);
   });
 
   test('a rewatch ask still tops up with seen titles', () async {
     turns
-      ..add(find(['The Prestige', 'Ex Machina', 'The Departed']))
+      ..add(find(['The Glass Orchard', 'Night Harbour', 'Paper Lanterns']))
       ..add(showPicks(['s:1', 's:2']));
-    expect(titlesOf(await agent().ask('something I\'ve seen')), ['The Prestige', 'Ex Machina', 'The Departed']);
+    expect(titlesOf(await agent().ask('something I\'ve seen')), [
+      'The Glass Orchard',
+      'Night Harbour',
+      'Paper Lanterns',
+    ]);
   });
 
   test('a title the top-up dropped in one ask can come back in the next', () async {

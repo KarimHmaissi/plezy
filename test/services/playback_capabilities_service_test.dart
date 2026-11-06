@@ -8,7 +8,7 @@ void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   final messenger = binding.defaultBinaryMessenger;
 
-  /// The Shield in front of the Samsung QE55S95F + HW-Q930F, roughly.
+  /// An Android TV box in front of a 4K HDR TV and an Atmos soundbar, roughly.
   const shieldReply = <String, Object?>{
     'hdmiSink': true,
     'sinkEncodings': ['pcm', 'eac3-joc', 'ac3', 'eac3', 'iec61937', 'truehd', 'mystery'],

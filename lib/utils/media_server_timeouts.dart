@@ -61,8 +61,8 @@ class MediaServerTimeouts {
 
   /// Deadline for the two optional extras on a Plex Continue Watching fetch:
   /// the older-items top-up from `/library/onDeck` and the bulk show-logo
-  /// lookup. Neither is the row itself, so a slow server (PRM2-Xtra in the
-  /// evening, 15-30 s) costs the row its older items or its logos for this
+  /// lookup. Neither is the row itself, so a slow server (15-30 s on a busy
+  /// evening) costs the row its older items or its logos for this
   /// load, never the hero.
   static const continueWatchingExtrasDeadline = Duration(seconds: 5);
 
