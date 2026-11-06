@@ -25,6 +25,9 @@ enum ReelAction {
   /// Opened the title's own page from its card.
   details,
 
+  /// Asked for more like this title from its card (V2-39).
+  moreLikeThis,
+
   /// Left before its clip showed a first frame, or after the clip failed.
   /// Neutral: it adds no fatigue and is not a sample.
   unplayed,

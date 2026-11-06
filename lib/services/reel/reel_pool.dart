@@ -379,10 +379,66 @@ class ReelPool {
     if (call == null || candidates.isEmpty) return null;
     final list = candidates.take(maxCandidates).toList();
     final againList = again.take(maxAgain).toList();
-    final cards = await library.cards([
-      for (final c in [...list, ...againList]) c.entry,
-    ]);
-    final byRow = {for (final c in cards) c.best.id: c};
+    final now = _clock();
+    final (:lines, :idOf, :byRow, :hasPremise) = await _candidateLines(
+      list,
+      also: [for (final c in againList) c.entry],
+    );
+    if (lines.isEmpty) return null;
+    final againLines = <String>[];
+    final againOf = <String, ReelCardData>{};
+    for (final (i, c) in againList.indexed) {
+      final card = byRow[c.entry.rowId];
+      if (card == null) continue;
+      final id = 'g${i + 1}';
+      againOf[id] = card;
+      againLines.add(againLine(id, card));
+    }
+    final user = StringBuffer('$facts\n\nCandidates:\n${lines.join('\n')}');
+    if (againLines.isNotEmpty) {
+      user.write(
+        '\n\nAnother go (shows they started and left, for the "Give it another go" deck only; '
+        'never For You cards):\n${againLines.join('\n')}',
+      );
+    }
+    try {
+      final input = await call(systemPrompt('about $target'), user.toString(), _tool);
+      await _keepAgain(input?['another_go'], againOf, now);
+      final (:out, :ids) = _picked(input?['cards'], idOf, byRow, hasPremise);
+      if (out.isEmpty) return null;
+      final rows = [
+        for (final (i, e) in out.indexed)
+          {'id': ids[i], 'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster, 'hk': ?e.hook},
+      ];
+      await store.cache(dayKey(now), jsonEncode(rows));
+      if (host) {
+        try {
+          final againRows = await _againRows(now);
+          await store.sharePool(
+            jsonEncode({'day': dateOf(now), 'at': now.millisecondsSinceEpoch, 'entries': rows, 'again': ?againRows}),
+          );
+        } catch (e) {
+          appLogger.w('Reel: sharing the pool failed', error: e);
+        }
+      }
+      return out;
+    } catch (e) {
+      appLogger.w('Reel: daily build failed', error: e);
+      return null;
+    }
+  }
+
+  /// The candidate lines both calls send (the daily build and More like
+  /// this), with what reading the answer needs: each line's candidate by
+  /// its `c` id, the cards by row, and the ids that had a premise to write
+  /// a hook from. [also] are read with the same batch (the build's "Another
+  /// go" shows).
+  Future<
+    ({List<String> lines, Map<String, PoolCandidate> idOf, Map<String, ReelCardData> byRow, Set<String> hasPremise})
+  >
+  _candidateLines(List<PoolCandidate> list, {List<DeckEntry> also = const []}) async {
+    final cards = await library.cards([for (final c in list) c.entry, ...also]);
+    final byRow = <String, ReelCardData>{for (final c in cards) c.best.id: c};
     final skips = await signals.quickSkips();
     final now = _clock();
     final notes = ReelSignals.notes(
@@ -422,68 +478,78 @@ class ReelPool {
         ].join(' · '),
       );
     }
-    if (lines.isEmpty) return null;
-    final againLines = <String>[];
-    final againOf = <String, ReelCardData>{};
-    for (final (i, c) in againList.indexed) {
-      final card = byRow[c.entry.rowId];
-      if (card == null) continue;
-      final id = 'g${i + 1}';
-      againOf[id] = card;
-      againLines.add(againLine(id, card));
-    }
-    final user = StringBuffer('$facts\n\nCandidates:\n${lines.join('\n')}');
-    if (againLines.isNotEmpty) {
-      user.write(
-        '\n\nAnother go (shows they started and left, for the "Give it another go" deck only; '
-        'never For You cards):\n${againLines.join('\n')}',
+    return (lines: lines, idOf: idOf, byRow: byRow, hasPremise: hasPremise);
+  }
+
+  /// The answer's `cards` as entries, known `c` ids only and each once, with
+  /// checked why and hook lines; [ids] are their cards' title ids.
+  static ({List<DeckEntry> out, List<String> ids}) _picked(
+    Object? picked,
+    Map<String, PoolCandidate> idOf,
+    Map<String, ReelCardData> byRow,
+    Set<String> hasPremise,
+  ) {
+    final out = <DeckEntry>[];
+    final ids = <String>[];
+    if (picked is! List) return (out: out, ids: ids);
+    final used = <String>{};
+    for (final p in picked) {
+      if (p is! Map) continue;
+      final c = idOf['${p['id']}'];
+      if (c == null || !used.add('${p['id']}')) continue;
+      ids.add(byRow[c.entry.rowId]!.id);
+      out.add(
+        DeckEntry(
+          serverId: c.entry.serverId,
+          ratingKey: c.entry.ratingKey,
+          why: checkedWhy(p['why'] as String?, p['anchor'] as String?, c),
+          cluster: (p['cluster'] as String?)?.trim().toLowerCase(),
+          hook: ReelPremise.checkedHook(
+            p['hook'] is String ? p['hook'] as String : null,
+            hadSource: hasPremise.contains('${p['id']}'),
+          ),
+        ),
       );
     }
+    return (out: out, ids: ids);
+  }
+
+  /// More like this (V2-39): the fewest and most cards one press inserts.
+  static const int moreLikeMin = 6;
+  static const int moreLikeMax = 8;
+
+  /// Titles like the seed read from the brain for one press.
+  static const int moreLikeCandidates = 40;
+
+  /// More like this (V2-39): one call with the daily build's prompt over
+  /// [candidates] (titles like [seed], the seed as each one's `like`
+  /// anchor), asking for the [moreLikeMin] to [moreLikeMax] they would most
+  /// enjoy next. Returns them in the call's order, at most [moreLikeMax],
+  /// with checked why and hook lines; null when there is no model, no
+  /// candidate or the call failed. Nothing is cached or shared: the cards
+  /// are for this session only. [call] stands in for [model].
+  Future<List<DeckEntry>?> moreLike(
+    String seed,
+    List<PoolCandidate> candidates, {
+    required String facts,
+    PoolModel? call,
+  }) async {
+    final ask = call ?? model;
+    if (ask == null || candidates.isEmpty) return null;
+    final (:lines, :idOf, :byRow, :hasPremise) = await _candidateLines(candidates.take(moreLikeCandidates).toList());
+    if (lines.isEmpty) return null;
+    final user =
+        '$facts\n\n'
+        'More like this: in the Reel, on the card for $seed, they asked for more like it. '
+        "This is not today's feed: choose the $moreLikeMin to $moreLikeMax candidates below they would most enjoy "
+        'next, in order. Every other rule holds. There is no "Another go" list.\n\n'
+        'Candidates:\n${lines.join('\n')}';
     try {
-      final input = await call(_system, user.toString(), _tool);
-      await _keepAgain(input?['another_go'], againOf, now);
-      final picked = input?['cards'];
-      if (picked is! List) return null;
-      final out = <DeckEntry>[];
-      final ids = <String>[];
-      final used = <String>{};
-      for (final p in picked) {
-        if (p is! Map) continue;
-        final c = idOf['${p['id']}'];
-        if (c == null || !used.add('${p['id']}')) continue;
-        ids.add(byRow[c.entry.rowId]!.id);
-        out.add(
-          DeckEntry(
-            serverId: c.entry.serverId,
-            ratingKey: c.entry.ratingKey,
-            why: checkedWhy(p['why'] as String?, p['anchor'] as String?, c),
-            cluster: (p['cluster'] as String?)?.trim().toLowerCase(),
-            hook: ReelPremise.checkedHook(
-              p['hook'] is String ? p['hook'] as String : null,
-              hadSource: hasPremise.contains('${p['id']}'),
-            ),
-          ),
-        );
-      }
-      if (out.isEmpty) return null;
-      final rows = [
-        for (final (i, e) in out.indexed)
-          {'id': ids[i], 'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster, 'hk': ?e.hook},
-      ];
-      await store.cache(dayKey(now), jsonEncode(rows));
-      if (host) {
-        try {
-          final againRows = await _againRows(now);
-          await store.sharePool(
-            jsonEncode({'day': dateOf(now), 'at': now.millisecondsSinceEpoch, 'entries': rows, 'again': ?againRows}),
-          );
-        } catch (e) {
-          appLogger.w('Reel: sharing the pool failed', error: e);
-        }
-      }
-      return out;
+      final input = await ask(systemPrompt('$moreLikeMin to $moreLikeMax'), user, _tool);
+      final (:out, ids: _) = _picked(input?['cards'], idOf, byRow, hasPremise);
+      return out.isEmpty ? null : out.take(moreLikeMax).toList();
     } catch (e) {
-      appLogger.w('Reel: daily build failed', error: e);
+      appLogger.w('Reel: More like this call failed', error: e);
       return null;
     }
   }
@@ -559,10 +625,12 @@ class ReelPool {
     return w;
   }
 
-  static const String _system =
+  /// The prompt both calls use; [count] is how many candidates to choose
+  /// ("about 90" for the daily build).
+  static String systemPrompt(String count) =>
       '''
 You build today's For You feed for one household's TV: a feed of trailers and anime openings they flick through like channels. They are choosing what to watch next.
-Choose about $target candidates and put them in the order you think they would most enjoy discovering today. You decide the mix of films and shows, the share of anime, and any weekend or weekday tilt, from the facts.
+Choose $count candidates and put them in the order you think they would most enjoy discovering today. You decide the mix of films and shows, the share of anime, and any weekend or weekday tilt, from the facts.
 - Ratings are labelled with their source; IMDb with its vote count is the most reliable. Few votes means unproven. "Plex audience (source unknown)" is a weaker signal.
 - This is a showcase of the best of their library for them: every card should be worth their evening. Leave out titles the public rates poorly (for example IMDb below about 6 with a fair number of votes), however similar they are to something they liked, unless their own history shows they love exactly that kind of film. Fewer, better cards beat a long list.
 - Candidates come from several places, each named in its line: similar to titles they love, similar to what they played lately, similar to their Reel Saves, their saved asks, the AI page's suggested lists, and titles added to the library this week. These are facts about where a title came from, not a ranking.

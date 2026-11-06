@@ -35,6 +35,11 @@ typedef ReelWatchlist = Future<bool> Function(MediaItem item);
 /// the one Watch plays) from the card's one metadata read.
 typedef ReelItemWithNext = Future<({MediaItem? item, MediaItem? next})> Function(String serverId, String ratingKey);
 
+/// More like this (V2-39): the cards chosen for titles like [seed], or null
+/// when none could be found. [skip] are the cards already shown in this
+/// deck this session.
+typedef ReelMoreLike = Future<List<ReelCardData>?> Function(ReelCardData seed, {required Set<String> skip});
+
 enum ReelSlotKind { card, poolEnd, empty, loading }
 
 /// A card as the views draw it.
@@ -89,6 +94,7 @@ class ReelController extends ChangeNotifier {
     this.externalClips = false,
     this.memoryRestored,
     this.itemWithNext,
+    this.moreLike,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     clips.phase.addListener(_onPhase);
@@ -131,6 +137,10 @@ class ReelController extends ChangeNotifier {
   /// A [ReelCardData.resume] card's metadata read: the item and its next
   /// episode in one request. Null: such cards read [ReelMedia.item].
   final ReelItemWithNext? itemWithNext;
+
+  /// More like this (V2-39): finds the cards to insert after the current
+  /// one. Null: the action isn't offered.
+  final ReelMoreLike? moreLike;
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -724,6 +734,73 @@ class ReelController extends ChangeNotifier {
 
   /// Phone feed: the current card's clip played through once.
   void clipEnded() => _clipEnded = true;
+
+  /// What More like this says: while the call runs, when its cards are in,
+  /// and when it found none.
+  static const String findingMoreLike = 'Finding more like this…';
+  static const String moreLikeUpNext = 'More like this, up next';
+  static const String noMoreLike = "Couldn't find more like this right now";
+
+  /// Whether the current card offers More like this.
+  bool get canMoreLike => moreLike != null && current.card != null;
+
+  /// The press in flight; a second press while it runs joins it.
+  Future<void>? _moreLiking;
+
+  /// More like this (V2-39): records the ask as a fact, then inserts the
+  /// cards the call chose straight after the card on screen once it lands
+  /// (never the raw similar titles), so they come next; the cursor, and so
+  /// the phone's page, stays where it is. Cards already shown in the deck
+  /// stay out; one further down the deck moves up instead of showing twice.
+  Future<void> moreLikeThis() => _moreLiking ??= _moreLikeThis().whenComplete(() => _moreLiking = null);
+
+  Future<void> _moreLikeThis() async {
+    final find = moreLike;
+    final seed = current.card;
+    if (find == null || seed == null) return;
+    final shown = {for (final c in (cards ?? const <ReelCardData>[]).take(index + 1)) c.id};
+    await store.record(seed.id, ReelAction.moreLikeThis, deck: deck.id);
+    _say(findingMoreLike);
+    List<ReelCardData>? found;
+    try {
+      found = await find(seed, skip: shown);
+    } catch (e) {
+      appLogger.w('Reel: More like this failed', error: e);
+    }
+    if (_disposed) return;
+    // Inserted after the card on screen when the call lands, in the deck on
+    // screen then: the press asked for them next.
+    final list = _cards[deck.id];
+    final at = index;
+    final before = {for (final c in (list ?? const <ReelCardData>[]).take(at + 1)) c.id, seed.id};
+    final fresh = <ReelCardData>[];
+    for (final c in found ?? const <ReelCardData>[]) {
+      if (fresh.length >= ReelPool.moreLikeMax) break;
+      if (before.add(c.id)) fresh.add(c);
+    }
+    if (list == null || fresh.isEmpty) {
+      _say(noMoreLike);
+      return;
+    }
+    final freshIds = {for (final c in fresh) c.id};
+    final next = [
+      ...list.take(at + 1),
+      ...fresh,
+      for (final c in list.skip(at + 1))
+        if (!freshIds.contains(c.id)) c,
+    ];
+    _cards[deck.id] = next;
+    appLogger.i('[ReelMore] ${deck.id}: ${fresh.length} cards after card ${at + 1}');
+    _say(moreLikeUpNext);
+    if (at >= list.length) {
+      // At the end of the deck: the first new card comes on screen.
+      if (_active) return _show();
+      notifyListeners();
+      return;
+    }
+    notifyListeners();
+    if (_active) _prepareAhead(next, 1, _generation);
+  }
 
   /// The title's own page.
   Future<void> openDetails() async {

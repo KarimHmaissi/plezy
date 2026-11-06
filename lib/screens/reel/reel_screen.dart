@@ -307,6 +307,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     switch (action) {
       case ReelSheetAction.save:
         await c.save();
+      case ReelSheetAction.moreLike:
+        // The call takes a while; the snackbar says so and the sheet's focus
+        // comes back at once.
+        unawaited(c.moreLikeThis());
       case ReelSheetAction.notForMe:
         await c.notForMe();
       case ReelSheetAction.spoiled:
@@ -365,7 +369,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       _perf.begin(ReelPerfTrigger.deck);
       unawaited(c.switchDeck(-1));
     } else if (key == LogicalKeyboardKey.mediaFastForward) {
-      unawaited(c.clips.seekBy(const Duration(seconds: 10)));
+      // FF = More like this (V2-39); a held key asks once.
+      if (event is KeyDownEvent) unawaited(c.moreLikeThis());
     } else if (key == LogicalKeyboardKey.mediaRewind) {
       unawaited(c.clips.seekBy(const Duration(seconds: -10)));
     } else if (key.isContextMenuKey) {

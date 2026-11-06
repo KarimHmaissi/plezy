@@ -177,6 +177,7 @@ void main() {
       externalClips: true,
       memoryRestored: restored,
       onOpen: (item) async => opened.add(item),
+      moreLike: (seed, {required skip}) async => [_card('5'), _card('6')],
       // A resume card's show has its fourth episode on deck.
       itemWithNext: (serverId, ratingKey) async => (
         item: await _Media().item(serverId, ratingKey),
@@ -295,6 +296,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(c.current.card?.id, 't7');
     expect(players.current, 't7');
+  });
+
+  testWidgets('More like this inserts after the page on screen: the page stays, the new next card is parked', (
+    tester,
+  ) async {
+    await pump(tester);
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.current.card?.id, 't2');
+
+    final press = c.moreLikeThis();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => press);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.index, 1);
+    expect(c.current.card?.id, 't2');
+    expect(find.text('Title 2'), findsOneWidget);
+    expect(players.current, 't2');
+    expect(players.held, contains('t5'), reason: 'the first new card is parked next');
+
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(c.current.card?.id, 't5');
+    expect(players.current, 't5');
+    // The confirmation's own timer runs out.
+    await tester.pump(const Duration(seconds: 4));
   });
 
   testWidgets('swipe right hides the controls to watch; swipe left brings them back', (tester) async {

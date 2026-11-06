@@ -224,6 +224,7 @@ void main() {
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
     ReelItemWithNext? itemWithNext,
+    ReelMoreLike? moreLike,
   }) => ReelController(
     decks:
         decks ??
@@ -251,6 +252,7 @@ void main() {
     externalClips: externalClips,
     memoryRestored: memoryRestored,
     itemWithNext: itemWithNext,
+    moreLike: moreLike,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -598,6 +600,143 @@ void main() {
     await c.suspend();
     expect(c.remoteState()['active'], isFalse);
     c.dispose();
+  });
+
+  group('More like this', () {
+    test('the chosen cards come straight after the card on screen, and the cursor stays', () async {
+      ReelCardData? seedAsked;
+      Set<String>? skipped;
+      final said = <String>[];
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+        moreLike: (seed, {required skip}) async {
+          seedAsked = seed;
+          skipped = skip;
+          return [_card('7'), _card('8')];
+        },
+      );
+      c.toast.addListener(() => said.add(c.toast.value ?? ''));
+      await c.start();
+      await c.step(1);
+      expect(c.canMoreLike, isTrue);
+      await c.moreLikeThis();
+      expect(seedAsked?.id, 't2');
+      expect(skipped, {'t1', 't2'}, reason: 'cards already shown stay out');
+      expect(c.index, 1);
+      expect(c.current.card?.id, 't2');
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't7', 't8', 't3', 't4']);
+      expect(said, [ReelController.findingMoreLike, ReelController.moreLikeUpNext]);
+      final events = await store.events(since: DateTime(2000));
+      expect(events.where((e) => e.action == ReelAction.moreLikeThis.name).map((e) => e.titleId), [
+        't2',
+      ], reason: 'the ask is a fact about the seed');
+      await c.step(1);
+      expect(c.current.card?.id, 't7');
+      c.dispose();
+    });
+
+    test('a card further down the deck moves up; one already shown, or the seed, never comes back', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+        moreLike: (seed, {required skip}) async => [_card('1'), _card('2'), _card('4'), _card('9'), _card('9')],
+      );
+      await c.start();
+      await c.step(1);
+      await c.moreLikeThis();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't4', 't9', 't3']);
+      c.dispose();
+    });
+
+    test('at most eight cards go in', () async {
+      final c = make(moreLike: (seed, {required skip}) async => [for (var i = 10; i < 20; i++) _card('$i')]);
+      await c.start();
+      await c.moreLikeThis();
+      expect(c.cards?.length, 3 + 8);
+      c.dispose();
+    });
+
+    test('nothing found leaves the deck as it was and says so', () async {
+      final said = <String>[];
+      final c = make(moreLike: (seed, {required skip}) async => null);
+      c.toast.addListener(() => said.add(c.toast.value ?? ''));
+      await c.start();
+      await c.moreLikeThis();
+      expect(c.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      expect(said.last, ReelController.noMoreLike);
+
+      final failing = make(moreLike: (seed, {required skip}) async => throw StateError('offline'));
+      await failing.start();
+      await failing.moreLikeThis();
+      expect(failing.cards?.map((x) => x.id), ['t1', 't2', 't3']);
+      failing.dispose();
+      c.dispose();
+    });
+
+    test('a second press while the call runs joins it: one call, one insert', () async {
+      var calls = 0;
+      final gate = Completer<List<ReelCardData>?>();
+      final c = make(
+        moreLike: (seed, {required skip}) {
+          calls++;
+          return gate.future;
+        },
+      );
+      await c.start();
+      final first = c.moreLikeThis();
+      final second = c.moreLikeThis();
+      gate.complete([_card('7')]);
+      await (first, second).wait;
+      expect(calls, 1);
+      expect(c.cards?.map((x) => x.id), ['t1', 't7', 't2', 't3']);
+      c.dispose();
+    });
+
+    test('cards land after the card on screen when the call lands, even if the feed moved on', () async {
+      final gate = Completer<List<ReelCardData>?>();
+      final c = make(moreLike: (seed, {required skip}) => gate.future);
+      await c.start();
+      final press = c.moreLikeThis();
+      await c.step(1);
+      await c.step(1);
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      gate.complete([_card('7'), _card('8')]);
+      await press;
+      expect(c.index, 3);
+      expect(c.current.card?.id, 't7', reason: 'at the end of the deck the first new card comes on screen');
+      c.dispose();
+    });
+
+    test('not offered without a finder, or on the end-of-deck card', () async {
+      final none = make();
+      await none.start();
+      expect(none.canMoreLike, isFalse);
+      none.dispose();
+
+      final c = make(moreLike: (seed, {required skip}) async => [_card('7')]);
+      await c.start();
+      for (var i = 0; i < 3; i++) {
+        await c.step(1);
+      }
+      expect(c.current.kind, ReelSlotKind.poolEnd);
+      expect(c.canMoreLike, isFalse);
+      c.dispose();
+    });
+
+    test('in the phone feed the new next card is resolved ahead', () async {
+      final c = make(externalClips: true, moreLike: (seed, {required skip}) async => [_card('7')]);
+      await c.start();
+      await c.moreLikeThis();
+      await pumpEventQueue();
+      expect(c.slotAt(1).card?.id, 't7');
+      expect(c.slotAt(1).resolved, isTrue);
+      expect(c.slotAt(1).clip, isNotNull);
+      c.dispose();
+    });
   });
 
   group('fatigue is timed from the first frame', () {

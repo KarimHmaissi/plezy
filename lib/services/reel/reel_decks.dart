@@ -759,6 +759,72 @@ Future<List<PoolCandidate>> forYouCandidates({
   return [for (final id in order.take(ReelPool.maxCandidates)) out[id]!];
 }
 
+/// More like this (V2-39): titles like [seed] for one press, facts only,
+/// in similarity order. The brain's [ReelPool.moreLikeCandidates] nearest
+/// unwatched titles, held to the hard facts For You keeps (on the servers,
+/// not Kids-only, unseen, not resting), the seed and [skip] (cards already
+/// shown this session) left out. Each carries the seed as its `like`
+/// anchor, so a why line can name it.
+Future<List<PoolCandidate>> moreLikeCandidates(
+  ReelCardData seed, {
+  required ReelLibrary library,
+  required ReelStore store,
+  HistoryBrain? brain,
+  Set<String> skip = const {},
+}) async {
+  final b = brain ?? HistoryBrain.instance;
+  final hits = [
+    for (final hit in await b.similar(seed.id, limit: ReelPool.moreLikeCandidates, watched: false))
+      if (hit.profile case final p when p.inLibrary && p.serverId != null && p.ratingKey != null)
+        PoolCandidate(
+          entry: DeckEntry(serverId: p.serverId, ratingKey: p.ratingKey),
+          titleId: p.id,
+          score: hit.score,
+          like: [seed.title.title],
+        ),
+  ];
+  final cards = await library.cards([for (final c in hits) c.entry]);
+  final byRow = {
+    for (final c in cards)
+      for (final copy in c.title.copies) '${copy.serverId}:${copy.ratingKey}': c,
+  };
+  final excluded = await store.excluded();
+  final out = <String, PoolCandidate>{};
+  for (final c in hits) {
+    final card = byRow[c.entry.rowId];
+    if (card == null || card.id == seed.id || skip.contains(card.id)) continue;
+    if (!card.facts.seen.isUnseen || excluded.contains(card.id) || out.containsKey(card.id)) continue;
+    out[card.id] = c.onCard(DeckEntry(serverId: card.best.serverId, ratingKey: card.best.ratingKey), card.id);
+  }
+  return out.values.toList();
+}
+
+/// More like this (V2-39), one press: [moreLikeCandidates], then one call
+/// with the daily build's prompt ([ReelPool.moreLike]) over them and
+/// [facts] (For You's facts block). Returns the cards the call chose, in
+/// its order; null when there is nothing like the seed, no model or the
+/// call failed. Raw similarity is never returned as cards.
+Future<List<ReelCardData>?> moreLikeCards(
+  ReelCardData seed, {
+  required ReelPool pool,
+  required ReelLibrary library,
+  required Future<String> Function() facts,
+  HistoryBrain? brain,
+  PoolModel? call,
+  Set<String> skip = const {},
+}) async {
+  final candidates = await moreLikeCandidates(seed, library: library, store: pool.store, brain: brain, skip: skip);
+  if (candidates.isEmpty) {
+    appLogger.i('[ReelMore] nothing like the seed to choose from');
+    return null;
+  }
+  final chosen = await pool.moreLike(seed.title.title, candidates, facts: await facts(), call: call);
+  if (chosen == null || chosen.isEmpty) return null;
+  final cards = await library.cards(chosen);
+  appLogger.i('[ReelMore] ${cards.length} chosen from ${candidates.length} candidates');
+  return cards.isEmpty ? null : cards;
+}
+
 /// The AI page's suggested lists, as saved (no new call).
 Future<List<AiHistoryEntry>> _suggestedLists() async => [for (final l in (await AiSuggestions.cached()).lists) l.entry];
 
@@ -791,8 +857,9 @@ Future<List<({DeckEntry entry, DateTime added})>> _addedSince(ReelLibrary librar
 /// (the synced note, which the build's prompt ranks above its defaults), how
 /// they watch lately, the day and the local time it was built, and what the
 /// Reel saw them do on this device and the other one:
-/// counts, counts per kind of title (the pool's clusters, from [pool]) and
-/// the titles they passed on lately. [nameOf] names a title id (the brain's
+/// counts, counts per kind of title (the pool's clusters, from [pool]), the
+/// titles they asked More like this for and the titles they passed on
+/// lately. [nameOf] names a title id (the brain's
 /// profile by default).
 Future<String> forYouFacts({
   required ReelStore store,
@@ -841,7 +908,10 @@ Future<String> forYouFacts({
   if (counts.isNotEmpty) lines.add('In the Reel, last 30 days, both devices together: $counts.');
   final kinds = ReelSignals.clusterLines(seen, clusters);
   if (kinds.isNotEmpty) lines.add('In the Reel by kind of title, last 30 days:\n${kinds.join('\n')}');
-  final passed = await _passedOn(store, seen, at, nameOf ?? (id) async => (await b.profile(id))?.title);
+  final name = nameOf ?? (id) async => (await b.profile(id))?.title;
+  final more = await _moreLikeAsked(seen, name);
+  if (more.isNotEmpty) lines.add('Asked for more like these in the Reel lately (newest first): ${more.join(', ')}');
+  final passed = await _passedOn(store, seen, at, name);
   if (passed.isNotEmpty) {
     lines.add(
       'Passed on in the Reel lately (Not for me, newest first): '
@@ -849,6 +919,31 @@ Future<String> forYouFacts({
     );
   }
   return lines.join('\n');
+}
+
+/// How many More like this seeds the facts name.
+const int moreLikeShown = 12;
+
+/// The newest [moreLikeShown] titles they asked More like this for (V2-39),
+/// on either device, named by [nameOf]; titles it can't name are left out.
+Future<List<String>> _moreLikeAsked(List<ReelSignal> seen, Future<String?> Function(String) nameOf) async {
+  final when = <String, DateTime>{};
+  for (final s in seen) {
+    if (s.action != ReelAction.moreLikeThis) continue;
+    final had = when[s.titleId];
+    if (had == null || s.at.isAfter(had)) when[s.titleId] = s.at;
+  }
+  final newest = when.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+  final out = <String>[];
+  for (final e in newest) {
+    if (out.length >= moreLikeShown) break;
+    String? name;
+    try {
+      name = await nameOf(e.key);
+    } catch (_) {}
+    if (name != null && name.isNotEmpty) out.add(name);
+  }
+  return out;
 }
 
 /// How far back a Not for me still counts as "lately".

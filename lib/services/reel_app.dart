@@ -161,6 +161,16 @@ abstract final class ReelApp {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
       },
+      // More like this (V2-39): the build's prompt over titles like the
+      // card, one call per press, its spend logged per press.
+      moreLike: (seed, {required skip}) => moreLikeCards(
+        seed,
+        pool: pool,
+        library: library,
+        facts: () => forYouFacts(store: store, pool: pool),
+        call: _moreLikeSonnet,
+        skip: skip,
+      ),
       deckFor: (id) async {
         if (!id.startsWith('ai:')) return null;
         final entry = await AiHistory.get(id.substring(3));
@@ -322,7 +332,21 @@ abstract final class ReelApp {
   /// The daily build's one Sonnet call (spend recorded like every AI call).
   /// Its `stop_reason` is logged, so a build cut short by the ceiling never
   /// falls back to code order silently.
-  static Future<Map<String, dynamic>?> _sonnet(String system, String user, Map<String, Object?> tool) async {
+  static Future<Map<String, dynamic>?> _sonnet(String system, String user, Map<String, Object?> tool) =>
+      _claude(system, user, tool, what: '[ReelPool] build');
+
+  /// One More like this press (V2-39): the build's prompt and ceiling over
+  /// 40 candidates. No cost figure is assumed; each press logs its tokens
+  /// and its cost (AiSpend), so the first runs say what a press costs.
+  static Future<Map<String, dynamic>?> _moreLikeSonnet(String system, String user, Map<String, Object?> tool) =>
+      _claude(system, user, tool, what: '[ReelMore] press');
+
+  static Future<Map<String, dynamic>?> _claude(
+    String system,
+    String user,
+    Map<String, Object?> tool, {
+    required String what,
+  }) async {
     final key = await AiKeyStore.read();
     if (key == null) return null;
     const model = ClaudeModel.sonnet;
@@ -340,13 +364,14 @@ abstract final class ReelApp {
         ],
       });
       final usage = (response['usage'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
-      await AiSpend.record(model, usage);
+      final cost = await AiSpend.record(model, usage);
       final stop = response['stop_reason'] as String?;
       final out = usage['output_tokens'];
+      final spent = 'input ${usage['input_tokens']} tokens, cost \$${cost.toStringAsFixed(4)}';
       if (stop == 'max_tokens') {
-        appLogger.w('[ReelPool] build cut short: stop_reason=max_tokens, output $out of $poolMaxTokens tokens');
+        appLogger.w('$what cut short: stop_reason=max_tokens, output $out of $poolMaxTokens tokens, $spent');
       } else {
-        appLogger.i('[ReelPool] build stop_reason=$stop, output $out tokens');
+        appLogger.i('$what stop_reason=$stop, output $out tokens, $spent');
       }
       return [
         for (final b in (response['content'] as List? ?? const []).whereType<Map>())

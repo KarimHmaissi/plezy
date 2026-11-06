@@ -163,4 +163,18 @@ void main() {
       '- cosy anime: 3 watched to the end',
     ]);
   });
+
+  test('More like this is a fact: shared with the other device, counted and named per candidate', () async {
+    await recordAt(phone, DateTime(2026, 3, 10, 9), 'm:harbor', ReelAction.moreLikeThis);
+    await recordAt(phone, DateTime(2026, 3, 10, 9, 5), 'm:harbor', ReelAction.moreLikeThis);
+    await signalsOf(phone, host: false).publish();
+    final shared = jsonDecode((await synced.readSetting(ReelSignals.phoneKey))!) as Map;
+    expect(shared['days'], {
+      '2026-03-10': {'m:harbor': 'mm'},
+    });
+    final onTv = await signalsOf(tv, host: true).since(DateTime(2026, 3, 1));
+    expect(ReelSignals.countsLine(onTv), '2 asked for more like it');
+    final notes = ReelSignals.notes(onTv, {'m:harbor'}, picks: const {}, now: now);
+    expect(notes['m:harbor'], ['asked for more like it 2×']);
+  });
 }

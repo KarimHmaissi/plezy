@@ -51,6 +51,7 @@ class ReelSignals {
     ReelAction.seenIt: 'k',
     ReelAction.forKids: 'f',
     ReelAction.details: 'd',
+    ReelAction.moreLikeThis: 'm',
   };
   static final Map<String, ReelAction> _actions = {for (final MapEntry(:key, :value) in _codes.entries) value: key};
 
@@ -168,6 +169,7 @@ class ReelSignals {
     ('saved', [ReelAction.save]),
     ('played', [ReelAction.watch, ReelAction.watchOnTv]),
     ('opened Details', [ReelAction.details]),
+    ('asked for more like it', [ReelAction.moreLikeThis]),
     ('replayed', [ReelAction.replay]),
     ('unmuted', [ReelAction.unmute]),
   ];
@@ -195,7 +197,8 @@ class ReelSignals {
   }
 
   /// Per-candidate facts for the titles in [ids]: a save not played since,
-  /// clips watched to the end, Details opened, replays and unmutes. [picks]
+  /// clips watched to the end, Details opened, More like this asked for,
+  /// replays and unmutes. [picks]
   /// are the synced saves (title id → when).
   static Map<String, List<String>> notes(
     Iterable<ReelSignal> signals,
@@ -227,6 +230,8 @@ class ReelSignals {
       if (toEnd > 0) lines.add('clip watched to the end${times(toEnd)}');
       final details = count(list, ReelAction.details);
       if (details > 0) lines.add('opened Details${times(details)}');
+      final more = count(list, ReelAction.moreLikeThis);
+      if (more > 0) lines.add('asked for more like it${times(more)}');
       final replays = count(list, ReelAction.replay);
       if (replays > 0) lines.add('replayed${times(replays)}');
       if (count(list, ReelAction.unmute) > 0) lines.add('unmuted');

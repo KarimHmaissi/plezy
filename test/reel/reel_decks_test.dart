@@ -180,6 +180,8 @@ PoolCandidate _candidate(String id) => PoolCandidate(
 );
 
 void main() {
+  moreLikeThisTests();
+
   group('the daily pool', () {
     late ForkDatabase db;
     late LocalCustomisationStore settings;
@@ -1182,6 +1184,173 @@ void main() {
       expect((await phone.cachedAgain())?.map((e) => e.ratingKey), ['lantern', 'harbor']);
       await phoneStore.record('lantern', ReelAction.sampled, deck: 'another-go');
       expect((await phone.cachedAgain())?.map((e) => e.ratingKey), ['harbor'], reason: 'gone through today');
+    });
+  });
+}
+
+void moreLikeThisTests() {
+  group('More like this', () {
+    late ForkDatabase db;
+    late LocalCustomisationStore settings;
+    late ReelStore store;
+    final now = DateTime(2026, 3, 10, 20);
+
+    setUp(() {
+      db = ForkDatabase.memory();
+      settings = LocalCustomisationStore(db);
+      store = ReelStore(database: () async => db, settings: () async => settings, clock: () => now);
+    });
+
+    tearDown(() async => db.close());
+
+    ReelPool pool({PoolModel? model}) => ReelPool(store: store, library: _Library(), model: model, clock: () => now);
+
+    /// A brain whose nearest titles to the seed 'h' are [keys], nearest first.
+    _SeededBrain brainNear(List<String> keys) => _SeededBrain(
+      watched: const [],
+      near: {
+        'h': [for (final (i, k) in keys.indexed) (profile: _unseen(k), score: 0.9 - i * 0.01)],
+      },
+    );
+
+    final seed = _card('h');
+
+    test('candidates: the seed is every one\'s anchor; the seed, shown, seen and resting titles stay out', () async {
+      await store.notForMe('rest');
+      final brain = brainNear(['a', 'h', 'shown', 'seen', 'rest', 'b']);
+      final library = _Library(shows: {'seen': (seen: const SeenState(kind: SeenKind.watched), kids: false)});
+      final out = await moreLikeCandidates(seed, library: library, store: store, brain: brain, skip: {'shown'});
+      expect(brain.asked, ['h']);
+      expect(out.map((c) => c.titleId), ['a', 'b']);
+      expect(out.first.like, ['Title h']);
+    });
+
+    test("one call with the build's prompt chooses 6 to 8, anchored on the seed, and nothing is kept", () async {
+      String? system, user;
+      final chosen =
+          await pool(
+            model: (s, u, _) async {
+              system = s;
+              user = u;
+              return {
+                'cards': [
+                  {
+                    'id': 'c2',
+                    'cluster': 'harbor drama',
+                    'why': 'Another quiet harbor story like Title h',
+                    'anchor': 'Title h',
+                  },
+                  {'id': 'c1', 'cluster': 'harbor drama', 'why': 'Like Lantern Street', 'anchor': 'Lantern Street'},
+                  {'id': 'c9', 'cluster': 'unknown id'},
+                ],
+              };
+            },
+          ).moreLike('Title h', [
+            for (final k in ['a', 'b'])
+              PoolCandidate(
+                entry: DeckEntry(serverId: 's1', ratingKey: k),
+                titleId: k,
+                score: 1,
+                like: ['Title h'],
+              ),
+          ], facts: 'Today is a test.');
+      expect(chosen?.map((e) => e.ratingKey), ['b', 'a']);
+      expect(chosen?.first.why, 'Another quiet harbor story like Title h');
+      expect(chosen?.last.why, isNull, reason: 'a why line must name its own evidence');
+      expect(system, contains('Choose 6 to 8 candidates'));
+      expect(system, contains('hook: optional'), reason: "the build's own rules");
+      expect(user, startsWith('Today is a test.'));
+      expect(user, contains('on the card for Title h, they asked for more like it'));
+      expect(user!.split('\n').firstWhere((l) => l.startsWith('c1:')), contains('similar to Title h'));
+      expect(await store.cached(ReelPool.dayKey(now)), isNull, reason: "the day's pool is untouched");
+    });
+
+    test('the daily build keeps its own count', () async {
+      String? system;
+      await pool(
+        model: (s, _, _) async {
+          system = s;
+          return null;
+        },
+      ).build([_candidate('m')], facts: '');
+      expect(system, contains('Choose about ${ReelPool.target} candidates'));
+    });
+
+    test('at most eight come back, and no model, no candidates or a failed call give none', () async {
+      final many = await pool(
+        model: (_, _, _) async => {
+          'cards': [
+            for (var i = 1; i <= 12; i++) {'id': 'c$i', 'cluster': 'x'},
+          ],
+        },
+      ).moreLike('Title h', [for (var i = 0; i < 12; i++) _candidate('k$i')], facts: '');
+      expect(many?.length, ReelPool.moreLikeMax);
+      expect(await pool().moreLike('Title h', [_candidate('a')], facts: ''), isNull);
+      expect(await pool(model: (_, _, _) async => {'cards': []}).moreLike('Title h', const [], facts: ''), isNull);
+      expect(
+        await pool(
+          model: (_, _, _) async => throw StateError('offline'),
+        ).moreLike('Title h', [_candidate('a')], facts: ''),
+        isNull,
+      );
+    });
+
+    test('a press: cards only from the call, never the raw similar titles', () async {
+      final brain = brainNear(['a', 'b', 'c']);
+      var facts = 0;
+      Future<List<ReelCardData>?> press(PoolModel model) => moreLikeCards(
+        seed,
+        pool: pool(),
+        library: _Library(),
+        facts: () async {
+          facts++;
+          return '';
+        },
+        brain: brain,
+        call: model,
+      );
+      final cards = await press(
+        (_, _, _) async => {
+          'cards': [
+            {'id': 'c3', 'cluster': 'x'},
+            {'id': 'c1', 'cluster': 'x'},
+          ],
+        },
+      );
+      expect(cards?.map((c) => c.id), ['c', 'a']);
+      expect(facts, 1);
+      expect(await press((_, _, _) async => null), isNull);
+      expect(
+        await moreLikeCards(seed, pool: pool(), library: _Library(), facts: () async => '', brain: brainNear([])),
+        isNull,
+      );
+    });
+
+    test('the facts name the titles they asked more like, newest first', () async {
+      Future<void> askAt(DateTime at, String id) async {
+        await ReelStore(
+          database: () async => db,
+          settings: () async => settings,
+          clock: () => at,
+        ).record(id, ReelAction.moreLikeThis, deck: 'for-you');
+      }
+
+      await askAt(DateTime(2026, 3, 8, 21), 'a');
+      await askAt(DateTime(2026, 3, 9, 21), 'b');
+      await askAt(DateTime(2026, 3, 10, 9), 'a');
+      final names = {'a': 'Harbor Lights', 'b': 'Lantern Street'};
+      final facts = await forYouFacts(
+        store: store,
+        pool: pool(),
+        brain: _Brain(),
+        now: now,
+        nameOf: (id) async => names[id],
+      );
+      expect(
+        facts,
+        contains('Asked for more like these in the Reel lately (newest first): Harbor Lights, Lantern Street'),
+      );
+      expect(facts, contains('3 asked for more like it'));
     });
   });
 }
