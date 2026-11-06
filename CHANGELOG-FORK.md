@@ -157,6 +157,19 @@ Details of each are in the dated entries below.
 - Stored like the Anthropic key (`TmdbKeyStore`): encrypted on the device,
   registered as a credential, so it is never exported, backed up or
   logged. Nothing uses it yet; it's ready for the Reel.
+### The next episode shows up as soon as an episode ends (A6)
+- Finishing an episode used to drop its show from Continue Watching and
+  Arc's Watch Next until Plex's on-deck caught up, so pressing Home showed
+  the wrong first card. Now the moment the episode is marked watched, the
+  player's queue puts the **next episode** of that show at the front of
+  Continue Watching and the shelf is synced straight away.
+- The row is provisional until Plex names the show: a refresh that still
+  lags (show missing, or the episode just watched) keeps it in place
+  instead of removing it and bringing it back. If Plex names a different
+  episode, that one wins. An unconfirmed row is dropped after 6 hours
+  (`DiscoverProvider.provisionalNextEpisodeTtl`).
+- Only the same show's next unwatched episode counts (a playlist's next
+  title doesn't). Playing it fetches its metadata fresh, as any row does.
 
 ## 2026-11-03
 

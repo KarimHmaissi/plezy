@@ -69,6 +69,11 @@ class PlaybackProgressTracker {
   /// un-scrobble the primary item.
   final Future<void> Function()? onScrobbled;
 
+  /// The series' next episode, read when this item is marked watched and
+  /// carried on the watched event so Continue Watching and the launcher shelf
+  /// show it at once. The player wires this to its episode queue.
+  final MediaItem? Function()? nextItem;
+
   /// Invoked on every paused progress tick. The player wires this to the
   /// Plex transcoder keepalive ping (`/video/:/transcode/universal/ping`) —
   /// timeline reports alone historically have not been enough to stop PMS
@@ -223,6 +228,7 @@ class PlaybackProgressTracker {
     this.playSessionId,
     this.mediaInfo,
     this.onScrobbled,
+    this.nextItem,
     this.onPausedKeepalive,
     this.canReportPlayback,
     this.hasRenderedPlayback,
@@ -760,7 +766,7 @@ class PlaybackProgressTracker {
     // Local state flips on the observed crossing, whether or not the backend
     // received that particular report. The server-side mark is a separate
     // question, answered by _settleServerMark once delivery is known.
-    _watchedPatchId = c.notifyWatchedFromPlaybackSession(metadata);
+    _watchedPatchId = c.notifyWatchedFromPlaybackSession(metadata, nextItem: nextItem?.call());
     appLogger.d(
       'Watched ${metadata.id} (${(percent * 100).toStringAsFixed(0)}% >= ${(threshold * 100).toStringAsFixed(0)}%)',
     );

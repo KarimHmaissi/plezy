@@ -518,6 +518,9 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
           );
           return burned ? sourceStreamId : null;
         },
+        // Read at the watched crossing, when the queue's adjacency has long
+        // since loaded, so Continue Watching can show the next episode at once.
+        nextItem: () => _nextEpisodeForWatchedEvent(metadata),
         onPausedKeepalive: mediaClient is PlexClient && effectivePlayMethod == 'Transcode'
             ? () => mediaClient.pingTranscodeSession(_playbackTranscodeSessionId)
             : null,

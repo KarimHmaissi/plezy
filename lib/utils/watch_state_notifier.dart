@@ -97,6 +97,12 @@ class WatchStateEvent with HierarchicalEventMixin {
   /// Null for events nothing will ever settle.
   final WatchPatchId? patchId;
 
+  /// The series' next episode, when the emitter knows it: the player's queue
+  /// at the moment an episode is marked watched. Continue Watching shows it
+  /// at once instead of waiting for the server's on-deck to catch up. Only
+  /// ever set on a [WatchStateChangeType.watched] event.
+  final MediaItem? nextItem;
+
   WatchStateEvent({
     required this.itemId,
     required this.serverId,
@@ -108,6 +114,7 @@ class WatchStateEvent with HierarchicalEventMixin {
     this.librarySectionID,
     this.serverAcknowledged = false,
     this.patchId,
+    this.nextItem,
   }) : globalKey = buildGlobalKey(ServerId(serverId), itemId);
 
   /// `serverId:librarySectionID`, matching [MediaLibrary.globalKey]. Null when
@@ -149,6 +156,7 @@ class WatchStateNotifier extends BaseNotifier<WatchStateEvent> {
     String? cacheServerId,
     bool serverAcknowledged = false,
     WatchPatchId? patchId,
+    MediaItem? nextItem,
   }) {
     final serverId = serverIdForEvent(item, notifier: 'WatchStateNotifier', event: 'watched');
     if (serverId == null) return null;
@@ -164,6 +172,7 @@ class WatchStateNotifier extends BaseNotifier<WatchStateEvent> {
         librarySectionID: item.libraryId,
         serverAcknowledged: serverAcknowledged,
         patchId: id,
+        nextItem: isNowWatched ? nextItem : null,
       ),
     );
     return id;
