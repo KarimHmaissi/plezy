@@ -674,7 +674,7 @@ class ClipResolver {
 
   /// A cached row in the current [sourceFormat]; anything else (an older
   /// format, a forgotten or unreadable row) is not cached.
-  Map<String, dynamic>? _entry(String raw) {
+  static Map<String, dynamic>? _entry(String raw) {
     try {
       final j = jsonDecode(raw);
       return j is Map<String, dynamic> && j['v'] == sourceFormat ? j : null;
@@ -684,7 +684,7 @@ class ClipResolver {
   }
 
   /// Every asset a cached row can play.
-  List<String> _assets(Map<String, dynamic> j) => switch (j['k']) {
+  static List<String> _assets(Map<String, dynamic> j) => switch (j['k']) {
     'at' => [
       for (final c in (j['c'] is List ? j['c'] as List : const []))
         if (c is Map && c['a'] is String) c['a'] as String,
@@ -692,6 +692,23 @@ class ClipResolver {
     'plex' || 'yt' => [if (j['a'] case final String a) a],
     _ => const [],
   };
+
+  /// What the cached `src:` rows alone say about [titles]' clips, by group
+  /// key: [ClipAnswer.found] for a row with a clip, [ClipAnswer.none] for a
+  /// cached miss. A title with no usable row (none, expired, or an older
+  /// format) is left out. Reads no server and resolves nothing (the warm
+  /// start before the Reel opens, V2-14).
+  static Future<Map<String, ClipAnswer>> cachedAnswers(ReelStore store, Iterable<ReelTitle> titles) async {
+    final rows = await store.cachedMany({for (final t in titles) 'src:${t.groupKey}'}, ttl: ReelStore.sourceTtl);
+    return {
+      for (final MapEntry(:key, :value) in rows.entries)
+        if (_entry(value) case final e?)
+          if (e['miss'] == true)
+            key.substring(4): ClipAnswer.none
+          else if (_assets(e).isNotEmpty)
+            key.substring(4): ClipAnswer.found,
+    };
+  }
 
   /// The group keys of [titles] whose cached answer is a miss (an AI card):
   /// cached `src:` rows in the current [sourceFormat] only, so nothing is

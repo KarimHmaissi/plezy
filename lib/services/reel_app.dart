@@ -17,6 +17,8 @@ import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../screens/media_detail_screen.dart';
+import '../screens/reel/reel_card_view.dart';
+import '../screens/reel/reel_screen.dart' show ReelScreen;
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/platform_detector.dart';
@@ -34,9 +36,11 @@ import 'catalog/trakt_lists_catalog_source.dart';
 import 'companion_remote/phone_mode.dart';
 import 'customisation/customisation_store.dart';
 import 'deep_links/deep_link_launcher.dart' show deepLinkServerWait, waitForServers;
+import 'device_performance.dart';
 import 'library_index/library_index.dart';
 import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
+import 'playback_coordinator.dart';
 import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
@@ -44,11 +48,13 @@ import 'reel/reel_data_budget.dart';
 import 'reel/reel_decks.dart';
 import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
+import 'reel/reel_art.dart';
 import 'reel/reel_metadata.dart';
-import 'reel/reel_playback_profile.dart';
+import 'reel/reel_playback_profile.dart' hide ReelScreen;
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
 import 'reel/reel_tmdb.dart';
+import 'reel/reel_warmer.dart';
 import 'reel_playback_watcher.dart';
 import 'reel_servers_plex.dart';
 import 'settings_service.dart';
@@ -65,12 +71,36 @@ abstract final class ReelApp {
   /// The decks the Reel offers here, in the app's own order, by id and name
   /// (the Decks screen, V2-52). Builds the deck objects without loading any.
   static Future<List<({String id, String name})>> deckList(BuildContext context) async {
-    final store = ReelStore.instance;
-    final library = _library();
+    final shared = _shared(ReelStore.instance);
+    final base = await _decks(context, library: shared.library, forYou: shared.forYou);
     return [
-      for (final d in await _decks(context, library: library, store: store, pool: _pool(store, library)))
-        (id: d.id, name: d.name),
+      for (final d in [...base, ...await _answerDecks(shared.library)]) (id: d.id, name: d.name),
     ];
+  }
+
+  static ({ReelLibrary library, ReelPool pool, ForYouDeck forYou})? _sharedFor;
+
+  /// The library, the day's pool and For You, one set per app run (V2-14):
+  /// the warm start before the Reel opens and every Reel session share
+  /// them, so a session opened while the warm start gathers or builds joins
+  /// that gather and that build (one Sonnet call a day) rather than
+  /// starting its own. A new set only if this device stops or starts
+  /// building the pool.
+  static ({ReelLibrary library, ReelPool pool, ForYouDeck forYou}) _shared(ReelStore store) {
+    final have = _sharedFor;
+    if (have != null && have.pool.host == !PhoneMode.isHandheld) return have;
+    final library = _library();
+    final pool = _pool(store, library);
+    final forYou = ForYouDeck(
+      pool: pool,
+      library: library,
+      candidates: () => forYouCandidates(library: library, store: store),
+      facts: () => forYouFacts(store: store, pool: pool),
+      again: () => anotherGoCandidates(library: library, store: store),
+      sharedChanges: Customisation.changed,
+      clears: ReelPool.clears,
+    );
+    return _sharedFor = (library: library, pool: pool, forYou: forYou);
   }
 
   static ReelLibrary _library() =>
@@ -82,14 +112,14 @@ abstract final class ReelApp {
       ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
 
   /// The decks in the app's own order: For You, Fits tonight, Give it
-  /// another go, Anime openings, Most Watched (with Trakt) and the saved
-  /// answers. The controller applies the user's order and hidden decks
-  /// ([ReelController.shownDecks]). For You is always first.
+  /// another go, Anime openings and Most Watched (with Trakt); the saved
+  /// answers follow ([_answerDecks]). The controller applies the user's
+  /// order and hidden decks ([ReelController.shownDecks]). For You is
+  /// always first.
   static Future<List<ReelDeck>> _decks(
     BuildContext context, {
     required ReelLibrary library,
-    required ReelStore store,
-    required ReelPool pool,
+    required ForYouDeck forYou,
   }) async {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
@@ -113,15 +143,6 @@ abstract final class ReelApp {
       }
     }
 
-    final forYou = ForYouDeck(
-      pool: pool,
-      library: library,
-      candidates: () => forYouCandidates(library: library, store: store),
-      facts: () => forYouFacts(store: store, pool: pool),
-      again: () => anotherGoCandidates(library: library, store: store),
-      sharedChanges: Customisation.changed,
-      clears: ReelPool.clears,
-    );
     return <ReelDeck>[
       forYou,
       FitsTonightDeck(forYou: forYou),
@@ -135,9 +156,14 @@ abstract final class ReelApp {
           films: () => chart(HomeRowIds.traktLists('chart:watched:movies')),
           shows: () => chart(HomeRowIds.traktLists('chart:watched:shows')),
         ),
-      for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
     ];
   }
+
+  /// The saved answers as decks (newest first). The Reel adds them once its
+  /// first card has shown (V2-04), so reading them never holds up its open.
+  static Future<List<ReelDeck>> _answerDecks(ReelLibrary library) async => [
+    for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
+  ];
 
   static Future<ReelController> controller(BuildContext context) async {
     final multi = context.read<MultiServerProvider>();
@@ -145,7 +171,13 @@ abstract final class ReelApp {
     final remote = context.read<CompanionRemoteProvider?>();
     final servers = multi.serverManager;
     final store = ReelStore.instance;
-    final library = _library();
+    // A Reel session is starting: the warm start's steps still to come are
+    // dropped (V2-14).
+    _warmer?.yieldNow();
+    final shared = _shared(store);
+    final library = shared.library;
+    final pool = shared.pool;
+    final forYou = shared.forYou;
     final resolver = resolverFor(
       servers,
       store,
@@ -153,10 +185,8 @@ abstract final class ReelApp {
       profile: ReelPlaybackWatcher.instance,
       tmdb: _tmdbRung(ReelPlaybackWatcher.instance),
     );
-    final pool = _pool(store, library);
     final media = _AppReelMedia(servers, store);
-    final decks = await _decks(context, library: library, store: store, pool: pool);
-    final forYou = decks.first as ForYouDeck;
+    final decks = await _decks(context, library: library, forYou: forYou);
 
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;
@@ -213,6 +243,15 @@ abstract final class ReelApp {
       // The phone's feed plays each card in its own page; the TV keeps the
       // native clip core.
       externalClips: !PlatformDetector.isTV(),
+      // TV cold open (V2-04): the clip core comes up alongside the deck, the
+      // card the Reel was left on opens at once (matched from the local
+      // index only), and the saved answers join after the first card.
+      warmClipCore: PlatformDetector.isTV(),
+      headCard: PlatformDetector.isTV() ? (entry) async => (await library.cards([entry])).firstOrNull : null,
+      moreDecks: () => _answerDecks(library),
+      // Each deck carries on where it was left today, on both devices
+      // (V2-14).
+      keepCursor: true,
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
       // While the Reel plays, the brain's indexer rests and its ONNX session
@@ -224,6 +263,7 @@ abstract final class ReelApp {
       // device's daily build hears them.
       onActive: (on) {
         active = on;
+        _warmer?.reelActive(on);
         if (on) {
           unawaited(_yieldAfter(forYou, stillActive: () => active));
         } else {
@@ -272,7 +312,8 @@ abstract final class ReelApp {
   static const Duration sweepDelay = Duration(seconds: 30);
 
   /// The Reel's cache housekeeping ([ReelStore.sweep]), at most once a day.
-  /// It runs here until the warm start before the tab opens (V2-14) exists.
+  /// On the TV the warm start before the Reel opens (V2-14) runs it too;
+  /// whichever comes first that day does it.
   static void _sweepLater(ReelStore store) => Timer(sweepDelay, () async {
     try {
       final s = await store.sweep();
@@ -285,6 +326,44 @@ abstract final class ReelApp {
       appLogger.w('[ReelCache] daily sweep failed', error: e);
     }
   });
+
+  static ReelWarmer? _warmer;
+
+  /// The Home the warm start decodes art through: the latest one armed
+  /// from, so a Home built again (a profile switch) replaces the one gone.
+  static BuildContext? _warmContext;
+
+  /// TV, from the app's post-startup idle point (Home's background start,
+  /// after the library index): arms the warm start before the Reel opens
+  /// (V2-14), once per app run, while the Reel is turned on. It never runs
+  /// while a video plays, in the background or with the Reel open, and
+  /// reads no server but for the first card's art.
+  static void warmBeforeOpen(BuildContext context) {
+    if (!PlatformDetector.isTV() || !ReelScreen.enabled) return;
+    _warmContext = context;
+    if (_warmer != null) return;
+    final servers = context.read<MultiServerProvider>().serverManager;
+    final store = ReelStore.instance;
+    final media = _AppReelMedia(servers, store);
+    _warmer = ReelWarmer(
+      store: store,
+      forYou: _shared(store).forYou,
+      playing: () => PlaybackCoordinator.instance.hasVideoSession,
+      foreground: () => WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      cachedItem: media.cachedItem,
+      // Decoded as the TV's card view builds it, through the latest Home's
+      // context (the same screen size); with no Home mounted it isn't, and
+      // the done line says art=failed.
+      precacheArt: (card, item, {required clip}) async {
+        final home = _warmContext;
+        if (home == null || !home.mounted) throw StateError('Home is not mounted');
+        await ReelCardView.precacheArt(home, card, item, clip: clip);
+      },
+      // Not while a memory trim has the Reel's art budget cut.
+      artAllowed: () => ReelArt.budgetBytes() >= DevicePerformance.reelImageBudgetBytes(),
+    )..arm();
+    appLogger.i('[ReelWarmer] armed');
+  }
 
   /// Settings' "Rebuild today's For You" ([ReelPool.clearToday]), with the
   /// same host rule as the Reel's own pool. Returns whether this device does
@@ -582,6 +661,10 @@ class _AppReelMedia implements ReelMedia {
     final r = await c.fetchItemWithOnDeck(ratingKey).timeout(const Duration(seconds: 15));
     return (item: r.item, next: r.onDeckEpisode);
   }
+
+  /// The item from the caches alone (the warm start, V2-14): Plex only.
+  Future<MediaItem?> cachedItem(String serverId, String ratingKey) async =>
+      _plex.serves(serverId) ? _metadata.cachedItem(serverId, ratingKey) : null;
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) {

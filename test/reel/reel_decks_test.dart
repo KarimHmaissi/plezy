@@ -105,6 +105,19 @@ class _Library extends ReelLibrary {
   ];
 }
 
+/// [_Library] that notes how many entries each match was asked for.
+class _BatchLibrary extends _Library {
+  _BatchLibrary({super.lengths});
+
+  final batches = <int>[];
+
+  @override
+  Future<List<ReelCardData>> cards(List<DeckEntry> entries) {
+    batches.add(entries.length);
+    return super.cards(entries);
+  }
+}
+
 /// The app's synced-data notifier, counting who listens.
 class _Synced extends ChangeNotifier {
   int listening = 0;
@@ -393,6 +406,84 @@ void main() {
       await forYou.building;
       expect(fired, 1);
       expect((await deck.load()).map((c) => c.id), ['q', 'p']);
+    });
+
+    group('first cards first (V2-04)', () {
+      List<String> keys(int n, [String prefix = 'k']) => [for (var i = 0; i < n; i++) '$prefix$i'];
+
+      test("For You's cached pool matches its first entries now and the rest only when asked", () async {
+        final library = _BatchLibrary();
+        final deck = ForYouDeck(
+          pool: pool(library: library),
+          library: library,
+          candidates: () async => const [],
+          facts: () async => '',
+        );
+        await cachePool(now, keys(14));
+        final parts = await deck.loadParts(ReelDeck.headEntries);
+        expect(parts.head.map((c) => c.id), keys(10));
+        expect(library.batches, [10], reason: 'the rest is not matched until asked');
+        expect(parts.rest, isNotNull);
+        expect((await parts.rest!()).map((c) => c.id), ['k10', 'k11', 'k12', 'k13']);
+        expect(library.batches, [10, 4]);
+        // The whole list, as load gives it, is the two parts in order.
+        expect((await deck.load()).map((c) => c.id), keys(14));
+      });
+
+      test('a pool no longer than the head, and code order (which ranks the whole list), load whole', () async {
+        final library = _BatchLibrary();
+        final deck = ForYouDeck(
+          pool: pool(library: library),
+          library: library,
+          candidates: () async => [for (final k in keys(12, 'c')) _candidate(k)],
+          facts: () async => '',
+        );
+        final coded = await deck.loadParts(ReelDeck.headEntries);
+        expect(coded.head, hasLength(12));
+        expect(coded.rest, isNull);
+        await cachePool(now, keys(10));
+        final short = await deck.loadParts(ReelDeck.headEntries);
+        expect(short.head, hasLength(10));
+        expect(short.rest, isNull);
+      });
+
+      test('Fits tonight keeps each of For You\'s parts to what fits', () async {
+        final library = _BatchLibrary(
+          lengths: {for (final k in keys(14)) k: (minutes: int.parse(k.substring(1)).isEven ? 90 : 150, show: false)},
+        );
+        final forYou = ForYouDeck(
+          pool: pool(library: library),
+          library: library,
+          candidates: () async => const [],
+          facts: () async => '',
+        );
+        await cachePool(now, keys(14));
+        final parts = await FitsTonightDeck(forYou: forYou).loadParts(ReelDeck.headEntries);
+        expect(parts.head.map((c) => c.id), ['k0', 'k2', 'k4', 'k6', 'k8']);
+        expect(parts.head.map((c) => c.chip).toSet(), {'1h 30m'});
+        expect((await parts.rest!()).map((c) => c.id), ['k10', 'k12']);
+      });
+
+      test('a fixed-list deck splits the same way; a deck with its own load loads whole', () async {
+        final library = _BatchLibrary();
+        final entries = EntriesDeck(
+          id: 'e',
+          name: 'E',
+          library: library,
+          entries: () async => [for (final k in keys(11)) DeckEntry(serverId: 's1', ratingKey: k)],
+        );
+        final parts = await entries.loadParts(3);
+        expect(parts.head.map((c) => c.id), ['k0', 'k1', 'k2']);
+        expect((await parts.rest!()).map((c) => c.id), keys(11).sublist(3));
+        expect(library.batches, [3, 8]);
+
+        final whole = await AiAnswerDeck(
+          entry: _answer('Calm', keys(12)),
+          library: library,
+        ).loadParts(ReelDeck.headEntries);
+        expect(whole.head, hasLength(12));
+        expect(whole.rest, isNull);
+      });
     });
 
     test('the Fits tonight limits: a film to the minute, an episode to the minute', () {

@@ -40,6 +40,10 @@ class ClipSource {
 /// screen, which the Reel never opens; this interface keeps it that way.
 abstract interface class ClipEngine {
   Player get player;
+
+  /// Initializes the core with no media (V2-04): the first [open] then
+  /// skips that step. Allocates no decoder; only an open does.
+  Future<void> warm();
   Future<void> open(String uri);
   Future<void> preload(String uri);
   Future<void> clearPreloads();
@@ -98,6 +102,9 @@ class ExoClipEngine implements ClipEngine {
 
   @override
   Player get player => _p;
+
+  @override
+  Future<void> warm() => _p.warmClip();
 
   @override
   Future<void> open(String uri) => _p.open(Media(uri), play: true);
@@ -372,6 +379,12 @@ class ClipPlayer {
       ..add(e.firstFrame.listen((_) => _onFirstFrame()))
       ..add(
         e.errors.listen((err) {
+          // No clip open yet (a warm core's init failing): not a clip's
+          // failure, so no card reads it as one. [warm] lets the core go.
+          if (_current == null) {
+            appLogger.w('Reel: clip core error with no clip open: ${err.message}');
+            return;
+          }
           appLogger.w('Reel: clip error: ${err.message}');
           phase.value = ClipPhase.failed;
         }),
@@ -388,6 +401,34 @@ class ClipPlayer {
         }),
       );
     return e;
+  }
+
+  /// Builds the core and initializes it with no media (the TV's cold open,
+  /// V2-04), alongside the deck load, so the first [play] doesn't wait for
+  /// the core. Allocates no decoder: only an open hands the core a clip. A
+  /// core already built is left as it is.
+  ///
+  /// Bounded by [callLimit]. A warm that runs out or throws lets the core
+  /// go (the next [play] builds a fresh one), unless a [play] has started
+  /// on it meanwhile: that open's own [openLimit] decides then. Returns how
+  /// long the warm took, or null when nothing was warmed.
+  Future<Duration?> warm() async {
+    if (_engine != null) return null;
+    final e = _ensure();
+    final opens = _opens;
+    final sw = Stopwatch()..start();
+    try {
+      await e.warm().timeout(callLimit);
+    } on TimeoutException {
+      appLogger.w('Reel: clip core warm timed out after ${callLimit.inMilliseconds}ms');
+      if (_opens == opens) _abandon(e);
+      return null;
+    } catch (err) {
+      appLogger.w('Reel: clip core warm failed', error: err);
+      if (_opens == opens) _abandon(e);
+      return null;
+    }
+    return sw.elapsed;
   }
 
   /// TV: a D-pad press that asks for another card ([trigger] `step` or

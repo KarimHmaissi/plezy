@@ -35,8 +35,21 @@ class FakeClipEngine implements ClipEngine {
   /// Holds every pause until completed (a pause still on its way).
   Completer<void>? pauseGate;
 
+  /// Holds every warm until completed (a slow, or never-finishing, core
+  /// init); [warmError] makes a warm throw once let through.
+  Completer<void>? warmGate;
+  Object? warmError;
+
   @override
   Player get player => throw UnimplementedError();
+
+  @override
+  Future<void> warm() async {
+    calls.add('warm');
+    await warmGate?.future;
+    final err = warmError;
+    if (err != null) throw err;
+  }
 
   @override
   Future<void> open(String uri) async {
@@ -504,6 +517,111 @@ void main() {
         expect(released, isTrue);
         expect(clips.phase.value, ClipPhase.idle);
       });
+    });
+  });
+
+  group('warm core (V2-04)', () {
+    test('a warm builds and initializes the core with no media; the first clip opens on that core', () async {
+      var built = 0;
+      clips = ClipPlayer(
+        engine: () {
+          built++;
+          return engine = FakeClipEngine();
+        },
+      );
+      final took = await clips.warm();
+      expect(took, isNotNull);
+      expect(built, 1);
+      expect(engine.calls, ['warm'], reason: 'no open, preload, surface or focus: nothing that takes a decoder');
+      expect(clips.phase.value, ClipPhase.idle);
+      expect(clips.current, isNull);
+      expect(clips.keepsScreenOn, isFalse);
+
+      await clips.play(_a, first: true);
+      expect(built, 1, reason: 'the open reuses the warm core');
+      expect(engine.calls.where((c) => c.startsWith('open')), ['open ${_a.uri}']);
+      expect(engine.calls.where((c) => c == 'warm'), hasLength(1));
+    });
+
+    test('a core already built is left as it is', () async {
+      await clips.play(_a, first: true);
+      expect(await clips.warm(), isNull);
+      expect(engine.calls, isNot(contains('warm')));
+    });
+
+    test('a warm that never comes back lets the core go within the call limit; the next clip builds afresh', () {
+      fakeAsync((async) {
+        final built = <FakeClipEngine>[];
+        clips = ClipPlayer(
+          engine: () {
+            final e = FakeClipEngine()..warmGate = built.isEmpty ? Completer<void>() : null;
+            built.add(e);
+            return engine = e;
+          },
+        );
+        Duration? took = const Duration(days: 1);
+        var done = false;
+        clips.warm().then((d) {
+          took = d;
+          done = true;
+        });
+        async.elapse(ClipPlayer.defaultCallLimit - const Duration(milliseconds: 1));
+        expect(done, isFalse);
+        async.elapse(const Duration(milliseconds: 1));
+        expect(done, isTrue, reason: 'a warm is never waited on for good');
+        expect(took, isNull);
+        expect(clips.engine, isNull);
+        async.flushMicrotasks();
+        expect(built.first.disposed, isTrue);
+        expect(clips.phase.value, ClipPhase.idle);
+
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        expect(built, hasLength(2));
+        expect(built.last.calls.where((c) => c.startsWith('open') || c == 'warm'), ['open ${_a.uri}']);
+      });
+    });
+
+    test('a slow warm with an open already under way leaves the core to the open', () {
+      fakeAsync((async) {
+        final slow = FakeClipEngine()..warmGate = Completer<void>();
+        clips = ClipPlayer(engine: () => engine = slow);
+        clips.warm();
+        async.flushMicrotasks();
+        clips.play(_a, first: true);
+        async.elapse(ClipPlayer.defaultCallLimit);
+        expect(clips.engine, same(slow), reason: "the warm's limit doesn't cut the open short");
+        expect(slow.disposed, isFalse);
+        expect(clips.phase.value, ClipPhase.loading);
+        slow.firstFrameCtl.add(null);
+        expect(clips.phase.value, ClipPhase.playing);
+      });
+    });
+
+    test('a warm the core throws on lets it go; its error is no clip failure', () async {
+      final built = <FakeClipEngine>[];
+      clips = ClipPlayer(
+        engine: () {
+          final e = FakeClipEngine()..warmError = built.isEmpty ? StateError('init failed') : null;
+          built.add(e);
+          return engine = e;
+        },
+      );
+      final first = clips.warm();
+      // The core reports its failed init as a player error, with no clip open.
+      built.first.errorCtl.add(const PlayerError('init failed'));
+      expect(await first, isNull);
+      expect(clips.phase.value, ClipPhase.idle);
+      expect(clips.engine, isNull);
+      await Future<void>.delayed(Duration.zero);
+      expect(built.first.disposed, isTrue);
+
+      await clips.play(_a, first: true);
+      expect(built, hasLength(2));
+      expect(clips.phase.value, ClipPhase.loading);
+      // Once a clip is open, an error is that clip's.
+      built.last.errorCtl.add(const PlayerError('decoder'));
+      expect(clips.phase.value, ClipPhase.failed);
     });
   });
 

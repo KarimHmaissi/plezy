@@ -252,6 +252,15 @@ class PlayerAndroid extends PlayerBase {
     await invoke('preloadClip', {'uri': uri});
   }
 
+  /// Clip mode: initializes the native core with no media (the Reel's cold
+  /// open, V2-04), so the first [open] doesn't wait for it. Initializing
+  /// builds the player, its surface (hidden) and its load control; no
+  /// decoder is allocated until an open hands the player a clip.
+  Future<void> warmClip() async {
+    if (disposed || !clipMode) return;
+    await _ensureInitialized();
+  }
+
   /// Clip mode: drop any preloaded next card.
   Future<void> clearPreloads() async {
     if (disposed || !clipMode || !initialized) return;
