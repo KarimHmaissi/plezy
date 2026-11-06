@@ -81,9 +81,9 @@ class ReelPick {
   }
 }
 
-/// Facts the Reel keeps. Picks and vetoes are small synced settings (newest
-/// edit wins between the TV and the phone); events and caches stay in this
-/// device's own fork database.
+/// Facts the Reel keeps. Picks, vetoes and the TV's day's pool are small
+/// synced settings (newest edit wins between the TV and the phone); events
+/// and caches stay in this device's own fork database.
 class ReelStore {
   ReelStore({
     Future<ForkDatabase> Function()? database,
@@ -101,6 +101,9 @@ class ReelStore {
 
   static const String picksKey = 'reel.picks';
   static const String vetoesKey = 'reel.vetoes';
+
+  /// The TV's For You pool for the day, shared with the phone (about 11 KB).
+  static const String poolKey = 'reel.pool';
 
   /// How long a clip asset identity (or a miss) is trusted.
   static const Duration sourceTtl = Duration(days: 30);
@@ -177,6 +180,14 @@ class ReelStore {
           ReelCacheCompanion.insert(key: key, value: value, updatedAt: _clock().millisecondsSinceEpoch),
         );
   }
+
+  // ---- the day's pool (synced) ----
+
+  /// The shared pool as the host wrote it (`{day, entries}`), or null.
+  Future<String?> sharedPool() async => (await _settings()).readSetting(poolKey);
+
+  /// The host shares its day's pool. Newest write wins, like picks.
+  Future<void> sharePool(String value) async => (await _settings()).writeSetting(poolKey, value);
 
   // ---- picks (synced) ----
 

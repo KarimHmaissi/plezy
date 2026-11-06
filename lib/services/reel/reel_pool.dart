@@ -41,26 +41,69 @@ typedef PoolModel = Future<Map<String, dynamic>?> Function(String system, String
 /// orders about 90 of them, writes optional why lines naming an anchor, and
 /// labels clusters. Code then only checks anchors and applies the layout
 /// rules. The pool is replaced each day, never added to.
+///
+/// The [host] (the TV) builds it each day and shares it through the synced
+/// settings ([ReelStore.poolKey]); a phone reads that copy and builds its own
+/// only once the shared pool is [fallbackAfter] old (or there never was one).
 class ReelPool {
-  ReelPool({required this.store, required this.library, this.model, DateTime Function()? clock})
+  ReelPool({required this.store, required this.library, this.model, this.host = true, DateTime Function()? clock})
     : _clock = clock ?? DateTime.now;
 
   final ReelStore store;
   final ReelLibrary library;
   final PoolModel? model;
+
+  /// This device builds the day's pool and shares it (the TV, a desktop).
+  /// A phone is not the host: it builds only as a fallback, and keeps that
+  /// build to itself.
+  final bool host;
   final DateTime Function() _clock;
 
   static const int maxCandidates = 250;
   static const int target = 90;
 
-  static String dayKey(DateTime d) =>
-      'pool:${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  /// How many days (today included) with no shared pool before a phone
+  /// builds its own.
+  static const int fallbackAfter = 2;
+
+  /// How many days back an earlier pool is still read.
+  static const int lookback = 3;
+
+  /// The calendar day of [d], `YYYY-MM-DD`.
+  static String dateOf(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static String dayKey(DateTime d) => 'pool:${dateOf(d)}';
 
   /// Today's day key, by this pool's clock.
   String today() => dayKey(_clock());
 
+  /// Now, by this pool's clock.
+  DateTime now() => _clock();
+
+  /// The shared pool: its day (`YYYY-MM-DD`) and rows, or null when there is
+  /// none or it can't be read.
+  Future<({String day, List<Object?> rows})?> shared() async {
+    final String? raw;
+    try {
+      raw = await store.sharedPool();
+    } catch (e) {
+      appLogger.d('Reel: shared pool unavailable', error: e);
+      return null;
+    }
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw);
+      if (j is Map && j['day'] is String && j['entries'] is List) {
+        return (day: j['day'] as String, rows: j['entries'] as List<Object?>);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Today's pool if built, else the newest earlier one, else null (the
-  /// caller falls back to code order). Either way it is the remainder:
+  /// caller falls back to code order). Each day reads this device's own
+  /// pool first, then the shared one. Either way it is the remainder:
   /// titles already gone through in the Reel since that pool's day are
   /// dropped, so a reopen (or the next day, on yesterday's pool) carries on
   /// rather than starting over. Gone through is any recorded event except
@@ -68,28 +111,11 @@ class ReelPool {
   /// kept title ids are returned whole.
   Future<List<DeckEntry>?> cachedPool() async {
     final now = _clock();
-    for (var back = 0; back < 3; back++) {
+    final share = await shared();
+    for (var back = 0; back < lookback; back++) {
       final day = now.subtract(Duration(days: back));
-      final raw = await store.cached(dayKey(day));
-      if (raw == null) continue;
-      final List<({String? id, DeckEntry entry})> rows;
-      try {
-        rows = [
-          for (final j in jsonDecode(raw) as List)
-            if (j is Map && j['sv'] is String && j['rk'] is String)
-              (
-                id: j['id'] as String?,
-                entry: DeckEntry(
-                  serverId: j['sv'] as String,
-                  ratingKey: j['rk'] as String,
-                  why: j['why'] as String?,
-                  cluster: j['cl'] as String?,
-                ),
-              ),
-        ];
-      } catch (_) {
-        continue;
-      }
+      final rows = await _localRows(day) ?? (share != null && share.day == dateOf(day) ? _rows(share.rows) : null);
+      if (rows == null) continue;
       final gone = await goneThrough(since: DateTime(day.year, day.month, day.day));
       return [
         for (final r in rows)
@@ -99,13 +125,57 @@ class ReelPool {
     return null;
   }
 
+  Future<List<({String? id, DeckEntry entry})>?> _localRows(DateTime day) async {
+    final raw = await store.cached(dayKey(day));
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw);
+      return j is List ? _rows(j) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static List<({String? id, DeckEntry entry})> _rows(List<Object?> list) => [
+    for (final j in list)
+      if (j is Map && j['sv'] is String && j['rk'] is String)
+        (
+          id: j['id'] is String ? j['id'] as String : null,
+          entry: DeckEntry(
+            serverId: j['sv'] as String,
+            ratingKey: j['rk'] as String,
+            why: j['why'] is String ? j['why'] as String : null,
+            cluster: j['cl'] is String ? j['cl'] as String : null,
+          ),
+        ),
+  ];
+
   /// Titles with a recorded Reel event (other than unplayed) since [since].
   Future<Set<String>> goneThrough({required DateTime since}) async => {
     for (final e in await store.events(since: since))
       if (e.action != ReelAction.unplayed.name) e.titleId,
   };
 
-  Future<bool> hasToday() async => await store.cached(dayKey(_clock())) != null;
+  /// Whether this device has its own pool for today.
+  Future<bool> hasOwnToday() async => await store.cached(dayKey(_clock())) != null;
+
+  /// Whether today's pool is here: this device's own, or the shared one.
+  Future<bool> hasToday() async => await hasOwnToday() || (await shared())?.day == dateOf(_clock());
+
+  /// Whether this device should run today's build: nothing for today yet,
+  /// and either it is the [host], or the shared pool is [fallbackAfter]
+  /// days old (or there never was one), so the host isn't building.
+  Future<bool> shouldBuild() async {
+    if (await hasToday()) return false;
+    if (host) return true;
+    final day = (await shared())?.day;
+    if (day == null) return true;
+    final now = _clock();
+    for (var back = 0; back < fallbackAfter; back++) {
+      if (day == dateOf(now.subtract(Duration(days: back)))) return false;
+    }
+    return true;
+  }
 
   /// Code order: the candidates by similarity with fatigue applied.
   Future<List<DeckEntry>> codeOrder(List<PoolCandidate> candidates) async {
@@ -119,8 +189,9 @@ class ReelPool {
   }
 
   /// Builds today's pool from [candidates] (already filtered to unseen,
-  /// not resting, not Kids) and caches it. Returns null when there is no
-  /// model or the call failed, leaving yesterday's pool in place.
+  /// not resting, not Kids) and caches it; the [host] also shares it.
+  /// Returns null when there is no model or the call failed, leaving
+  /// yesterday's pool in place.
   Future<List<DeckEntry>?> build(List<PoolCandidate> candidates, {required String facts}) async {
     final call = model;
     if (call == null || candidates.isEmpty) return null;
@@ -174,13 +245,18 @@ class ReelPool {
         );
       }
       if (out.isEmpty) return null;
-      await store.cache(
-        dayKey(now),
-        jsonEncode([
-          for (final (i, e) in out.indexed)
-            {'id': ids[i], 'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster},
-        ]),
-      );
+      final rows = [
+        for (final (i, e) in out.indexed)
+          {'id': ids[i], 'sv': e.serverId, 'rk': e.ratingKey, 'why': ?e.why, 'cl': ?e.cluster},
+      ];
+      await store.cache(dayKey(now), jsonEncode(rows));
+      if (host) {
+        try {
+          await store.sharePool(jsonEncode({'day': dateOf(now), 'entries': rows}));
+        } catch (e) {
+          appLogger.w('Reel: sharing the pool failed', error: e);
+        }
+      }
       return out;
     } catch (e) {
       appLogger.w('Reel: daily build failed', error: e);

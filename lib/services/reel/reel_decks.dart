@@ -85,10 +85,20 @@ class EntriesDeck extends ReelDeck {
 }
 
 /// For You: today's pool (or yesterday's remainder while today's builds),
-/// else the taste pool in code order. When today's build lands, [rebuilt]
+/// else the taste pool in code order. The pool is this device's own build
+/// or the one the TV shares (see [ReelPool]). When today's build lands here,
+/// or the TV's shared pool for today arrives through [sharedChanges], [rebuilt]
 /// fires and the session takes it.
 class ForYouDeck extends ReelDeck {
-  ForYouDeck({required this.pool, required this.library, required this.candidates, required this.facts});
+  ForYouDeck({
+    required this.pool,
+    required this.library,
+    required this.candidates,
+    required this.facts,
+    Listenable? sharedChanges,
+  }) {
+    _rebuilt = _PoolRebuilt(sharedChanges, () => unawaited(_onSharedChange()));
+  }
 
   final ReelPool pool;
   final ReelLibrary library;
@@ -96,6 +106,9 @@ class ForYouDeck extends ReelDeck {
   final Future<String> Function() facts;
   Future<void>? _building;
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
+
+  /// The shared pool's day as last seen, so only a new one fires [rebuilt].
+  String? _sharedDay;
 
   @override
   String get id => 'for-you';
@@ -106,16 +119,35 @@ class ForYouDeck extends ReelDeck {
   @override
   bool get daily => true;
 
-  /// Bumped when today's build has been cached.
+  /// Fires when today's build has been cached, or today's shared pool has
+  /// arrived. Listens to the synced data only while something listens here.
   @override
-  final ValueNotifier<int> rebuilt = ValueNotifier(0);
+  Listenable get rebuilt => _rebuilt;
+  late final _PoolRebuilt _rebuilt;
 
   @override
   Future<List<ReelCardData>> load() async {
+    _sharedDay = (await pool.shared())?.day;
     final cached = await pool.cachedPool();
-    if (!await pool.hasToday()) _building ??= _buildToday();
+    if (await pool.shouldBuild()) _building ??= _buildToday();
     if (cached != null && cached.isNotEmpty) return library.cards(cached);
     return worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
+  }
+
+  /// The synced data changed (a sync or a TV snapshot): when it brought the
+  /// shared pool for today, and this device has no pool of its own for
+  /// today (its own comes first), the session takes it.
+  Future<void> _onSharedChange() async {
+    try {
+      final day = (await pool.shared())?.day;
+      if (day == null || day == _sharedDay) return;
+      _sharedDay = day;
+      if (day != ReelPool.dateOf(pool.now()) || await pool.hasOwnToday()) return;
+      appLogger.i('[ReelDeck] for-you: shared pool for $day arrived');
+      _rebuilt.bump();
+    } catch (e) {
+      appLogger.d('Reel: shared pool check failed', error: e);
+    }
   }
 
   /// [candidates], gathered once a day: code order and the build share it.
@@ -162,11 +194,12 @@ class ForYouDeck extends ReelDeck {
     return [...rated, ...unrated];
   }
 
-  /// The first Reel open of the day starts the build; nothing schedules it.
+  /// The first Reel open of the day starts the build (on a phone, only
+  /// once the TV's shared pool is stale); nothing schedules it.
   Future<void> _buildToday() async {
     try {
       final built = await pool.build(await _todaysCandidates(), facts: await facts());
-      if (built != null) rebuilt.value++;
+      if (built != null) _rebuilt.bump();
     } catch (e) {
       appLogger.w('Reel: For You build failed', error: e);
     } finally {
@@ -176,6 +209,37 @@ class ForYouDeck extends ReelDeck {
 
   /// Tests and the History page: wait for a build in flight.
   Future<void> get building => _building ?? Future.value();
+}
+
+/// [ForYouDeck.rebuilt]: its own bumps, plus [source] (the synced data
+/// changing) while it has listeners, so a deck the controller has let go
+/// of holds no listener on the app-wide notifier.
+class _PoolRebuilt extends ChangeNotifier {
+  _PoolRebuilt(this.source, this.onSource);
+
+  final Listenable? source;
+  final VoidCallback onSource;
+
+  void bump() => notifyListeners();
+
+  @override
+  void addListener(VoidCallback listener) {
+    final first = !hasListeners;
+    super.addListener(listener);
+    if (first) source?.addListener(onSource);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    super.removeListener(listener);
+    if (!hasListeners) source?.removeListener(onSource);
+  }
+
+  @override
+  void dispose() {
+    source?.removeListener(onSource);
+    super.dispose();
+  }
 }
 
 /// Anime openings: shows from the anime libraries, seen ones allowed and

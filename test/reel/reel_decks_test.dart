@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
@@ -63,6 +64,25 @@ class _Library extends ReelLibrary {
   ];
 }
 
+/// The app's synced-data notifier, counting who listens.
+class _Synced extends ChangeNotifier {
+  int listening = 0;
+
+  void bump() => notifyListeners();
+
+  @override
+  void addListener(VoidCallback listener) {
+    listening++;
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    listening--;
+    super.removeListener(listener);
+  }
+}
+
 PoolCandidate _candidate(String id) => PoolCandidate(
   entry: DeckEntry(serverId: 's1', ratingKey: id),
   titleId: id,
@@ -72,19 +92,39 @@ PoolCandidate _candidate(String id) => PoolCandidate(
 void main() {
   group('the daily pool', () {
     late ForkDatabase db;
+    late LocalCustomisationStore settings;
     late ReelStore store;
     late DateTime now;
 
     setUp(() {
       db = ForkDatabase.memory();
-      final settings = LocalCustomisationStore(db);
+      settings = LocalCustomisationStore(db);
       now = DateTime(2026, 3, 10, 20);
       store = ReelStore(database: () async => db, settings: () async => settings, clock: () => now);
     });
 
     tearDown(() async => db.close());
 
-    ReelPool pool({PoolModel? model}) => ReelPool(store: store, library: _Library(), model: model, clock: () => now);
+    ReelPool pool({PoolModel? model, bool host = true}) =>
+        ReelPool(store: store, library: _Library(), model: model, host: host, clock: () => now);
+
+    /// The TV's pool for [day] as it reaches the phone's synced settings.
+    Future<void> sharePool(DateTime day, List<String> ids) => settings.writeSetting(
+      ReelStore.poolKey,
+      jsonEncode({
+        'day': ReelPool.dateOf(day),
+        'entries': [
+          for (final id in ids) {'id': id, 'sv': 's1', 'rk': id, 'cl': 'harbor drama'},
+        ],
+      }),
+    );
+
+    PoolModel picks(List<String> ids) =>
+        (_, _, _) async => {
+          'cards': [
+            for (final id in ids) {'id': id, 'cluster': 'space sci-fi'},
+          ],
+        };
 
     Future<void> cachePool(DateTime day, List<String> ids) => store.cache(
       ReelPool.dayKey(day),
@@ -190,6 +230,120 @@ void main() {
       now = now.add(const Duration(days: 1));
       await deck.load();
       expect(gathered, 3);
+    });
+    test('the TV shares its build through the synced settings, and a phone build keeps to itself', () async {
+      await pool(model: picks(['c2', 'c1'])).build([_candidate('m'), _candidate('n')], facts: '');
+      final shared = jsonDecode((await settings.readSetting(ReelStore.poolKey))!) as Map;
+      expect(shared['day'], '2026-03-10');
+      expect((shared['entries'] as List).map((j) => (j as Map)['id']), ['n', 'm']);
+      expect((shared['entries'] as List).map((j) => (j as Map)['cl']), ['space sci-fi', 'space sci-fi']);
+      expect(SyncUnits.syncsSetting(ReelStore.poolKey), isTrue);
+
+      await settings.writeSetting(ReelStore.poolKey, null);
+      await pool(model: picks(['c1']), host: false).build([_candidate('p')], facts: '');
+      expect(await settings.readSetting(ReelStore.poolKey), isNull);
+      expect(await store.cached(ReelPool.dayKey(now)), isNotNull);
+    });
+
+    test("a phone reads the TV's pool as its remainder; its own pool for the same day comes first", () async {
+      final phone = pool(host: false);
+      expect(await phone.cachedPool(), isNull);
+
+      await sharePool(DateTime(2026, 3, 9), ['a', 'b', 'c']);
+      await recordAt(DateTime(2026, 3, 9, 21), 'a', ReelAction.sampled);
+      expect((await phone.cachedPool())?.map((e) => e.ratingKey), ['b', 'c']);
+      expect((await phone.cachedPool())?.first.cluster, 'harbor drama');
+
+      // An own pool from an earlier day loses to the newer shared one.
+      await cachePool(DateTime(2026, 3, 8), ['old']);
+      expect((await phone.cachedPool())?.map((e) => e.ratingKey), ['b', 'c']);
+
+      // The same day: this device's own pool first.
+      await cachePool(DateTime(2026, 3, 9), ['own']);
+      expect((await phone.cachedPool())?.map((e) => e.ratingKey), ['own']);
+
+      // Today's shared pool beats yesterday's own one.
+      await sharePool(now, ['x', 'y']);
+      expect((await phone.cachedPool())?.map((e) => e.ratingKey), ['x', 'y']);
+      expect(await phone.hasToday(), isTrue);
+      expect(await phone.hasOwnToday(), isFalse);
+    });
+
+    test('a phone builds only after 2 days with no shared pool, or when there never was one', () async {
+      final phone = pool(host: false);
+      expect(await phone.shouldBuild(), isTrue, reason: 'never a shared pool');
+
+      await sharePool(now, ['a']);
+      expect(await phone.shouldBuild(), isFalse);
+      await sharePool(DateTime(2026, 3, 9), ['a']);
+      expect(await phone.shouldBuild(), isFalse, reason: "yesterday's pool carries the phone through today");
+      await sharePool(DateTime(2026, 3, 8), ['a']);
+      expect(await phone.shouldBuild(), isTrue);
+
+      await cachePool(now, ['own']);
+      expect(await phone.shouldBuild(), isFalse, reason: 'it already built today');
+    });
+
+    test('the TV builds whenever it has nothing for today, whatever the shared copy says', () async {
+      await sharePool(DateTime(2026, 3, 9), ['a']);
+      expect(await pool().shouldBuild(), isTrue);
+      await cachePool(now, ['own']);
+      expect(await pool().shouldBuild(), isFalse);
+    });
+
+    test("For You on a phone opens on the TV's pool and does not build", () async {
+      await sharePool(now, ['h', 'k']);
+      var called = 0;
+      final deck = ForYouDeck(
+        pool: pool(
+          host: false,
+          model: (_, _, _) async {
+            called++;
+            return null;
+          },
+        ),
+        library: _Library(),
+        candidates: () async => [_candidate('p')],
+        facts: () async => '',
+      );
+      expect((await deck.load()).map((c) => c.id), ['h', 'k']);
+      await deck.building;
+      expect(called, 0);
+    });
+
+    test("today's shared pool arriving fires rebuilt once, and only while something listens", () async {
+      final synced = _Synced();
+      final deck = ForYouDeck(
+        pool: pool(host: false),
+        library: _Library(),
+        candidates: () async => [_candidate('p')],
+        facts: () async => '',
+        sharedChanges: synced,
+      );
+      await sharePool(DateTime(2026, 3, 9), ['a']);
+      expect((await deck.load()).map((c) => c.id), ['a']);
+      var fired = 0;
+      void listener() => fired++;
+      deck.rebuilt.addListener(listener);
+      expect(synced.listening, 1);
+
+      Future<void> sync() async {
+        synced.bump();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      await sync();
+      expect(fired, 0, reason: 'nothing new was synced');
+      await sharePool(now, ['b', 'c']);
+      await sync();
+      expect(fired, 1);
+      await sync();
+      expect(fired, 1, reason: 'the same shared day fires once');
+      expect((await deck.load()).map((c) => c.id), ['b', 'c']);
+
+      deck.rebuilt.removeListener(listener);
+      expect(synced.listening, 0);
     });
   });
 

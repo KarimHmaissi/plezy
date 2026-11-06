@@ -60,7 +60,8 @@ abstract final class ReelApp {
     final facts = IndexTitleFactsSource.app();
     final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
     final resolver = resolverFor(servers, store);
-    final pool = ReelPool(store: store, library: library, model: _sonnet);
+    // The TV builds the day's pool and shares it; a phone reads that copy.
+    final pool = ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
     final media = _AppReelMedia(servers);
     final resolverRows = catalog == null
         ? null
@@ -88,6 +89,7 @@ abstract final class ReelApp {
         library: library,
         candidates: () => forYouCandidates(library: library, store: store),
         facts: () => forYouFacts(store: store),
+        sharedChanges: Customisation.changed,
       ),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
