@@ -104,9 +104,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   /// Phone: the feed's players (the TV plays on the native clip core).
   /// They take audio focus unless the sound pref says to mix (V2-22), and
-  /// hold the screen on only while a card really plays.
+  /// hold the screen on only while a card really plays. A clip plays as
+  /// often as the clip-end pref says, then holds (V2-47).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
     create: (uri) => PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
+    plays: () => ReelController.clipEndPref().plays,
     keepAwake: _awake.setEnabled,
     onLooped: (_) => _controller?.clipEnded(),
     onStarted: (id) => _controller?.clipStarted(id),
@@ -242,6 +244,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void _remoteStep(Map<String, dynamic> data) {
     final c = _controller;
     if (c == null || !_shown) return;
+    // Someone at the phone: Lean back keeps rolling (V2-47).
+    c.noteInput();
     final dir = data['dir'];
     final deckDir = data['deckDir'];
     if (dir is int && dir != 0) {
@@ -257,6 +261,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void _remoteAction(String action) {
     final c = _controller;
     if (c == null || !_shown) return;
+    c.noteInput();
     unawaited(switch (action) {
       'watch' => _watch(),
       'save' => c.save(),
@@ -382,6 +387,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final c = _controller;
     if (c == null) return KeyEventResult.ignored;
+    // Any key is someone there: Lean back's idle stop counts from it (V2-47).
+    if (event is KeyDownEvent || event is KeyRepeatEvent) c.noteInput();
     final sel = _longPress.handleKeyEvent(
       event,
       isOwnerActive: () => _shown && !_sheetOpen,

@@ -50,6 +50,10 @@ class _Video extends ChangeNotifier implements FeedVideo {
   Future<void> seekTo(Duration position) async => _position = position;
   @override
   Future<void> setVolume(double volume) async {}
+  @override
+  bool get completed => false;
+  @override
+  Future<void> setLooping(bool looping) async {}
 
   void tick(Duration to) {
     _position = to;

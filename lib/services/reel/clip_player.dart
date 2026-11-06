@@ -108,22 +108,28 @@ class ExoClipEngine implements ClipEngine {
 
 enum ClipPhase { idle, loading, playing, paused, held, failed }
 
-/// The Reel's clip player: plays one card's clip, preloads the next, loops a
-/// clip twice and then holds on its last frame, and dips the sound between
-/// cards. It never reports a timeline, a scrobble or a media session: it
-/// imports none of that code (test/reel/no_reporting_guard_test.dart).
+/// The Reel's clip player: plays one card's clip, preloads the next, plays a
+/// clip as many times as the clip-end pref says (V2-47) and then holds on
+/// its last frame, and dips the sound between cards. It never reports a
+/// timeline, a scrobble or a media session: it imports none of that code
+/// (test/reel/no_reporting_guard_test.dart).
 class ClipPlayer {
-  ClipPlayer({ClipEngine Function()? engine, this.loops = 2, ReelPerf? perf})
+  ClipPlayer({ClipEngine Function()? engine, int? Function()? plays, ReelPerf? perf})
     : _create = engine ?? ExoClipEngine.new,
+      _plays = plays ?? _twice,
       _perf = perf ?? ReelPerf.instance;
+
+  static int? _twice() => 2;
 
   final ClipEngine Function() _create;
 
   /// The debug overlay's tape (it records nothing unless switched on).
   final ReelPerf _perf;
 
-  /// Plays before holding on the last frame.
-  final int loops;
+  /// How many times a clip plays before it holds on its last frame; null
+  /// loops it for good. Asked at each end, so a change to the clip-end pref
+  /// applies to the clip already playing.
+  final int? Function() _plays;
 
   ClipEngine? _engine;
   final List<StreamSubscription<Object?>> _subs = [];
@@ -281,10 +287,12 @@ class ClipPlayer {
     final e = _engine;
     if (e == null) return;
     _played++;
-    if (_played < loops) {
+    final plays = _plays();
+    if (plays == null || _played < plays) {
       unawaited(e.seek(Duration.zero).then((_) => e.play()));
     } else {
-      // Hold on the last frame; Replay is focused by the view.
+      // Hold on the last frame; Replay is focused by the view, and Lean
+      // back moves on from here (ReelController).
       unawaited(e.pause());
       phase.value = ClipPhase.held;
     }

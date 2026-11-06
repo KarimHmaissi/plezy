@@ -43,6 +43,17 @@ class _Servers implements ReelServers {
   String? clipUrl(String serverId, String partKey) => 'https://$serverId.example$partKey';
 }
 
+/// No trailer for [none]: those cards resolve to AI cards.
+class _SomeServers extends _Servers {
+  _SomeServers(this.none);
+
+  final Set<String> none;
+
+  @override
+  Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async =>
+      none.contains(ratingKey) ? const [] : super.extras(serverId, ratingKey, timeout: timeout);
+}
+
 class _Media implements ReelMedia {
   @override
   Future<MediaItem?> item(String serverId, String ratingKey) async => MediaItem(
@@ -202,6 +213,9 @@ void main() {
     ReelWatchlist? addToWatchlist,
     bool Function()? reachesTvNow,
     Listenable? memoryRestored,
+    ReelServers? servers,
+    int? Function()? plays,
+    ReelClipEnd Function()? clipEnd,
   }) => ReelController(
     decks:
         decks ??
@@ -209,12 +223,13 @@ void main() {
           _Deck('a', [_card('1'), _card('2'), _card('3')]),
         ],
     resolver: ClipResolver(
-      servers: _Servers(),
+      servers: servers ?? _Servers(),
       store: store,
       aniList: (_) async => null,
       animeThemes: (_) async => const {},
     ),
     clips: ClipPlayer(
+      plays: plays,
       engine: () {
         engines++;
         return engine = FakeClipEngine();
@@ -228,6 +243,7 @@ void main() {
     reachesTvNow: reachesTvNow,
     externalClips: externalClips,
     memoryRestored: memoryRestored,
+    clipEnd: clipEnd,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -950,6 +966,116 @@ void main() {
       await c.start();
       expect(loads, 1);
       expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
+  });
+  group('when a clip ends: Lean back on the TV (V2-47)', () {
+    late DateTime now;
+
+    String clipOf(String ratingKey) => 'open https://s1.example/services/iva/assets/$ratingKey/video.mp4';
+
+    /// The clip on screen shows its first frame and plays out once; then
+    /// the outgoing clip's 250 ms fade runs, so the next one is open.
+    Future<void> playOut() async {
+      engine.firstFrameCtl.add(null);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+    }
+
+    setUp(() => now = DateTime(2026, 3, 2, 20));
+
+    ReelController lean({ReelServers? servers, ReelClipEnd end = ReelClipEnd.nextCard}) => make(
+      clock: () => now,
+      servers: servers,
+      plays: () => end.plays,
+      clipEnd: () => end,
+      decks: [
+        _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+      ],
+    );
+
+    test('the clip-end prefs map to plays: loop for good, twice, once', () {
+      expect(ReelClipEnd.loop.plays, isNull);
+      expect(ReelClipEnd.twiceThenHold.plays, 2);
+      expect(ReelClipEnd.nextCard.plays, 1);
+    });
+
+    test('next card moves on once the clip has played, and records it as watched to the end', () async {
+      final c = lean();
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.card?.id, 't1');
+      await playOut();
+      expect(c.current.card?.id, 't2');
+      expect(engine.calls, contains(clipOf('2')));
+      final events = await store.events(since: DateTime(2000));
+      expect(events.where((e) => e.titleId == 't1').map((e) => e.action), contains(ReelAction.toEnd.name));
+      c.dispose();
+    });
+
+    test('Lean back passes over AI cards, which have no end to move on from', () async {
+      final c = lean(servers: _SomeServers({'2', '3'}));
+      await c.start();
+      await pumpEventQueue();
+      await playOut();
+      expect(c.current.card?.id, 't4');
+      expect(c.current.clip, isNotNull);
+      c.dispose();
+    });
+
+    test('a key press still shows an AI card', () async {
+      final c = lean(servers: _SomeServers({'2'}));
+      await c.start();
+      await pumpEventQueue();
+      await c.step(1);
+      expect(c.current.card?.id, 't2');
+      expect(c.current.isAiCard, isTrue);
+      c.dispose();
+    });
+
+    test('after 30 minutes with no input it holds instead; input lets it roll on again', () async {
+      final c = lean();
+      await c.start();
+      await pumpEventQueue();
+      expect(c.mayRollOn, isTrue);
+      await playOut();
+      expect(c.current.card?.id, 't2');
+
+      // Cards moving on by themselves are not input.
+      now = now.add(ReelController.leanBackIdle);
+      expect(c.mayRollOn, isFalse);
+      await playOut();
+      expect(c.current.card?.id, 't2');
+      expect(c.clips.phase.value, ClipPhase.held);
+
+      c.noteInput();
+      expect(c.mayRollOn, isTrue);
+      await c.replay();
+      await playOut();
+      expect(c.current.card?.id, 't3');
+      c.dispose();
+    });
+
+    test('twice then hold never moves on by itself', () async {
+      final c = lean(end: ReelClipEnd.twiceThenHold);
+      await c.start();
+      await pumpEventQueue();
+      await playOut();
+      expect(c.clips.phase.value, ClipPhase.playing, reason: 'the second play');
+      engine.completedCtl.add(true);
+      await pumpEventQueue();
+      expect(c.clips.phase.value, ClipPhase.held);
+      expect(c.current.card?.id, 't1');
+      c.dispose();
+    });
+
+    test('the phone feed moves on itself: a held card never steps the controller', () async {
+      final c = make(externalClips: true, clipEnd: () => ReelClipEnd.nextCard, clock: () => now);
+      await c.start();
+      c.clipStarted('t1');
+      c.clipEnded();
+      await pumpEventQueue();
+      expect(c.current.card?.id, 't1');
       c.dispose();
     });
   });

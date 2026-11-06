@@ -20,6 +20,10 @@ abstract class FeedVideo implements Listenable {
   Duration get duration;
   bool get playing;
 
+  /// Played to its end with looping off, and holding its last frame (until
+  /// a seek or a play).
+  bool get completed;
+
   /// How far the clip is loaded from its start (the end of the furthest
   /// buffered range). On Android the plugin polls it once a second.
   Duration get buffered;
@@ -29,6 +33,9 @@ abstract class FeedVideo implements Listenable {
   Future<void> pause();
   Future<void> seekTo(Duration position);
   Future<void> setVolume(double volume);
+
+  /// Plays on from the start at the end (true) or stops on the last frame.
+  Future<void> setLooping(bool looping);
   Future<void> dispose();
 
   /// The picture.
@@ -63,6 +70,11 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
   Duration get duration => _c.value.duration;
   @override
   bool get playing => _c.value.isPlaying;
+
+  /// `video_player` 2.14.1 pauses on the `completed` event, seeks to the
+  /// duration (the last frame) and sets `isCompleted` until the next play.
+  @override
+  bool get completed => _c.value.isCompleted;
   @override
   Duration get buffered {
     var end = Duration.zero;
@@ -75,10 +87,8 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
   @override
   Future<void> initialize() async {
     try {
+      // Looping is set by the feed before each visit's first play (V2-47).
       await _c.initialize();
-      // Let go while it was opening (the feed doesn't wait for an open).
-      if (_disposed) return;
-      await _c.setLooping(true);
     } catch (e) {
       if (_disposed) return;
       _failed = true;
@@ -95,6 +105,13 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
   Future<void> seekTo(Duration position) => _c.seekTo(position);
   @override
   Future<void> setVolume(double volume) => _c.setVolume(volume);
+
+  @override
+  Future<void> setLooping(bool looping) async {
+    // Let go while it was opening (the feed doesn't wait for an open).
+    if (_disposed) return;
+    await _c.setLooping(looping);
+  }
 
   @override
   Future<void> dispose() async {
@@ -153,10 +170,11 @@ abstract final class FeedRamp {
 }
 
 /// What one card's page draws (V2-02): its player once it has a picture,
-/// whether it is the card on screen, and whether a tap paused it. Each page
+/// whether it is the card on screen, whether a tap paused it, and whether
+/// its clip played out and holds its last frame for Replay (V2-47). Each page
 /// listens to its own card ([ReelFeedPlayers.card]), so a player opening two
 /// cards away doesn't rebuild the page you are looking at.
-typedef FeedCardState = ({FeedVideo? video, bool current, bool paused});
+typedef FeedCardState = ({FeedVideo? video, bool current, bool paused, bool held});
 
 /// The phone feed's players, the TikTok way: the card on screen plays, and
 /// the cards around it (the previous one and the next two) are opened and
@@ -183,6 +201,13 @@ typedef FeedCardState = ({FeedVideo? video, bool current, bool paused});
 /// its visit is never played again by a re-sync: once it stops by itself
 /// (a call, another app's music) it stays stopped until tapped (or a screen
 /// switch re-syncs with `resume`), so it never takes the audio focus back.
+///
+/// When a clip ends (V2-47, D6): it plays as many times as [plays] says,
+/// looping without a gap (media3's repeat mode) until its last play, which
+/// runs with looping off so it stops on its last frame. The card then holds
+/// for Replay ([FeedCardState.held]) and [ended] fires; the feed moves on
+/// from there with Next card. A held card stays held through a re-sync or a
+/// screen switch, and plays from its start on the next visit.
 class ReelFeedPlayers extends ChangeNotifier {
   ReelFeedPlayers({
     FeedVideo Function(Uri uri)? create,
@@ -192,15 +217,30 @@ class ReelFeedPlayers extends ChangeNotifier {
     this.onLeft,
     this.keepAwake,
     this.riseOver = FeedRamp.over,
-  }) : _create = create ?? PluginFeedVideo.new;
+    int? Function()? plays,
+  }) : _create = create ?? PluginFeedVideo.new,
+       _plays = plays ?? _forever;
 
   final FeedVideo Function(Uri uri) _create;
+
+  static int? _forever() => null;
+
+  /// How many times a card's clip plays on a visit before it holds; null
+  /// loops it for good. Asked at each play-through, so a change to the
+  /// clip-end pref applies to the card on screen (V2-47).
+  final int? Function() _plays;
+
+  final StreamController<String> _ended = StreamController<String>.broadcast();
+
+  /// The card on screen played its last play and now holds (V2-47).
+  Stream<String> get ended => _ended.stream;
 
   /// How long a card takes to rise to full volume ([FeedRamp.over]); zero
   /// sets full volume at once, with no timer (widget tests).
   final Duration riseOver;
 
-  /// The card on screen played through once (it loops on).
+  /// The card on screen played through once (it loops on, or holds after
+  /// its last play).
   final void Function(String cardId)? onLooped;
 
   /// The card on screen is really playing: its position has moved since it
@@ -265,7 +305,12 @@ class ReelFeedPlayers extends ChangeNotifier {
 
   FeedCardState _stateOf(String cardId) {
     final current = cardId == _current;
-    return (video: videoFor(cardId), current: current, paused: current && _paused);
+    return (
+      video: videoFor(cardId),
+      current: current,
+      paused: current && _paused,
+      held: current && (_byId[cardId]?.held ?? false),
+    );
   }
 
   /// Brings the window in line: [window] in priority order, the card on
@@ -389,6 +434,11 @@ class ReelFeedPlayers extends ChangeNotifier {
           // ([FeedRamp]), so a swipe onto it plays without first waiting on
           // a volume change.
           await _volume(entry, _muted ? 0 : FeedRamp.from);
+          // Its looping for a first play, sent while parked so a swipe onto
+          // it has nothing to wait on (V2-47). Not awaited: the plugin's
+          // calls reach the player in the order they are made.
+          if (!_isLive(entry)) return;
+          unawaited(_loop(entry));
           notifyListeners();
           if (entry.id == _current) _advance();
         }(),
@@ -424,6 +474,9 @@ class ReelFeedPlayers extends ChangeNotifier {
   Future<void> _apply(_Entry e, {bool resume = false}) async {
     if (!_isLive(e) || !e.video.ready) return;
     if (e.id == _current && !_paused) {
+      // Played out this visit: it holds for Replay, even through a screen
+      // switch.
+      if (e.held) return;
       if (e.video.playing) return;
       // A start already on its way (the open and the sync both apply).
       if (e.starting case final s?) return s;
@@ -440,8 +493,21 @@ class ReelFeedPlayers extends ChangeNotifier {
   /// Plays the card on screen. The first play of a visit comes in quietly
   /// and rises to full (V2-19).
   Future<void> _start(_Entry e) async {
-    final rise = !e.voiced && !_muted;
+    final fresh = !e.voiced;
+    final rise = fresh && !_muted;
     e.voiced = true;
+    if (fresh) {
+      // A new visit counts its plays afresh, and a card left holding from
+      // an earlier one starts from the top.
+      e.plays = 0;
+      if (e.held) {
+        e.held = false;
+        await e.video.seekTo(Duration.zero);
+        if (!_isLive(e)) return;
+      }
+      await _loop(e);
+      if (!_isLive(e)) return;
+    }
     if (rise) await _volume(e, FeedRamp.from);
     if (!_isLive(e)) return;
     await e.video.play();
@@ -454,10 +520,23 @@ class ReelFeedPlayers extends ChangeNotifier {
     e.last = Duration.zero;
     e.started = false;
     e.voiced = false;
+    e.plays = 0;
+    e.held = false;
+    e.ended = false;
     e.ramp?.cancel();
     if (!e.video.ready || !e.video.playing) return;
     await _volume(e, 0);
     await e.video.pause();
+  }
+
+  /// Loops [e] while it has more than this play left ([plays]), so its last
+  /// play stops on the final frame; skips a call that would change nothing.
+  Future<void> _loop(_Entry e) async {
+    final plays = _plays();
+    final on = plays == null || e.plays + 1 < plays;
+    if (e.looping == on) return;
+    e.looping = on;
+    await e.video.setLooping(on);
   }
 
   /// Sets [e]'s volume, skipping a call that would change nothing.
@@ -506,7 +585,8 @@ class ReelFeedPlayers extends ChangeNotifier {
     }
   }
 
-  /// A looping clip's position jumps back to the start: one play-through.
+  /// One play-through: a looping clip's position jumps back to the start,
+  /// or a clip on its last play stops at its end (V2-47).
   void _watchLoop(_Entry e) {
     if (e.id != _current) return;
     _advance();
@@ -515,14 +595,66 @@ class ReelFeedPlayers extends ChangeNotifier {
       e.failedTold = true;
       return;
     }
+    // Stopped at its end (the plugin pauses on it): told once per end.
+    if (e.video.completed && !e.video.playing) {
+      if (e.started && !e.ended && _isLive(e)) {
+        e.ended = true;
+        _completed(e);
+      }
+      return;
+    }
+    e.ended = false;
     if (!e.video.playing) return;
     final pos = e.video.position;
     if (!e.started && pos > Duration.zero) {
       e.started = true;
       onStarted?.call(e.id);
     }
-    if (pos + const Duration(seconds: 1) < e.last && e.last > const Duration(seconds: 3)) onLooped?.call(e.id);
+    if (pos + const Duration(seconds: 1) < e.last && e.last > const Duration(seconds: 3)) {
+      e.plays++;
+      onLooped?.call(e.id);
+      // The next play is the last: it stops on the final frame.
+      unawaited(_loop(e));
+    }
     e.last = pos;
+  }
+
+  /// The card on screen stopped at its end. With plays left (the pref went
+  /// to Loop, or to more plays, mid-clip) it plays on from the start;
+  /// otherwise it holds its last frame for Replay.
+  void _completed(_Entry e) {
+    e.plays++;
+    e.last = Duration.zero;
+    onLooped?.call(e.id);
+    final plays = _plays();
+    if (plays == null || e.plays < plays) {
+      unawaited(() async {
+        await _loop(e);
+        if (_isLive(e) && e.id == _current && !_paused) await e.video.play();
+      }());
+      return;
+    }
+    e.held = true;
+    unawaited(_syncAwake());
+    notifyListeners();
+    if (!_ended.isClosed) _ended.add(e.id);
+  }
+
+  /// Replay on a held card (V2-47): its plays start again from the top.
+  Future<void> replay() async {
+    final e = _byId[_current];
+    if (e == null || !e.video.ready || !_isLive(e)) return;
+    e.held = false;
+    e.plays = 0;
+    e.last = Duration.zero;
+    _paused = false;
+    await _loop(e);
+    if (!_isLive(e)) return;
+    await e.video.seekTo(Duration.zero);
+    if (!_isLive(e) || e.id != _current) return;
+    await e.video.play();
+    unawaited(_syncAwake());
+    notifyListeners();
   }
 
   /// Lets [id]'s player go at once, without waiting for its open (V2-06): a
@@ -539,9 +671,11 @@ class ReelFeedPlayers extends ChangeNotifier {
     }
   }
 
+  /// A tap: pauses or plays the card on screen; on a held card, replays.
   Future<void> togglePause() async {
     final e = _byId[_current];
     if (e == null || !e.video.ready) return;
+    if (e.held) return replay();
     _paused = !_paused;
     unawaited(_syncAwake());
     _paused ? await e.video.pause() : await e.video.play();
@@ -616,6 +750,7 @@ class ReelFeedPlayers extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_ended.close());
     unawaited(releaseAll());
     for (final n in _cards.values) {
       n.dispose();
@@ -667,6 +802,17 @@ class _Entry {
 
   /// The volume last set on the player; null before the first.
   double? volume;
+
+  /// Looping as last set on the player; null before the first.
+  bool? looping;
+
+  /// Play-throughs this visit, and whether the last one ended and the card
+  /// now holds its final frame (V2-47).
+  int plays = 0;
+  bool held = false;
+
+  /// The end the player is stopped at was already counted.
+  bool ended = false;
 
   /// A play of the card on screen on its way.
   Future<void>? starting;

@@ -33,6 +33,16 @@ typedef ReelWatchlist = Future<bool> Function(MediaItem item);
 
 enum ReelSlotKind { card, poolEnd, empty, loading }
 
+/// How many times a clip plays before it holds (V2-47, D6): null loops it for
+/// good. Next card plays it once; the feed or Lean back then moves on.
+extension ReelClipEndPlays on ReelClipEnd {
+  int? get plays => switch (this) {
+    ReelClipEnd.loop => null,
+    ReelClipEnd.twiceThenHold => 2,
+    ReelClipEnd.nextCard => 1,
+  };
+}
+
 /// A card as the views draw it.
 class ReelSlot {
   const ReelSlot._(this.kind, {this.card, this.item, this.clip, this.resolved = false});
@@ -70,8 +80,10 @@ class ReelController extends ChangeNotifier {
     this.onOpen,
     this.externalClips = false,
     this.memoryRestored,
+    ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now {
+  }) : _clock = clock ?? DateTime.now,
+       _clipEnd = clipEnd ?? clipEndPref {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
     ReelStore.picksChanged.addListener(_onPicksChanged);
@@ -136,6 +148,35 @@ class ReelController extends ChangeNotifier {
   }
 
   final DateTime Function() _clock;
+
+  /// The clip-end pref, read when a clip ends so a change applies at once.
+  final ReelClipEnd Function() _clipEnd;
+
+  /// What a clip does when it ends (V2-47): the device's pref.
+  ReelClipEnd get clipEnd => _clipEnd();
+
+  /// The device's clip-end pref ([SettingsService.reelClipEnd]).
+  static ReelClipEnd clipEndPref() =>
+      SettingsService.instanceOrNull?.read(SettingsService.reelClipEnd) ?? ReelClipEnd.twiceThenHold;
+
+  /// Lean back (V2-47) stops moving on after this long with no real input,
+  /// so a Reel left playing to an empty room holds its card and lets the
+  /// screen sleep.
+  static const leanBackIdle = Duration(minutes: 30);
+
+  /// The last real input: a key, a touch, a command from the phone, or the
+  /// Reel opening. A card moving on by itself is not input.
+  DateTime? _lastInput;
+
+  /// The view saw real input ([leanBackIdle]).
+  void noteInput() => _lastInput = _clock();
+
+  /// Whether Next card may still move on by itself: there was real input in
+  /// the last [leanBackIdle].
+  bool get mayRollOn {
+    final at = _lastInput;
+    return at != null && _clock().difference(at) < leanBackIdle;
+  }
 
   int _deck = 0;
   final Map<String, List<ReelCardData>> _cards = {};
@@ -212,6 +253,8 @@ class ReelController extends ChangeNotifier {
   /// Opens the Reel (or comes back to it): loads the deck and plays.
   Future<void> start({String? deckId}) async {
     _active = true;
+    // Opening the Reel (or coming back to it) is someone there.
+    noteInput();
     // The picks are synced: the other device may have saved since.
     unawaited(_loadSaved());
     // The degrade ladder carries over: coming back from Watch or another tab
@@ -331,7 +374,10 @@ class ReelController extends ChangeNotifier {
   /// the cursor on from where the last left it, and only the card the
   /// cursor lands on is resolved and opened. Cards passed over were never on
   /// screen, so they record nothing.
-  Future<void> step(int dir) async {
+  ///
+  /// [skipAi] passes over every AI card (Lean back, V2-47): a still has no
+  /// end to move on from, so the channel would stop on it.
+  Future<void> step(int dir, {bool skipAi = false}) async {
     final list = cards;
     if (list == null) return;
     final to = (index + dir).clamp(0, list.length);
@@ -342,7 +388,7 @@ class ReelController extends ChangeNotifier {
     // A later step moved the cursor on while this one was leaving: that
     // step shows the card it lands on.
     if (gen != _generation) return;
-    await _show(direction: dir);
+    await _show(direction: dir, skipAi: skipAi);
   }
 
   /// Next / previous deck (wraps), with the deck strip.
@@ -399,7 +445,7 @@ class ReelController extends ChangeNotifier {
     }
   }();
 
-  Future<void> _show({int direction = 1}) async {
+  Future<void> _show({int direction = 1, bool skipAi = false}) async {
     if (_disposed) return;
     final gen = ++_generation;
     notifyListeners();
@@ -412,15 +458,15 @@ class ReelController extends ChangeNotifier {
     final c = list[index];
     await _resolve(c);
     if (gen != _generation || !_active) return;
-    // An AI card only with room (at most 1 in 6); otherwise the title waits
-    // for another day and the feed moves on.
+    // An AI card only with room (at most 1 in 6), and never in Lean back;
+    // otherwise the title waits for another day and the feed moves on.
     if (!externalClips &&
         _clip[c.id] == null &&
-        _sinceAiCard < 6 &&
+        (skipAi || _sinceAiCard < 6) &&
         index + direction >= 0 &&
         index + direction <= list.length) {
       _cursor[deck.id] = index + (direction == 0 ? 1 : direction);
-      return _show(direction: direction == 0 ? 1 : direction);
+      return _show(direction: direction == 0 ? 1 : direction, skipAi: skipAi);
     }
     final clip = _clip[c.id];
     _cardShown = c.id;
@@ -467,6 +513,9 @@ class ReelController extends ChangeNotifier {
 
   /// TV: the clock starts on this card's first frame (the core moves from
   /// loading to playing only then; a resume from pause doesn't count).
+  /// With Next card (Lean back, V2-47), a clip that played out moves on to
+  /// the next card with a clip, until [leanBackIdle] passes with no input;
+  /// then it holds with Replay like Twice then hold.
   void _onPhase() {
     final now = clips.phase.value, was = _lastPhase;
     _lastPhase = now;
@@ -476,6 +525,8 @@ class ReelController extends ChangeNotifier {
       _cardFailed = true;
     } else if (was == ClipPhase.loading && now == ClipPhase.playing && _cardSince == null && !_cardFailed) {
       _cardSince = _clock();
+    } else if (now == ClipPhase.held && was != ClipPhase.held && _active) {
+      if (clipEnd == ReelClipEnd.nextCard && mayRollOn) unawaited(step(1, skipAi: true));
     }
   }
 

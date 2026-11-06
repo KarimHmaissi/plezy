@@ -122,6 +122,13 @@ enum ReelFeedLayout {
 /// itself and comes back out when it is turned upright again (unless the
 /// controls were asked back in between). The picture glides between its
 /// placeholder shape and the clip's own instead of snapping.
+///
+/// When a clip ends (V2-47, D6): the players play it as often as the
+/// clip-end pref says, then the card holds its last frame with Replay, in
+/// the TV's button style. With Next card the feed moves on to the next card
+/// with a clip instead, sliding as a swipe would, until
+/// [ReelController.leanBackIdle] passes with no touch; then it holds too,
+/// so the screen can sleep.
 class ReelFeedView extends StatefulWidget {
   const ReelFeedView({
     super.key,
@@ -199,6 +206,11 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   /// Counts bursts, so each one grows in afresh.
   int _bursts = 0;
 
+  /// The feed is moving on by itself from a card that played out (V2-47):
+  /// the outgoing card doesn't show Replay as it slides away.
+  bool _rolling = false;
+  StreamSubscription<String>? _ended;
+
   ReelController get _c => widget.controller;
 
   @override
@@ -206,6 +218,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     super.initState();
     _deck = _c.deck.id;
     _c.addListener(_onController);
+    _ended = widget.players.ended.listen(_onEnded);
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
@@ -247,12 +260,17 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       old.controller.removeListener(_onController);
       widget.controller.addListener(_onController);
     }
+    if (!identical(old.players, widget.players)) {
+      unawaited(_ended?.cancel());
+      _ended = widget.players.ended.listen(_onEnded);
+    }
     if (old.metered != widget.metered) _sync();
   }
 
   @override
   void dispose() {
     _c.removeListener(_onController);
+    unawaited(_ended?.cancel());
     _pages.dispose();
     _showBars();
     if (_immersive) widget.onImmersive?.call(false);
@@ -324,6 +342,31 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     }
   }
 
+  /// The card on screen played out (V2-47). With Next card the feed moves
+  /// on to the next card that isn't an AI card (a still has no end to move
+  /// on from), or to the deck's end; the step commits on the settle, as for
+  /// a swipe. It stays held for Replay under a finger, with any other
+  /// clip-end pref, or once [ReelController.leanBackIdle] has passed with
+  /// no touch.
+  void _onEnded(String cardId) {
+    if (!mounted || !_c.active || _c.clipEnd != ReelClipEnd.nextCard || !_c.mayRollOn) return;
+    if (_c.slotAt(_page).card?.id != cardId) return;
+    if (!_pages.hasClients || _pages.position.isScrollingNotifier.value) return;
+    var to = _page + 1;
+    while (_c.slotAt(to).isAiCard) {
+      to++;
+    }
+    setState(() => _rolling = true);
+    _goTo(to);
+  }
+
+  /// Replay on a held card (V2-47): the players start it again and the
+  /// controller records the replay.
+  void _replay() {
+    unawaited(widget.players.replay());
+    unawaited(_c.replay());
+  }
+
   /// Past the middle of a swipe: the incoming card plays and the window
   /// moves with it; the controller hears of it when the page settles.
   void _onPageChanged(int page) {
@@ -341,6 +384,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     // Caught mid-flight by a finger: the release ends somewhere else.
     if ((page - at).abs() > 0.01) return false;
     _page = at;
+    if (_rolling) setState(() => _rolling = false);
     if (at != _c.index) unawaited(_c.step(at - _c.index));
     unawaited(widget.players.settle());
     return false;
@@ -444,18 +488,23 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     return PopScope<Object?>(
       canPop: !_immersive,
       onPopInvokedWithResult: _onPop,
-      child: ColoredBox(
-        color: Colors.black,
-        child: LayoutBuilder(
-          builder: (context, box) {
-            final layout = ReelFeedLayout.of(box.biggest);
-            if (layout != _layout) {
-              _layout = layout;
-              // After this frame: going immersive tells the shell.
-              WidgetsBinding.instance.addPostFrameCallback((_) => _followLayout());
-            }
-            return _stack(count);
-          },
+      // Any touch is someone there: Next card's idle stop counts from it
+      // (V2-47). A card moving on by itself is not a touch.
+      child: Listener(
+        onPointerDown: (_) => _c.noteInput(),
+        child: ColoredBox(
+          color: Colors.black,
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final layout = ReelFeedLayout.of(box.biggest);
+              if (layout != _layout) {
+                _layout = layout;
+                // After this frame: going immersive tells the shell.
+                WidgetsBinding.instance.addPostFrameCallback((_) => _followLayout());
+              }
+              return _stack(count);
+            },
+          ),
         ),
       ),
     );
@@ -579,13 +628,16 @@ class _ReelFeedViewState extends State<ReelFeedView> {
           final isCurrent = state.current;
           final glide = _motion(context, const Duration(milliseconds: 280));
           final backdrop = _Backdrop(slot: slot, dim: _immersive ? _immersiveDim(context) : 0.55);
+          final held = state.held && !_rolling;
           final picture = RepaintBoundary(
-            child: _Picture(slot: slot, video: video, paused: state.paused),
+            child: _Picture(slot: slot, video: video, paused: state.paused, held: held, onReplay: _replay),
           );
           Widget tappable(Widget child) => GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: isCurrent ? () => unawaited(widget.players.togglePause()) : null,
-            onDoubleTap: isCurrent ? _save : null,
+            onTap: isCurrent ? (state.held ? _replay : () => unawaited(widget.players.togglePause())) : null,
+            // Held (V2-47): no double-tap, so Replay and a tap on the
+            // picture answer at once instead of waiting out its window.
+            onDoubleTap: isCurrent && !state.held ? _save : null,
             onLongPress: isCurrent ? widget.onSheet : null,
             child: child,
           );
@@ -798,12 +850,23 @@ class _Backdrop extends StatelessWidget {
 /// The frame starts 16:9 and glides to the clip's own shape once it opens
 /// (V2-30), on the app's slow token and emphasized curve; with reduce motion
 /// on, or on the reduced effects tier, it takes the new shape at once.
+///
+/// A clip that played out holds its last frame with Replay over it (V2-47),
+/// the TV's filled Replay button.
 class _Picture extends StatelessWidget {
-  const _Picture({required this.slot, required this.video, required this.paused});
+  const _Picture({
+    required this.slot,
+    required this.video,
+    required this.paused,
+    required this.held,
+    required this.onReplay,
+  });
 
   final ReelSlot slot;
   final FeedVideo? video;
   final bool paused;
+  final bool held;
+  final VoidCallback onReplay;
 
   @override
   Widget build(BuildContext context) {
@@ -850,6 +913,20 @@ class _Picture extends StatelessWidget {
                     size: 44,
                     color: Theme.of(context).colorScheme.onSurface,
                   ),
+                ),
+              ),
+            ),
+          ),
+          AnimatedOpacity(
+            opacity: held ? 1 : 0,
+            duration: _motion(context, const Duration(milliseconds: 150)),
+            child: IgnorePointer(
+              ignoring: !held,
+              child: Center(
+                child: FilledButton.icon(
+                  onPressed: onReplay,
+                  icon: const Icon(Symbols.replay_rounded),
+                  label: const Text('Replay'),
                 ),
               ),
             ),

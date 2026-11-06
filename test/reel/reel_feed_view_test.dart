@@ -32,15 +32,21 @@ import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
 class _Servers implements ReelServers {
+  _Servers([this.none = const {}]);
+
+  /// Cards with no trailer: they resolve to AI cards.
+  final Set<String> none;
+
   @override
   Future<List<PlexExtraClip>> extras(String serverId, String ratingKey, {required Duration timeout}) async => [
-    PlexExtraClip(
-      ratingKey: 'x$ratingKey',
-      title: 'Trailer',
-      partKey: '/iva/$ratingKey.mp4',
-      subtype: 'trailer',
-      index: 0,
-    ),
+    if (!none.contains(ratingKey))
+      PlexExtraClip(
+        ratingKey: 'x$ratingKey',
+        title: 'Trailer',
+        partKey: '/iva/$ratingKey.mp4',
+        subtype: 'trailer',
+        index: 0,
+      ),
   ];
 
   @override
@@ -140,18 +146,40 @@ class _Video extends ChangeNotifier implements FeedVideo {
   @override
   Future<void> initialize() async => _ready = true;
   @override
-  Future<void> play() async => _playing = true;
+  Future<void> play() async {
+    // As the plugin does: a play from the end starts at the top.
+    if (completed) at = Duration.zero;
+    completed = false;
+    _playing = true;
+  }
+
   @override
   Future<void> pause() async => _playing = false;
   @override
   Future<void> seekTo(Duration position) async {
     seeks++;
     at = position;
+    completed = position == duration;
   }
 
   /// The plugin's position poll.
   void tick(Duration to) {
     at = to;
+    notifyListeners();
+  }
+
+  @override
+  bool completed = false;
+  bool? looping;
+  @override
+  Future<void> setLooping(bool on) async => looping = on;
+
+  /// The clip reaches its end with looping off: the plugin pauses on the
+  /// last frame.
+  void end() {
+    _playing = false;
+    at = duration;
+    completed = true;
     notifyListeners();
   }
 
@@ -178,6 +206,12 @@ void main() {
   late ValueNotifier<int> restored;
   late _Deck first;
 
+  /// The clip-end pref (V2-47), how far the clock has run on, and the
+  /// cards with no trailer.
+  late ReelClipEnd clipEnd;
+  late Duration skew;
+  late Set<String> noClip;
+
   setUp(() {
     db = ForkDatabase.memory();
     final settings = LocalCustomisationStore(db);
@@ -186,13 +220,16 @@ void main() {
     decksOpened = watched = sheets = resized = 0;
     immersiveReports = [];
     restored = ValueNotifier(0);
+    clipEnd = ReelClipEnd.twiceThenHold;
+    skew = Duration.zero;
+    noClip = {};
     c = ReelController(
       decks: [
         first = _Deck('a', ['1', '2', '3', '4']),
         _Deck('b', ['9']),
       ],
       resolver: ClipResolver(
-        servers: _Servers(),
+        servers: _Servers(noClip),
         store: store,
         aniList: (_) async => null,
         animeThemes: (_) async => const {},
@@ -205,6 +242,8 @@ void main() {
       externalClips: true,
       memoryRestored: restored,
       onOpen: (item) async => opened.add(item),
+      clipEnd: () => clipEnd,
+      clock: () => DateTime.now().add(skew),
     );
     videos = {};
     ratios = {};
@@ -216,6 +255,7 @@ void main() {
       // Full volume at once: the rise (V2-19) is covered in
       // feed_players_test.dart and would leave a timer behind here.
       riseOver: Duration.zero,
+      plays: () => clipEnd.plays,
     );
   });
 
@@ -1326,6 +1366,113 @@ void main() {
       final bar = tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
       final context = tester.element(find.byType(LinearProgressIndicator));
       expect(bar.backgroundColor, Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12));
+    });
+  });
+  group('when a clip ends (V2-47)', () {
+    Finder replay() => find.widgetWithText(FilledButton, 'Replay');
+
+    /// Some page shows Replay: its own fade is in and nothing above it
+    /// ignores taps (the pages either side carry a hidden one).
+    bool replayShown(WidgetTester tester) {
+      for (final e in replay().evaluate()) {
+        final b = find.byElementPredicate((x) => x == e);
+        final fade = tester.widget<AnimatedOpacity>(find.ancestor(of: b, matching: find.byType(AnimatedOpacity)).first);
+        final blocked = tester
+            .widgetList<IgnorePointer>(find.ancestor(of: b, matching: find.byType(IgnorePointer)))
+            .any((w) => w.ignoring);
+        if (fade.opacity == 1 && !blocked) return true;
+      }
+      return false;
+    }
+
+    /// The card's clip plays a little, then reaches its end.
+    Future<void> playOut(WidgetTester tester, String id) async {
+      videos[id]!
+        ..tick(const Duration(seconds: 5))
+        ..end();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+
+    testWidgets('twice then hold: the second play holds its last frame with Replay', (tester) async {
+      await pump(tester);
+      final v = videos['1']!;
+      expect(v.looping, isTrue, reason: 'the first play loops into the second');
+      expect(replayShown(tester), isFalse);
+      v
+        ..tick(const Duration(seconds: 5))
+        ..tick(const Duration(seconds: 55))
+        ..tick(const Duration(milliseconds: 200));
+      await tester.pump();
+      expect(v.looping, isFalse, reason: 'the last play stops on its final frame');
+      await playOut(tester, '1');
+      expect(players.current, 't1', reason: 'it holds rather than moving on');
+      expect(v.playing, isFalse);
+      expect(replayShown(tester), isTrue);
+
+      await tester.tap(replay());
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(v.playing, isTrue);
+      expect(v.position, Duration.zero);
+      expect(replayShown(tester), isFalse);
+      final events = await tester.runAsync(() => store.events(since: DateTime(2000)));
+      expect(events!.map((e) => e.action), contains(ReelAction.replay.name));
+    });
+
+    testWidgets('a tap on the held picture replays it too', (tester) async {
+      clipEnd = ReelClipEnd.nextCard;
+      // Long idle: next card holds instead of moving on.
+      await pump(tester);
+      skew = ReelController.leanBackIdle;
+      await playOut(tester, '1');
+      expect(players.current, 't1');
+      expect(replayShown(tester), isTrue);
+      await tester.tapAt(tester.getCenter(find.byType(PageView)) - const Offset(0, 140));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(videos['1']!.playing, isTrue);
+      expect(replayShown(tester), isFalse);
+    });
+
+    testWidgets('next card slides on to the next card once the clip has played', (tester) async {
+      clipEnd = ReelClipEnd.nextCard;
+      await pump(tester);
+      expect(videos['1']!.looping, isFalse, reason: 'one play, ending on its last frame');
+      await playOut(tester, '1');
+      expect(players.current, 't2');
+      expect(c.index, 1, reason: 'the step commits on the settle');
+      expect(videos['2']!.playing, isTrue);
+    });
+
+    testWidgets('next card passes over an AI card', (tester) async {
+      clipEnd = ReelClipEnd.nextCard;
+      noClip.add('2');
+      await pump(tester);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      expect(c.slotAt(1).isAiCard, isTrue);
+      await playOut(tester, '1');
+      expect(players.current, 't3');
+      expect(c.index, 2);
+    });
+
+    testWidgets('after 30 minutes with no touch it holds; a touch lets it move on again', (tester) async {
+      clipEnd = ReelClipEnd.nextCard;
+      await pump(tester);
+      skew = ReelController.leanBackIdle;
+      await playOut(tester, '1');
+      expect(players.current, 't1');
+      expect(replayShown(tester), isTrue);
+
+      // Any touch is someone there; Replay plays it again.
+      await tester.tap(replay());
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(c.mayRollOn, isTrue);
+      await playOut(tester, '1');
+      expect(players.current, 't2');
     });
   });
 }

@@ -137,6 +137,47 @@ void main() {
     });
   });
 
+  group('the clip-end pref sets the plays (V2-47)', () {
+    test('loop plays on for good and never holds', () async {
+      clips = ClipPlayer(engine: () => engine, plays: () => null);
+      await clips.play(_a);
+      engine.firstFrameCtl.add(null);
+      for (var i = 0; i < 4; i++) {
+        engine.completedCtl.add(true);
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(clips.phase.value, ClipPhase.playing);
+      expect(engine.calls, isNot(contains('pause')));
+      expect(clips.playedLoops, 4);
+    });
+
+    test('next card holds after one play', () async {
+      clips = ClipPlayer(engine: () => engine, plays: () => 1);
+      await clips.play(_a);
+      engine.firstFrameCtl.add(null);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.calls.last, 'pause');
+      expect(clips.phase.value, ClipPhase.held);
+    });
+
+    test('the pref is read at each end, so a change applies to the clip playing', () async {
+      int? plays = 2;
+      clips = ClipPlayer(engine: () => engine, plays: () => plays);
+      await clips.play(_a);
+      engine.firstFrameCtl.add(null);
+      plays = null;
+      engine.completedCtl.add(true);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(clips.phase.value, ClipPhase.playing);
+      plays = 1;
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(clips.phase.value, ClipPhase.held);
+    });
+  });
+
   test('preloads the next card on the same core, or clears it', () async {
     await clips.preload(_b);
     await clips.preload(null);

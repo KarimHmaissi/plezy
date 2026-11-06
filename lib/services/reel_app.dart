@@ -107,7 +107,8 @@ abstract final class ReelApp {
     final controller = ReelController(
       decks: decks,
       resolver: resolver,
-      clips: ClipPlayer(),
+      // V2-47: the TV's clip plays as often as the clip-end pref says.
+      clips: ClipPlayer(plays: () => ReelController.clipEndPref().plays),
       store: store,
       media: media,
       onWatch: (item, {required onTv}) async {

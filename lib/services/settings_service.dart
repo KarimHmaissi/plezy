@@ -787,8 +787,8 @@ class SettingsService extends BaseSharedPreferencesService {
     defaultValue: ReelStartSound.sound,
   );
 
-  /// What a clip does when it ends (D6). Today the TV plays twice then holds,
-  /// the approved default for both devices; the phone loops until V2-47.
+  /// What a clip does when it ends (D6, V2-47): twice then hold on both
+  /// devices; Loop and Next card (Lean back on the TV) as options.
   static const reelClipEnd = EnumPref<ReelClipEnd>(
     'reel_clip_end',
     values: ReelClipEnd.values,

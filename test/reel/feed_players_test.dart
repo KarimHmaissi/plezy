@@ -50,7 +50,25 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
   @override
   Future<void> play() async {
     calls.add('play');
+    // As the plugin does: a play from the end starts at the top.
+    if (completed) _position = Duration.zero;
+    completed = false;
     _playing = true;
+  }
+
+  @override
+  bool completed = false;
+
+  @override
+  Future<void> setLooping(bool looping) async => calls.add('loop $looping');
+
+  /// The clip reaches its end with looping off: the plugin pauses on the
+  /// last frame.
+  void end() {
+    _playing = false;
+    _position = duration;
+    completed = true;
+    notifyListeners();
   }
 
   @override
@@ -63,6 +81,7 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
   Future<void> seekTo(Duration position) async {
     calls.add('seek ${position.inSeconds}');
     _position = position;
+    completed = position == duration;
   }
 
   @override
@@ -512,6 +531,8 @@ void main() {
         expect(a.calls.sublist(a.calls.indexOf('init')), [
           'init',
           'volume 0.3',
+          // Loop mode for the visit (V2-47), set before the first play.
+          'loop true',
           'play',
         ], reason: 'quiet before the first sound');
 
@@ -754,6 +775,181 @@ void main() {
       expect(awake, [true, false]);
       // tearDown disposes again; make that a no-op.
       p = ReelFeedPlayers(create: _FakeVideo.new);
+    });
+  });
+  group('when a clip ends (V2-47)', () {
+    late ReelFeedPlayers q;
+    late Map<String, _FakeVideo> vids;
+    late List<String> plays, ended;
+    late List<bool> awake;
+    int? times;
+
+    ReelFeedPlayers make() => ReelFeedPlayers(
+      create: (uri) {
+        final id = uri.pathSegments.last.split('.').first;
+        return vids[id] = _FakeVideo(uri);
+      },
+      plays: () => times,
+      onLooped: plays.add,
+      keepAwake: (on) async => awake.add(on),
+      riseOver: Duration.zero,
+    );
+
+    setUp(() {
+      vids = {};
+      plays = [];
+      ended = [];
+      awake = [];
+      times = 2;
+      q = make();
+      q.ended.listen(ended.add);
+    });
+
+    tearDown(() => q.dispose());
+
+    /// Plays [v] from the top through to a gapless loop back to the start.
+    void playThrough(_FakeVideo v) {
+      v
+        ..tick(const Duration(seconds: 5))
+        ..tick(const Duration(seconds: 85))
+        ..tick(const Duration(milliseconds: 200));
+    }
+
+    test('twice then hold: loops once without a gap, then holds the last frame for Replay', () async {
+      q.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      final a = vids['a']!;
+      expect(a.calls, containsAllInOrder(['loop true', 'play']), reason: 'the first play loops into the second');
+
+      playThrough(a);
+      await _settle();
+      expect(plays, ['a']);
+      expect(a.calls.last, 'loop false', reason: 'the second play stops on its last frame');
+      expect(q.card('a').value.held, isFalse);
+
+      a
+        ..tick(const Duration(seconds: 40))
+        ..end();
+      await _settle();
+      expect(plays, ['a', 'a']);
+      expect(ended, ['a']);
+      expect(q.card('a').value.held, isTrue);
+      expect(a.playing, isFalse);
+      expect(awake.last, isFalse, reason: 'a held card lets the screen sleep');
+
+      // Further position polls on the held frame count nothing more.
+      a.tick(a.duration);
+      a.end();
+      await _settle();
+      expect(ended, ['a']);
+
+      // A screen switch re-syncs with resume: it stays held.
+      q.sync(current: 'a', window: _win('a', ['b']), resume: true);
+      await _settle();
+      expect(a.playing, isFalse);
+      expect(q.card('a').value.held, isTrue);
+      expect(vids['b']!.playing, isFalse);
+    });
+
+    test('Replay, or a tap on the held card, plays it again from the top with its plays afresh', () async {
+      q.sync(current: 'a', window: _win('a'));
+      await _settle();
+      final a = vids['a']!;
+      playThrough(a);
+      a.end();
+      await _settle();
+      expect(q.card('a').value.held, isTrue);
+
+      await q.togglePause();
+      await _settle();
+      expect(q.card('a').value.held, isFalse);
+      expect(q.paused, isFalse);
+      expect(a.playing, isTrue);
+      expect(a.position, Duration.zero);
+      expect(_since(a, 'loop true'), ['loop true', 'seek 0', 'play'], reason: 'two plays again');
+      expect(awake.last, isTrue);
+
+      playThrough(a);
+      a.end();
+      await _settle();
+      expect(ended, ['a', 'a']);
+
+      await q.replay();
+      expect(a.playing, isTrue);
+    });
+
+    test('loop plays on for good', () async {
+      times = null;
+      q.sync(current: 'a', window: _win('a'));
+      await _settle();
+      final a = vids['a']!;
+      for (var i = 0; i < 3; i++) {
+        playThrough(a);
+      }
+      await _settle();
+      expect(plays, ['a', 'a', 'a']);
+      expect(a.calls.where((c) => c.startsWith('loop')), ['loop true']);
+      expect(ended, isEmpty);
+      expect(a.playing, isTrue);
+    });
+
+    test('next card plays once and tells the feed', () async {
+      times = 1;
+      q.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      final a = vids['a']!;
+      expect(a.calls, containsAllInOrder(['loop false', 'play']));
+      a
+        ..tick(const Duration(seconds: 5))
+        ..end();
+      await _settle();
+      expect(plays, ['a']);
+      expect(ended, ['a']);
+      expect(q.card('a').value.held, isTrue);
+    });
+
+    test('a pref changed to loop mid-clip plays on at the end instead of holding', () async {
+      q.sync(current: 'a', window: _win('a'));
+      await _settle();
+      final a = vids['a']!;
+      playThrough(a);
+      await _settle();
+      times = null;
+      a.end();
+      await _settle();
+      expect(ended, isEmpty);
+      expect(q.card('a').value.held, isFalse);
+      expect(a.playing, isTrue);
+      expect(a.calls.sublist(a.calls.length - 2), ['loop true', 'play']);
+    });
+
+    test('a card that held is played from the top on the next visit', () async {
+      q.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      final a = vids['a']!;
+      playThrough(a);
+      a.end();
+      await _settle();
+      expect(q.card('a').value.held, isTrue);
+
+      q.sync(current: 'b', window: _win('b', [], 'a'));
+      await _settle();
+      await q.settle();
+      expect(q.card('a').value.held, isFalse);
+      q.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      expect(a.playing, isTrue);
+      expect(a.position, Duration.zero);
+      expect(_since(a, 'loop true'), contains('play'), reason: 'looping set again for a new visit');
+    });
+
+    test('a parked card that reaches its end tells nothing', () async {
+      q.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      vids['b']!.end();
+      await _settle();
+      expect(ended, isEmpty);
+      expect(plays, isEmpty);
     });
   });
 }
