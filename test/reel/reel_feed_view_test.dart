@@ -142,6 +142,8 @@ class _Video extends ChangeNotifier implements FeedVideo {
   @override
   bool get playing => _playing;
   @override
+  bool get buffering => false;
+  @override
   Duration get buffered => _ready ? duration : Duration.zero;
   @override
   Future<void> initialize() async => _ready = true;

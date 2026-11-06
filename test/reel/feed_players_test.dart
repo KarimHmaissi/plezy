@@ -38,6 +38,8 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
   @override
   bool get playing => _playing;
   @override
+  bool buffering = false;
+  @override
   Duration get buffered => _ready ? (loaded ?? duration) : Duration.zero;
 
   @override
@@ -95,6 +97,14 @@ class _FakeVideo extends ChangeNotifier implements FeedVideo {
   /// The system stops or restarts it (audio focus lost or given back).
   void systemPlaying(bool playing) {
     _playing = playing;
+    notifyListeners();
+  }
+
+  /// A stall mid-play: the plugin reports it as buffering and not playing
+  /// until data comes ([stall] false).
+  void stall(bool stalled) {
+    buffering = stalled;
+    _playing = !stalled;
     notifyListeners();
   }
 
@@ -219,6 +229,22 @@ void main() {
     await players.settle();
     expect(made['a']!.position, const Duration(seconds: 12));
     expect(made['b']!.position, Duration.zero, reason: 'the card that peeked in starts from the top next time');
+  });
+
+  test('a swipe back onto a card while the settle parks it never rewinds it on screen', () async {
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
+    await _settle();
+    players.sync(current: 'b', window: _win('b', ['c', 'd'], 'a'));
+    await _settle();
+    made['a']!.tick(const Duration(seconds: 12));
+    // The page rests on b; before the settle has parked a, a fast swipe
+    // brings a back past the middle.
+    final settling = players.settle();
+    players.sync(current: 'a', window: _win('a', ['b', 'c']));
+    await settling;
+    await _settle();
+    expect(made['a']!.position, const Duration(seconds: 12), reason: 'on screen again: no jump to frame 0');
+    expect(made['a']!.calls.where((c) => c.startsWith('seek')), isEmpty);
   });
 
   test('the card left behind is told once per change of card', () async {
@@ -726,6 +752,26 @@ void main() {
       a.systemPlaying(true);
       await _settle();
       expect(awake.last, isTrue);
+    });
+
+    test('a stall mid-play keeps the screen on', () async {
+      p.sync(current: 'a', window: _win('a', ['b']));
+      await _settle();
+      final a = made['a']!;
+      expect(awake, [true]);
+
+      a.stall(true);
+      await _settle();
+      expect(awake, [true], reason: 'letting go mid-stall would dim an untouched screen');
+      a.stall(false);
+      await _settle();
+      expect(awake, [true]);
+
+      // A tap pause lets it go, stall or not.
+      await p.togglePause();
+      a.stall(true);
+      await _settle();
+      expect(awake.last, isFalse);
     });
 
     test('a card that stopped by itself plays again on a tap, or on the next visit', () async {

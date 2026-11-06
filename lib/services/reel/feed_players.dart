@@ -20,6 +20,10 @@ abstract class FeedVideo implements Listenable {
   Duration get duration;
   bool get playing;
 
+  /// Waiting for data mid-play (a stall). `video_player` reports [playing]
+  /// false meanwhile, as ExoPlayer's `isPlaying` does.
+  bool get buffering;
+
   /// Played to its end with looping off, and holding its last frame (until
   /// a seek or a play).
   bool get completed;
@@ -70,6 +74,8 @@ class PluginFeedVideo extends ChangeNotifier implements FeedVideo {
   Duration get duration => _c.value.duration;
   @override
   bool get playing => _c.value.isPlaying;
+  @override
+  bool get buffering => _c.value.isBuffering;
 
   /// `video_player` 2.14.1 pauses on the `completed` event, seeks to the
   /// duration (the last frame) and sets `isCompleted` until the next play.
@@ -353,10 +359,17 @@ class ReelFeedPlayers extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Tells [keepAwake] whether the card on screen is really playing.
+  /// Tells [keepAwake] whether the card on screen is really playing. A stall
+  /// mid-play still counts: letting the screen go for it would dim a screen
+  /// left untouched past its timeout.
   Future<void> _syncAwake() async {
     final e = _byId[_current];
-    final on = !_disposed && !_paused && e != null && e.video.ready && e.video.playing;
+    final on =
+        !_disposed &&
+        !_paused &&
+        e != null &&
+        e.video.ready &&
+        (e.video.playing || (e.voiced && e.video.buffering && !e.video.completed));
     if (on == _awake) return;
     _awake = on;
     await keepAwake?.call(on);
@@ -581,6 +594,8 @@ class ReelFeedPlayers extends ChangeNotifier {
     for (final e in _byId.values.toList()) {
       if (e.id == _current || !_isLive(e) || !e.video.ready) continue;
       await _leave(e);
+      // A swipe may have brought it on screen while it was being parked.
+      if (e.id == _current || !_isLive(e)) continue;
       if (e.video.position > Duration.zero) await e.video.seekTo(Duration.zero);
     }
   }
