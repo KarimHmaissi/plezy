@@ -391,9 +391,11 @@ void main() {
     expect(clips.engine, isNull);
   });
 
-  test('V2-60: two releases back to back (hidden, then paused) both finish', () async {
+  test('two releases at once (the app hidden, then paused) both finish and dispose the core', () async {
     await clips.play(_a);
-    await Future.wait([clips.release(), clips.release()]);
+    final first = clips.release();
+    final second = clips.release();
+    await Future.wait([first, second]);
     expect(engine.disposed, isTrue);
     expect(engine.calls.where((c) => c == 'dispose'), hasLength(1));
     expect(clips.phase.value, ClipPhase.idle);

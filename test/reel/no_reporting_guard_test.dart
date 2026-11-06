@@ -4,14 +4,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 /// Clips never report watch state (Reel spec §8): no timeline, scrobble,
-/// tracker, Discord, OS media session or local history. Three layers:
+/// tracker, Discord, OS media session or local history. Four layers:
 /// 1. the clip playback path (what runs while a clip plays) reaches none of
 ///    the reporting modules, nor the Plex client, through ANY chain of
 ///    imports;
-/// 2. no Reel file imports any of them directly (the Reel reaches servers
+/// 2. every other Reel file is a root too (V2-62): it may reach them only
+///    through one of the known benign exits in [_benignExits];
+/// 3. no Reel file imports any of them directly (the Reel reaches servers
 ///    only through the narrow `ReelServers` seam, and Watch, which is a real
 ///    play, is a callback the app hands in);
-/// 3. no Reel source names a timeline or scrobble call.
+/// 4. no Reel source names a timeline or scrobble call.
+/// reel_seam_test.dart checks the same at run time: a Reel session calls
+/// only extras, clipUrl and fetchItem on a server.
 /// The live check (viewOffset / On Deck unchanged after clips) is the proof
 /// on the device; this keeps a future edit from quietly wiring reporting in.
 const _forbidden = {
@@ -34,6 +38,41 @@ const _clipPath = [
   // The phone feed's players.
   'lib/services/reel/feed_players.dart',
 ];
+
+/// Imports from a Reel file into app code that reaches a reporting module
+/// (or the Plex client) further down, each read and found benign: the Reel
+/// uses that module for something else, and none of its calls report.
+/// Every other exit from the Reel into such code fails the guard. An entry
+/// that no longer leads to reporting code must be removed.
+const _benignExits = {
+  // A server's client for card art (`tryGetMediaClientWithFallback`): the
+  // image helper builds a URL from it and calls nothing on the server.
+  'lib/screens/reel/reel_card_view.dart → lib/utils/provider_extensions.dart',
+  'lib/screens/reel/reel_decide_view.dart → lib/utils/provider_extensions.dart',
+  'lib/screens/reel/reel_feed_view.dart → lib/utils/provider_extensions.dart',
+  'lib/screens/reel/reel_remote_view.dart → lib/utils/provider_extensions.dart',
+  // On TV mode's link between the phone and the TV: it carries Reel steps
+  // and actions, never a timeline.
+  'lib/screens/reel/reel_remote_view.dart → lib/providers/companion_remote_provider.dart',
+  'lib/screens/reel/reel_screen.dart → lib/providers/companion_remote_provider.dart',
+  // The Reel's settings page: its tiles reach the app's settings plumbing.
+  'lib/screens/reel/reel_screen.dart → lib/screens/settings/reel_settings_screen.dart',
+  // The Decks screen loads the deck list through ReelApp, the app glue that
+  // also hands Watch over to real playback, which reports as a play should.
+  'lib/screens/reel/reel_sheet.dart → lib/screens/settings/reel_decks_screen.dart',
+  // Read-only facts for decks and cards: the day's AI briefing picks, the
+  // local history and the library index's titles and seen state.
+  'lib/services/reel/reel_decks.dart → lib/services/ai/ai_briefing.dart',
+  // The AI page's saved suggestion lists (`AiSuggestions.cached`), read as
+  // For You candidates (V2-41).
+  'lib/services/reel/reel_decks.dart → lib/services/ai/ai_suggestions.dart',
+  'lib/services/reel/reel_decks.dart → lib/services/ai/facts/title_facts.dart',
+  'lib/services/reel/reel_decks.dart → lib/services/brain/history_brain.dart',
+  'lib/services/reel/reel_library.dart → lib/services/ai/facts/index_title_facts_source.dart',
+  'lib/services/reel/reel_library.dart → lib/services/ai/facts/title_facts.dart',
+  // A month's name for the daily build's "last watched" facts.
+  'lib/services/reel/reel_pool.dart → lib/services/ai/facts/seen_state.dart',
+};
 
 List<String> _reelFiles() => [
   for (final dir in ['lib/screens/reel', 'lib/services/reel'])
@@ -88,6 +127,45 @@ void main() {
         if (graph[f] case final chain?) f: chain.join(' → '),
     };
     expect(leaks, isEmpty, reason: leaks.values.join('\n'));
+  });
+
+  /// Every import from a Reel file into app code, with the reporting
+  /// modules it leads to and one chain that gets there.
+  Map<String, ({Set<String> reaches, String chain})> exitsToReporting() {
+    final reel = _reelFiles().toSet();
+    final exits = <String, ({Set<String> reaches, String chain})>{};
+    final graphs = <String, Map<String, List<String>>>{};
+    for (final f in reel) {
+      for (final to in _importsOf(f)) {
+        if (reel.contains(to)) continue;
+        final graph = graphs[to] ??= reachable([to]);
+        final hits = _forbidden.where(graph.containsKey).toSet();
+        if (hits.isEmpty) continue;
+        exits['$f → $to'] = (reaches: hits, chain: [f, ...graph[hits.first]!].join(' → '));
+      }
+    }
+    return exits;
+  }
+
+  late final exits = exitsToReporting();
+
+  test('every Reel file reaches reporting code only through a known benign exit', () {
+    final files = _reelFiles();
+    expect(files, containsAll(['lib/services/reel/reel_controller.dart', 'lib/screens/reel/reel_screen.dart']));
+    // Any chain from a Reel file to a reporting module leaves the Reel for
+    // the last time through one of these exits, so checking each exit
+    // covers every chain from every Reel file.
+    final leaks = [
+      for (final MapEntry(key: exit, value: (:reaches, :chain)) in exits.entries)
+        if (!_benignExits.contains(exit)) '$exit reaches ${reaches.join(', ')}\n  $chain',
+    ];
+    expect(leaks, isEmpty, reason: leaks.join('\n'));
+  });
+
+  test('the benign exits are all still live', () {
+    final live = exits.keys.toSet();
+    final stale = _benignExits.difference(live);
+    expect(stale, isEmpty, reason: 'no longer leads to reporting code; remove it:\n${stale.join('\n')}');
   });
 
   test('no Reel file imports reporting code or the Plex client', () {

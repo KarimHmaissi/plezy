@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
@@ -20,6 +21,7 @@ import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/feed_players.dart';
 import 'package:plezy/services/reel/reel_art.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
+import 'package:plezy/services/reel/reel_data_budget.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
@@ -242,6 +244,9 @@ void main() {
   late int decksOpened, watched, sheets, resized;
   late List<bool> immersiveReports;
   late ValueNotifier<int> restored;
+  late ValueNotifier<int> link, settingsChanged;
+  late bool onCellular;
+  late ReelCellular cellular;
   late _Deck first;
   late _Servers servers;
   late _Media media;
@@ -264,6 +269,10 @@ void main() {
     clipEnd = ReelClipEnd.twiceThenHold;
     skew = Duration.zero;
     noClip = {};
+    link = ValueNotifier(0);
+    settingsChanged = ValueNotifier(0);
+    onCellular = false;
+    cellular = ReelCellular.dataSaver;
     c = ReelController(
       decks: [
         first = _Deck('a', ['1', '2', '3', '4']),
@@ -282,6 +291,10 @@ void main() {
       addToWatchlist: (_) async => true,
       externalClips: true,
       memoryRestored: restored,
+      settingsChanged: settingsChanged,
+      cellular: () => cellular,
+      metered: () => onCellular,
+      linkChanged: link,
       onOpen: (item) async => opened.add(item),
       moreLike: (seed, {required skip}) async => [_card('5'), _card('6')],
       // A resume card's show has its fourth episode on deck.
@@ -316,11 +329,12 @@ void main() {
     c.dispose();
     players.dispose();
     restored.dispose();
+    link.dispose();
+    settingsChanged.dispose();
     await db.close();
   });
 
-  Widget feed({bool metered = false, bool watchOnTv = false}) => ReelFeedView(
-    metered: metered,
+  Widget feed({bool watchOnTv = false}) => ReelFeedView(
     controller: c,
     players: players,
     watchOnTv: watchOnTv,
@@ -337,6 +351,7 @@ void main() {
     MonoPalette? palette,
     bool themed = false,
     bool watchOnTv = false,
+    bool screenReader = false,
     Widget Function(Widget feed)? wrap,
     Size size = const Size(420, 860),
   }) async {
@@ -347,6 +362,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: appTheme ?? ThemeData.dark(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(accessibleNavigation: screenReader),
+          child: child!,
+        ),
         home: Scaffold(
           body: (wrap ?? (f) => f)(
             themed
@@ -391,17 +410,17 @@ void main() {
     await tester.pump();
     expect(players.held, containsAll(['t1', 't2', 't3']), reason: 'the one behind is parked too');
 
-    Widget app(bool metered) => MaterialApp(
-      theme: ThemeData.dark(),
-      home: Scaffold(body: feed(metered: metered)),
-    );
-    await tester.pumpWidget(app(true));
+    // Mobile data on the default Data saver (V2-53): the link change reaches
+    // the feed through the controller.
+    onCellular = true;
+    link.value++;
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
     expect(players.current, 't2');
     expect(players.held.toSet(), {'t2', 't3'}, reason: 'the card on screen and the next only');
 
-    await tester.pumpWidget(app(false));
+    onCellular = false;
+    link.value++;
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
     expect(players.held, containsAll(['t1', 't2', 't3']));
@@ -427,6 +446,67 @@ void main() {
     await tester.pump();
     expect(players.held, isEmpty);
     expect(find.text('Title 1'), findsOneWidget);
+  });
+
+  Future<void> settle(WidgetTester tester) async {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+  }
+
+  testWidgets('on Wi-Fi the next two and the one behind are parked', (tester) async {
+    await pump(tester);
+    expect(players.held.toSet(), {'t1', 't2', 't3'});
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    expect(players.held.toSet(), {'t2', 't3', 't4', 't1'});
+  });
+
+  testWidgets('Data saver on mobile data keeps the card on screen and the next one only', (tester) async {
+    onCellular = true;
+    await pump(tester);
+    expect(c.dataBudget, ReelDataBudget.saver);
+    expect(players.held.toSet(), {'t1', 't2'});
+    expect(players.current, 't1');
+
+    await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    expect(players.current, 't2');
+    expect(players.held.toSet(), {'t2', 't3'}, reason: 'the card behind lets its player go');
+  });
+
+  testWidgets('Stills only on mobile data opens no player; back on Wi-Fi the clips come back', (tester) async {
+    onCellular = true;
+    cellular = ReelCellular.stillsOnly;
+    await pump(tester);
+    expect(players.held, isEmpty);
+    expect(find.text('Title 1'), findsOneWidget, reason: 'the card shows its art and title');
+
+    onCellular = false;
+    link.value++;
+    await settle(tester);
+    expect(players.held.toSet(), {'t1', 't2', 't3'});
+    expect(players.current, 't1');
+  });
+
+  testWidgets('a mobile-data choice made while the Reel plays is taken up at once', (tester) async {
+    onCellular = true;
+    cellular = ReelCellular.normal;
+    await pump(tester);
+    expect(players.held.toSet(), {'t1', 't2', 't3'}, reason: 'Normal plays as on Wi-Fi');
+
+    cellular = ReelCellular.stillsOnly;
+    settingsChanged.value++;
+    await settle(tester);
+    expect(players.held, isEmpty);
+
+    cellular = ReelCellular.dataSaver;
+    settingsChanged.value++;
+    await settle(tester);
+    expect(players.held.toSet(), {'t1', 't2'});
   });
 
   testWidgets('swiping up moves to the next card and its parked player', (tester) async {
@@ -1839,6 +1919,100 @@ void main() {
       expect(c.mayRollOn, isTrue);
       await playOut(tester, '1');
       expect(players.current, 't2');
+    });
+  });
+
+  group('with a screen reader (V2-54)', () {
+    /// The card's own node: the nearest one over its title that carries the
+    /// custom actions (the title block is also a Details button, V2-29, so
+    /// it has a node of its own inside the card's).
+    SemanticsNode cardNode(WidgetTester tester) {
+      SemanticsNode? node = tester.getSemantics(find.text('Title 1'));
+      while (node != null && (node.getSemanticsData().customSemanticsActionIds?.isEmpty ?? true)) {
+        node = node.parent;
+      }
+      return node ?? tester.getSemantics(find.text('Title 1'));
+    }
+
+    Map<String, int> customActions(SemanticsNode node) => {
+      for (final id in node.getSemanticsData().customSemanticsActionIds ?? const <int>[])
+        CustomSemanticsAction.getAction(id)!.label!: id,
+    };
+
+    void perform(SemanticsNode node, int id) => node.owner!.performAction(node.id, SemanticsAction.customAction, id);
+
+    testWidgets('each card is one node with Save, More and Hide controls; the feed keeps its scroll', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester);
+      final node = cardNode(tester);
+      expect(customActions(node).keys, containsAll(['Save', 'More', 'Hide controls']));
+      final data = node.getSemanticsData();
+      expect(data.hasAction(SemanticsAction.scrollLeft), isFalse, reason: 'the sideways swipe stays out of the tree');
+      expect(data.hasAction(SemanticsAction.scrollRight), isFalse);
+      // The feed's scroll actions live on an ancestor: the PageView's own
+      // scrollable node, not the card.
+      final ancestors = <SemanticsNode>[];
+      for (var n = node.parent; n != null; n = n.parent) {
+        ancestors.add(n);
+      }
+      expect(
+        ancestors.any((n) => n.getSemanticsData().hasAction(SemanticsAction.scrollUp)),
+        isTrue,
+        reason: 'the next card is still a scroll away',
+      );
+
+      perform(node, customActions(node)['More']!);
+      expect(sheets, 1);
+
+      perform(node, customActions(node)['Hide controls']!);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Deck a'), isTrue);
+      final shown = cardNode(tester);
+      expect(customActions(shown).keys, contains('Show controls'));
+      perform(shown, customActions(shown)['Show controls']!);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Deck a'), isFalse);
+      semantics.dispose();
+    });
+
+    testWidgets('Save from the card node saves the card on screen', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester);
+      final node = cardNode(tester);
+      await tester.runAsync(() async {
+        perform(node, customActions(node)['Save']!);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
+      final picks = await tester.runAsync(c.store.picks);
+      expect(picks?.map((p) => p.titleId), contains('t1'));
+      semantics.dispose();
+    });
+
+    testWidgets('the Reel starts muted and the swipe no longer hides the controls', (tester) async {
+      await pump(tester, screenReader: true);
+      await settle(tester);
+      expect(players.muted, isTrue);
+
+      await tester.fling(find.text('Title 1'), const Offset(300, 0), 1500);
+      await tester.pumpAndSettle();
+      expect(hidden(tester, 'Details'), isFalse);
+      expect(hidden(tester, 'Deck a'), isFalse);
+
+      // Unmuting afterwards sticks.
+      await tester.tap(find.byTooltip('Sound on'));
+      await settle(tester);
+      expect(players.muted, isFalse);
+      await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(players.muted, isFalse);
+    });
+
+    testWidgets('without one, the Reel starts with sound', (tester) async {
+      await pump(tester);
+      await settle(tester);
+      expect(players.muted, isFalse);
     });
   });
 }

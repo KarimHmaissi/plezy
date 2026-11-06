@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
 import '../../media/media_item_types.dart';
@@ -13,6 +15,7 @@ import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../services/reel/reel_data_budget.dart';
 import '../../services/reel/reel_library.dart';
 import '../../services/reel/reel_premise.dart';
 import '../../services/settings_service.dart';
@@ -136,6 +139,11 @@ enum ReelFeedLayout {
 /// with a clip instead, sliding as a swipe would, until
 /// [ReelController.leanBackIdle] passes with no touch; then it holds too,
 /// so the screen can sleep.
+///
+/// With a screen reader (`MediaQuery.accessibleNavigationOf`, V2-54) each
+/// card is one node with Save, More and Hide/Show controls as custom
+/// actions, the Reel starts muted so the clip doesn't talk over it, and the
+/// controls stay shown: the sideways swipe no longer hides them.
 class ReelFeedView extends StatefulWidget {
   const ReelFeedView({
     super.key,
@@ -148,7 +156,6 @@ class ReelFeedView extends StatefulWidget {
     this.onRemote,
     this.onResize,
     this.onImmersive,
-    this.metered = false,
   });
 
   final ReelController controller;
@@ -171,10 +178,6 @@ class ReelFeedView extends StatefulWidget {
   /// shell reads it so that Back, which the feed takes to bring its controls
   /// back, doesn't also step to Home.
   final ValueChanged<bool>? onImmersive;
-
-  /// On a metered link (mobile data with no Wi-Fi) the window holds only the
-  /// card on screen and the next (V2-08).
-  final bool metered;
 
   @override
   State<ReelFeedView> createState() => _ReelFeedViewState();
@@ -218,6 +221,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   bool _rolling = false;
   StreamSubscription<String>? _ended;
 
+  /// A screen reader is on (V2-54).
+  bool _a11y = false;
+
+  /// The one mute a screen reader brings; unmuting after it sticks.
+  bool _a11yMuted = false;
+
   ReelController get _c => widget.controller;
 
   @override
@@ -240,6 +249,27 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       // After this frame's layout, when the page view has its new size.
       WidgetsBinding.instance.addPostFrameCallback((_) => _resized());
     }
+    _followScreenReader();
+  }
+
+  /// A screen reader came on (V2-54): the controls come back and stay (the
+  /// sideways swipe and the layout's own immersive are off while it is on),
+  /// and the Reel goes quiet once, so the clip doesn't talk over it. The
+  /// mute is for this visit only; unmuting after it sticks.
+  void _followScreenReader() {
+    final a11y = MediaQuery.accessibleNavigationOf(context);
+    if (a11y == _a11y) return;
+    _a11y = a11y;
+    if (!a11y) return;
+    // After this frame: leaving immersive and muting both tell listeners
+    // that rebuild.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_immersive) _immersiveByUser(false);
+      if (_a11yMuted) return;
+      _a11yMuted = true;
+      if (!widget.players.muted) unawaited(_setMuted(true, remember: false));
+    });
   }
 
   /// The window changed size (V2-65): re-sync the players for the window as
@@ -274,7 +304,6 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       unawaited(_ended?.cancel());
       _ended = widget.players.ended.listen(_onEnded);
     }
-    if (old.metered != widget.metered) _sync();
   }
 
   @override
@@ -352,7 +381,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       }
       return;
     }
-    if (!_c.active || _immersive || _controlsAsked) return;
+    if (!_c.active || _immersive || _controlsAsked || _a11y) return;
     _setImmersive(true);
     _sideways = true;
   }
@@ -427,10 +456,14 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   /// The card on screen, the next two, then the one behind (by page, so
   /// the decision card holds a place and plays nothing); the players open
-  /// them in stages as the card on screen loads (V2-08).
+  /// them in stages as the card on screen loads (V2-08). On mobile data the
+  /// Reel's data budget (V2-53) narrows that: Data saver to the card on
+  /// screen and the next, Stills only to none (the memory ladder's level-2
+  /// path); Normal keeps the whole window.
   void _sync({bool resume = false}) {
     // Hidden, paused or handing over to real playback: nothing plays.
     if (!_c.active) return;
+    final budget = _c.dataBudget;
     final i = _page;
     final window = <FeedClip>[
       for (final offset in const [0, 1, 2, -1])
@@ -441,8 +474,8 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     widget.players.sync(
       current: _c.slotAt(i).card?.id,
       window: window,
-      memoryLevel: _c.memoryLevel,
-      metered: widget.metered,
+      memoryLevel: budget.clips ? _c.memoryLevel : 2,
+      metered: budget.ahead < ReelDataBudget.full.ahead,
       resume: resume,
     );
   }
@@ -517,6 +550,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     unawaited(_c.save(silent: true));
   }
 
+  /// The screen reader's Hide / Show controls action (V2-54).
+  void _toggleControls() {
+    ForkMotion.selection();
+    _immersiveByUser(!_immersive);
+  }
+
   @override
   Widget build(BuildContext context) {
     final count = _c.slotCount;
@@ -577,10 +616,11 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   /// The mute button (V2-22): the players go silent (or rise) at once, and
   /// the controller records an unmute and keeps the choice.
-  Future<void> _toggleMute() async {
-    final muted = !widget.players.muted;
+  Future<void> _toggleMute() => _setMuted(!widget.players.muted);
+
+  Future<void> _setMuted(bool muted, {bool remember = true}) async {
     await widget.players.setMuted(muted);
-    await _c.setMuted(muted);
+    await _c.setMuted(muted, remember: remember);
   }
 
   /// The cards after page [i] for the two-pane Up next (V2-30).
@@ -607,23 +647,23 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       case ReelSlotKind.empty:
         return ReelMessage(
           icon: Symbols.movie_rounded,
-          title: 'Nothing in ${_c.deck.name} yet',
-          body: 'Pick another deck to keep going.',
+          title: t.reel.card.emptyTitle(deck: _c.deck.name),
+          body: t.reel.card.pickAnotherDeck,
           action: FilledButton.tonalIcon(
             onPressed: widget.onDecks,
             icon: const Icon(Symbols.video_library_rounded),
-            label: const Text('Decks'),
+            label: Text(t.reel.card.decks),
           ),
         );
       case ReelSlotKind.poolEnd:
         return ReelMessage(
           icon: Symbols.check_circle_rounded,
-          title: _c.deck.id == 'for-you' ? "That's today's For You" : "That's all of ${_c.deck.name}",
-          body: 'Pick another deck to keep going.',
+          title: _c.deck.id == 'for-you' ? t.reel.card.endForYou : t.reel.card.endTitle(deck: _c.deck.name),
+          body: t.reel.card.pickAnotherDeck,
           action: FilledButton.tonalIcon(
             onPressed: widget.onDecks,
             icon: const Icon(Symbols.video_library_rounded),
-            label: const Text('Decks'),
+            label: Text(t.reel.card.decks),
           ),
         );
       case ReelSlotKind.decide:
@@ -663,17 +703,42 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         ),
       ),
     );
-    // Sideways anywhere on the page hides or shows the controls. Tap,
-    // double-tap and long-press live on the picture only, so the buttons
-    // answer at once instead of waiting out the double-tap window.
+    final onScreen = card.id == _c.slotAt(_page).card?.id;
+    // One node per card for a screen reader (V2-54): its texts read
+    // together, with Save, More and Hide/Show controls as custom actions.
+    // The feed's own scroll actions stay on the PageView above it; the
+    // sideways swipe is kept out of the tree, so the page offers no scroll
+    // actions of its own.
+    return Semantics(
+      container: true,
+      customSemanticsActions: onScreen
+          ? {
+              CustomSemanticsAction(label: t.reel.card.save): _save,
+              CustomSemanticsAction(label: t.reel.card.more): widget.onSheet,
+              CustomSemanticsAction(label: _immersive ? t.reel.card.showControls : t.reel.card.hideControls):
+                  _toggleControls,
+            }
+          : null,
+      child: _gestures(slot, card, info, layout),
+    );
+  }
+
+  Widget _gestures(ReelSlot slot, ReelCardData card, Widget info, ReelFeedLayout layout) {
+    // Sideways anywhere on the page hides or shows the controls (not with a
+    // screen reader on). Tap, double-tap and long-press live on the picture
+    // only, so the buttons answer at once instead of waiting out the
+    // double-tap window.
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onHorizontalDragEnd: (d) {
-        final v = d.primaryVelocity ?? 0;
-        if (v.abs() < 250 || (v > 0) == _immersive) return;
-        ForkMotion.selection();
-        _immersiveByUser(v > 0);
-      },
+      excludeFromSemantics: true,
+      onHorizontalDragEnd: _a11y
+          ? null
+          : (d) {
+              final v = d.primaryVelocity ?? 0;
+              if (v.abs() < 250 || (v > 0) == _immersive) return;
+              ForkMotion.selection();
+              _immersiveByUser(v > 0);
+            },
       child: ValueListenableBuilder<FeedCardState>(
         valueListenable: widget.players.card(card.id),
         child: info,
@@ -1081,12 +1146,12 @@ class _TopBar extends StatelessWidget {
                   const Spacer(),
                   if (onRemote != null)
                     IconButton(
-                      tooltip: 'On TV',
+                      tooltip: t.reel.card.onTv,
                       onPressed: onRemote,
                       icon: const Icon(Symbols.settings_remote_rounded),
                     ),
                   IconButton(
-                    tooltip: muted ? 'Sound on' : 'Mute',
+                    tooltip: muted ? t.reel.card.soundOn : t.reel.card.mute,
                     onPressed: onMute,
                     icon: Icon(muted ? Symbols.volume_off_rounded : Symbols.volume_up_rounded),
                   ),

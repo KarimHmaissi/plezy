@@ -625,8 +625,11 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
   /// gone and the request goes nowhere.
   static bool _isMounted(FocusNode node) => node.context?.mounted ?? false;
 
-  /// Fork: The Reel is Android only (its clip core is ExoPlayer).
-  static bool get _hasReel => Platform.isAndroid;
+  /// Fork: The Reel is Android only (its clip core is ExoPlayer), and its
+  /// settings page can hide it; the same rule as `ReelScreen.enabled`, which
+  /// the shell uses.
+  static bool get _hasReel =>
+      Platform.isAndroid && (SettingsService.instanceOrNull?.read(SettingsService.showReelTab) ?? true);
 
   /// Derive a focus key from the current selection state (tab + library).
   /// Returns null if no meaningful selected item exists.
@@ -931,13 +934,15 @@ class SideNavigationRailState extends State<SideNavigationRail> with MountedSetS
     final nowPlayingTrack = widget.isOfflineMode || !PlatformDetector.isTV() ? null : musicService?.currentTrack;
 
     // Listen to fullscreen + the groupLibrariesByServer / showExploreTab
-    // settings so the rail rebuilds when they are toggled in Appearance, and to
+    // settings so the rail rebuilds when they are toggled in Appearance (and
+    // showReelTab, on the Reel's settings page), and to
     // librariesSectionExpanded so the Libraries header toggle repaints.
     return ListenableBuilder(
       listenable: Listenable.merge([
         FullscreenStateManager(),
         SettingsService.instance.listenable(SettingsService.groupLibrariesByServer),
         SettingsService.instance.listenable(SettingsService.showExploreTab),
+        SettingsService.instance.listenable(SettingsService.showReelTab),
         SettingsService.instance.listenable(SettingsService.librariesSectionExpanded),
       ]),
       builder: (context, _) {

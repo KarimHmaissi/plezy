@@ -117,7 +117,9 @@ void main() {
     // The TV card's backdrop reads its prefs during build.
     resetSharedPreferencesForTest();
     SettingsService.resetForTesting();
-    await SettingsService.getInstance();
+    final prefs = await SettingsService.getInstance();
+    // Past the first-run intro (V2-55; reel_intro_test.dart covers it).
+    await prefs.write(SettingsService.reelIntroSeen, true);
     db = ForkDatabase.memory();
     final settings = LocalCustomisationStore(db);
     store = ReelStore(database: () async => db, settings: () async => settings);

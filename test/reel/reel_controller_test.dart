@@ -21,6 +21,8 @@ import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
+import 'package:plezy/services/reel/reel_data_budget.dart';
+import 'package:plezy/services/reel/reel_deck_prefs.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_playback_profile.dart';
@@ -378,6 +380,11 @@ void main() {
     Future<void> Function(bool muted)? saveMuted,
     int? Function()? plays,
     ReelClipEnd Function()? clipEnd,
+    Listenable? settingsChanged,
+    Listenable? deckPrefsChanged,
+    ReelCellular Function()? cellular,
+    bool Function()? metered,
+    Listenable? linkChanged,
   }) => ReelController(
     decks:
         decks ??
@@ -411,6 +418,11 @@ void main() {
     moreLike: moreLike,
     saveMuted: saveMuted,
     clipEnd: clipEnd,
+    settingsChanged: settingsChanged,
+    deckPrefsChanged: deckPrefsChanged,
+    cellular: cellular,
+    metered: metered,
+    linkChanged: linkChanged,
     clock: clock,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
@@ -799,6 +811,62 @@ void main() {
     });
   }
 
+  group('On TV mode opens on the Fold\'s card (V2-48)', () {
+    List<ReelDeck> two() => [
+      _Deck('a', [_card('1'), _card('2'), _card('3')]),
+      _Deck('b', [_card('4'), _card('5'), _card('6')]),
+    ];
+
+    test('a first start opens the deck on the card for the title', () async {
+      final c = make(decks: two());
+      await c.start(deckId: 'b', groupKey: 'g5');
+      expect(c.deck.id, 'b');
+      expect(c.current.card?.id, 't5');
+      c.dispose();
+    });
+
+    test('a title the deck does not have leaves the deck on its own cursor', () async {
+      final c = make(decks: two());
+      await c.start();
+      await c.openAt('b', 'g-not-here');
+      expect(c.deck.id, 'b');
+      expect(c.current.card?.id, 't4');
+      await c.step(1);
+      await c.openAt('a');
+      await c.openAt('b', 'g-still-not-here');
+      expect(c.current.card?.id, 't5', reason: 'the deck kept its place');
+      c.dispose();
+    });
+
+    test('while playing: another deck opens on the card; the same deck moves to it', () async {
+      final c = make(decks: two());
+      await c.start();
+      expect(c.current.card?.id, 't1');
+      await c.openAt('b', 'g6');
+      expect(c.deck.id, 'b');
+      expect(c.current.card?.id, 't6');
+
+      await c.openAt('b', 'g4');
+      expect(c.current.card?.id, 't4');
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.calls, contains('open https://s1.example/services/iva/assets/4/video.mp4'));
+
+      final changed = c.cardChanged.value;
+      await c.openAt('b', 'g4');
+      expect(c.cardChanged.value, changed, reason: 'already on it: nothing reopens');
+      c.dispose();
+    });
+
+    test('openDeck on the deck already playing stays where it is', () async {
+      final c = make(decks: two());
+      await c.start();
+      await c.step(1);
+      await c.openDeck('a');
+      expect(c.current.card?.id, 't2');
+      c.dispose();
+    });
+  });
+
   test('memory pressure drops the preload, then releases the core for stills', () async {
     final c = make();
     await c.start();
@@ -822,6 +890,86 @@ void main() {
     expect(engines, made, reason: 'no new clip core while stills only');
     expect(c.current.card?.id, 't3');
     c.dispose();
+  });
+
+  test('Stills only on mobile data opens no clip core; off mobile data it plays again', () async {
+    var onCellular = true;
+    final link = ValueNotifier(0);
+    final c = make(cellular: () => ReelCellular.stillsOnly, metered: () => onCellular, linkChanged: link);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.dataBudget, ReelDataBudget.stills);
+    expect(engines, 0, reason: 'no clip core and no preload on stills');
+    expect(c.current.card?.id, 't1');
+
+    onCellular = false;
+    link.value++;
+    expect(c.dataBudget, ReelDataBudget.full);
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(engine.calls, contains('open https://s1.example/services/iva/assets/2/video.mp4'));
+    expect(engine.calls, contains('preload https://s1.example/services/iva/assets/3/video.mp4'));
+    c.dispose();
+    link.dispose();
+  });
+
+  test('moving to mobile data on Stills only mid-session releases the playing clip core', () async {
+    var onCellular = false;
+    final link = ValueNotifier(0);
+    final c = make(cellular: () => ReelCellular.stillsOnly, metered: () => onCellular, linkChanged: link);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final first = engine;
+    expect(first.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+
+    onCellular = true;
+    link.value++;
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(c.current.card?.id, 't2');
+    expect(first.disposed, isTrue, reason: 'the last clip stops with its preload');
+    final made = engines;
+    await c.step(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(engines, made, reason: 'no new clip core on stills');
+    c.dispose();
+    link.dispose();
+  });
+
+  test('Data saver on mobile data still plays the card and preloads the next', () async {
+    final c = make(cellular: () => ReelCellular.dataSaver, metered: () => true);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.dataBudget, ReelDataBudget.saver);
+    expect(engine.calls, contains('open https://s1.example/services/iva/assets/1/video.mp4'));
+    // The lookahead waits for the card's first frame (V2-11).
+    engine.firstFrameCtl.add(null);
+    await pumpEventQueue();
+    expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
+    c.dispose();
+  });
+
+  test('the views hear about the link only when mobile data comes or goes', () async {
+    var onCellular = false;
+    final link = ValueNotifier(0);
+    final c = make(metered: () => onCellular, linkChanged: link);
+    var told = 0;
+    c.addListener(() => told++);
+
+    link.value++;
+    expect(told, 0, reason: 'still on Wi-Fi');
+    onCellular = true;
+    link.value++;
+    expect(told, 1);
+    expect(c.dataBudget, ReelDataBudget.saver, reason: 'Data saver is the default');
+    link.value++;
+    expect(told, 1);
+
+    c.dispose();
+    onCellular = false;
+    link.value++;
+    expect(told, 1, reason: 'a disposed Reel stops listening');
+    link.dispose();
   });
 
   test('the ladder holds across visits until the memory policy restores', () async {
@@ -853,6 +1001,27 @@ void main() {
     c.dispose();
     restored.value++;
     restored.dispose();
+  });
+
+  test('a settings change reaches the views of a playing Reel, and stops at dispose', () async {
+    final changed = ValueNotifier(0);
+    final c = make(settingsChanged: changed);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final card = c.current.card?.id;
+    final made = engines;
+
+    var told = 0;
+    c.addListener(() => told++);
+    changed.value++;
+    expect(told, 1, reason: 'the views rebuild and read the new choice');
+    expect(c.current.card?.id, card, reason: 'no restart: the same card stays');
+    expect(engines, made, reason: 'and the clip core is not rebuilt');
+
+    c.dispose();
+    expect(() => changed.value++, returnsNormally, reason: 'the listener left with the controller');
+    expect(told, 1);
+    changed.dispose();
   });
 
   test('the watchdog tiers map to the ladder: halved is 1, cleared is 2', () async {
@@ -2669,4 +2838,163 @@ void main() {
       c.dispose();
     });
   });
+
+  group('deck order, hidden decks and the start deck (V2-52)', () {
+    List<ReelDeck> four() => [
+      _Deck('for-you', [_card('1')]),
+      _Deck('anime-openings', [_card('2')]),
+      _Deck('most-watched', [_card('3')]),
+      _Deck('ai:7', [_card('4')]),
+    ];
+    List<String> ids(List<ReelDeck> d) => [for (final x in d) x.id];
+
+    test('with nothing arranged the Reel opens on For You and offers every deck in the app order', () async {
+      final decks = four()..insert(0, decks0());
+      final c = make(decks: decks);
+      await c.start();
+      expect(c.deck.id, 'for-you', reason: 'For You is the start deck even when it is not first');
+      expect(ids(c.shownDecks), ['other', 'for-you', 'anime-openings', 'most-watched', 'ai:7']);
+      expect(built, isEmpty, reason: 'For You is looked up, never built');
+      c.dispose();
+    });
+
+    test('the user order and hidden decks drive the pickers, → and the On TV state', () async {
+      await store.writeDeckPrefs(
+        const ReelDeckPrefs(order: ['ai:7', 'for-you'], hidden: {'most-watched'}),
+        was: ReelDeckPrefs.none,
+      );
+      final c = make(decks: four());
+      await c.start();
+      expect(c.deck.id, 'for-you');
+      expect(ids(c.shownDecks), ['ai:7', 'for-you', 'anime-openings']);
+      expect(c.nextDeck?.id, 'anime-openings');
+      await c.switchDeck(1);
+      expect(c.deck.id, 'anime-openings');
+      await c.switchDeck(1);
+      expect(c.deck.id, 'ai:7', reason: 'the hidden deck is skipped and the cycle wraps');
+      expect(
+        [for (final d in c.remoteState()['decks']! as List) (d as Map)['id']],
+        ['ai:7', 'for-you', 'anime-openings'],
+      );
+      c.dispose();
+    });
+
+    test('a link still opens a hidden deck; it stays ticked while playing and → leaves it for its neighbour', () async {
+      await store.writeDeckPrefs(const ReelDeckPrefs(hidden: {'most-watched'}), was: ReelDeckPrefs.none);
+      final c = make(decks: four());
+      await c.start(deckId: 'most-watched');
+      expect(c.deck.id, 'most-watched');
+      expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'most-watched', 'ai:7']);
+      await c.switchDeck(1);
+      expect(c.deck.id, 'ai:7');
+      expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'ai:7']);
+      await c.openDeck('most-watched');
+      expect(c.deck.id, 'most-watched');
+      c.dispose();
+    });
+
+    test('"Where I left off" opens the deck this device was last on', () async {
+      final first = make(decks: four());
+      await first.start();
+      await first.switchDeck(1);
+      expect(first.deck.id, 'anime-openings');
+      await pumpEventQueue();
+      first.dispose();
+
+      await store.writeDeckPrefs(const ReelDeckPrefs(start: ReelStartDeck.last), was: ReelDeckPrefs.none);
+      final last = make(decks: four());
+      await last.start();
+      expect(last.deck.id, 'anime-openings');
+      last.dispose();
+
+      await store.writeDeckPrefs(ReelDeckPrefs.none, was: const ReelDeckPrefs(start: ReelStartDeck.last));
+      final forYou = make(decks: four());
+      await forYou.start();
+      expect(forYou.deck.id, 'for-you', reason: 'For You starts For You, wherever this device left off');
+      forYou.dispose();
+    });
+
+    test('a hidden start deck gives way to the first shown deck', () async {
+      await store.writeDeckPrefs(
+        const ReelDeckPrefs(order: ['anime-openings'], hidden: {'for-you'}),
+        was: ReelDeckPrefs.none,
+      );
+      final c = make(decks: four());
+      await c.start();
+      expect(c.deck.id, 'anime-openings');
+      c.dispose();
+    });
+
+    test('coming back to a warm Reel keeps the deck that was playing', () async {
+      final c = make(decks: four());
+      await c.start();
+      await c.switchDeck(1);
+      await c.suspend();
+      await c.start();
+      expect(c.deck.id, 'anime-openings');
+      c.dispose();
+    });
+
+    test('moving and hiding from a picker is kept, synced, and shown at once', () async {
+      final c = make(decks: four());
+      await c.start();
+      var notified = 0;
+      c.addListener(() => notified++);
+      await c.moveDeck('ai:7', -99);
+      expect(ids(c.shownDecks), ['ai:7', 'for-you', 'anime-openings', 'most-watched']);
+      await c.moveDeck('for-you', 1);
+      expect(ids(c.shownDecks), ['ai:7', 'anime-openings', 'for-you', 'most-watched']);
+      await c.hideDeck('most-watched', hide: true);
+      expect(ids(c.shownDecks), ['ai:7', 'anime-openings', 'for-you']);
+      expect(notified, greaterThanOrEqualTo(3));
+      final stored = await store.deckPrefs();
+      expect(stored.order.take(3), ['ai:7', 'anime-openings', 'for-you']);
+      expect(stored.hidden, {'most-watched'});
+
+      await c.hideDeck('most-watched', hide: false);
+      expect(ids(c.shownDecks), contains('most-watched'));
+      c.dispose();
+    });
+
+    test('the last shown deck is never hidden', () async {
+      final c = make(
+        decks: [
+          _Deck('for-you', [_card('1')]),
+          _Deck('ai:7', [_card('4')]),
+        ],
+      );
+      await c.start();
+      await c.hideDeck('ai:7', hide: true);
+      await c.hideDeck('for-you', hide: true);
+      expect(c.deckPrefs.hidden, {'ai:7'});
+      expect(ids(c.shownDecks), ['for-you']);
+      c.dispose();
+    });
+
+    test('an arrangement made elsewhere (the Decks screen, the other device) is taken up at once', () async {
+      final changed = ValueNotifier(0);
+      final c = make(decks: four(), deckPrefsChanged: changed);
+      await c.start();
+      await store.writeDeckPrefs(const ReelDeckPrefs(hidden: {'anime-openings'}), was: ReelDeckPrefs.none);
+      changed.value++;
+      await pumpEventQueue();
+      expect(ids(c.shownDecks), ['for-you', 'most-watched', 'ai:7']);
+      c.dispose();
+    });
+
+    test('on a mirror that lost its TV an arrangement is not kept, and it says so', () async {
+      store = ReelStore(
+        database: () async => db,
+        settings: () async => MirrorCustomisationStore({}, send: (_) => false),
+      );
+      final c = make(decks: four());
+      await c.start();
+      await expectLater(c.moveDeck('ai:7', -1), completes);
+      expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'most-watched', 'ai:7']);
+      expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+  });
 }
+
+ReelDeck decks0() => _Deck('other', [_card('8')]);

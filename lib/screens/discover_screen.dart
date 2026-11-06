@@ -488,7 +488,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     return [
       ...homeRowMenuEntries(context, row),
       // Fork: a saved AI answer on Home opens as a Reel deck.
-      if (Platform.isAndroid && row.id.startsWith('ai:'))
+      if (ReelScreen.enabled && row.id.startsWith('ai:'))
         MediaMenuExtraEntry(
           icon: Symbols.movie_rounded,
           label: t.aiTab.reelIt,

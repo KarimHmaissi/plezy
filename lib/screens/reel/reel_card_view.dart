@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../focus/focus_theme.dart';
+import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/media_item.dart';
 import '../../services/device_performance.dart';
@@ -13,6 +14,7 @@ import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_library.dart';
 import '../../services/settings_service.dart' show ReelOkAction;
 import '../../theme/fork_motion.dart';
+import '../../theme/fork_spacing.dart';
 import '../../theme/mono_tokens.dart';
 import '../../utils/content_utils.dart';
 import '../../utils/formatters.dart';
@@ -121,14 +123,16 @@ class ReelCardView extends StatelessWidget {
       case ReelSlotKind.empty:
         return ReelMessage(
           icon: reelDeckIcon(controller.deck.id),
-          title: 'Nothing in ${controller.deck.name} yet',
-          body: tv ? 'Press → for the next deck.' : 'Swipe sideways for the next deck.',
+          title: t.reel.card.emptyTitle(deck: controller.deck.name),
+          body: tv ? t.reel.card.emptyBodyTv : t.reel.card.emptyBodyPhone,
         );
       case ReelSlotKind.poolEnd:
         return ReelMessage(
           icon: Symbols.check_circle_rounded,
-          title: controller.deck.id == 'for-you' ? "That's today's For You" : "That's all of ${controller.deck.name}",
-          body: tv ? 'Press → for ${_nextDeckName()}.' : 'Swipe sideways for ${_nextDeckName()}.',
+          title: controller.deck.id == 'for-you'
+              ? t.reel.card.endForYou
+              : t.reel.card.endTitle(deck: controller.deck.name),
+          body: tv ? t.reel.card.endBodyTv(deck: _nextDeckName()) : t.reel.card.endBodyPhone(deck: _nextDeckName()),
         );
       case ReelSlotKind.decide:
         return ReelDecideView(controller: controller, slot: slot, tv: tv, onWatch: onWatch);
@@ -314,10 +318,8 @@ class ReelCardView extends StatelessWidget {
     );
   }
 
-  String _nextDeckName() {
-    final d = controller.decks;
-    return d.length < 2 ? 'another deck' : d[(controller.deckIndex + 1) % d.length].name;
-  }
+  /// The deck → goes to: the next shown deck in the user's order.
+  String _nextDeckName() => controller.nextDeck?.name ?? t.reel.card.anotherDeck;
 }
 
 /// Holds the spotlight's artwork back for [delay] after [cover] turns on, so
@@ -635,7 +637,7 @@ class _Extras extends StatelessWidget {
                   child: FilledButton.icon(
                     onPressed: onReplay,
                     icon: const Icon(Symbols.replay_rounded),
-                    label: const Text('Replay'),
+                    label: Text(t.reel.card.replay),
                   ),
                 ),
               ),
@@ -718,7 +720,7 @@ class _ProgressLine extends StatelessWidget {
   }
 }
 
-/// An empty deck or the end of one.
+/// An empty deck or the end of one, or the first-run intro (V2-55).
 class ReelMessage extends StatelessWidget {
   const ReelMessage({super.key, required this.icon, required this.title, required this.body, this.action});
 
@@ -733,20 +735,25 @@ class ReelMessage extends StatelessWidget {
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,
       child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(height: 16),
-            Text(title, textAlign: TextAlign.center, style: theme.textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-            if (action case final a?) ...[const SizedBox(height: 20), a],
-          ],
+        // A readable measure for a longer body (the intro) on a wide screen.
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 560),
+          padding: EdgeInsets.symmetric(horizontal: ForkSpacing.of(context).edgeInset),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 48, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(height: 16),
+              Text(title, textAlign: TextAlign.center, style: theme.textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text(
+                body,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              if (action case final a?) ...[const SizedBox(height: 20), a],
+            ],
+          ),
         ),
       ),
     );

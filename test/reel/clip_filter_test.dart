@@ -504,5 +504,39 @@ void main() {
         isNull,
       );
     });
+    test('openings without lyrics or subtitles come first; with captions on, those come first (V2-54)', () {
+      Map<String, dynamic> anime(List<Map<String, dynamic>> videos) => {
+        'animethemes': [
+          theme('OP', 1, [
+            {'episodes': '1-12', 'videos': videos},
+          ]),
+        ],
+      };
+      final videos = [
+        {...video('OP1-Lyrics'), 'lyrics': true, 'subbed': false},
+        {...video('OP1-Subbed'), 'lyrics': false, 'subbed': true},
+        {...video('OP1'), 'lyrics': false, 'subbed': false},
+        {...video('OP1-Credits', nc: false), 'lyrics': true},
+      ];
+      // The captions pref reaches the pick through the playback profile.
+      const captioned = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080, captions: true);
+      final clean = ClipFilter.firstOpening(anime(videos));
+      expect(clean?.url, endsWith('/OP1.webm'));
+      expect(clean?.captioned, isFalse);
+
+      final cc = ClipFilter.firstOpening(anime(videos), profile: captioned);
+      expect(cc?.url, endsWith('/OP1-Lyrics.webm'));
+      expect(cc?.captioned, isTrue);
+      expect(
+        ClipFilter.firstOpening(anime([videos[1], videos[2]]), profile: captioned)?.url,
+        endsWith('/OP1-Subbed.webm'),
+        reason: 'subbed counts as captioned',
+      );
+      expect(
+        ClipFilter.firstOpening(anime([videos[2], videos[3]]), profile: captioned)?.url,
+        endsWith('/OP1.webm'),
+        reason: 'creditless still comes before captions',
+      );
+    });
   });
 }

@@ -8,6 +8,7 @@ import '../../mpv/player/player.dart';
 import '../../screens/video_player/wakelock_controller.dart';
 import '../../utils/app_logger.dart';
 import 'reel_perf.dart';
+import 'reel_volume.dart';
 
 /// Where a clip comes from. Clips never carry request headers: the Plex
 /// token rides in the PMS URL only, so nothing Plex reaches AnimeThemes.
@@ -76,10 +77,22 @@ abstract interface class ClipEngine {
 }
 
 /// ExoPlayer in clip mode (Android): one core for the whole Reel session.
+/// Every level it is sent is scaled by [ReelVolume] (On TV mode's volume
+/// buttons), and a change to it applies at once.
 class ExoClipEngine implements ClipEngine {
-  ExoClipEngine() : _p = PlayerAndroid(clipMode: true);
+  ExoClipEngine({ValueListenable<int>? volume})
+    : _p = PlayerAndroid(clipMode: true),
+      _volume = volume ?? ReelVolume.level {
+    _volume.addListener(_onVolume);
+  }
 
   final PlayerAndroid _p;
+  final ValueListenable<int> _volume;
+
+  /// The level last asked for, before [ReelVolume.scale].
+  double _asked = 100;
+
+  void _onVolume() => unawaited(_p.setVolume(ReelVolume.scale(_asked, _volume.value)));
 
   @override
   Player get player => _p;
@@ -103,7 +116,10 @@ class ExoClipEngine implements ClipEngine {
   Future<void> seek(Duration position) => _p.seek(position);
 
   @override
-  Future<void> setVolume(double volume) => _p.setVolume(volume);
+  Future<void> setVolume(double volume) {
+    _asked = volume;
+    return _p.setVolume(ReelVolume.scale(volume, _volume.value));
+  }
 
   @override
   Future<void> setVisible(bool visible) => _p.setVisible(visible);
@@ -145,7 +161,10 @@ class ExoClipEngine implements ClipEngine {
   Future<void> abandonAudioFocus() => _p.abandonAudioFocus();
 
   @override
-  Future<void> dispose() => _p.dispose();
+  Future<void> dispose() {
+    _volume.removeListener(_onVolume);
+    return _p.dispose();
+  }
 }
 
 enum ClipPhase { idle, loading, playing, paused, held, failed }

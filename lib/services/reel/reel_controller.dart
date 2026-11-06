@@ -2,14 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../i18n/strings.g.dart';
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
+import '../customisation/customisation_store.dart';
 import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
 import '../settings_service.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
+import 'reel_data_budget.dart';
 import 'reel_decay.dart';
+import 'reel_deck_prefs.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
 import 'reel_playback_profile.dart';
@@ -174,16 +178,26 @@ class ReelController extends ChangeNotifier {
     this.itemWithNext,
     this.moreLike,
     this.saveMuted,
+    this.settingsChanged,
+    this.cellular,
+    this.metered,
+    this.linkChanged,
+    Listenable? deckPrefsChanged,
     ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
     ReelPrefetcher? prefetcher,
   }) : _clock = clock ?? DateTime.now,
        _clipEnd = clipEnd ?? clipEndPref,
-       _prefetch = prefetcher ?? ReelPrefetcher() {
+       _prefetch = prefetcher ?? ReelPrefetcher(),
+       deckPrefsChanged = deckPrefsChanged ?? Listenable.merge([ReelStore.deckPrefsChanged, Customisation.changed]) {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
     resolver.profile?.addListener(_onProfile);
     ReelStore.picksChanged.addListener(_onPicksChanged);
+    settingsChanged?.addListener(_onSettingsChanged);
+    _wasMetered = metered?.call() ?? false;
+    linkChanged?.addListener(_onLinkChanged);
+    this.deckPrefsChanged.addListener(_onDeckPrefsChanged);
     decks.forEach(_watchDeck);
   }
 
@@ -239,6 +253,131 @@ class ReelController extends ChangeNotifier {
 
   static Future<void> _saveMutedPref(bool muted) async =>
       SettingsService.instanceOrNull?.write(SettingsService.reelMuted, muted);
+
+  /// Fires when one of the Reel's settings changes (its settings page,
+  /// V2-46). The Reel reads its prefs where it uses them, so a change only
+  /// has to reach the views: the controller tells its listeners, and the
+  /// next card, clip end or key press follows the new choice without a
+  /// restart.
+  final Listenable? settingsChanged;
+
+  void _onSettingsChanged() {
+    if (_disposed) return;
+    appLogger.d('Reel: a setting changed; the views take it up now');
+    notifyListeners();
+  }
+
+  /// The Reel on mobile data (V2-53, `reel_cellular`). Null reads the
+  /// pref's default.
+  final ReelCellular Function()? cellular;
+
+  /// Whether the link is cellular only (`OfflineModeProvider.isCellularOnly`).
+  /// Null reads as Wi-Fi.
+  final bool Function()? metered;
+
+  /// Fires when the link may have changed (the app's connectivity
+  /// provider). The views re-sync only when [metered] really moved.
+  final Listenable? linkChanged;
+  bool _wasMetered = false;
+
+  /// What the Reel may spend on this link now ([ReelDataBudget]): the phone
+  /// feed's player window, the clip/still choice and the preload follow it.
+  /// The views read this, so reading it also notes the link they last acted
+  /// on, and a change the link listener missed is still caught at its next
+  /// tick. The controller's own reads ([_budget]) note nothing, so they
+  /// never swallow a change the views have yet to hear of.
+  ReelDataBudget get dataBudget {
+    _wasMetered = metered?.call() ?? false;
+    return _budget;
+  }
+
+  ReelDataBudget get _budget => ReelDataBudget.of(
+    cellular?.call() ?? SettingsService.reelCellular.resolvedDefault,
+    metered: metered?.call() ?? false,
+  );
+
+  void _onLinkChanged() {
+    if (_disposed) return;
+    final now = metered?.call() ?? false;
+    if (now == _wasMetered) return;
+    _wasMetered = now;
+    appLogger.i('Reel: ${now ? 'mobile data' : 'off mobile data'}, $_budget');
+    notifyListeners();
+  }
+
+  /// Fires when the deck prefs change (a picker or the Decks screen on this
+  /// device, or the other device's arrangement arriving): the pickers and
+  /// the deck cycle follow at once.
+  final Listenable deckPrefsChanged;
+
+  /// The synced deck arrangement (V2-52), read on the first start.
+  ReelDeckPrefs get deckPrefs => _prefs;
+  ReelDeckPrefs _prefs = ReelDeckPrefs.none;
+  Future<void>? _prefsRead;
+
+  Future<void> _readPrefs() async {
+    try {
+      final read = await store.deckPrefs();
+      if (_disposed || read == _prefs) return;
+      _prefs = read;
+      notifyListeners();
+    } catch (e) {
+      appLogger.d('Reel: deck prefs unavailable', error: e);
+    }
+  }
+
+  void _onDeckPrefsChanged() {
+    if (_disposed) return;
+    _prefsRead = _readPrefs();
+  }
+
+  /// The decks the pickers and → / ← offer, in the user's order: hidden ones
+  /// left out, except the deck playing (a link may have opened it).
+  List<ReelDeck> get shownDecks => _prefs.shown(decks, _idOf, keep: deck.id);
+
+  static String _idOf(ReelDeck d) => d.id;
+
+  /// Whether [id] is hidden from the pickers and the deck cycle.
+  bool isHidden(String id) => _prefs.hidden.contains(id);
+
+  /// The deck → (next deck) goes to, or null with nothing else to show.
+  ReelDeck? get nextDeck {
+    final shown = shownDecks;
+    if (shown.length < 2) return null;
+    return shown[(shown.indexOf(deck) + 1) % shown.length];
+  }
+
+  /// Moves [id] [by] places among the shown decks (a large negative [by]
+  /// pins it to the top).
+  Future<void> moveDeck(String id, int by) => _arrange(
+    'moveDeck',
+    _prefs.moved(known: [for (final d in decks) d.id], among: [for (final d in shownDecks) d.id], id: id, by: by),
+  );
+
+  /// Hides [id] from the pickers and the deck cycle, or shows it again. The
+  /// last shown deck can't be hidden. Hiding the deck that is playing keeps
+  /// it on screen until the next deck change.
+  Future<void> hideDeck(String id, {required bool hide}) async {
+    if (hide && !_prefs.canHide([for (final d in decks) d.id], id)) return;
+    await _arrange('hideDeck', _prefs.withHidden(id, hide: hide));
+  }
+
+  Future<void> _arrange(String name, ReelDeckPrefs next) => _act(name, () async {
+    await _prefsRead;
+    final was = _prefs;
+    if (next == was) return;
+    _prefs = next;
+    notifyListeners();
+    try {
+      await store.writeDeckPrefs(next, was: was);
+    } catch (e) {
+      // Not kept: the pickers go back to what is stored.
+      if (identical(_prefs, next)) _prefs = was;
+      notifyListeners();
+      if (e is MirrorReadOnlyException) rethrow;
+      appLogger.w('Reel: $name not kept', error: e);
+    }
+  });
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -543,8 +682,12 @@ class ReelController extends ChangeNotifier {
     return [for (var i = p + 1; i <= p + 3; i++) slotAt(i)];
   }
 
-  /// Opens the Reel (or comes back to it): loads the deck and plays.
-  Future<void> start({String? deckId}) async {
+  /// Opens the Reel (or comes back to it): loads the deck and plays. The
+  /// first start opens [deckId] when given, else the start deck
+  /// ([ReelDeckPrefs.start]); later starts keep the deck that was playing.
+  /// With [groupKey] (On TV mode), [deckId] opens on that title's card when
+  /// its list has it, as [openAt].
+  Future<void> start({String? deckId, String? groupKey}) async {
     if (!_active) _comeBack();
     _setActive(true);
     // Opening the Reel (or coming back to it) is someone there.
@@ -553,10 +696,16 @@ class ReelController extends ChangeNotifier {
     unawaited(_loadSaved());
     // The degrade ladder carries over: coming back from Watch or another tab
     // says nothing about memory. Only the policy's restore resets it.
+    await (_prefsRead ??= _readPrefs());
     if (deckId != null) {
       final i = await _deckIndex(deckId);
       if (i >= 0) _deck = i;
+    } else if (!_started) {
+      final i = await _startIndex();
+      if (i >= 0) _deck = i;
     }
+    _started = true;
+    _remember();
     // A warm controller on a new day: daily decks (For You) load again, so
     // today's pool (or yesterday's remainder while it builds) replaces the
     // list kept from an earlier day.
@@ -576,8 +725,9 @@ class ReelController extends ChangeNotifier {
       _pickAt = 0;
       _onDecide.clear();
     }
-    await (_ensureDeck(deck), _refreshPicks()).wait;
+    final (list, _) = await (_ensureDeck(deck), _refreshPicks()).wait;
     if (!_active) return;
+    if (deckId != null && deck.id == deckId) _seekTitle(list, groupKey);
     await _show();
   }
 
@@ -619,6 +769,45 @@ class ReelController extends ChangeNotifier {
         notifyListeners();
       }();
     }
+  }
+
+  bool _started = false;
+
+  /// The start deck when it is shown: For You, or the deck this device was
+  /// last on. Else the first shown deck. -1 leaves the cursor where it is.
+  Future<int> _startIndex() async {
+    String? want = ReelDeckPrefs.forYouId;
+    if (_prefs.start == ReelStartDeck.last) {
+      try {
+        want = await store.lastDeck();
+      } catch (_) {
+        want = null;
+      }
+    }
+    if (want != null && !_prefs.hidden.contains(want)) {
+      // A last deck may be an answer saved after the list was built.
+      final i = _prefs.start == ReelStartDeck.last ? await _deckIndex(want) : decks.indexWhere((d) => d.id == want);
+      if (i >= 0) return i;
+    }
+    final shown = _prefs.shown(decks, _idOf);
+    return shown.isEmpty ? -1 : decks.indexOf(shown.first);
+  }
+
+  /// The deck id this device last wrote as its last deck.
+  String? _remembered;
+
+  /// Keeps the deck playing as this device's last deck (per device, not
+  /// synced), for the "Where I left off" start.
+  void _remember() {
+    if (decks.isEmpty) return;
+    final id = deck.id;
+    if (id == _remembered) return;
+    _remembered = id;
+    unawaited(
+      store.rememberDeck(id).catchError((Object e) {
+        appLogger.d('Reel: last deck not kept', error: e);
+      }),
+    );
   }
 
   /// Tab hidden, Home pressed or the app paused: stop and release the
@@ -797,32 +986,58 @@ class ReelController extends ChangeNotifier {
     await _show(direction: dir, skipAi: skipAi);
   }
 
-  /// Next / previous deck (wraps), with the deck strip.
+  /// Next / previous shown deck (wraps), with the deck strip. A hidden
+  /// deck opened by a link is left for its shown neighbour.
   ///
   /// Like [step], it bumps the generation first, so a card of the old deck
   /// still resolving never plays once the deck has changed.
   Future<void> switchDeck(int dir) async {
-    if (decks.length < 2) return;
+    final shown = shownDecks;
+    if (shown.length < 2) return;
+    var at = (shown.indexOf(deck) + dir) % shown.length;
+    if (at < 0) at += shown.length;
+    final to = decks.indexOf(shown[at]);
     _generation++;
     _clearPrefetch();
     await _leaveCard();
-    _deck = (_deck + dir) % decks.length;
-    if (_deck < 0) _deck += decks.length;
+    _deck = to;
+    _remember();
     _showStrip();
     notifyListeners();
     await _ensureDeck(deck);
     await _show();
   }
 
-  Future<void> openDeck(String id) async {
+  Future<void> openDeck(String id) => openAt(id);
+
+  /// Opens deck [id] on the card for [groupKey] (On TV mode: the TV opens
+  /// on the card the Fold was showing). A title that isn't in this device's
+  /// list of the deck, or no [groupKey], leaves the deck on its own cursor.
+  Future<void> openAt(String id, [String? groupKey]) async {
     final i = await _deckIndex(id);
-    if (i < 0 || i == _deck) return;
+    if (i < 0) return;
+    if (i == _deck) {
+      if (groupKey == null) return;
+      final d = deck;
+      final at = _indexOf(await _ensureDeck(d), groupKey);
+      // A deck change while the list loaded wins.
+      if (at == null || at == index || !identical(d, deck)) return;
+      // As [step]: the cursor moves first, under the generation counter.
+      _cursor[deck.id] = at;
+      _onDecide.remove(deck.id);
+      final gen = ++_generation;
+      await _leaveCard();
+      if (gen != _generation) return;
+      await _show();
+      return;
+    }
     _generation++;
     _clearPrefetch();
     await _leaveCard();
     _deck = i;
+    _remember();
     _showStrip();
-    await _ensureDeck(deck);
+    _seekTitle(await _ensureDeck(deck), groupKey);
     await _show();
   }
 
@@ -835,6 +1050,21 @@ class ReelController extends ChangeNotifier {
     await _show();
   }
 
+  /// The card for [groupKey] in [list], or null.
+  static int? _indexOf(List<ReelCardData> list, String? groupKey) {
+    if (groupKey == null) return null;
+    final at = list.indexWhere((c) => c.title.groupKey == groupKey);
+    return at < 0 ? null : at;
+  }
+
+  /// Puts the deck playing on the card for [groupKey], when it has one.
+  void _seekTitle(List<ReelCardData> list, String? groupKey) {
+    final at = _indexOf(list, groupKey);
+    if (at == null || !identical(list, cards)) return;
+    _cursor[deck.id] = at;
+    _onDecide.remove(deck.id);
+  }
+
   /// Puts the strip up for the deck now selected. It stays while the deck
   /// loads; the hold starts when the deck shows ([_settleStrip]).
   void _showStrip() {
@@ -843,11 +1073,14 @@ class ReelController extends ChangeNotifier {
     _stripTimer = null;
     _stripPending = true;
     _stripSince = _generation;
-    final n = decks.length;
+    // The neighbours → and ← go to: the shown decks, in the user's order.
+    final shown = shownDecks;
+    final n = shown.length;
+    final at = shown.indexOf(deck);
     deckStrip.value = ReelDeckStripState(
-      previous: n > 2 ? decks[(_deck - 1 + n) % n] : null,
+      previous: n > 2 && at >= 0 ? shown[(at - 1 + n) % n] : null,
       current: deck,
-      next: n > 1 ? decks[(_deck + 1) % n] : null,
+      next: n > 1 && at >= 0 ? shown[(at + 1) % n] : null,
     );
   }
 
@@ -994,9 +1227,17 @@ class ReelController extends ChangeNotifier {
     } else if (clip == null) {
       _sinceAiCard = 0;
       await clips.pause();
-    } else if (memoryLevel >= 2) {
-      // Low memory: the backdrop as a still, no clip core (and no clock).
+    } else if (memoryLevel >= 2 || !_budget.clips) {
+      // Low memory, or Stills only on mobile data: the backdrop as a still,
+      // no clip core (and no clock).
       _sinceAiCard++;
+      // The ladder released the core on its way to level 2; a link that
+      // moved to mobile data mid-session hasn't, so the last clip and its
+      // preload stop here.
+      if (memoryLevel < 2) {
+        await clips.release();
+        _firstClip = true;
+      }
     } else {
       _sinceAiCard++;
       _cardClip = clip.source.uri;
@@ -1132,11 +1373,12 @@ class ReelController extends ChangeNotifier {
   /// [ClipSource.preloadable]).
   void _preloadNext(List<ReelCardData> list, int gen) {
     final ahead = index + _direction;
-    if (externalClips || memoryLevel != 0 || ahead < 0 || ahead >= list.length) return;
+    if (externalClips || memoryLevel != 0 || !_budget.clips || ahead < 0 || ahead >= list.length) return;
     final next = list[ahead];
     unawaited(
       _prefetch.done(ReelPrefetcher.keyOf(next.id, ReelPrefetchStage.resolve)).then((_) {
-        if (gen != _generation || !_active || memoryLevel != 0 || !_resolved.contains(next.id)) return;
+        if (gen != _generation || !_active || memoryLevel != 0 || !_budget.clips) return;
+        if (!_resolved.contains(next.id)) return;
         unawaited(clips.preload(_clip[next.id]?.source));
       }),
     );
@@ -1249,7 +1491,7 @@ class ReelController extends ChangeNotifier {
     // The new clip's first frame starts the clock.
     _cardFailed = false;
     _cardSince = null;
-    if (externalClips || memoryLevel >= 2) return;
+    if (externalClips || memoryLevel >= 2 || !_budget.clips) return;
     _cardClip = clip.source.uri;
     _prefetch.hold();
     await clips.play(clip.source, first: _firstClip);
@@ -1359,9 +1601,9 @@ class ReelController extends ChangeNotifier {
   }
 
   /// Confirmations that say where a Save went.
-  static const String savedOnTv = 'On the TV tonight';
-  static const String savedForLater = 'Saved, on the TV next time you connect';
-  static const String notConnected = "Couldn't save: not connected to the TV";
+  static String get savedOnTv => t.reel.toast.savedOnTv;
+  static String get savedForLater => t.reel.toast.savedForLater;
+  static String get notConnected => t.reel.toast.notConnected;
 
   /// Runs a card action that writes the synced Reel data. A phone mirroring
   /// a TV it has lost can't write ([MirrorReadOnlyException]): say so and
@@ -1740,7 +1982,7 @@ class ReelController extends ChangeNotifier {
       'deck': deck.id,
       'deckName': deck.name,
       'decks': [
-        for (final d in decks) {'id': d.id, 'name': d.name},
+        for (final d in shownDecks) {'id': d.id, 'name': d.name},
       ],
       'index': index,
       'groupKey': c?.title.groupKey,
@@ -1763,6 +2005,10 @@ class ReelController extends ChangeNotifier {
               },
           ],
         },
+      // V2-49: the phone's More menu offers Replay and Spoiled me only with
+      // a clip, and its mute button follows the TV's sound.
+      'hasClip': s.clip != null,
+      'muted': clips.muted,
     };
   }
 
@@ -1784,6 +2030,9 @@ class ReelController extends ChangeNotifier {
     memoryRestored?.removeListener(_onMemoryRestored);
     resolver.profile?.removeListener(_onProfile);
     ReelStore.picksChanged.removeListener(_onPicksChanged);
+    settingsChanged?.removeListener(_onSettingsChanged);
+    linkChanged?.removeListener(_onLinkChanged);
+    deckPrefsChanged.removeListener(_onDeckPrefsChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);
     }

@@ -14,6 +14,7 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../providers/offline_mode_provider.dart';
 import '../screens/media_detail_screen.dart';
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
@@ -58,18 +59,37 @@ abstract final class ReelApp {
   /// Saved AI answers offered as decks (newest first).
   static const int answerDecks = 12;
 
-  static Future<ReelController> controller(BuildContext context) async {
+  /// The decks the Reel offers here, in the app's own order, by id and name
+  /// (the Decks screen, V2-52). Builds the deck objects without loading any.
+  static Future<List<({String id, String name})>> deckList(BuildContext context) async {
+    final store = ReelStore.instance;
+    final library = _library();
+    return [
+      for (final d in await _decks(context, library: library, store: store, pool: _pool(store, library)))
+        (id: d.id, name: d.name),
+    ];
+  }
+
+  static ReelLibrary _library() =>
+      ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app());
+
+  /// The day's For You pool: the TV builds it and shares it; a phone reads
+  /// that copy.
+  static ReelPool _pool(ReelStore store, ReelLibrary library) =>
+      ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
+
+  /// The decks in the app's own order: For You, Fits tonight, Give it
+  /// another go, Anime openings, Most Watched (with Trakt) and the saved
+  /// answers. The controller applies the user's order and hidden decks
+  /// ([ReelController.shownDecks]). For You is always first.
+  static Future<List<ReelDeck>> _decks(
+    BuildContext context, {
+    required ReelLibrary library,
+    required ReelStore store,
+    required ReelPool pool,
+  }) async {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
-    final remote = context.read<CompanionRemoteProvider?>();
-    final servers = multi.serverManager;
-    final store = ReelStore.instance;
-    final facts = IndexTitleFactsSource.app();
-    final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: facts);
-    final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
-    // The TV builds the day's pool and shares it; a phone reads that copy.
-    final pool = ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
-    final media = _AppReelMedia(servers, store);
     final resolverRows = catalog == null
         ? null
         : HomeRowResolver(sources: catalog, clientFor: (id) => multi.getClientForServer(id));
@@ -99,7 +119,7 @@ abstract final class ReelApp {
       sharedChanges: Customisation.changed,
       clears: ReelPool.clears,
     );
-    final decks = <ReelDeck>[
+    return <ReelDeck>[
       forYou,
       FitsTonightDeck(forYou: forYou),
       AnotherGoDeck(forYou: forYou, library: library),
@@ -114,6 +134,21 @@ abstract final class ReelApp {
         ),
       for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
     ];
+  }
+
+  static Future<ReelController> controller(BuildContext context) async {
+    final multi = context.read<MultiServerProvider>();
+    final catalog = context.read<CatalogSourcesProvider?>();
+    final remote = context.read<CompanionRemoteProvider?>();
+    final link = context.read<OfflineModeProvider?>();
+    final servers = multi.serverManager;
+    final store = ReelStore.instance;
+    final library = _library();
+    final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
+    final pool = _pool(store, library);
+    final media = _AppReelMedia(servers, store);
+    final decks = await _decks(context, library: library, store: store, pool: pool);
+    final forYou = decks.first as ForYouDeck;
 
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;
@@ -189,6 +224,15 @@ abstract final class ReelApp {
       // Give it another go: the card's one metadata read brings the show's
       // next episode, so Watch can say which.
       itemWithNext: media.itemWithNext,
+      // The Reel's settings page applies to the Reel that is playing.
+      settingsChanged: SettingsService.instanceOrNull?.listenableOfAll(SettingsService.reelChoicePrefs),
+      // The Reel on mobile data (V2-53): the pref, and the app's one
+      // connectivity reading.
+      cellular: () =>
+          SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
+          SettingsService.reelCellular.resolvedDefault,
+      metered: () => link?.isCellularOnly ?? false,
+      linkChanged: link,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
@@ -312,6 +356,11 @@ abstract final class ReelApp {
           : (id) => waitForServers(serversChanged, () => plex.connected(id), timeout: deepLinkServerWait),
     );
   }
+
+  /// The cards' metadata and art over the app's servers, for the run-time
+  /// seam test (V2-62).
+  @visibleForTesting
+  static ReelMedia mediaFor(MultiServerManager servers, ReelStore store) => _AppReelMedia(servers, store);
 
   /// Answers worth a deck: the user's own asks, not Tonight or the briefing.
   static Future<List<AiHistoryEntry>> _answers() async {

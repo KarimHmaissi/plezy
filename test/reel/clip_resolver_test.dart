@@ -1028,4 +1028,65 @@ void main() {
       expect((await resolver.resolve(on('c', '4')))?.source.preloadable, isTrue);
     });
   });
+
+  group('resolver failures (V2-62)', () {
+    test('a server whose extras read fails is not marked slow; the next copy is used', () async {
+      servers.failWith['a'] = const FormatException('bad extras response');
+      servers.extrasByKey['b:2'] = [_x('82', 'Trailer')];
+      final clip = await resolver.resolve(
+        film(
+          copies: const [
+            ReelCopy(serverId: 'a', ratingKey: '1'),
+            ReelCopy(serverId: 'b', ratingKey: '2'),
+          ],
+        ),
+      );
+      expect(clip?.assetId, 'plex:82');
+      expect(resolver.slowServers, isEmpty, reason: 'only a timeout marks a server slow');
+    });
+
+    test('a trailer on a server that is not connected falls to the next copy', () async {
+      servers.offline.add('a');
+      servers.extrasByKey['a:1'] = [_x('83', 'Trailer')];
+      servers.extrasByKey['b:2'] = [_x('84', 'Trailer')];
+      final clip = await resolver.resolve(
+        film(
+          copies: const [
+            ReelCopy(serverId: 'a', ratingKey: '1'),
+            ReelCopy(serverId: 'b', ratingKey: '2'),
+          ],
+        ),
+      );
+      expect(clip?.assetId, 'plex:84');
+      expect(clip?.serverId, 'b');
+    });
+
+    test('an unreadable cache entry is resolved again', () async {
+      await store.cache('src:imdb:tt1', '{not json');
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      expect((await resolver.resolve(film()))?.assetId, 'plex:87');
+      expect(servers.calls, ['a:1']);
+    });
+
+    test('at most ${AnimeThemesClient.perMinute} AnimeThemes requests a minute; the rest are unknown', () async {
+      var requests = 0;
+      final client = AnimeThemesClient(
+        client: MockClient((_) async {
+          requests++;
+          return http.Response('{"data":{"findAnimeByExternalSite":[]}}', 200);
+        }),
+      );
+      var refused = 0;
+      for (var i = 0; i < AnimeThemesClient.perMinute + 5; i++) {
+        try {
+          await client.fetch([101]);
+        } on AnimeThemesUnavailable {
+          refused++;
+        }
+      }
+      expect(requests, AnimeThemesClient.perMinute);
+      expect(refused, 5, reason: 'past the cap a lookup is unknown, never "no record"');
+      expect(AnimeThemesClient.perMinute, lessThan(90), reason: "under the API's 90 a minute");
+    });
+  });
 }

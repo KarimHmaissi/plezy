@@ -129,12 +129,12 @@ void main() {
   });
 
   group('SettingsService Reel prefs', () {
-    test('default to what the Reel does today', () async {
+    test('default to what the Reel does today, with Data saver on mobile data (V2-53)', () async {
       final settings = await SettingsService.getInstance();
 
       expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
       expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
-      expect(settings.read(SettingsService.reelCellular), ReelCellular.normal);
+      expect(settings.read(SettingsService.reelCellular), ReelCellular.dataSaver);
       expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
       expect(settings.read(SettingsService.reelMuted), isFalse);
       expect(settings.read(SettingsService.reelCaptions), isFalse);
@@ -181,7 +181,7 @@ void main() {
 
       await settings.write(SettingsService.reelStartSound, ReelStartSound.mutedIfOtherAudio);
       await settings.write(SettingsService.reelClipEnd, ReelClipEnd.loop);
-      await settings.write(SettingsService.reelCellular, ReelCellular.dataSaver);
+      await settings.write(SettingsService.reelCellular, ReelCellular.stillsOnly);
       await settings.write(SettingsService.reelOkAction, ReelOkAction.details);
       await settings.write(SettingsService.reelMuted, true);
       await settings.write(SettingsService.reelCaptions, true);
@@ -194,7 +194,7 @@ void main() {
 
       expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
       expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
-      expect(settings.read(SettingsService.reelCellular), ReelCellular.normal);
+      expect(settings.read(SettingsService.reelCellular), ReelCellular.dataSaver);
       expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
       expect(settings.read(SettingsService.reelMuted), isFalse);
       expect(settings.read(SettingsService.reelCaptions), isFalse);

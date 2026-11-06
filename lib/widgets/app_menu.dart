@@ -3,9 +3,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../focus/dpad_navigator.dart';
+import '../focus/dpad_select_long_press_controller.dart';
 import '../focus/focusable_tile_mixin.dart';
 import '../focus/input_mode_tracker.dart';
 import '../focus/key_event_utils.dart';
@@ -39,6 +41,11 @@ class AppMenuItem<T> extends AppMenuEntry<T> {
   final Color? stateLayerColor;
   final String? semanticLabel;
 
+  /// Fork: the item's second action. Long-press, hold OK or the menu key on
+  /// a focused item closes the menu with this value instead of [value].
+  /// With it set, OK acts on release (a hold is the second action).
+  final T? secondaryValue;
+
   const AppMenuItem({
     required this.value,
     this.label,
@@ -54,6 +61,7 @@ class AppMenuItem<T> extends AppMenuEntry<T> {
     this.foregroundColor,
     this.stateLayerColor,
     this.semanticLabel,
+    this.secondaryValue,
   }) : assert(label != null || child != null, 'AppMenuItem requires either label or child'),
        assert(subtitle == null || subtitleWidget == null, 'Provide subtitle or subtitleWidget, not both'),
        assert(icon == null || leading == null, 'Provide icon or leading, not both');
@@ -498,6 +506,9 @@ class _AppMenuListState<T> extends State<AppMenuList<T>> {
       item: item,
       focusNode: initialFocusAssigned ? _initialFocusNode : null,
       onPressed: item.enabled ? () => widget.onSelected(item.value) : null,
+      onSecondary: item.enabled && item.secondaryValue != null
+          ? () => widget.onSelected(item.secondaryValue as T)
+          : null,
     );
   }
 }
@@ -507,7 +518,10 @@ class AppMenuItemTile<T> extends StatefulWidget {
   final VoidCallback? onPressed;
   final FocusNode? focusNode;
 
-  const AppMenuItemTile({super.key, required this.item, this.onPressed, this.focusNode});
+  /// Fork: the item's second action ([AppMenuItem.secondaryValue]).
+  final VoidCallback? onSecondary;
+
+  const AppMenuItemTile({super.key, required this.item, this.onPressed, this.focusNode, this.onSecondary});
 
   @override
   State<AppMenuItemTile<T>> createState() => _AppMenuItemTileState<T>();
@@ -516,6 +530,9 @@ class AppMenuItemTile<T> extends StatefulWidget {
 class _AppMenuItemTileState<T> extends State<AppMenuItemTile<T>> with FocusableTileStateMixin<AppMenuItemTile<T>> {
   bool _isHovered = false;
   bool _isFocused = false;
+
+  /// Hold OK for the second action ([AppMenuItemTile.onSecondary]).
+  final DpadSelectLongPressController _hold = DpadSelectLongPressController();
 
   @override
   FocusNode? get widgetFocusNode => widget.focusNode;
@@ -540,12 +557,32 @@ class _AppMenuItemTileState<T> extends State<AppMenuItemTile<T>> with FocusableT
   @override
   void dispose() {
     effectiveFocusNode.removeListener(_updateFocusedState);
+    _hold.dispose();
     super.dispose();
   }
 
   void _updateFocusedState() {
     final focused = effectiveFocusNode.hasFocus;
+    if (!focused) _hold.reset();
     if (_isFocused != focused) setState(() => _isFocused = focused);
+  }
+
+  /// Keys for an item with a second action: OK on release, hold OK or the
+  /// menu key for the second action.
+  KeyEventResult? _secondaryKey(KeyEvent event, {required bool enabled}) {
+    final secondary = widget.onSecondary;
+    if (!enabled || secondary == null) return null;
+    if (event.logicalKey.isContextMenuKey) {
+      if (event is KeyDownEvent) secondary();
+      return KeyEventResult.handled;
+    }
+    final r = _hold.handleKeyEvent(
+      event,
+      isOwnerActive: () => mounted && effectiveFocusNode.hasFocus,
+      onShortPress: () => widget.onPressed?.call(),
+      onLongPress: secondary,
+    );
+    return r == KeyEventResult.ignored ? null : r;
   }
 
   @override
@@ -573,6 +610,8 @@ class _AppMenuItemTileState<T> extends State<AppMenuItemTile<T>> with FocusableT
         canRequestFocus: enabled,
         onKeyEvent: (node, event) {
           if (SelectKeyUpSuppressor.consumeIfSuppressed(event)) return KeyEventResult.handled;
+          final secondary = _secondaryKey(event, enabled: enabled);
+          if (secondary != null) return secondary;
           return dpadKeyHandler(onSelect: enabled ? widget.onPressed : null, trapHorizontalEdges: true)(node, event);
         },
         child: MouseRegion(
@@ -584,6 +623,7 @@ class _AppMenuItemTileState<T> extends State<AppMenuItemTile<T>> with FocusableT
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: enabled ? widget.onPressed : null,
+              onLongPress: enabled ? widget.onSecondary : null,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 child: AnimatedContainer(

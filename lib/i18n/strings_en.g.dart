@@ -80,6 +80,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$startup$en startup = Translations$startup$en.internal(_root);
 	late final Translations$licenses$en licenses = Translations$licenses$en.internal(_root);
 	late final Translations$navigation$en navigation = Translations$navigation$en.internal(_root);
+	late final Translations$reel$en reel = Translations$reel$en.internal(_root);
 	late final Translations$history$en history = Translations$history$en.internal(_root);
 	late final Translations$comfort$en comfort = Translations$comfort$en.internal(_root);
 	late final Translations$watchlist$en watchlist = Translations$watchlist$en.internal(_root);
@@ -4534,6 +4535,27 @@ class Translations$navigation$en {
 	String get history => 'History';
 }
 
+// Path: reel
+class Translations$reel$en {
+	Translations$reel$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+	late final Translations$reel$intro$en intro = Translations$reel$intro$en.internal(_root);
+	late final Translations$reel$card$en card = Translations$reel$card$en.internal(_root);
+	late final Translations$reel$sheet$en sheet = Translations$reel$sheet$en.internal(_root);
+	late final Translations$reel$toast$en toast = Translations$reel$toast$en.internal(_root);
+	late final Translations$reel$remote$en remote = Translations$reel$remote$en.internal(_root);
+	late final Translations$reel$deckNames$en deckNames = Translations$reel$deckNames$en.internal(_root);
+
+	/// en: 'From the Reel'
+	String get homeRow => 'From the Reel';
+
+	late final Translations$reel$settings$en settings = Translations$reel$settings$en.internal(_root);
+	late final Translations$reel$decks$en decks = Translations$reel$decks$en.internal(_root);
+}
+
 // Path: history
 class Translations$history$en {
 	Translations$history$en.internal(this._root);
@@ -8307,6 +8329,417 @@ class Translations$libraries$advancedFilters$en {
 	String get dateOlderThanYear => 'Older than a year';
 }
 
+// Path: reel.intro
+class Translations$reel$intro$en {
+	Translations$reel$intro$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Welcome to the Reel'
+	String get title => 'Welcome to the Reel';
+
+	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.'
+	String get bodyTv => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.';
+
+	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.'
+	String get bodyPhone => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.';
+
+	/// en: 'Start'
+	String get start => 'Start';
+}
+
+// Path: reel.card
+class Translations$reel$card$en {
+	Translations$reel$card$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Nothing in $deck yet'
+	String emptyTitle({required Object deck}) => 'Nothing in ${deck} yet';
+
+	/// en: 'Press → for the next deck.'
+	String get emptyBodyTv => 'Press → for the next deck.';
+
+	/// en: 'Swipe sideways for the next deck.'
+	String get emptyBodyPhone => 'Swipe sideways for the next deck.';
+
+	/// en: 'That's today's For You'
+	String get endForYou => 'That\'s today\'s For You';
+
+	/// en: 'That's all of $deck'
+	String endTitle({required Object deck}) => 'That\'s all of ${deck}';
+
+	/// en: 'Press → for $deck.'
+	String endBodyTv({required Object deck}) => 'Press → for ${deck}.';
+
+	/// en: 'Swipe sideways for $deck.'
+	String endBodyPhone({required Object deck}) => 'Swipe sideways for ${deck}.';
+
+	/// en: 'another deck'
+	String get anotherDeck => 'another deck';
+
+	/// en: 'Pick another deck to keep going.'
+	String get pickAnotherDeck => 'Pick another deck to keep going.';
+
+	/// en: 'Decks'
+	String get decks => 'Decks';
+
+	/// en: 'Theme via AnimeThemes'
+	String get themeCredit => 'Theme via AnimeThemes';
+
+	/// en: 'Replay'
+	String get replay => 'Replay';
+
+	/// en: 'OK watch · ↓ next · → next deck · hold OK for more'
+	String get hintsWatch => 'OK watch  ·  ↓ next  ·  → next deck  ·  hold OK for more';
+
+	/// en: 'OK replay · ↓ next · → next deck · hold OK for more'
+	String get hintsReplay => 'OK replay  ·  ↓ next  ·  → next deck  ·  hold OK for more';
+
+	/// en: 'Watch'
+	String get watch => 'Watch';
+
+	/// en: 'Watch on TV'
+	String get watchOnTv => 'Watch on TV';
+
+	/// en: 'Details'
+	String get details => 'Details';
+
+	/// en: 'Save'
+	String get save => 'Save';
+
+	/// en: 'More'
+	String get more => 'More';
+
+	/// en: 'On TV'
+	String get onTv => 'On TV';
+
+	/// en: 'Sound on'
+	String get soundOn => 'Sound on';
+
+	/// en: 'Mute'
+	String get mute => 'Mute';
+
+	/// en: 'Hide controls'
+	String get hideControls => 'Hide controls';
+
+	/// en: 'Show controls'
+	String get showControls => 'Show controls';
+}
+
+// Path: reel.sheet
+class Translations$reel$sheet$en {
+	Translations$reel$sheet$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Watch here'
+	String get watchHere => 'Watch here';
+
+	/// en: 'Save for the TV'
+	String get saveForTv => 'Save for the TV';
+
+	/// en: 'More like this'
+	String get moreLike => 'More like this';
+
+	/// en: 'Watch'
+	String get watch => 'Watch';
+
+	/// en: 'Details'
+	String get details => 'Details';
+
+	/// en: 'Not for me'
+	String get notForMe => 'Not for me';
+
+	/// en: 'Spoiled me'
+	String get spoiledMe => 'Spoiled me';
+
+	/// en: 'Seen it'
+	String get seenIt => 'Seen it';
+
+	/// en: 'Sound off'
+	String get soundOff => 'Sound off';
+}
+
+// Path: reel.toast
+class Translations$reel$toast$en {
+	Translations$reel$toast$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'On the TV tonight'
+	String get savedOnTv => 'On the TV tonight';
+
+	/// en: 'Saved, on the TV next time you connect'
+	String get savedForLater => 'Saved, on the TV next time you connect';
+
+	/// en: 'Couldn't save: not connected to the TV'
+	String get notConnected => 'Couldn\'t save: not connected to the TV';
+}
+
+// Path: reel.remote
+class Translations$reel$remote$en {
+	Translations$reel$remote$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'The Reel'
+	String get title => 'The Reel';
+
+	/// en: 'On $tv'
+	String onTv({required Object tv}) => 'On ${tv}';
+
+	/// en: 'the TV'
+	String get theTv => 'the TV';
+
+	/// en: 'Up next'
+	String get upNext => 'Up next';
+
+	/// en: 'Swipe the picture up for the next title, sideways for another deck. Tap it to pause.'
+	String get howTo => 'Swipe the picture up for the next title, sideways for another deck. Tap it to pause.';
+
+	/// en: 'Watch on TV'
+	String get watchOnTv => 'Watch on TV';
+
+	/// en: 'Save'
+	String get save => 'Save';
+
+	/// en: 'Not for me'
+	String get notForMe => 'Not for me';
+
+	/// en: 'Pause'
+	String get pause => 'Pause';
+
+	/// en: 'Play'
+	String get play => 'Play';
+
+	/// en: 'That's the deck. Swipe sideways for another.'
+	String get deckEnd => 'That\'s the deck. Swipe sideways for another.';
+
+	/// en: 'Nothing on this deck yet.'
+	String get deckEmpty => 'Nothing on this deck yet.';
+
+	/// en: 'Playing on TV'
+	String get playingOnTv => 'Playing on TV';
+
+	/// en: 'Paused'
+	String get paused => 'Paused';
+
+	/// en: 'Opening the Reel on $tv…'
+	String opening({required Object tv}) => 'Opening the Reel on ${tv}…';
+
+	/// en: '$tv isn't showing the Reel.'
+	String notShowing({required Object tv}) => '${tv} isn\'t showing the Reel.';
+
+	/// en: 'Try again'
+	String get tryAgain => 'Try again';
+}
+
+// Path: reel.deckNames
+class Translations$reel$deckNames$en {
+	Translations$reel$deckNames$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'For You'
+	String get forYou => 'For You';
+
+	/// en: 'Anime openings'
+	String get animeOpenings => 'Anime openings';
+
+	/// en: 'Most Watched'
+	String get mostWatched => 'Most Watched';
+
+	/// en: '#$n show this week'
+	String showThisWeek({required Object n}) => '#${n} show this week';
+
+	/// en: '#$n film this week'
+	String filmThisWeek({required Object n}) => '#${n} film this week';
+}
+
+// Path: reel.settings
+class Translations$reel$settings$en {
+	Translations$reel$settings$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Reel'
+	String get title => 'Reel';
+
+	/// en: 'Sound, clip ends and the Reel tab'
+	String get subtitle => 'Sound, clip ends and the Reel tab';
+
+	/// en: 'Reel settings'
+	String get sheetEntry => 'Reel settings';
+
+	/// en: 'Playing'
+	String get playing => 'Playing';
+
+	/// en: 'Sound when a card starts'
+	String get startSound => 'Sound when a card starts';
+
+	/// en: 'With sound'
+	String get startSoundOn => 'With sound';
+
+	/// en: 'Muted if other audio is playing'
+	String get startSoundMutedIfOtherAudio => 'Muted if other audio is playing';
+
+	/// en: 'Starts muted while music or another app is playing'
+	String get startSoundMutedIfOtherAudioDescription => 'Starts muted while music or another app is playing';
+
+	/// en: 'When a clip ends'
+	String get clipEnd => 'When a clip ends';
+
+	/// en: 'Loop'
+	String get clipEndLoop => 'Loop';
+
+	/// en: 'Play twice, then hold'
+	String get clipEndTwiceThenHold => 'Play twice, then hold';
+
+	/// en: 'Stops on the last frame, with Replay'
+	String get clipEndTwiceThenHoldDescription => 'Stops on the last frame, with Replay';
+
+	/// en: 'Next card'
+	String get clipEndNextCard => 'Next card';
+
+	/// en: 'Moves on to the next card by itself'
+	String get clipEndNextCardDescription => 'Moves on to the next card by itself';
+
+	/// en: 'OK button'
+	String get okAction => 'OK button';
+
+	/// en: 'Watch'
+	String get okActionWatch => 'Watch';
+
+	/// en: 'Details'
+	String get okActionDetails => 'Details';
+
+	/// en: 'On mobile data'
+	String get cellular => 'On mobile data';
+
+	/// en: 'Normal'
+	String get cellularNormal => 'Normal';
+
+	/// en: 'Clips play as they do on Wi-Fi'
+	String get cellularNormalDescription => 'Clips play as they do on Wi-Fi';
+
+	/// en: 'Data saver'
+	String get cellularDataSaver => 'Data saver';
+
+	/// en: 'Smaller clips and fewer ready ahead; a fast swipe may show a still first'
+	String get cellularDataSaverDescription => 'Smaller clips and fewer ready ahead; a fast swipe may show a still first';
+
+	/// en: 'Data saver · a fast swipe may show a still first'
+	String get cellularDataSaverSubtitle => 'Data saver · a fast swipe may show a still first';
+
+	/// en: 'Stills only'
+	String get cellularStillsOnly => 'Stills only';
+
+	/// en: 'No clips on mobile data, only each card's art'
+	String get cellularStillsOnlyDescription => 'No clips on mobile data, only each card\'s art';
+
+	/// en: 'Openings with lyrics first'
+	String get captions => 'Openings with lyrics first';
+
+	/// en: 'Where an anime has one, pick the opening with on-screen lyrics or subtitles'
+	String get captionsDescription => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles';
+
+	/// en: 'Show the Reel tab'
+	String get showTab => 'Show the Reel tab';
+
+	/// en: 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place'
+	String get showTabDescription => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place';
+
+	/// en: 'Developer'
+	String get developer => 'Developer';
+
+	/// en: 'Reel debug tools'
+	String get developerTools => 'Reel debug tools';
+
+	/// en: 'Timings overlay and measuring links. Shown while debug logging is on'
+	String get developerToolsDescription => 'Timings overlay and measuring links. Shown while debug logging is on';
+}
+
+// Path: reel.decks
+class Translations$reel$decks$en {
+	Translations$reel$decks$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Decks'
+	String get title => 'Decks';
+
+	/// en: 'Their order, hidden decks and where the Reel starts'
+	String get subtitle => 'Their order, hidden decks and where the Reel starts';
+
+	/// en: 'Start on'
+	String get startOn => 'Start on';
+
+	/// en: 'For You'
+	String get startForYou => 'For You';
+
+	/// en: 'Where I left off'
+	String get startLast => 'Where I left off';
+
+	/// en: 'Your decks'
+	String get yourDecks => 'Your decks';
+
+	/// en: 'Hidden'
+	String get hidden => 'Hidden';
+
+	/// en: 'Hidden. A link still opens it'
+	String get hiddenDescription => 'Hidden. A link still opens it';
+
+	/// en: 'Move to the top'
+	String get moveToTop => 'Move to the top';
+
+	/// en: 'Move up'
+	String get moveUp => 'Move up';
+
+	/// en: 'Move down'
+	String get moveDown => 'Move down';
+
+	/// en: 'Hide'
+	String get hide => 'Hide';
+
+	/// en: 'Show again'
+	String get show => 'Show again';
+
+	/// en: 'Arrange decks'
+	String get arrange => 'Arrange decks';
+
+	/// en: 'Or hold OK on a deck to move or hide it'
+	String get arrangeHintTv => 'Or hold OK on a deck to move or hide it';
+
+	/// en: 'Or hold a deck to move or hide it'
+	String get arrangeHintPhone => 'Or hold a deck to move or hide it';
+
+	/// en: 'No decks yet'
+	String get none => 'No decks yet';
+
+	/// en: 'The order, hidden decks and start deck are the same on the TV and the phone. A link to a hidden deck still opens it.'
+	String get syncedNote => 'The order, hidden decks and start deck are the same on the TV and the phone. A link to a hidden deck still opens it.';
+
+	/// en: 'Couldn't save the decks'
+	String get saveFailed => 'Couldn\'t save the decks';
+}
+
 // Path: history.copy
 class Translations$history$copy$en {
 	Translations$history$copy$en.internal(this._root);
@@ -11119,6 +11552,120 @@ extension on Translations {
 			'navigation.comfort' => 'Comfort',
 			'navigation.reel' => 'Reel',
 			'navigation.history' => 'History',
+			'reel.intro.title' => 'Welcome to the Reel',
+			'reel.intro.bodyTv' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.',
+			'reel.intro.bodyPhone' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.',
+			'reel.intro.start' => 'Start',
+			'reel.card.emptyTitle' => ({required Object deck}) => 'Nothing in ${deck} yet',
+			'reel.card.emptyBodyTv' => 'Press → for the next deck.',
+			'reel.card.emptyBodyPhone' => 'Swipe sideways for the next deck.',
+			'reel.card.endForYou' => 'That\'s today\'s For You',
+			'reel.card.endTitle' => ({required Object deck}) => 'That\'s all of ${deck}',
+			'reel.card.endBodyTv' => ({required Object deck}) => 'Press → for ${deck}.',
+			'reel.card.endBodyPhone' => ({required Object deck}) => 'Swipe sideways for ${deck}.',
+			'reel.card.anotherDeck' => 'another deck',
+			'reel.card.pickAnotherDeck' => 'Pick another deck to keep going.',
+			'reel.card.decks' => 'Decks',
+			'reel.card.themeCredit' => 'Theme via AnimeThemes',
+			'reel.card.replay' => 'Replay',
+			'reel.card.hintsWatch' => 'OK watch  ·  ↓ next  ·  → next deck  ·  hold OK for more',
+			'reel.card.hintsReplay' => 'OK replay  ·  ↓ next  ·  → next deck  ·  hold OK for more',
+			'reel.card.watch' => 'Watch',
+			'reel.card.watchOnTv' => 'Watch on TV',
+			'reel.card.details' => 'Details',
+			'reel.card.save' => 'Save',
+			'reel.card.more' => 'More',
+			'reel.card.onTv' => 'On TV',
+			'reel.card.soundOn' => 'Sound on',
+			'reel.card.mute' => 'Mute',
+			'reel.card.hideControls' => 'Hide controls',
+			'reel.card.showControls' => 'Show controls',
+			'reel.sheet.watchHere' => 'Watch here',
+			'reel.sheet.saveForTv' => 'Save for the TV',
+			'reel.sheet.moreLike' => 'More like this',
+			'reel.sheet.watch' => 'Watch',
+			'reel.sheet.details' => 'Details',
+			'reel.sheet.notForMe' => 'Not for me',
+			'reel.sheet.spoiledMe' => 'Spoiled me',
+			'reel.sheet.seenIt' => 'Seen it',
+			'reel.sheet.soundOff' => 'Sound off',
+			'reel.toast.savedOnTv' => 'On the TV tonight',
+			'reel.toast.savedForLater' => 'Saved, on the TV next time you connect',
+			'reel.toast.notConnected' => 'Couldn\'t save: not connected to the TV',
+			'reel.remote.title' => 'The Reel',
+			'reel.remote.onTv' => ({required Object tv}) => 'On ${tv}',
+			'reel.remote.theTv' => 'the TV',
+			'reel.remote.upNext' => 'Up next',
+			'reel.remote.howTo' => 'Swipe the picture up for the next title, sideways for another deck. Tap it to pause.',
+			'reel.remote.watchOnTv' => 'Watch on TV',
+			'reel.remote.save' => 'Save',
+			'reel.remote.notForMe' => 'Not for me',
+			'reel.remote.pause' => 'Pause',
+			'reel.remote.play' => 'Play',
+			'reel.remote.deckEnd' => 'That\'s the deck. Swipe sideways for another.',
+			'reel.remote.deckEmpty' => 'Nothing on this deck yet.',
+			'reel.remote.playingOnTv' => 'Playing on TV',
+			'reel.remote.paused' => 'Paused',
+			'reel.remote.opening' => ({required Object tv}) => 'Opening the Reel on ${tv}…',
+			'reel.remote.notShowing' => ({required Object tv}) => '${tv} isn\'t showing the Reel.',
+			'reel.remote.tryAgain' => 'Try again',
+			'reel.deckNames.forYou' => 'For You',
+			'reel.deckNames.animeOpenings' => 'Anime openings',
+			'reel.deckNames.mostWatched' => 'Most Watched',
+			'reel.deckNames.showThisWeek' => ({required Object n}) => '#${n} show this week',
+			'reel.deckNames.filmThisWeek' => ({required Object n}) => '#${n} film this week',
+			'reel.homeRow' => 'From the Reel',
+			'reel.settings.title' => 'Reel',
+			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
+			'reel.settings.sheetEntry' => 'Reel settings',
+			'reel.settings.playing' => 'Playing',
+			'reel.settings.startSound' => 'Sound when a card starts',
+			'reel.settings.startSoundOn' => 'With sound',
+			'reel.settings.startSoundMutedIfOtherAudio' => 'Muted if other audio is playing',
+			'reel.settings.startSoundMutedIfOtherAudioDescription' => 'Starts muted while music or another app is playing',
+			'reel.settings.clipEnd' => 'When a clip ends',
+			'reel.settings.clipEndLoop' => 'Loop',
+			'reel.settings.clipEndTwiceThenHold' => 'Play twice, then hold',
+			'reel.settings.clipEndTwiceThenHoldDescription' => 'Stops on the last frame, with Replay',
+			'reel.settings.clipEndNextCard' => 'Next card',
+			'reel.settings.clipEndNextCardDescription' => 'Moves on to the next card by itself',
+			'reel.settings.okAction' => 'OK button',
+			'reel.settings.okActionWatch' => 'Watch',
+			'reel.settings.okActionDetails' => 'Details',
+			'reel.settings.cellular' => 'On mobile data',
+			'reel.settings.cellularNormal' => 'Normal',
+			'reel.settings.cellularNormalDescription' => 'Clips play as they do on Wi-Fi',
+			'reel.settings.cellularDataSaver' => 'Data saver',
+			'reel.settings.cellularDataSaverDescription' => 'Smaller clips and fewer ready ahead; a fast swipe may show a still first',
+			'reel.settings.cellularDataSaverSubtitle' => 'Data saver · a fast swipe may show a still first',
+			'reel.settings.cellularStillsOnly' => 'Stills only',
+			'reel.settings.cellularStillsOnlyDescription' => 'No clips on mobile data, only each card\'s art',
+			'reel.settings.captions' => 'Openings with lyrics first',
+			'reel.settings.captionsDescription' => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles',
+			'reel.settings.showTab' => 'Show the Reel tab',
+			'reel.settings.showTabDescription' => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place',
+			'reel.settings.developer' => 'Developer',
+			'reel.settings.developerTools' => 'Reel debug tools',
+			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
+			'reel.decks.title' => 'Decks',
+			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
+			'reel.decks.startOn' => 'Start on',
+			'reel.decks.startForYou' => 'For You',
+			'reel.decks.startLast' => 'Where I left off',
+			'reel.decks.yourDecks' => 'Your decks',
+			'reel.decks.hidden' => 'Hidden',
+			'reel.decks.hiddenDescription' => 'Hidden. A link still opens it',
+			'reel.decks.moveToTop' => 'Move to the top',
+			'reel.decks.moveUp' => 'Move up',
+			'reel.decks.moveDown' => 'Move down',
+			'reel.decks.hide' => 'Hide',
+			'reel.decks.show' => 'Show again',
+			'reel.decks.arrange' => 'Arrange decks',
+			'reel.decks.arrangeHintTv' => 'Or hold OK on a deck to move or hide it',
+			'reel.decks.arrangeHintPhone' => 'Or hold a deck to move or hide it',
+			'reel.decks.none' => 'No decks yet',
+			'reel.decks.syncedNote' => 'The order, hidden decks and start deck are the same on the TV and the phone. A link to a hidden deck still opens it.',
+			'reel.decks.saveFailed' => 'Couldn\'t save the decks',
 			'history.title' => 'History',
 			'history.allTime' => 'All time',
 			'history.hours' => 'Hours',
@@ -11512,6 +12059,8 @@ extension on Translations {
 			'music.addToQueue' => 'Add to queue',
 			'music.discNumber' => ({required Object n}) => 'Disc ${n}',
 			'music.trackCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} track', other: '${n} tracks', ), 
+			_ => null,
+		} ?? switch (path) {
 			'music.nowPlaying' => 'Now Playing',
 			'music.playingFrom' => ({required Object title}) => 'Playing from ${title}',
 			'music.queue' => 'Queue',
@@ -11626,8 +12175,6 @@ extension on Translations {
 			'watchTogether.letEveryoneControl' => 'Let Everyone Control Playback',
 			'watchTogether.lockRoom' => 'Lock Room',
 			'watchTogether.lockRoomDescription' => 'Nobody new can join',
-			_ => null,
-		} ?? switch (path) {
 			'watchTogether.leaveRoom' => 'Leave Room',
 			'watchTogether.leaveRoomQuestion' => 'Leave Room?',
 			'watchTogether.leaveRoomConfirm' => 'You can join again with the room code.',
@@ -12026,6 +12573,8 @@ extension on Translations {
 			'metadataEdit.accountDefault' => 'Account default',
 			'metadataEdit.seriesDefault' => 'Series default',
 			'metadataEdit.episodeSorting' => 'Episode Sorting',
+			_ => null,
+		} ?? switch (path) {
 			'metadataEdit.oldestFirst' => 'Oldest first',
 			'metadataEdit.newestFirst' => 'Newest first',
 			'metadataEdit.keep' => 'Keep',
@@ -12140,8 +12689,6 @@ extension on Translations {
 			'seerr.permissionRevoked' => 'You no longer have permission to request this',
 			'services.title' => 'Services',
 			'services.hubSubtitle' => 'Sync watch progress and request new titles.',
-			_ => null,
-		} ?? switch (path) {
 			'services.integrations' => 'Integrations',
 			'services.notConnected' => 'Not connected',
 			'services.connectedAs' => ({required Object username}) => 'Connected as @${username}',

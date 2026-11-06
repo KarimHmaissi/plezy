@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/customisation/mirror_store.dart';
+import 'package:plezy/services/reel/reel_deck_prefs.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 void main() {
@@ -383,5 +384,31 @@ void main() {
       expect(sent.single['key'], ReelStore.vetoKey('x'));
       expect(await phone.spoiledAssets('x'), {'plex:1', 'plex:2'});
     });
+  });
+
+  test('the deck arrangement is a synced setting; the last deck stays on this device', () async {
+    expect(await store.deckPrefs(), ReelDeckPrefs.none);
+    final changes = ReelStore.deckPrefsChanged.value;
+    const next = ReelDeckPrefs(order: ['ai:1'], hidden: {'most-watched'}, start: ReelStartDeck.last);
+    await store.writeDeckPrefs(next, was: ReelDeckPrefs.none);
+    expect(await store.deckPrefs(), next);
+    expect(ReelStore.deckPrefsChanged.value, changes + 1);
+    final settings = LocalCustomisationStore(db);
+    expect(await settings.readSetting(ReelDeckPrefs.decksKey), isNotNull);
+    expect(SyncUnits.isSyncable(SyncUnits.setting(ReelDeckPrefs.decksKey)), isTrue);
+    expect(SyncUnits.isSyncable(SyncUnits.setting(ReelDeckPrefs.startKey)), isTrue);
+
+    await store.rememberDeck('anime-openings');
+    expect(await store.lastDeck(), 'anime-openings');
+    expect(await settings.readSetting('lastDeck'), isNull, reason: 'kept in the device cache, not synced');
+  });
+
+  test('only the changed deck setting is written, so the other keeps its sync stamp', () async {
+    const was = ReelDeckPrefs(order: ['ai:1']);
+    await store.writeDeckPrefs(was, was: ReelDeckPrefs.none);
+    final settings = LocalCustomisationStore(db);
+    expect(await settings.readSetting(ReelDeckPrefs.startKey), isNull);
+    await store.writeDeckPrefs(was.withStart(ReelStartDeck.last), was: was);
+    expect(await settings.readSetting(ReelDeckPrefs.startKey), 'last');
   });
 }
