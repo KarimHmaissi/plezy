@@ -154,10 +154,11 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     required int durationMs,
     int videoWidth = 0,
     int videoHeight = 0,
-  }) {
+  }) async {
     final delaySec = settingsService.read(SettingsService.displaySwitchDelay);
     _frameRate.beginSuppressWindow(delaySec);
-    return player.setVideoFrameRate(
+    final itemId = _currentMetadata.id;
+    final switched = await player.setVideoFrameRate(
       fps,
       durationMs,
       extraDelayMs: delaySec * 1000,
@@ -165,6 +166,8 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
       videoHeight: videoHeight,
       matchResolution: settingsService.read(SettingsService.matchContentResolution),
     );
+    _signal.noteSwitch(itemId, fps, switched);
+    return switched;
   }
 
   /// Whether the ExoPlayer pre-open display-mode negotiation applies: the
@@ -261,6 +264,7 @@ extension _VideoPlayerOpenMethods on VideoPlayerScreenState {
     int preKnownWidth = 0,
     int preKnownHeight = 0,
   }) async {
+    _signal.noteContentFps(_currentMetadata.id, preKnownFps);
     final firstFramePlan = _firstFrameStartupPlan(currentPlayer, settingsService, hasVideoUrl: hasVideoUrl);
     if (firstFramePlan != null) return firstFramePlan;
 

@@ -230,6 +230,20 @@ class PlatformDetector {
     return TvDetectionService.isAppleTVSync();
   }
 
+  /// An Android device in TV mode (Shield, Google TV): the one platform where
+  /// the app itself asks the display for the content's frame rate.
+  static bool isAndroidTV() {
+    return _debugIsAndroidTVOverride ?? (Platform.isAndroid && isTV());
+  }
+
+  static bool? _debugIsAndroidTVOverride;
+
+  /// Test-only: override [isAndroidTV], since the test host is never Android.
+  @visibleForTesting
+  static void debugSetIsAndroidTVOverride(bool? value) {
+    _debugIsAndroidTVOverride = value;
+  }
+
   /// True on Android Automotive OS head units.
   static bool isAutomotive() {
     return TvDetectionService.isAutomotiveSync();
@@ -339,10 +353,7 @@ class PlatformDetector {
     // the HDMI output to an AC3 format and back, which re-syncs the link and
     // can rotate the receiver's channels. Dolby Digital encoding
     // (SettingsService.macDolbyEncode) takes its place.
-    return Platform.isIOS ||
-        Platform.isWindows ||
-        Platform.isLinux ||
-        (Platform.isAndroid && isTV());
+    return Platform.isIOS || Platform.isWindows || Platform.isLinux || (Platform.isAndroid && isTV());
   }
 
   static bool supportsPictureInPicture() => pictureInPictureAllowed(

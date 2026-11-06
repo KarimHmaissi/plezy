@@ -737,7 +737,15 @@ class SettingsService extends BaseSharedPreferencesService {
   static const autoHidePerformanceOverlay = BoolPref('auto_hide_performance_overlay', defaultValue: true);
   static const enableDiscordRPC = BoolPref('enable_discord_rpc');
   static const enableTraktWatchedSync = BoolPref('enable_trakt_watched_sync', defaultValue: true);
-  static const matchContentFrameRate = BoolPref('match_content_frame_rate');
+
+  /// On by default on Android TV, where the app can switch the display to the
+  /// content's rate (a 23.976 film on a 60 Hz mode judders); off elsewhere.
+  /// A value the viewer saved still wins.
+  static bool _androidTvFrameRateDefault() => PlatformDetector.isAndroidTV();
+  static const matchContentFrameRate = BoolPref(
+    'match_content_frame_rate',
+    defaultValueProvider: _androidTvFrameRateDefault,
+  );
   static const matchContentResolution = BoolPref('match_content_resolution');
   static const tunneledPlayback = BoolPref('tunneled_playback', defaultValue: false);
   static const dvConversionMode = EnumPref<DvConversionModePreference>(

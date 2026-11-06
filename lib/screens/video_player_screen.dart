@@ -103,6 +103,7 @@ import 'video_player/episode_session_state.dart';
 import 'video_player/first_frame_gate.dart';
 import 'video_player/frame_rate_matcher.dart';
 import 'video_player/player_output_format.dart';
+import 'video_player/signal_line.dart';
 import 'video_player/companion_remote_binding.dart';
 import 'video_player/media_controls_screen_controller.dart';
 import 'video_player/media_reload_outcome.dart';
@@ -1030,6 +1031,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
     onHome: () => _handleHomeButton(),
     readProvider: () => context.read<CompanionRemoteProvider>(),
     metadata: () => _currentMetadata,
+    signal: () => _signalLine,
     hasPreviousItem: () => _hasPreviousItem,
     onSelectAudio: (track) => unawaited(_onAudioTrackChanged(track)),
     onSelectSubtitle: (track) => unawaited(_onSubtitleTrackChanged(track)),
@@ -2263,6 +2265,20 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// Android display frame-rate matching state (retry counter, applied
   /// latch, MediaSession pause-suppression window) — see [FrameRateMatcher].
   final FrameRateMatcher _frameRate = FrameRateMatcher();
+
+  /// The current item's rate and what the display did about it, for the
+  /// signal line in the info panel and on the phone's now-playing card.
+  final PlaybackSignal _signal = PlaybackSignal();
+
+  /// "23.976 matched · Direct Play · E-AC3 5.1" for the current item, or null.
+  String? get _signalLine {
+    final p = player;
+    return _signal.lineFor(
+      _currentMetadata.id,
+      transcoding: widget.isLive || _isOfflinePlayback ? null : _isTranscoding,
+      audio: p == null ? null : PlaybackSignal.selectedAudio(p.state),
+    );
+  }
 
   Future<void> _pauseAndHidePlayerForRouteExit(Player currentPlayer) async {
     // Dispatch both against the captured owner before yielding. A late pause

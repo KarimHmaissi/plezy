@@ -114,6 +114,20 @@ Details of each are in the dated entries below.
   which reshuffled the row each time. Each one now keeps the time it was
   first published (remembered across restarts, pruned to what's on the
   row), so a new next episode leads once and then holds its place.
+### Frame-rate matching on by default on the TV, and a signal line
+- **Match content frame rate** now starts on for a fresh Android TV
+  install, so a 23.976 film plays on a 23.976 Hz mode instead of
+  juddering at 60. Phones and other platforms keep it off. A value saved
+  in Settings, Playback still wins, so if it was once turned off there it
+  stays off until switched back on. Resolution matching stays off, so the
+  Shield keeps outputting 4K and its upscaler still handles 1080p.
+- A new **signal line**, such as "23.976 matched · Direct Play · E-AC3
+  5.1", shows the content rate and whether the display switched for it
+  ("matched"; "no switch" when the request changed nothing, because the
+  mode already matched or the TV lists no mode for it), the play method,
+  and the audio. It appears at the top of the performance overlay and
+  under the title on the phone's now-playing screen. Nothing is added to
+  the TV picture.
 
 ## 2026-11-03
 
