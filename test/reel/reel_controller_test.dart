@@ -552,6 +552,7 @@ void main() {
                     'link': 'https://v.animethemes.moe/OP$id-$res.webm',
                     'nc': true,
                     'resolution': res,
+                    'overlap': 'NONE',
                   },
               ],
             },

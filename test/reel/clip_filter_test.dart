@@ -108,19 +108,42 @@ void main() {
   });
 
   group('anime openings', () {
-    Map<String, dynamic> video(String name, {bool nc = true, int res = 1080, int size = 30}) => {
+    Map<String, dynamic> video(
+      String name, {
+      bool nc = true,
+      int res = 1080,
+      int size = 30,
+      Object? overlap = 'NONE',
+      bool lyrics = false,
+      bool subbed = false,
+      String? source,
+    }) => {
       'id': name.hashCode,
       'link': 'https://v.animethemes.moe/$name.webm',
       'nc': nc,
       'resolution': res,
       'size': size,
+      'overlap': overlap,
+      'lyrics': lyrics,
+      'subbed': subbed,
+      'source': source,
     };
+
+    const captionsOn = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080, captions: true);
 
     Map<String, dynamic> theme(String type, int? seq, List<Map<String, dynamic>> entries) => {
       'type': type,
       'sequence': seq,
       'song': {'title': 'song $type$seq'},
       'animethemeentries': entries,
+    };
+
+    Map<String, dynamic> op1(List<Map<String, dynamic>> videos) => {
+      'animethemes': [
+        theme('OP', 1, [
+          {'episodes': '1-12', 'videos': videos},
+        ]),
+      ],
     };
 
     test('OP1 of episode 1, creditless 1080p preferred', () {
@@ -194,6 +217,94 @@ void main() {
         }),
         isNull,
       );
+    });
+
+    group('episode footage, captions and source (V2-17)', () {
+      test('an opening with the episode over it is never a candidate, nor an unknown overlap', () {
+        final anime = op1([
+          video('over', overlap: 'OVER'),
+          video('missing', overlap: null),
+          video('numeric', overlap: 2),
+          video('new', overlap: 'SOMETIMES'),
+        ]);
+        expect(ClipFilter.openings(anime), isEmpty);
+        expect(ClipFilter.firstOpening(anime), isNull);
+      });
+
+      test('a transition plays only when no file without episode footage is left', () {
+        expect(
+          ClipFilter.firstOpening(
+            op1([
+              video('trans-1080', overlap: 'TRANS', source: 'BD'),
+              video('clean-480', res: 480, nc: false, lyrics: true, source: 'VHS'),
+            ]),
+          )?.url,
+          endsWith('clean-480.webm'),
+        );
+        final fallback = ClipFilter.firstOpening(
+          op1([video('trans', overlap: 'TRANS'), video('over', overlap: 'OVER')]),
+        );
+        expect(fallback?.url, endsWith('/trans.webm'));
+        expect(fallback?.transition, isTrue);
+      });
+
+      test('creditless first, then no lyrics or subtitles, then BD, WEB, others', () {
+        expect(
+          ClipFilter.firstOpening(op1([video('credited', nc: false), video('creditless-subbed', subbed: true)]))?.url,
+          endsWith('creditless-subbed.webm'),
+        );
+        expect(
+          ClipFilter.firstOpening(
+            op1([video('lyrics-bd', lyrics: true, source: 'BD'), video('clean-web', source: 'WEB')]),
+          )?.url,
+          endsWith('clean-web.webm'),
+        );
+        expect(
+          ClipFilter.firstOpening(
+            op1([video('raw', source: 'RAW'), video('none'), video('web', source: 'WEB'), video('bd', source: 'BD')]),
+          )?.url,
+          endsWith('/bd.webm'),
+        );
+        expect(
+          ClipFilter.firstOpening(op1([video('dvd', source: 'DVD'), video('web', source: 'WEB')]))?.url,
+          endsWith('/web.webm'),
+        );
+      });
+
+      test('with captions on, lyrics or subtitles rank first; creditless still comes before them', () {
+        final anime = op1([video('clean', source: 'BD'), video('lyrics', lyrics: true, source: 'WEB')]);
+        expect(ClipFilter.firstOpening(anime)?.url, endsWith('/clean.webm'));
+        expect(ClipFilter.firstOpening(anime, profile: captionsOn)?.url, endsWith('/lyrics.webm'));
+        expect(
+          ClipFilter.firstOpening(
+            op1([video('credited-subbed', nc: false, subbed: true), video('creditless-clean')]),
+            profile: captionsOn,
+          )?.url,
+          endsWith('creditless-clean.webm'),
+        );
+      });
+
+      test('the rank decides before height; at the profile height the larger file wins', () {
+        final anime = op1([
+          video('bd-720-small', res: 720, size: 10, source: 'BD'),
+          video('bd-720-large', res: 720, size: 50, source: 'BD'),
+          video('bd-1080', size: 90, source: 'BD'),
+          video('web-480', res: 480, source: 'WEB'),
+        ]);
+        const cover = ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
+        expect(ClipFilter.firstOpening(anime, profile: cover)?.url, endsWith('bd-720-large.webm'));
+        expect(ClipFilter.firstOpening(anime)?.url, endsWith('bd-1080.webm'));
+      });
+
+      test('the opening keeps what ranks it', () {
+        final op = ClipFilter.openings(
+          op1([video('a', overlap: 'TRANS', nc: false, subbed: true, source: 'WEB')]),
+        ).single;
+        expect(op.transition, isTrue);
+        expect(op.creditless, isFalse);
+        expect(op.captioned, isTrue);
+        expect(op.source, 'WEB');
+      });
     });
 
     test('a sole OP with no sequence counts as OP1; never an ED alone', () {

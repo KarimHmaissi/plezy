@@ -90,7 +90,13 @@ void main() {
               {
                 'episodes': '1-12',
                 'videos': [
-                  {'id': 9, 'link': 'https://v.animethemes.moe/Show-OP1.webm', 'nc': true, 'resolution': 1080},
+                  {
+                    'id': 9,
+                    'link': 'https://v.animethemes.moe/Show-OP1.webm',
+                    'nc': true,
+                    'resolution': 1080,
+                    'overlap': 'NONE',
+                  },
                 ],
               },
             ],
@@ -378,12 +384,24 @@ void main() {
     const cover = ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
     const inner = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
 
-    Map<String, dynamic> video(int id, int res, {bool nc = true, int size = 30}) => {
+    Map<String, dynamic> video(
+      int id,
+      int res, {
+      bool nc = true,
+      int size = 30,
+      String overlap = 'NONE',
+      bool lyrics = false,
+      String? source,
+    }) => {
       'id': id,
       'link': 'https://v.animethemes.moe/HarborLights-OP1-$id.webm',
       'nc': nc,
       'resolution': res,
       'size': size,
+      'overlap': overlap,
+      'lyrics': lyrics,
+      'subbed': false,
+      'source': source,
     };
 
     setUp(() {
@@ -484,6 +502,10 @@ void main() {
         '{"k":"plex","sv":"a","pk":"/services/iva/assets/1/video.mp4","a":"plex:1","l":"Trailer"}',
       ),
       ('a miss', '{"miss":true}'),
+      (
+        'candidates cached before overlap was read',
+        '{"v":2,"k":"at","l":"Opening 1","c":[{"a":"at:9","u":"https://v.animethemes.moe/Old.webm","h":1080,"sz":1,"r":0}]}',
+      ),
     ]) {
       test('a row in the older format ($name) reads as not cached and is resolved again', () async {
         await store.cache('src:tvdb:1', row);
@@ -503,12 +525,97 @@ void main() {
           'k': 'at',
           'l': 'Opening 1',
           'c': [
-            {'a': 'at:3', 'u': 'http://insecure.example/x.webm', 'h': 1080, 'sz': 1, 'r': 0},
+            {
+              'a': 'at:3',
+              'u': 'http://insecure.example/x.webm',
+              'h': 1080,
+              'sz': 1,
+              'tr': false,
+              'nc': true,
+              'cc': false,
+              'so': null,
+            },
           ],
         }),
       );
       expect((await resolver.lookup(harbor)).clip?.assetId, 'at:3');
       expect(atCalls, hasLength(1));
+    });
+
+    test('an opening with the episode over it is never stored; a transition is, as the fallback', () async {
+      atRecords = {
+        101: {
+          'animethemes': [
+            {
+              'type': 'OP',
+              'sequence': 1,
+              'animethemeentries': [
+                {
+                  'episodes': '1-12',
+                  'videos': [video(1, 1080, overlap: 'OVER'), video(2, 1080, overlap: 'TRANS')],
+                },
+              ],
+            },
+          ],
+        },
+      };
+      final clip = (await resolver.lookup(harbor)).clip;
+      expect(clip?.assetId, 'at:2');
+      expect(clip?.candidates.map((c) => c.assetId), ['at:2']);
+      expect(clip?.candidates.single.transition, isTrue);
+    });
+
+    test('only episode footage over the opening: the title falls to the next rung', () async {
+      atRecords = {
+        101: {
+          'animethemes': [
+            {
+              'type': 'OP',
+              'sequence': 1,
+              'animethemeentries': [
+                {
+                  'episodes': '1-12',
+                  'videos': [video(1, 1080, overlap: 'OVER')],
+                },
+              ],
+            },
+          ],
+        },
+      };
+      servers.extrasByKey['a:5'] = [_x('90', 'Harbor Lights Trailer')];
+      expect((await resolver.lookup(harbor)).clip?.assetId, 'plex:90');
+    });
+
+    test('the captions pref re-picks from the cached candidates, with what ranks them kept', () async {
+      atRecords = {
+        101: {
+          'animethemes': [
+            {
+              'type': 'OP',
+              'sequence': 1,
+              'animethemeentries': [
+                {
+                  'episodes': '1-12',
+                  'videos': [video(1, 1080, source: 'BD'), video(2, 1080, lyrics: true, source: 'WEB')],
+                },
+              ],
+            },
+          ],
+        },
+      };
+      final profile = ValueNotifier<ReelPlaybackProfile>(inner);
+      addTearDown(profile.dispose);
+      resolver = make(profile: profile);
+      final clip = (await resolver.lookup(harbor)).clip!;
+      expect(clip.assetId, 'at:1');
+      final row = jsonDecode((await store.cached('src:tvdb:1'))!) as Map<String, dynamic>;
+      expect((row['c'] as List).last, containsPair('cc', true));
+      expect((row['c'] as List).first, containsPair('so', 'BD'));
+
+      profile.value = const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080, captions: true);
+      expect(resolver.repick(clip).assetId, 'at:2');
+      expect((await resolver.lookup(harbor)).clip?.assetId, 'at:2');
+      expect(atCalls, hasLength(1), reason: 'served from the cached candidates');
     });
 
     test('Plex trailers are cached in the new format with their one file', () async {
@@ -636,6 +743,12 @@ void main() {
             '"animethemes":[{"type":"OP","sequence":1,"animethemeentries":[{"episodes":"1","videos":[]}]}]}]}}',
       ),
       ('that is not JSON', '<html>'),
+      (
+        'with an overlap this build cannot read',
+        '{"data":{"findAnimeByExternalSite":[{"resources":{"nodes":[{"site":"ANILIST","externalId":101}]},'
+            '"animethemes":[{"type":"OP","sequence":1,"animethemeentries":[{"episodes":"1","videos":{"nodes":'
+            '[{"id":1,"link":"https://v.animethemes.moe/HarborLights-OP1.webm","nc":true,"overlap":"SOMETIMES"}]}}]}]}]}}',
+      ),
     ]) {
       test('a response $name throws (a changed schema is never "no opening")', () async {
         final client = AnimeThemesClient(client: MockClient((_) async => http.Response(body, 200)));

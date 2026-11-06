@@ -71,10 +71,32 @@ class ReelTitle {
 }
 
 /// One file of a clip with several (an opening at 720 and 1080, with and
-/// without credits). The resolver keeps them all and the playback profile
-/// picks one when the card plays (plan V2-16).
+/// without credits). The resolver keeps them all with what ranks them, and
+/// the playback profile picks one when the card plays (plan V2-16, V2-17),
+/// so a change of screen or of the captions pref needs no new lookup.
 class ClipCandidate implements ReelRendition {
-  const ClipCandidate({required this.uri, required this.assetId, this.height, this.sizeBytes, this.rank = 0});
+  const ClipCandidate({
+    required this.uri,
+    required this.assetId,
+    this.height,
+    this.sizeBytes,
+    this.transition = false,
+    this.creditless = false,
+    this.captioned = false,
+    this.source,
+  });
+
+  /// An opening's file as cached.
+  factory ClipCandidate.opening(AnimeOpening op) => ClipCandidate(
+    uri: op.url,
+    assetId: 'at:${op.videoId}',
+    height: op.resolution,
+    sizeBytes: op.sizeBytes,
+    transition: op.transition,
+    creditless: op.creditless,
+    captioned: op.captioned,
+    source: op.source,
+  );
 
   final String uri;
 
@@ -84,18 +106,52 @@ class ClipCandidate implements ReelRendition {
   final int? height;
   @override
   final int? sizeBytes;
-  @override
-  final int rank;
 
-  Map<String, Object?> toJson() => {'a': assetId, 'u': uri, 'h': height, 'sz': sizeBytes, 'r': rank};
+  /// See [AnimeOpening.transition], [AnimeOpening.creditless],
+  /// [AnimeOpening.captioned] and [AnimeOpening.source].
+  final bool transition;
+  final bool creditless;
+  final bool captioned;
+  final String? source;
+
+  @override
+  int rankFor(ReelPlaybackProfile profile) => ClipFilter.openingRank(
+    transition: transition,
+    creditless: creditless,
+    captioned: captioned,
+    source: source,
+    captions: profile.captions,
+  );
+
+  Map<String, Object?> toJson() => {
+    'a': assetId,
+    'u': uri,
+    'h': height,
+    'sz': sizeBytes,
+    'tr': transition,
+    'nc': creditless,
+    'cc': captioned,
+    'so': source,
+  };
 
   /// A cached candidate, or null when it isn't shaped as written.
   static ClipCandidate? fromJson(Object? j) {
     if (j is! Map) return null;
-    final (a, u, h, sz, r) = (j['a'], j['u'], j['h'], j['sz'], j['r']);
+    final (a, u, h, sz, so) = (j['a'], j['u'], j['h'], j['sz'], j['so']);
+    final (tr, nc, cc) = (j['tr'], j['nc'], j['cc']);
     if (a is! String || u is! String || !u.startsWith('https://')) return null;
-    if ((h != null && h is! int) || (sz != null && sz is! int) || r is! int) return null;
-    return ClipCandidate(uri: u, assetId: a, height: h as int?, sizeBytes: sz as int?, rank: r);
+    if ((h != null && h is! int) || (sz != null && sz is! int) || (so != null && so is! String)) return null;
+    if (tr is! bool || nc is! bool || cc is! bool) return null;
+    return ClipCandidate(
+      uri: u,
+      assetId: a,
+      height: h as int?,
+      sizeBytes: sz as int?,
+      transition: tr,
+      creditless: nc,
+      captioned: cc,
+      source: so as String?,
+    );
   }
 }
 
@@ -218,10 +274,12 @@ class ClipResolver {
 
   ReelPlaybackProfile get playback => profile?.value ?? ReelPlaybackProfile.standard;
 
-  /// The `src:` row format. Rows written before it (one file per title, or
-  /// a miss cached by the older ladder) read as not cached, so the title is
-  /// resolved once more and every candidate is stored.
-  static const int sourceFormat = 2;
+  /// The `src:` row format. Rows written before it (one file per title, a
+  /// miss cached by the older ladder, or candidates cached before `overlap`
+  /// was read, which may include an opening with episode footage over it)
+  /// read as not cached, so the title is resolved once more and every
+  /// candidate is stored with what ranks it.
+  static const int sourceFormat = 3;
 
   final Set<String> _slowServers = {};
   final Map<String, Future<bool>> _waits = {};
@@ -392,16 +450,7 @@ class ClipResolver {
     if (t.anime && t.isShow) {
       final (ops, opSure) = await _openings(t);
       sure &= opSure;
-      final candidates = [
-        for (final op in ops)
-          ClipCandidate(
-            uri: op.url,
-            assetId: 'at:${op.videoId}',
-            height: op.resolution,
-            sizeBytes: op.sizeBytes,
-            rank: op.rank,
-          ),
-      ];
+      final candidates = [for (final op in ops) ClipCandidate.opening(op)];
       // A banned file bans the opening: its other files are the same clip.
       final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1('Opening 1', candidates);
       if (clip != null) {
@@ -620,12 +669,20 @@ query ReelOpenings($ids: [Int!]) {
                     'episodes': e['episodes'],
                     'spoiler': e['spoiler'],
                     'nsfw': e['nsfw'],
-                    'videos': [for (final v in _nodes(e['videos'])) Map<String, dynamic>.from(v)],
+                    'videos': [for (final v in _nodes(e['videos'])) _video(v)],
                   },
               ],
             },
       ],
     };
+  }
+
+  /// One video as queried. An `overlap` this build can't read throws: the
+  /// opening filter drops such a file, and a schema change must leave the
+  /// title unknown, never a 30-day miss.
+  static Map<String, dynamic> _video(Map v) {
+    if (ClipFilter.overlapOf(v['overlap']) == null) throw const AnimeThemesUnavailable('unknown overlap');
+    return Map<String, dynamic>.from(v);
   }
 
   static List<Map> _list(Object? v, String what) {

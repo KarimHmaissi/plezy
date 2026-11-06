@@ -131,8 +131,8 @@ class ClipFilter {
       s.toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
 
   /// Season 1's first opening from an AnimeThemes `anime` record, as
-  /// [profile] plays it: the best of [openings] by its rank (creditless
-  /// first), then the profile's height and file size (plan V2-16).
+  /// [profile] plays it: the best of [openings] by [openingRank], then the
+  /// profile's height and file size (plan V2-16, V2-17).
   static AnimeOpening? firstOpening(
     Map<String, dynamic> anime, {
     ReelPlaybackProfile profile = ReelPlaybackProfile.standard,
@@ -140,7 +140,9 @@ class ClipFilter {
 
   /// Every file of season 1's first opening: OP with sequence 1 (or the
   /// only OP), from an entry whose episodes start at 1, not a spoiler, not
-  /// NSFW. Never EDs, never later OPs. Which file plays is the playback
+  /// NSFW, and with no episode footage over it: `overlap` NONE, or TRANS
+  /// (kept as a fallback), never OVER or a value this build doesn't know
+  /// (D13). Never EDs, never later OPs. Which file plays is the playback
   /// profile's choice, made when the card plays.
   static List<AnimeOpening> openings(Map<String, dynamic> anime) {
     final themes = [
@@ -159,6 +161,8 @@ class ClipFilter {
         if (v is! Map) continue;
         final link = v['link'];
         if (link is! String || !link.startsWith('https://')) continue;
+        final overlap = overlapOf(v['overlap']);
+        if (overlap == null || overlap == OpeningOverlap.over) continue;
         candidates.add(
           AnimeOpening(
             url: link,
@@ -167,12 +171,44 @@ class ClipFilter {
             resolution: v['resolution'] as int?,
             sizeBytes: v['size'] as int?,
             song: (op1['song'] as Map?)?['title'] as String?,
+            transition: overlap == OpeningOverlap.transition,
+            captioned: v['lyrics'] == true || v['subbed'] == true,
+            source: v['source'] as String?,
           ),
         );
       }
     }
     return candidates;
   }
+
+  /// An AnimeThemes `overlap` as the GraphQL API spells it (the server's
+  /// `VideoOverlap` case names); null for anything else.
+  static OpeningOverlap? overlapOf(Object? v) => switch (v) {
+    'NONE' => OpeningOverlap.none,
+    'TRANS' => OpeningOverlap.transition,
+    'OVER' => OpeningOverlap.over,
+    _ => null,
+  };
+
+  /// An opening file's rank under [captions], lower first, in this order:
+  /// no episode footage before a transition; creditless before credited;
+  /// with captions off a clean file before one with lyrics or subtitles
+  /// burned in, with captions on the reverse; then source BD, WEB, others.
+  /// Height and file size come after, from the playback profile.
+  static int openingRank({
+    required bool transition,
+    required bool creditless,
+    required bool captioned,
+    required String? source,
+    required bool captions,
+  }) => (transition ? 1000 : 0) + (creditless ? 0 : 100) + (captioned == captions ? 0 : 10) + sourceRank(source);
+
+  /// BD before WEB before any other source (RAW, DVD, VHS, LD) or none.
+  static int sourceRank(String? source) => switch (source) {
+    'BD' => 0,
+    'WEB' => 1,
+    _ => 2,
+  };
 
   /// "1-14", "1", "1, 3" start at episode 1; null (unknown) is allowed for a
   /// sole entry since OP1 of season 1 opens episode 1 by definition.
@@ -183,6 +219,11 @@ class ClipFilter {
   }
 }
 
+/// How much episode footage an opening's video carries (AnimeThemes
+/// `overlap`): none, a transition into or out of the episode, or the episode
+/// playing over the opening.
+enum OpeningOverlap { none, transition, over }
+
 /// One file of a season-1 opening from AnimeThemes.
 class AnimeOpening implements ReelRendition {
   const AnimeOpening({
@@ -192,6 +233,9 @@ class AnimeOpening implements ReelRendition {
     this.resolution,
     this.sizeBytes,
     this.song,
+    this.transition = false,
+    this.captioned = false,
+    this.source,
   });
 
   final String url;
@@ -202,10 +246,25 @@ class AnimeOpening implements ReelRendition {
   final int? sizeBytes;
   final String? song;
 
+  /// Episode footage transitions into or out of it (`overlap` TRANS): played
+  /// only when no file without any is left.
+  final bool transition;
+
+  /// Lyrics or dialogue subtitles are burned in.
+  final bool captioned;
+
+  /// Where the file came from (`BD`, `WEB`, …), when known.
+  final String? source;
+
   @override
   int? get height => resolution;
 
-  /// Creditless before credited.
   @override
-  int get rank => creditless ? 0 : 1;
+  int rankFor(ReelPlaybackProfile profile) => ClipFilter.openingRank(
+    transition: transition,
+    creditless: creditless,
+    captioned: captioned,
+    source: source,
+    captions: profile.captions,
+  );
 }

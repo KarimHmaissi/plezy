@@ -22,8 +22,8 @@ ReelLink reelLinkOf(List<ConnectivityResult> results) {
 
 /// Fork (Reel, plan V2-16): the device's current [ReelPlaybackProfile],
 /// rebuilt when the screen's metrics change (the Fold switching screens or
-/// turning), when the network changes, and when the Reel's mobile-data pref
-/// does. Lives outside `lib/services/reel/` because it reads the app's
+/// turning), when the network changes, and when the Reel's mobile-data or
+/// captions pref does. Lives outside `lib/services/reel/` because it reads the app's
 /// platform, connectivity and settings services.
 ///
 /// One per app, started on first use: a metrics observer and a share of the
@@ -35,11 +35,14 @@ class ReelPlaybackWatcher extends ValueNotifier<ReelPlaybackProfile> with Widget
     required this._isTV,
     required this._cellular,
     this._cellularChanged,
+    this._captions,
+    this._captionsChanged,
     Stream<List<ConnectivityResult>>? linkChanges,
     Future<List<ConnectivityResult>> Function()? checkLink,
   }) : super(ReelPlaybackProfile.standard) {
     WidgetsBinding.instance.addObserver(this);
     _cellularChanged?.addListener(_rebuild);
+    _captionsChanged?.addListener(_rebuild);
     _links = linkChanges?.listen((r) {
       _heard = true;
       _onLink(r);
@@ -62,6 +65,8 @@ class ReelPlaybackWatcher extends ValueNotifier<ReelPlaybackProfile> with Widget
       isTV: PlatformDetector.isTV,
       cellular: () => SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ?? ReelCellular.normal,
       cellularChanged: settings?.listenableOf(SettingsService.reelCellular),
+      captions: () => SettingsService.instanceOrNull?.read(SettingsService.reelCaptions) ?? false,
+      captionsChanged: settings?.listenableOf(SettingsService.reelCaptions),
       linkChanges: ConnectivityProbe.changes,
       checkLink: ConnectivityProbe.check,
     );
@@ -70,6 +75,10 @@ class ReelPlaybackWatcher extends ValueNotifier<ReelPlaybackProfile> with Widget
   final bool Function() _isTV;
   final ReelCellular Function() _cellular;
   final Listenable? _cellularChanged;
+
+  /// The captions pref (V2-54): null reads as off.
+  final bool Function()? _captions;
+  final Listenable? _captionsChanged;
   StreamSubscription<List<ConnectivityResult>>? _links;
   ReelLink _link = ReelLink.unmetered;
   bool _heard = false;
@@ -94,6 +103,7 @@ class ReelPlaybackWatcher extends ValueNotifier<ReelPlaybackProfile> with Widget
       devicePixelRatio: ratio,
       link: _link,
       dataSaver: _cellular() != ReelCellular.normal,
+      captions: _captions?.call() ?? false,
     );
     if (next == value) return;
     appLogger.d('Reel: $next');
@@ -105,6 +115,7 @@ class ReelPlaybackWatcher extends ValueNotifier<ReelPlaybackProfile> with Widget
     _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     _cellularChanged?.removeListener(_rebuild);
+    _captionsChanged?.removeListener(_rebuild);
     unawaited(_links?.cancel());
     super.dispose();
   }

@@ -46,10 +46,12 @@ abstract interface class ReelRendition {
   /// The file's size in bytes; null when unknown.
   int? get sizeBytes;
 
-  /// The source's own preference apart from height, lower first (an
-  /// opening's creditless cut before one with credits). Only the best rank
-  /// is played; the profile picks among files of that rank.
-  int get rank;
+  /// The source's own preference apart from height under [profile], lower
+  /// first (an opening with no episode footage before one with a
+  /// transition, creditless before credited, captions as the profile asks).
+  /// Only the best rank is played; the profile picks among files of that
+  /// rank.
+  int rankFor(ReelPlaybackProfile profile);
 }
 
 class ReelPlaybackProfile {
@@ -62,18 +64,21 @@ class ReelPlaybackProfile {
     this.fit = BoxFit.contain,
     this.fillAllowed = false,
     this.largerFileAtHeight = true,
+    this.captions = false,
   });
 
   /// The rules for [screen] on [link], with the height cap lowered to what
   /// a screen of [size] (logical pixels) at [devicePixelRatio] can show of a
   /// 16:9 picture, and to [dataSaverHeight] when [dataSaver] is on over
   /// mobile data. A zero [size] (no view yet) leaves the rule's cap.
+  /// [captions] ranks openings with lyrics or subtitles first (V2-54).
   factory ReelPlaybackProfile.from({
     required bool tv,
     required Size size,
     required double devicePixelRatio,
     required ReelLink link,
     bool dataSaver = false,
+    bool captions = false,
   }) {
     final portrait = size.height > size.width;
     final screen = tv
@@ -99,6 +104,7 @@ class ReelPlaybackProfile {
       sdrOnly: screen == ReelScreen.tv,
       fillAllowed: screen == ReelScreen.compactPortrait,
       largerFileAtHeight: !saving,
+      captions: captions,
     );
   }
 
@@ -139,6 +145,11 @@ class ReelPlaybackProfile {
   /// data saver the smaller one does.
   final bool largerFileAtHeight;
 
+  /// The viewer wants captions: a file with lyrics or dialogue subtitles
+  /// ranks before one without (V2-54, V2-17). Off, the clean file ranks
+  /// first.
+  final bool captions;
+
   /// The height this profile plays from [heights]: the tallest at or below
   /// [maxHeight], else the shortest above it. Null for no heights.
   int? heightFrom(Iterable<int> heights) {
@@ -153,17 +164,18 @@ class ReelPlaybackProfile {
     return below ?? above;
   }
 
-  /// The file to play from [renditions]: the best [ReelRendition.rank],
+  /// The file to play from [renditions]: the best [ReelRendition.rankFor],
   /// then [heightFrom] (a file of unknown height only when no height is
   /// known), then the larger or smaller file by [largerFileAtHeight]. Ties
   /// keep the source's order. Null for none.
   T? pick<T extends ReelRendition>(Iterable<T> renditions) {
     final all = renditions.toList();
     if (all.isEmpty) return null;
-    final best = all.map((r) => r.rank).reduce(math.min);
+    final ranks = [for (final r in all) r.rankFor(this)];
+    final best = ranks.reduce(math.min);
     final ranked = [
-      for (final r in all)
-        if (r.rank == best) r,
+      for (var i = 0; i < all.length; i++)
+        if (ranks[i] == best) all[i],
     ];
     final height = heightFrom([for (final r in ranked) ?r.height]);
     final atHeight = [
@@ -206,13 +218,15 @@ class ReelPlaybackProfile {
       other.sdrOnly == sdrOnly &&
       other.fit == fit &&
       other.fillAllowed == fillAllowed &&
-      other.largerFileAtHeight == largerFileAtHeight;
+      other.largerFileAtHeight == largerFileAtHeight &&
+      other.captions == captions;
 
   @override
-  int get hashCode => Object.hash(screen, maxHeight, link, dataSaver, sdrOnly, fit, fillAllowed, largerFileAtHeight);
+  int get hashCode =>
+      Object.hash(screen, maxHeight, link, dataSaver, sdrOnly, fit, fillAllowed, largerFileAtHeight, captions);
 
   @override
   String toString() =>
       'ReelPlaybackProfile(${screen.name}, ≤$maxHeight, ${link.name}'
-      '${dataSaver ? ', data saver' : ''}${sdrOnly ? ', SDR' : ''})';
+      '${dataSaver ? ', data saver' : ''}${sdrOnly ? ', SDR' : ''}${captions ? ', captions' : ''})';
 }

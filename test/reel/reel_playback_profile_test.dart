@@ -16,8 +16,10 @@ class _File implements ReelRendition {
   final int? height;
   @override
   final int? sizeBytes;
-  @override
   final int rank;
+
+  @override
+  int rankFor(ReelPlaybackProfile profile) => rank;
 
   @override
   String toString() => name;
@@ -152,6 +154,22 @@ void main() {
     });
   });
 
+  group('captions', () {
+    test('the pref rides on the profile and changes its equality', () {
+      expect(_from().captions, isFalse);
+      final on = ReelPlaybackProfile.from(
+        tv: false,
+        size: const Size(400, 900),
+        devicePixelRatio: 2.6,
+        link: ReelLink.unmetered,
+        captions: true,
+      );
+      expect(on.captions, isTrue);
+      expect(on, isNot(_from()));
+      expect(on.toString(), contains('captions'));
+    });
+  });
+
   group('the link', () {
     test('mobile data only when it is the only link; offline only when said outright', () {
       expect(reelLinkOf([ConnectivityResult.mobile]), ReelLink.cellular);
@@ -210,6 +228,26 @@ void main() {
       tester.view.physicalSize = const Size(700 * 2.6, 840 * 2.6);
       await tester.pump();
       expect(told, 3);
+    });
+
+    testWidgets('rebuilds when the captions pref changes (V2-17)', (tester) async {
+      addTearDown(tester.view.reset);
+      tester.view
+        ..devicePixelRatio = 2.6
+        ..physicalSize = const Size(700 * 2.6, 840 * 2.6);
+      final captions = ValueNotifier(false);
+      addTearDown(captions.dispose);
+      final w = ReelPlaybackWatcher(
+        isTV: () => false,
+        cellular: () => ReelCellular.normal,
+        captions: () => captions.value,
+        captionsChanged: captions,
+      );
+      addTearDown(w.dispose);
+      expect(w.value.captions, isFalse);
+      captions.value = true;
+      await tester.pump();
+      expect(w.value.captions, isTrue);
     });
 
     testWidgets('the first connectivity snapshot never overrides a newer change', (tester) async {
