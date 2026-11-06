@@ -31,7 +31,7 @@ Future<ReelSheetAction?> showReelSheet(BuildContext context, ReelController c, {
         const AppMenuDivider(),
         const AppMenuHeader(label: 'Decks'),
         for (final (i, d) in c.decks.indexed)
-          AppMenuItem(value: 'deck:${d.id}', icon: _deckIcon(d.id), label: d.name, selected: i == c.deckIndex),
+          AppMenuItem(value: 'deck:${d.id}', icon: reelDeckIcon(d.id), label: d.name, selected: i == c.deckIndex),
       ],
     ],
   );
@@ -53,13 +53,15 @@ Future<void> showReelDeckPicker(BuildContext context, ReelController c) async {
     anchorAlignment: AppMenuAnchorAlignment.center,
     entries: [
       for (final (i, d) in c.decks.indexed)
-        AppMenuItem(value: d.id, icon: _deckIcon(d.id), label: d.name, selected: i == c.deckIndex),
+        AppMenuItem(value: d.id, icon: reelDeckIcon(d.id), label: d.name, selected: i == c.deckIndex),
     ],
   );
   if (picked != null) await c.openDeck(picked);
 }
 
-IconData _deckIcon(String id) => switch (id) {
+/// Each deck's icon, the same in the menu, the picker and the TV's deck
+/// strip.
+IconData reelDeckIcon(String id) => switch (id) {
   'for-you' => Symbols.auto_awesome_rounded,
   'anime-openings' => Symbols.music_note_rounded,
   'most-watched' => Symbols.trending_up_rounded,

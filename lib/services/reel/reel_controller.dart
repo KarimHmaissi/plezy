@@ -30,7 +30,9 @@ typedef ReelWatch = Future<bool> Function(MediaItem item, {required bool onTv});
 /// Adds a title to the Plex watchlist (Save's mirror).
 typedef ReelWatchlist = Future<bool> Function(MediaItem item);
 
-enum ReelSlotKind { card, poolEnd, empty, loading }
+/// [failed]: the deck's list couldn't be loaded (V2-27), which is not the
+/// same as a deck with nothing in it.
+enum ReelSlotKind { card, poolEnd, empty, loading, failed }
 
 /// A card as the views draw it.
 class ReelSlot {
@@ -39,6 +41,7 @@ class ReelSlot {
   const ReelSlot.loading() : this._(ReelSlotKind.loading);
   const ReelSlot.poolEnd() : this._(ReelSlotKind.poolEnd);
   const ReelSlot.empty() : this._(ReelSlotKind.empty);
+  const ReelSlot.failed() : this._(ReelSlotKind.failed);
 
   final ReelSlotKind kind;
   final ReelCardData? card;
@@ -49,6 +52,18 @@ class ReelSlot {
   final bool resolved;
 
   bool get isAiCard => resolved && clip == null;
+}
+
+/// The deck strip after a deck change (V2-27): the deck now showing between
+/// the ones ← and → go to. [previous] is null with fewer than three decks
+/// (it would be [next] again), [next] with fewer than two.
+@immutable
+class ReelDeckStripState {
+  const ReelDeckStripState({this.previous, required this.current, this.next});
+
+  final ReelDeck? previous;
+  final ReelDeck current;
+  final ReelDeck? next;
 }
 
 /// The Reel's session: decks, the card cursor, resolving two cards ahead and
@@ -142,6 +157,10 @@ class ReelController extends ChangeNotifier {
 
   /// The day ([ReelPool.dayKey]) each deck's list was loaded on.
   final Map<String, String> _loadedOn = {};
+
+  /// Decks whose last load threw: they show a failure, not an empty deck,
+  /// and load again on the next visit or on [retryDeck].
+  final Set<String> _failed = {};
   final Map<String, ResolvedClip?> _clip = {};
   final Set<String> _resolved = {};
   final Map<String, MediaItem?> _item = {};
@@ -170,9 +189,19 @@ class ReelController extends ChangeNotifier {
   int _sinceAiCard = 99;
   int _generation = 0;
 
-  /// The deck name shown for 1.5 s after a deck change.
-  final ValueNotifier<String?> deckStrip = ValueNotifier(null);
+  /// The deck strip: up from a deck change until [stripHold] after the
+  /// new deck's first card shows (V2-27), so a slow deck keeps its name.
+  final ValueNotifier<ReelDeckStripState?> deckStrip = ValueNotifier(null);
   Timer? _stripTimer;
+
+  /// A strip is up and its deck hasn't shown yet: the hold starts then.
+  bool _stripPending = false;
+
+  /// How long the strip stays once the deck is on screen.
+  static const Duration defaultStripHold = Duration(milliseconds: 1500);
+
+  @visibleForTesting
+  Duration stripHold = defaultStripHold;
 
   /// One-line confirmations ([savedOnTv]).
   final ValueNotifier<String?> toast = ValueNotifier(null);
@@ -189,7 +218,7 @@ class ReelController extends ChangeNotifier {
 
   ReelSlot slotAt(int i) {
     final list = cards;
-    if (list == null) return const ReelSlot.loading();
+    if (list == null) return _failed.contains(deck.id) ? const ReelSlot.failed() : const ReelSlot.loading();
     if (list.isEmpty) return const ReelSlot.empty();
     if (i >= list.length) return const ReelSlot.poolEnd();
     final c = list[i];
@@ -236,6 +265,7 @@ class ReelController extends ChangeNotifier {
   Future<void> suspend() async {
     _active = false;
     _generation++;
+    _hideStrip();
     await _leaveCard();
     await clips.release();
     _firstClip = true;
@@ -247,6 +277,8 @@ class ReelController extends ChangeNotifier {
     if (have != null) return have;
     final f = _loading[d.id] ??= () async {
       _loadedOn[d.id] = _today();
+      // Trying again: the deck reads as loading (the skeleton) meanwhile.
+      if (_failed.remove(d.id)) notifyListeners();
       try {
         final sw = Stopwatch()..start();
         final raw = await d.load();
@@ -258,8 +290,10 @@ class ReelController extends ChangeNotifier {
         _cards[d.id] = loaded;
         return loaded;
       } catch (e) {
+        // Not kept as an empty list: the deck says it failed, and loads
+        // again next time it is asked for.
         appLogger.w('Reel: deck ${d.id} failed to load', error: e);
-        _cards[d.id] = const [];
+        _failed.add(d.id);
         return const <ReelCardData>[];
       } finally {
         unawaited(_loading.remove(d.id));
@@ -363,11 +397,49 @@ class ReelController extends ChangeNotifier {
     await _show();
   }
 
+  /// OK on a deck that failed to load: load it again and show it.
+  Future<void> retryDeck() async {
+    final d = deck;
+    if (!_failed.contains(d.id)) return;
+    await _ensureDeck(d);
+    if (!_active || !identical(deck, d)) return;
+    await _show();
+  }
+
+  /// Puts the strip up for the deck now selected. It stays while the deck
+  /// loads; the hold starts when the deck shows ([_settleStrip]).
   void _showStrip() {
     if (_disposed) return;
-    deckStrip.value = deck.name;
     _stripTimer?.cancel();
-    _stripTimer = Timer(const Duration(milliseconds: 1500), () => deckStrip.value = null);
+    _stripTimer = null;
+    _stripPending = true;
+    final n = decks.length;
+    deckStrip.value = ReelDeckStripState(
+      previous: n > 2 ? decks[(_deck - 1 + n) % n] : null,
+      current: deck,
+      next: n > 1 ? decks[(_deck + 1) % n] : null,
+    );
+  }
+
+  /// The deck is on screen (its first card, an end or a failure): the strip
+  /// goes [stripHold] from now. Only the latest [_show] counts, so a slow
+  /// deck overtaken by another switch doesn't start the earlier one's hold.
+  void _settleStrip(int gen) {
+    if (_disposed || !_stripPending || gen != _generation) return;
+    _stripPending = false;
+    _stripTimer?.cancel();
+    _stripTimer = Timer(stripHold, () {
+      _stripTimer = null;
+      if (!_disposed) deckStrip.value = null;
+    });
+  }
+
+  void _hideStrip() {
+    if (_disposed) return;
+    _stripTimer?.cancel();
+    _stripTimer = null;
+    _stripPending = false;
+    deckStrip.value = null;
   }
 
   void _say(String text) {
@@ -403,6 +475,7 @@ class ReelController extends ChangeNotifier {
     final list = cards;
     if (list == null || index >= list.length) {
       if (!externalClips) await clips.pause();
+      _settleStrip(gen);
       return;
     }
     final c = list[index];
@@ -442,6 +515,7 @@ class ReelController extends ChangeNotifier {
       _firstClip = false;
     }
     _prepareAhead(list, direction, gen);
+    _settleStrip(gen);
   }
 
   /// Two ahead: resolve; one ahead (in the swipe direction): preload.

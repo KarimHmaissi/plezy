@@ -173,6 +173,17 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     switch (slot.kind) {
       case ReelSlotKind.loading:
         return const ReelCurtain();
+      case ReelSlotKind.failed:
+        return ReelMessage(
+          icon: Symbols.cloud_off_rounded,
+          title: "Couldn't load ${_c.deck.name}",
+          body: 'Check the connection and try again.',
+          action: FilledButton.tonalIcon(
+            onPressed: () => unawaited(_c.retryDeck()),
+            icon: const Icon(Symbols.refresh_rounded),
+            label: const Text('Try again'),
+          ),
+        );
       case ReelSlotKind.empty:
         return ReelMessage(
           icon: Symbols.movie_rounded,

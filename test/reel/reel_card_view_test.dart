@@ -10,6 +10,7 @@ import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/screens/reel/reel_card_view.dart';
+import 'package:plezy/screens/reel/reel_sheet.dart' show reelDeckIcon;
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/library_index/index_database.dart';
@@ -21,6 +22,7 @@ import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/theme/fork_motion.dart';
 import 'package:plezy/utils/layout_constants.dart';
 import 'package:plezy/widgets/fork_motion_widgets.dart';
 import 'package:plezy/widgets/stat_chip.dart';
@@ -187,14 +189,45 @@ Future<Map<int, Map<String, dynamic>>> _animeThemes(List<int> ids) async => {
 const _a = ClipSource(uri: 'https://cdn.example/a.mp4', origin: ClipOrigin.plexExtra);
 const _b = ClipSource(uri: 'https://cdn.example/b.mp4', origin: ClipOrigin.plexExtra);
 
-ReelController _controller(ForkDatabase db, ReelDeck deck, void Function(FakeClipEngine) onEngine, {ReelMedia? media}) {
+/// A deck with its own id and name whose load can wait on [gate] and
+/// throw while [fails] is set (V2-27).
+class _SwitchDeck extends ReelDeck {
+  _SwitchDeck(this.id, this.name, this.ids);
+
+  @override
+  final String id;
+  @override
+  final String name;
+  final List<String> ids;
+  Completer<void>? gate;
+  bool fails = false;
+
+  @override
+  bool get keepsSeen => true;
+  @override
+  bool get raw => true;
+  @override
+  Future<List<ReelCardData>> load() async {
+    await gate?.future;
+    if (fails) throw StateError('server unreachable');
+    return [for (final i in ids) _card(i)];
+  }
+}
+
+ReelController _controller(
+  ForkDatabase db,
+  ReelDeck deck,
+  void Function(FakeClipEngine) onEngine, {
+  ReelMedia? media,
+  List<ReelDeck> more = const [],
+}) {
   resetSharedPreferencesForTest();
   SettingsService.resetForTesting();
   LocaleSettings.setLocaleSync(AppLocale.en);
   final settings = LocalCustomisationStore(db);
   final store = ReelStore(database: () async => db, settings: () async => settings);
   return ReelController(
-    decks: [deck],
+    decks: [deck, ...more],
     resolver: ClipResolver(
       servers: _Servers(),
       store: store,
@@ -615,6 +648,190 @@ void main() {
       expect(title(), findsOneWidget);
       engine.firstFrameCtl.add(null);
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('TV deck switch (V2-27)', () {
+    late ForkDatabase db;
+    late ReelController c;
+
+    setUp(() {
+      db = ForkDatabase.memory();
+    });
+
+    tearDown(() async {
+      c.dispose();
+      await db.close();
+    });
+
+    Future<void> pumpView(WidgetTester tester, {Size size = const Size(1920, 1080), bool reduceMotion = false}) async {
+      await tester.runAsync(SettingsService.getInstance);
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        TranslationProvider(
+          child: MaterialApp(
+            theme: ThemeData.dark(),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(disableAnimations: reduceMotion),
+              child: child!,
+            ),
+            home: Scaffold(
+              body: ListenableBuilder(
+                listenable: c,
+                builder: (context, _) => Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ReelCardView(controller: c, slot: c.current, tv: true, onReplay: () {}),
+                    ReelDeckStrip(controller: c),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    final skeleton = find.byKey(const ValueKey('spotlight-pending-skeleton'));
+
+    testWidgets('a deck still loading is the spotlight skeleton, not a spinner', (tester) async {
+      final deck = _SwitchDeck('a', 'Deck A', ['1'])..gate = Completer<void>();
+      c = _controller(db, deck, (_) {});
+      await tester.runAsync(SettingsService.getInstance);
+      await tester.runAsync(() async {
+        unawaited(c.start());
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await pumpView(tester);
+      expect(c.current.kind, ReelSlotKind.loading);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(ReelTvSkeleton), findsOneWidget);
+      final spot = tester.widget<TvSpotlightBackground>(find.byType(TvSpotlightBackground));
+      expect(spot.item, isNull);
+      expect(spot.pendingTitle, isEmpty);
+      // The title slot is a bar too, inside the one shimmer.
+      expect(skeleton, findsOneWidget);
+      expect(
+        tester.widget<ForkShimmer>(find.ancestor(of: skeleton, matching: find.byType(ForkShimmer))).active,
+        isTrue,
+      );
+
+      await tester.runAsync(() async {
+        deck.gate!.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pump();
+      expect(c.current.kind, ReelSlotKind.card);
+      // The skeleton fades out over the card with the sheet motion.
+      await tester.pump(ForkMotion.sheetIn ~/ 2);
+      expect(find.byType(ReelTvSkeleton), findsOneWidget);
+      await tester.pump(ForkMotion.sheetIn);
+      expect(find.byType(ReelTvSkeleton), findsNothing);
+      expect(find.text('Harbor Lights'), findsWidgets);
+    });
+
+    testWidgets('a deck that failed to load says so, and Try again loads it', (tester) async {
+      final deck = _SwitchDeck('a', 'Deck A', ['1'])..fails = true;
+      c = _controller(db, deck, (_) {});
+      await tester.runAsync(SettingsService.getInstance);
+      await tester.runAsync(c.start);
+      await pumpView(tester, reduceMotion: true);
+      expect(c.current.kind, ReelSlotKind.failed);
+      expect(find.text("Couldn't load Deck A"), findsOneWidget);
+      expect(find.textContaining('Press OK to try again'), findsOneWidget);
+      expect(find.textContaining('Nothing in'), findsNothing);
+
+      deck.fails = false;
+      await tester.runAsync(() async {
+        tester
+            .widget<ButtonStyleButton>(
+              find.ancestor(
+                of: find.text('Try again'),
+                matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+              ),
+            )
+            .onPressed!();
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pump();
+      expect(c.current.card?.id, 't1');
+      expect(find.text("Couldn't load Deck A"), findsNothing);
+    });
+
+    testWidgets("an empty deck shows that deck's own icon", (tester) async {
+      c = _controller(db, _SwitchDeck('anime-openings', 'Openings', const []), (_) {});
+      await tester.runAsync(SettingsService.getInstance);
+      await tester.runAsync(c.start);
+      await pumpView(tester, reduceMotion: true);
+      expect(find.text('Nothing in Openings yet'), findsOneWidget);
+      expect(find.byIcon(reelDeckIcon('anime-openings')), findsOneWidget);
+    });
+
+    /// Three decks, never started: the strip is driven as the controller
+    /// drives it on a switch (the timing is covered in the controller test).
+    List<ReelDeck> threeDecks() => [
+      _SwitchDeck('for-you', 'For You', ['1']),
+      _SwitchDeck('anime-openings', 'Openings', ['2']),
+      _SwitchDeck('most-watched', 'Most watched', ['3']),
+    ];
+
+    testWidgets('the strip reads previous, current and next, inside the overscan margin, in the TV scale', (
+      tester,
+    ) async {
+      final decks = threeDecks();
+      c = _controller(db, decks.first, (_) {}, more: decks.skip(1).toList());
+      const size = Size(960, 540);
+      await pumpView(tester, size: size);
+      c.deckStrip.value = ReelDeckStripState(previous: decks[0], current: decks[1], next: decks[2]);
+      await tester.pump();
+      await tester.pump(ForkMotion.sheetIn);
+      expect(find.text('‹  For You'), findsOneWidget);
+      expect(find.text('Openings'), findsOneWidget);
+      expect(find.text('Most watched  ›'), findsOneWidget);
+
+      final strip = find.byKey(const ValueKey('reel-deck-strip:anime-openings'));
+      final rect = tester.getRect(strip);
+      expect(rect.top, closeTo(size.height * ReelDeckStrip.overscan, 0.5));
+      expect(rect.right, closeTo(size.width * (1 - ReelDeckStrip.overscan), 0.5));
+      expect(rect.left, greaterThanOrEqualTo(size.width * ReelDeckStrip.overscan - 0.5));
+
+      final scale = TvLayoutConstants.scaleForSize(size);
+      final icon = tester.widget<Icon>(find.descendant(of: strip, matching: find.byType(Icon)));
+      expect(icon.icon, reelDeckIcon('anime-openings'));
+      expect(icon.size, closeTo(20 * scale, 0.01));
+    });
+
+    testWidgets('the strip rises in with the sheet motion and leaves when cleared', (tester) async {
+      final decks = threeDecks();
+      c = _controller(db, decks.first, (_) {}, more: decks.skip(1).toList());
+      await pumpView(tester);
+      c.deckStrip.value = ReelDeckStripState(current: decks[1], next: decks[2]);
+      await tester.pump();
+      final strip = find.byKey(const ValueKey('reel-deck-strip:anime-openings'));
+      const restingTop = 1080 * ReelDeckStrip.overscan;
+      await tester.pump(ForkMotion.sheetIn ~/ 4);
+      expect(tester.getRect(strip).top, greaterThan(restingTop + 1), reason: 'still rising');
+      await tester.pump(ForkMotion.sheetIn);
+      expect(tester.getRect(strip).top, closeTo(restingTop, 0.5));
+      expect(find.textContaining('‹'), findsNothing, reason: 'no previous deck given');
+
+      c.deckStrip.value = null;
+      await tester.pump();
+      await tester.pump(ForkMotion.sheetOut + const Duration(milliseconds: 20));
+      expect(strip, findsNothing);
+    });
+
+    testWidgets('with animations off the strip is placed at once', (tester) async {
+      final decks = threeDecks();
+      c = _controller(db, decks.first, (_) {}, more: decks.skip(1).toList());
+      await pumpView(tester, reduceMotion: true);
+      c.deckStrip.value = ReelDeckStripState(previous: decks[0], current: decks[1], next: decks[2]);
+      await tester.pump();
+      final strip = find.byKey(const ValueKey('reel-deck-strip:anime-openings'));
+      expect(tester.getRect(strip).top, closeTo(1080 * ReelDeckStrip.overscan, 0.5));
     });
   });
 }

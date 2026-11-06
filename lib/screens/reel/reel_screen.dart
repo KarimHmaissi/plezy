@@ -368,6 +368,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
           unawaited(c.replay());
         } else if (c.current.kind == ReelSlotKind.poolEnd) {
           unawaited(c.switchDeck(1));
+        } else if (c.current.kind == ReelSlotKind.failed) {
+          unawaited(c.retryDeck());
         } else {
           unawaited(_watch());
         }
@@ -422,7 +424,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       child: ColoredBox(
         color: Colors.transparent,
         child: c == null
-            ? const ReelCurtain()
+            ? (_isTv ? const ReelTvSkeleton() : const ReelCurtain())
             : Stack(
                 fit: StackFit.expand,
                 children: [

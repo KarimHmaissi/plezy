@@ -18,6 +18,7 @@ import '../../widgets/fitted_metadata_line.dart';
 import '../../widgets/media_rating_badge.dart';
 import '../../widgets/stat_chip.dart';
 import '../../widgets/tv_spotlight_background.dart';
+import 'reel_sheet.dart' show reelDeckIcon;
 
 /// One card, in the app's own look. On the TV it is Home's spotlight (logo or
 /// title, the metadata line with rating badges, the summary, the same scrims)
@@ -47,12 +48,51 @@ class ReelCardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = _content(context);
+    if (!tv) return content;
+    // V2-27: loading, a failure, an empty deck or its end and the card fade
+    // into each other. One card to the next keeps the same key, so it
+    // changes in place (the spotlight runs its own cross-fade).
+    final duration = stateFade(context);
+    return AnimatedSwitcher(
+      duration: duration,
+      reverseDuration: duration,
+      switchInCurve: ForkMotion.enterCurve,
+      switchOutCurve: ForkMotion.exitCurve,
+      layoutBuilder: (currentChild, previousChildren) =>
+          Stack(fit: StackFit.expand, children: [...previousChildren, ?currentChild]),
+      child: KeyedSubtree(key: ValueKey(stateKey(slot.kind, controller.deck.id)), child: content),
+    );
+  }
+
+  /// What the TV's state fade switches on: every card is one state, the
+  /// other kinds are one per deck.
+  @visibleForTesting
+  static String stateKey(ReelSlotKind kind, String deckId) =>
+      kind == ReelSlotKind.card ? 'card' : '${kind.name}:$deckId';
+
+  /// The state fade: [ForkMotion.sheetIn], none with animations off.
+  static Duration stateFade(BuildContext context) =>
+      ForkMotion.reduceMotion(context) ? Duration.zero : DevicePerformance.reducedDuration(ForkMotion.sheetIn);
+
+  Widget _content(BuildContext context) {
     switch (slot.kind) {
       case ReelSlotKind.loading:
-        return const ReelCurtain();
+        return tv ? const ReelTvSkeleton() : const ReelCurtain();
+      case ReelSlotKind.failed:
+        return ReelMessage(
+          icon: Symbols.cloud_off_rounded,
+          title: "Couldn't load ${controller.deck.name}",
+          body: tv ? 'Press OK to try again, or → for the next deck.' : 'Tap to try again.',
+          action: FilledButton.tonalIcon(
+            onPressed: () => unawaited(controller.retryDeck()),
+            icon: const Icon(Symbols.refresh_rounded),
+            label: const Text('Try again'),
+          ),
+        );
       case ReelSlotKind.empty:
         return ReelMessage(
-          icon: Symbols.movie_rounded,
+          icon: reelDeckIcon(controller.deck.id),
           title: 'Nothing in ${controller.deck.name} yet',
           body: tv ? 'Press → for the next deck.' : 'Swipe sideways for the next deck.',
         );
@@ -556,6 +596,27 @@ class ReelMessage extends StatelessWidget {
   }
 }
 
+/// TV loading (V2-27): Home's spotlight with nothing in it yet, and the info
+/// block as a shimmering skeleton where the first card's will sit, instead
+/// of a bare spinner.
+class ReelTvSkeleton extends StatelessWidget {
+  const ReelTvSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = TvLayoutConstants.scaleOf(context);
+    return TvSpotlightBackground(
+      key: const ValueKey('reel-tv-skeleton'),
+      item: null,
+      client: null,
+      // A card's resting info block: the key hints under it, no extras.
+      contentTop: 120 * scale,
+      contentBottom: 80 * scale,
+      pendingTitle: '',
+    );
+  }
+}
+
 /// Loading, as everywhere else in the app.
 class ReelCurtain extends StatelessWidget {
   const ReelCurtain({super.key});
@@ -567,42 +628,100 @@ class ReelCurtain extends StatelessWidget {
   );
 }
 
-/// The deck name for 1.5 s after a change, as an app chip.
+/// The deck strip (V2-27): ‹ previous · CURRENT · next › in a pill, top
+/// right inside the TV's overscan-safe margin, sized in the TV scale. It
+/// rises in with the app's sheet motion and stays until the new deck has
+/// shown ([ReelController.defaultStripHold]).
 class ReelDeckStrip extends StatelessWidget {
   const ReelDeckStrip({super.key, required this.controller});
 
   final ReelController controller;
 
+  /// Android TV's overscan-safe margin: 5% of each edge
+  /// (https://developer.android.com/design/ui/tv/guides/styles/layouts).
+  static const double overscan = 0.05;
+
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<String?>(
+  Widget build(BuildContext context) => ValueListenableBuilder<ReelDeckStripState?>(
     valueListenable: controller.deckStrip,
-    builder: (context, name, _) {
-      final theme = Theme.of(context);
+    builder: (context, strip, _) {
+      final size = MediaQuery.sizeOf(context);
+      final reduce = ForkMotion.reduceMotion(context);
       return Positioned(
-        top: 36,
-        right: 40,
+        top: size.height * overscan,
+        right: size.width * overscan,
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          child: name == null
+          duration: reduce ? Duration.zero : DevicePerformance.reducedDuration(ForkMotion.sheetIn),
+          reverseDuration: reduce ? Duration.zero : DevicePerformance.reducedDuration(ForkMotion.sheetOut),
+          transitionBuilder: (child, animation) => ForkMotion.riseTransition(animation, child),
+          layoutBuilder: (currentChild, previousChildren) =>
+              Stack(alignment: Alignment.topRight, children: [...previousChildren, ?currentChild]),
+          child: strip == null
               ? const SizedBox.shrink()
-              : Container(
-                  key: ValueKey(name),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Symbols.movie_rounded, size: 20, color: theme.colorScheme.primary),
-                      const SizedBox(width: 8),
-                      Text(name, style: theme.textTheme.titleMedium),
-                    ],
-                  ),
+              : _DeckStripPill(
+                  key: ValueKey('reel-deck-strip:${strip.current.id}'),
+                  strip: strip,
+                  maxWidth: size.width * (1 - 2 * overscan),
                 ),
         ),
       );
     },
   );
+}
+
+class _DeckStripPill extends StatelessWidget {
+  const _DeckStripPill({super.key, required this.strip, required this.maxWidth});
+
+  final ReelDeckStripState strip;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scale = TvLayoutConstants.scaleOf(context);
+    final currentStyle = theme.textTheme.titleMedium?.copyWith(
+      color: theme.colorScheme.onSurface,
+      fontSize: (theme.textTheme.titleMedium?.fontSize ?? 16) * scale,
+      fontWeight: FontWeight.w700,
+    );
+    final sideStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontSize: (theme.textTheme.bodyMedium?.fontSize ?? 14) * scale,
+    );
+    final gap = SizedBox(width: 10 * scale);
+    Widget side(String text) => Flexible(
+      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: sideStyle),
+    );
+    final previous = strip.previous, next = strip.next;
+    return Semantics(
+      liveRegion: true,
+      label: strip.current.name,
+      excludeSemantics: true,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 18 * scale, vertical: 8 * scale),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (previous != null) ...[side('‹  ${previous.name}'), gap, Text('·', style: sideStyle), gap],
+                Icon(reelDeckIcon(strip.current.id), size: 20 * scale, color: theme.colorScheme.primary),
+                SizedBox(width: 8 * scale),
+                Flexible(
+                  flex: 2,
+                  child: Text(strip.current.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: currentStyle),
+                ),
+                if (next != null) ...[gap, Text('·', style: sideStyle), gap, side('${next.name}  ›')],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

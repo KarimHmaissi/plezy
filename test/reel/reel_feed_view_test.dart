@@ -78,8 +78,15 @@ class _Deck extends ReelDeck {
   bool get keepsSeen => true;
   @override
   bool get raw => true;
+
+  /// The server can't be reached (V2-27).
+  bool fails = false;
+
   @override
-  Future<List<ReelCardData>> load() async => [for (final i in ids) _card(i)];
+  Future<List<ReelCardData>> load() async {
+    if (fails) throw StateError('server unreachable');
+    return [for (final i in ids) _card(i)];
+  }
 }
 
 ReelCardData _card(String id) => ReelCardData(
@@ -321,6 +328,22 @@ void main() {
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
   });
+  testWidgets('a deck that fails to load says so, and Try again loads it (V2-27)', (tester) async {
+    first.fails = true;
+    await pump(tester);
+    expect(c.current.kind, ReelSlotKind.failed);
+    expect(find.text("Couldn't load Deck a"), findsOneWidget);
+    expect(find.textContaining('Nothing in'), findsNothing);
+
+    first.fails = false;
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Try again'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    expect(find.text('Title 1'), findsOneWidget);
+  });
+
   group('metadata landing late (V2-26)', () {
     /// The feed with every item held back until the gate opens.
     Future<void> pumpGated(WidgetTester tester, {bool reduceMotion = false}) async {

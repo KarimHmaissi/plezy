@@ -116,6 +116,23 @@ class _CountingDeck extends _Deck {
   }
 }
 
+/// A deck whose load waits on [gate], and throws while [fails] is set.
+class _SlowDeck extends _Deck {
+  _SlowDeck(super.id, super.cards);
+
+  Completer<void>? gate;
+  bool fails = false;
+  int loads = 0;
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    loads++;
+    await gate?.future;
+    if (fails) throw StateError('server unreachable');
+    return super.load();
+  }
+}
+
 /// A daily deck whose build can land after it loaded.
 class _DailyDeck extends ReelDeck {
   _DailyDeck(this.id, this.cards);
@@ -880,6 +897,134 @@ void main() {
       await c.start();
       expect(loads, 1);
       expect(c.current.card?.id, 't6');
+      c.dispose();
+    });
+  });
+
+  group('deck switch (V2-27)', () {
+    test('the strip stays while a slow deck loads, and goes a hold after it shows', () async {
+      final slow = _SlowDeck('b', [_card('5')])..gate = Completer<void>();
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          slow,
+        ],
+      )..stripHold = const Duration(milliseconds: 60);
+      await c.start();
+      final switching = c.switchDeck(1);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(c.current.kind, ReelSlotKind.loading);
+      expect(c.deckStrip.value?.current.id, 'b', reason: 'the deck has not shown: no hold yet');
+      slow.gate!.complete();
+      await switching;
+      expect(c.current.card?.id, 't5');
+      expect(c.deckStrip.value?.current.id, 'b', reason: 'the hold starts when the deck shows');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(c.deckStrip.value, isNull);
+      c.dispose();
+    });
+
+    test('the strip names the decks either side', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+          _Deck('c', [_card('3')]),
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      final strip = c.deckStrip.value!;
+      expect([strip.previous?.id, strip.current.id, strip.next?.id], ['a', 'b', 'c']);
+      await c.switchDeck(1);
+      final wrapped = c.deckStrip.value!;
+      expect([wrapped.previous?.id, wrapped.current.id, wrapped.next?.id], ['b', 'c', 'a']);
+      c.dispose();
+    });
+
+    test('with two decks the strip shows only the next one', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.deckStrip.value?.previous, isNull);
+      expect(c.deckStrip.value?.next?.id, 'a');
+      c.dispose();
+    });
+
+    test('leaving the Reel takes the strip down', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.deckStrip.value, isNotNull);
+      await c.suspend();
+      expect(c.deckStrip.value, isNull);
+      c.dispose();
+    });
+
+    test('a deck that fails to load says so, and OK loads it again', () async {
+      final flaky = _SlowDeck('b', [_card('5')])..fails = true;
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          flaky,
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.current.kind, ReelSlotKind.failed, reason: 'not an empty deck');
+      expect(c.cards, isNull);
+
+      flaky
+        ..fails = false
+        ..gate = Completer<void>();
+      final retry = c.retryDeck();
+      await Future<void>.delayed(Duration.zero);
+      expect(c.current.kind, ReelSlotKind.loading, reason: 'the skeleton while it tries again');
+      flaky.gate!.complete();
+      await retry;
+      expect(flaky.loads, 2);
+      expect(c.current.card?.id, 't5');
+      c.dispose();
+    });
+
+    test('a failed deck loads again when it is next visited', () async {
+      final flaky = _SlowDeck('b', [_card('5')])..fails = true;
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          flaky,
+        ],
+      );
+      await c.start();
+      await c.switchDeck(1);
+      expect(c.current.kind, ReelSlotKind.failed);
+      await c.switchDeck(1);
+      flaky.fails = false;
+      await c.switchDeck(1);
+      expect(c.current.card?.id, 't5');
+      c.dispose();
+    });
+
+    test('retry does nothing on a deck that loaded', () async {
+      var loads = 0;
+      final c = make(
+        decks: [
+          _CountingDeck('a', [_card('1')], () => loads++),
+        ],
+      );
+      await c.start();
+      await c.retryDeck();
+      expect(loads, 1);
       c.dispose();
     });
   });

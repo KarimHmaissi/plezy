@@ -57,7 +57,8 @@ class TvSpotlightBackground extends StatelessWidget {
   /// Fork (The Reel): while [item] is still null, the title to show in the
   /// info block's own logo slot, over a shimmering skeleton of the metadata
   /// line and summary. The block keeps the frame the item will fill, and the
-  /// item's info replaces it with the usual in-place cross-fade.
+  /// item's info replaces it with the usual in-place cross-fade. An empty
+  /// title (nothing known yet) is drawn as a skeleton bar as well.
   final String? pendingTitle;
 
   /// Fork (The Reel): false keeps [pendingTitle] but drops the skeleton, for
@@ -312,7 +313,23 @@ class TvSpotlightBackground extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final logoWidth = math.min(_logoWidth(scale), width);
     final titleWidth = ClearLogoImage.fallbackWidthFor(logoWidth: logoWidth, available: width);
-    final title = SizedBox(width: titleWidth, height: _logoHeight(scale), child: _buildTitle(context, pendingTitle!));
+    // An empty title (nothing known yet, e.g. a Reel deck still loading)
+    // is a skeleton bar in the slot too, at the title's own line height.
+    final noTitle = pendingTitle!.isEmpty;
+    final title = SizedBox(
+      width: titleWidth,
+      height: _logoHeight(scale),
+      child: noTitle
+          ? Align(
+              alignment: .bottomLeft,
+              child: _skeletonLine(
+                Theme.of(context).textTheme.displaySmall?.copyWith(fontSize: _titleFontSize(scale)),
+                titleWidth * 0.7,
+                colorScheme,
+              ),
+            )
+          : _buildTitle(context, pendingTitle!),
+    );
     if (!pendingSkeleton) return Column(crossAxisAlignment: .start, mainAxisSize: .min, children: [title]);
     final summaryStyle = Theme.of(
       context,
@@ -322,13 +339,14 @@ class TvSpotlightBackground extends StatelessWidget {
       crossAxisAlignment: .start,
       mainAxisSize: .min,
       children: [
-        title,
+        if (!noTitle) title,
         ForkShimmer(
           child: Column(
             key: const ValueKey('spotlight-pending-skeleton'),
             crossAxisAlignment: .start,
             mainAxisSize: .min,
             children: [
+              if (noTitle) title,
               SizedBox(height: _sectionGap(scale)),
               _skeletonLine(metadataTextStyle(context, compact: compact), width * 0.42, colorScheme),
               SizedBox(height: _sectionGap(scale)),
