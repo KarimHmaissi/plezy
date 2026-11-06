@@ -232,9 +232,13 @@ class ReelController extends ChangeNotifier {
   /// one. Null: the action isn't offered.
   final ReelMoreLike? moreLike;
 
-  /// Keeps the mute across launches (`reel_muted`, V2-22); the saved value
-  /// is handed to [clips] when it is built.
+  /// Keeps the mute across launches (V2-22); the saved value is handed to
+  /// [clips] when it is built. Null: [SettingsService.reelMuted], the one
+  /// pref both the TV and the phone feed start from.
   final Future<void> Function(bool muted)? saveMuted;
+
+  static Future<void> _saveMutedPref(bool muted) async =>
+      SettingsService.instanceOrNull?.write(SettingsService.reelMuted, muted);
 
   /// Builds a deck asked for by id that isn't in [decks] yet (an answer
   /// saved after the Reel opened); it joins the end of [decks].
@@ -1638,13 +1642,10 @@ class ReelController extends ChangeNotifier {
   /// plays, or the saved mute put back) nothing is recorded or kept.
   Future<void> setMuted(bool muted, {bool remember = true}) async {
     final c = current.card;
-    if (remember) {
-      if (!muted && c != null) await store.record(c.id, ReelAction.unmute, deck: deck.id);
-      await SettingsService.instanceOrNull?.write(SettingsService.reelMuted, muted);
-    }
+    if (remember && !muted && c != null) await store.record(c.id, ReelAction.unmute, deck: deck.id);
     await clips.setMuted(muted);
     notifyListeners();
-    await saveMuted?.call(muted);
+    if (remember) await (saveMuted ?? _saveMutedPref)(muted);
   }
 
   /// How hard the system has asked for memory back (the degrade ladder):

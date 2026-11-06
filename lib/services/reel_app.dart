@@ -189,9 +189,6 @@ abstract final class ReelApp {
       // Give it another go: the card's one metadata read brings the show's
       // next episode, so Watch can say which.
       itemWithNext: media.itemWithNext,
-      saveMuted: (muted) async {
-        await SettingsService.instanceOrNull?.write(SettingsService.reelMuted, muted);
-      },
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));

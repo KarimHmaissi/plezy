@@ -280,7 +280,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (widget.offline) {
       _release();
     } else {
-      unawaited(_start());
+      // The feed was let go: its sound settles again, as on any visit.
+      unawaited(_visit());
     }
   }
 
@@ -354,7 +355,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   ReelController? get controller => _controller;
 
-  Future<void> _start() async {
+  /// [visitMuted]: how a phone visit's sound starts ([_startSound]), handed
+  /// to the controller before its first card plays.
+  Future<void> _start({bool? visitMuted}) async {
     if (widget.offline) return;
     // Any new attempt (Retry, the tab shown again, back online, resumed)
     // shows the curtain while it builds.
@@ -366,6 +369,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       return; // shown as a message with Retry (_ensure)
     }
     if (!mounted || !_shown || widget.offline) return;
+    if (visitMuted != null) await c.setMuted(visitMuted, remember: false);
+    if (!mounted || !_shown) return;
     final deck = _pendingDeck;
     _pendingDeck = null;
     if (deck != null && c.active) {
@@ -435,16 +440,22 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   Future<void> _visit() async {
     // Only from a feed that was let go: a resume that never paused (the
     // shade pulled down) keeps the sound as it is, and the feed's own clip
-    // must not count as other audio.
-    if (!_isTv && _players.current == null) await _startSound();
-    await _start();
+    // must not count as other audio. Offline nothing is built (V2-60).
+    bool? muted;
+    if (!_isTv && !widget.offline && _players.current == null) {
+      muted = await _startSound();
+      if (muted == null) return;
+    }
+    await _start(visitMuted: muted);
   }
 
   /// Phone (V2-22): a visit starts muted when the mute was kept, while the
   /// connected TV is playing, or, with "Muted if other audio is playing",
   /// while another app's audio plays. Only the kept mute is saved; the
-  /// others hold for this visit.
-  Future<void> _startSound() async {
+  /// others hold for this visit. The players take it here; the controller
+  /// takes it in [_start], once it is built (a failed build shows Retry
+  /// there). Null: the visit ended while it looked.
+  Future<bool?> _startSound() async {
     final remote = context.read<CompanionRemoteProvider?>();
     final tvPlaying =
         remote != null && remote.isRemote && remote.isConnected && ReelSound.tvPlaying(remote.nowPlaying.value);
@@ -452,11 +463,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     final pref = _startSoundPref;
     final otherAudio =
         !saved && !tvPlaying && pref == ReelStartSound.mutedIfOtherAudio && await ReelSound.otherAudioPlaying();
-    if (!mounted || !_shown) return;
+    if (!mounted || !_shown) return null;
     final muted = ReelSound.startMuted(saved: saved, pref: pref, tvPlaying: tvPlaying, otherAudio: otherAudio);
     await _players.setMuted(muted);
-    final c = await _ensure();
-    if (mounted) await c.setMuted(muted, remember: false);
+    return muted;
   }
 
   @override
@@ -707,7 +717,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         // V2-24: the phone feed, its loading curtain included, is always dark.
         child: _isTv
             ? body
-            : ReelFeedTheme(palette: context.select<ThemeProvider, MonoPalette>((t) => t.activePalette), child: body),
+            : ReelFeedTheme(
+                palette: context.select<ThemeProvider?, MonoPalette?>((t) => t?.activePalette),
+                child: body,
+              ),
       ),
     );
   }
