@@ -165,7 +165,7 @@ void main() {
     final sent = (envelope['items'] as List).single as Map;
     expect(sent['posterSourceUri'], startsWith('https://media.invalid/'));
     expect(sent, isNot(contains('posterUri')));
-    expect(client.thumbnailRequests.single, (path: '/poster', width: 640, height: 360));
+    expect(client.thumbnailRequests.single, (path: '/poster', width: 1280, height: 720));
 
     calls.clear();
     expect(
@@ -244,7 +244,7 @@ void main() {
     });
   }
 
-  test('non-tvOS target keeps 640x360 episode thumbnails and the spoiler-safe override', () async {
+  test('non-tvOS target publishes 1280x720 episode thumbnails and the spoiler-safe override', () async {
     messenger.setMockMethodCallHandler(channel, (call) async => true);
     final client = _ShelfClient();
     final service = SystemShelfService.forTesting(
@@ -260,7 +260,7 @@ void main() {
 
     expect(client.thumbnailRequests.map((request) => request.path), ['/spoiler-safe-art', '/episode-still']);
     for (final request in client.thumbnailRequests) {
-      expect((request.width, request.height), (640, 360));
+      expect((request.width, request.height), (1280, 720));
     }
   });
 

@@ -184,6 +184,10 @@ Details of each are in the dated entries below.
   library list already had, so one server that stops answering can't hold
   back the others. No extra requests to the servers: same calls, just
   started together.
+### Sharper Watch Next art on the Shield's home (A8)
+- Plezy now publishes Watch Next art at 1280×720 instead of 640×360, so
+  Arc's cards on the 4K TV aren't upscaled from half size. Arc's side of
+  this (decoding at the card's real pixel size) is in the Arc fork.
 
 ## 2026-11-03
 

@@ -458,7 +458,9 @@ class SystemShelfService {
           }
           thumbPath ??= item.posterThumb(mode: EpisodePosterMode.episodeThumbnail, mixedHubContext: true);
           if (thumbPath != null) {
-            posterSourceUri = client.thumbnailUrl(thumbPath, width: 640, height: 360);
+            // Launcher cards on a 4K TV are drawn at about 720 px wide, so
+            // 640x360 art was upscaled and soft.
+            posterSourceUri = client.thumbnailUrl(thumbPath, width: 1280, height: 720);
           }
         }
       }
