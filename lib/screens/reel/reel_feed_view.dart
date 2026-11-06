@@ -5,14 +5,35 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../media/ids.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
 import '../../services/reel/reel_controller.dart';
+import '../../theme/mono_theme.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/optimized_media_image.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
+
+/// The phone feed's theme (V2-24). The feed paints on black whatever the app
+/// theme is, so its text, buttons and loading and empty states always take the
+/// dark half of the user's [palette]: the palette itself when it is dark,
+/// otherwise Dark ([ThemeProvider.darkThemeFor]). Status bar icons go light to
+/// match. The TV keeps Home's theme.
+class ReelFeedTheme extends StatelessWidget {
+  const ReelFeedTheme({super.key, required this.palette, required this.child});
+
+  /// The palette on screen ([ThemeProvider.activePalette]).
+  final MonoPalette? palette;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+    value: SystemUiOverlayStyle.light,
+    child: Theme(data: ThemeProvider.darkThemeFor(palette), child: child),
+  );
+}
 
 /// The phone Reel, a feed you thumb through: each card plays in its own
 /// page (the clip is drawn into the page, so it slides with your thumb), and

@@ -12,12 +12,14 @@ import '../../mixins/refreshable.dart';
 import '../../navigation/navigation_tabs.dart';
 import '../../mixins/tab_visibility_aware.dart';
 import '../../providers/companion_remote_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_perf.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/settings_service.dart';
+import '../../theme/mono_theme.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../services/reel/feed_players.dart';
@@ -380,24 +382,28 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   @override
   Widget build(BuildContext context) {
     final c = _controller;
+    final Widget body = c == null
+        ? const ReelCurtain()
+        : Stack(
+            fit: StackFit.expand,
+            children: [
+              _isTv ? _tv(c) : _phone(c),
+              ValueListenableBuilder<bool>(
+                valueListenable: _perf.overlay,
+                builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),
+              ),
+            ],
+          );
     return Focus(
       focusNode: _focus,
       autofocus: false,
       onKeyEvent: _onKey,
       child: ColoredBox(
         color: Colors.transparent,
-        child: c == null
-            ? const ReelCurtain()
-            : Stack(
-                fit: StackFit.expand,
-                children: [
-                  _isTv ? _tv(c) : _phone(c),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: _perf.overlay,
-                    builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
+        // V2-24: the phone feed, its loading curtain included, is always dark.
+        child: _isTv
+            ? body
+            : ReelFeedTheme(palette: context.select<ThemeProvider, MonoPalette>((t) => t.activePalette), child: body),
       ),
     );
   }

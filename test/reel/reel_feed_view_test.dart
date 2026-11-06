@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/screens/reel/reel_card_view.dart';
 import 'package:plezy/screens/reel/reel_feed_view.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
@@ -17,6 +19,9 @@ import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+import 'package:plezy/theme/mono_theme.dart';
+import 'package:plezy/theme/mono_tokens.dart';
+import 'package:plezy/theme/palette_contrast.dart';
 
 import 'clip_player_test.dart' show FakeClipEngine;
 
@@ -181,23 +186,25 @@ void main() {
     await db.close();
   });
 
-  Future<void> pump(WidgetTester tester) async {
+  Widget feed() => ReelFeedView(
+    controller: c,
+    players: players,
+    watchOnTv: false,
+    onWatch: () => watched++,
+    onSheet: () => sheets++,
+    onDecks: () => decksOpened++,
+  );
+
+  Future<void> pump(WidgetTester tester, {ThemeData? appTheme, MonoPalette? palette, bool themed = false}) async {
     tester.view.physicalSize = const Size(420, 860);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.runAsync(c.start);
     await tester.pumpWidget(
       MaterialApp(
-        theme: ThemeData.dark(),
+        theme: appTheme ?? ThemeData.dark(),
         home: Scaffold(
-          body: ReelFeedView(
-            controller: c,
-            players: players,
-            watchOnTv: false,
-            onWatch: () => watched++,
-            onSheet: () => sheets++,
-            onDecks: () => decksOpened++,
-          ),
+          body: themed ? ReelFeedTheme(palette: palette, child: feed()) : feed(),
         ),
       ),
     );
@@ -308,5 +315,79 @@ void main() {
     expect(opened.single.id, '1');
     await tester.tap(find.text('Watch').first);
     expect(watched, 1);
+  });
+  group('V2-24: the feed is always dark', () {
+    Color painted(WidgetTester tester, String text) => tester
+        .widget<RichText>(find.descendant(of: find.text(text).first, matching: find.byType(RichText)))
+        .text
+        .style!
+        .color!;
+
+    // The feed's canvas and gradients are fixed black.
+    const black = Color(0xFF000000);
+
+    testWidgets('under Light the title, deck button and Watch read on black', (tester) async {
+      await pump(tester, appTheme: monoTheme(MonoPalette.light), palette: MonoPalette.light, themed: true);
+      expect(Theme.of(tester.element(find.text('Title 1'))).brightness, Brightness.dark);
+      for (final text in ['Title 1', 'Deck a']) {
+        final ratio = MonoPalette.contrastRatio(Color.alphaBlend(painted(tester, text), black), black);
+        expect(ratio, greaterThanOrEqualTo(PaletteContrastCheck.textOnBg.minimum), reason: '$text on black');
+      }
+      // Watch is a filled button: its fill must stand off the black page and
+      // its label must read on that fill.
+      final fill = tester
+          .widget<Material>(find.ancestor(of: find.text('Watch').first, matching: find.byType(Material)).first)
+          .color!;
+      expect(MonoPalette.contrastRatio(fill, black), greaterThanOrEqualTo(PaletteContrastCheck.accentOnBg.minimum));
+      expect(
+        MonoPalette.contrastRatio(painted(tester, 'Watch'), fill),
+        greaterThanOrEqualTo(PaletteContrastCheck.labelOnAccent.minimum),
+      );
+      final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+        find.byType(AnnotatedRegion<SystemUiOverlayStyle>).first,
+      );
+      expect(region.value, SystemUiOverlayStyle.light);
+    });
+
+    testWidgets('without it a light app theme paints near-black text on black', (tester) async {
+      // Guards the test above: the same feed, unthemed, fails the check.
+      await pump(tester, appTheme: monoTheme(MonoPalette.light));
+      final ratio = MonoPalette.contrastRatio(Color.alphaBlend(painted(tester, 'Title 1'), black), black);
+      expect(ratio, lessThan(PaletteContrastCheck.textOnBg.minimum));
+    });
+
+    testWidgets('a light palette falls back to Dark; a dark one is kept', (tester) async {
+      Future<ThemeData> themeUnder(MonoPalette palette) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: monoTheme(MonoPalette.light),
+            home: ReelFeedTheme(palette: palette, child: const ReelCurtain()),
+          ),
+        );
+        return Theme.of(tester.element(find.byType(CircularProgressIndicator)));
+      }
+
+      // Theme.of localises the data, so compare the palette the theme carries.
+      Color bg(ThemeData theme) => theme.extension<MonoTokens>()!.bg;
+
+      const dark = MonoPalette.forest;
+      expect(dark.brightness, Brightness.dark);
+      expect(MonoPalette.paper.brightness, Brightness.light);
+      expect(bg(await themeUnder(MonoPalette.paper)), MonoPalette.dark.bg);
+      expect(bg(await themeUnder(dark)), dark.bg);
+    });
+
+    testWidgets('the loading curtain is dark, not the light app page', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: monoTheme(MonoPalette.light),
+          home: const ReelFeedTheme(palette: MonoPalette.light, child: ReelCurtain()),
+        ),
+      );
+      final box = tester.widget<ColoredBox>(
+        find.ancestor(of: find.byType(CircularProgressIndicator), matching: find.byType(ColoredBox)).first,
+      );
+      expect(box.color.computeLuminance(), lessThan(0.1));
+    });
   });
 }
