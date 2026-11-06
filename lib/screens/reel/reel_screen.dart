@@ -24,6 +24,7 @@ import '../../services/reel/feed_players.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
 import 'reel_feed_view.dart';
+import 'reel_held_step.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
 
@@ -91,6 +92,15 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   final FocusNode _focus = FocusNode(debugLabel: 'reel');
   final DpadSelectLongPressController _longPress = DpadSelectLongPressController();
   bool _sheetOpen = false;
+
+  /// TV: ↑ / ↓ with a held key's repeats coalesced into one landing (V2-66).
+  late final ReelHeldStep _held = ReelHeldStep(
+    cursor: () {
+      final c = _controller, list = c?.cards;
+      return c == null || list == null ? null : (index: c.index, last: list.length);
+    },
+    step: _stepBy,
+  );
 
   /// Phone: the feed's players (the TV plays on the native clip core).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
@@ -166,6 +176,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _controller?.dispose();
     _focus.dispose();
     _longPress.dispose();
+    _held.dispose();
     _players.dispose();
     super.dispose();
   }
@@ -217,6 +228,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void _remoteStep(Map<String, dynamic> data) {
     final c = _controller;
     if (c == null || !_shown) return;
+    _held.land();
     final dir = data['dir'];
     final deckDir = data['deckDir'];
     if (dir is int && dir != 0) {
@@ -256,6 +268,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _shown = false;
     ReelScreen.showing.value = false;
     _perf.detachFrames();
+    _held.cancel();
     unawaited(_controller?.suspend());
     unawaited(_players.releaseAll());
   }
@@ -269,6 +282,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_shown) return;
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _held.cancel();
       unawaited(_controller?.suspend());
       unawaited(_players.releaseAll());
     } else if (state == AppLifecycleState.resumed) {
@@ -323,9 +337,29 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _focus.requestFocus();
   }
 
+  /// ↑ / ↓: [count] cards at once, in the same turn, so the controller
+  /// opens only the card the cursor lands on.
+  ///
+  /// `[ReelTTFF] key=`: from this step to the landed card's first frame
+  /// (V2-01). A held key lands on its key up, so it times from the release
+  /// that picked the card.
+  void _stepBy(int dir, int count) {
+    final c = _controller;
+    if (c == null) return;
+    _perf.begin(ReelPerfTrigger.key);
+    c.clips.markKey(Stopwatch()..start());
+    for (var k = 0; k < count; k++) {
+      unawaited(c.step(dir));
+    }
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final c = _controller;
     if (c == null) return KeyEventResult.ignored;
+    if (_isTv) {
+      final held = _held.handle(event);
+      if (held != null) return held;
+    }
     final sel = _longPress.handleKeyEvent(
       event,
       isOwnerActive: () => _shown && !_sheetOpen,
@@ -352,17 +386,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       });
       return KeyEventResult.handled;
     }
-    // `[ReelTTFF] key=`: from this press to the landed card's first frame
-    // (V2-01). A held key's repeats restart it, so it times the press that
-    // picked the card the cursor lands on.
+    // The phone's arrows (a keyboard) step on every press and repeat.
     if (key == LogicalKeyboardKey.arrowDown) {
-      _perf.begin(ReelPerfTrigger.key);
-      c.clips.markKey(Stopwatch()..start());
-      unawaited(c.step(1));
+      _stepBy(1, 1);
     } else if (key == LogicalKeyboardKey.arrowUp) {
-      _perf.begin(ReelPerfTrigger.key);
-      c.clips.markKey(Stopwatch()..start());
-      unawaited(c.step(-1));
+      _stepBy(-1, 1);
     } else if (key == LogicalKeyboardKey.arrowRight) {
       _perf.begin(ReelPerfTrigger.deck);
       c.clips.markKey(Stopwatch()..start(), trigger: 'deck');
@@ -419,10 +447,17 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     );
   }
 
+  /// While ↑ / ↓ is held the card view shows where the hold has got to
+  /// (its title and artwork over the clip still playing); the clip opens
+  /// once the key comes up.
   Widget _tv(ReelController c) => Stack(
     fit: StackFit.expand,
     children: [
-      ReelCardView(controller: c, slot: c.current, tv: true, onReplay: c.replay),
+      ValueListenableBuilder<int?>(
+        valueListenable: _held.preview,
+        builder: (context, to, _) =>
+            ReelCardView(controller: c, slot: to == null ? c.current : c.slotAt(to), tv: true, onReplay: c.replay),
+      ),
       ReelDeckStrip(controller: c),
     ],
   );

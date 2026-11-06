@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
 import 'package:plezy/mpv/models.dart';
@@ -11,6 +12,7 @@ import 'package:plezy/services/library_index/index_database.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/screens/reel/reel_held_step.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/customisation/mirror_store.dart';
@@ -699,6 +701,56 @@ void main() {
       expect(opens(), ['3'], reason: 'the card passed over while resolving never opens');
       final events = await store.events(since: DateTime(2000));
       expect([for (final e in events) e.titleId], ['t1']);
+      c.dispose();
+    });
+
+    test('a held ↓ on the TV keys: the press opens its card, the repeats open only the landed one', () async {
+      final c = make(
+        clock: clock,
+        decks: [
+          _Deck('a', [for (var i = 1; i <= 9; i++) _card('$i')]),
+        ],
+      );
+      await c.start();
+      await Future<void>.delayed(Duration.zero);
+      engine.firstFrameCtl.add(null);
+      now = now.add(const Duration(seconds: 9));
+      engine.calls.clear();
+
+      final pending = <Future<void>>[];
+      final held = ReelHeldStep(
+        cursor: () => (index: c.index, last: c.cards!.length),
+        step: (dir, count) {
+          for (var k = 0; k < count; k++) {
+            pending.add(c.step(dir));
+          }
+        },
+      );
+      const key = LogicalKeyboardKey.arrowDown, physical = PhysicalKeyboardKey.arrowDown;
+      held.handle(const KeyDownEvent(physicalKey: physical, logicalKey: key, timeStamp: Duration.zero));
+      await Future.wait(pending);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.current.card?.id, 't2');
+      for (var k = 0; k < 5; k++) {
+        held.handle(const KeyRepeatEvent(physicalKey: physical, logicalKey: key, timeStamp: Duration.zero));
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(c.index, 1, reason: 'the cursor waits for the key up');
+      expect(held.preview.value, 6);
+      held.handle(const KeyUpEvent(physicalKey: physical, logicalKey: key, timeStamp: Duration.zero));
+      expect(c.index, 6, reason: 'the cursor lands before the preview clears');
+      await Future.wait(pending);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.current.card?.id, 't7');
+      expect(opens(), ['2', '7'], reason: 'cards passed while held never open');
+      final events = await store.events(since: DateTime(2000));
+      expect(
+        [for (final e in events) '${e.titleId} ${e.action}'],
+        ['t1 ${ReelAction.sampled.name}', 't2 ${ReelAction.unplayed.name}'],
+      );
+      expect(await store.quickSkips(), isEmpty);
+      held.dispose();
       c.dispose();
     });
 
