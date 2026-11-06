@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
+import 'package:plezy/services/ai/ai_history.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/brain/history_brain.dart';
 import 'package:plezy_brain/plezy_brain.dart';
@@ -14,6 +15,8 @@ import 'package:plezy/services/reel/reel_library.dart';
 import 'package:plezy/services/reel/reel_pool.dart';
 import 'package:plezy/services/reel/reel_signals.dart';
 import 'package:plezy/services/reel/reel_store.dart';
+
+import '../test_helpers/media_items.dart';
 
 ReelCardData _card(String id, {double? imdb, double? tmdb, double? audience, String? tagline, String? summary}) =>
     ReelCardData(
@@ -99,6 +102,47 @@ class _Brain extends HistoryBrain {
   @override
   Future<List<TitleProfile>> watchedProfiles() async => const [];
 }
+
+/// An unwatched library title as the brain knows it (card id = [key]).
+TitleProfile _unseen(String key, {TitleKind kind = TitleKind.movie}) =>
+    TitleProfile(id: 'p:$key', kind: kind, title: 'Title $key', serverId: 's1', ratingKey: key, inLibrary: true);
+
+/// A brain with its own history and fixed similar titles per seed.
+class _SeededBrain extends HistoryBrain {
+  _SeededBrain({required this.watched, required this.near, this.names = const {}});
+
+  final List<TitleProfile> watched;
+  final Map<String, List<({TitleProfile profile, double score})>> near;
+  final Map<String, String> names;
+  final asked = <String>[];
+
+  @override
+  Future<List<TitleProfile>> watchedProfiles() async => watched;
+
+  @override
+  Future<List<({TitleProfile profile, double score})>> similar(
+    String id, {
+    int limit = 20,
+    bool? watched,
+    TitleKind? kind,
+  }) async {
+    asked.add(id);
+    return near[id] ?? const [];
+  }
+
+  @override
+  Future<TitleProfile?> profile(String id) async =>
+      names[id] == null ? null : TitleProfile(id: id, kind: TitleKind.movie, title: names[id]!);
+}
+
+AiHistoryEntry _answer(String label, List<String> keys) => AiHistoryEntry(
+  id: label,
+  request: label,
+  intro: '',
+  createdAt: DateTime(2026, 3, 1),
+  items: [for (final k in keys) testMediaItem(id: k, serverId: 's1')],
+  reasons: const {},
+);
 
 PoolCandidate _candidate(String id) => PoolCandidate(
   entry: DeckEntry(serverId: 's1', ratingKey: id),
@@ -476,6 +520,197 @@ void main() {
 
       deck.rebuilt.removeListener(listener);
       expect(synced.listening, 0);
+    });
+  });
+
+  group('wider For You candidates', () {
+    late ForkDatabase db;
+    late LocalCustomisationStore settings;
+    late ReelStore store;
+    final now = DateTime(2026, 3, 10, 20);
+
+    setUp(() {
+      db = ForkDatabase.memory();
+      settings = LocalCustomisationStore(db);
+      store = ReelStore(database: () async => db, settings: () async => settings, clock: () => now);
+    });
+
+    tearDown(() async => db.close());
+
+    test('every source reaches the list, a title from two sources is one candidate, and each is tagged', () async {
+      final loved = TitleProfile(
+        id: 'p:loved',
+        kind: TitleKind.movie,
+        title: 'Harbor Lights',
+        myRating: 9,
+        watches: [DateTime(2025, 6, 1)],
+      );
+      final lately = TitleProfile(
+        id: 'p:lately',
+        kind: TitleKind.show,
+        title: 'Lantern Street',
+        watches: [now.subtract(const Duration(days: 3))],
+      );
+      final brain = _SeededBrain(
+        watched: [loved, lately],
+        near: {
+          'p:loved': [(profile: _unseen('a'), score: 0.9), (profile: _unseen('both'), score: 0.5)],
+          'p:lately': [
+            (profile: _unseen('b', kind: TitleKind.show), score: 0.8),
+            (profile: _unseen('both'), score: 0.4),
+          ],
+          'p:saved': [(profile: _unseen('c'), score: 0.7)],
+          'p:savedHere': [(profile: _unseen('g'), score: 0.6)],
+        },
+        names: {'p:savedHere': 'Quiet Tide'},
+      );
+      await store.savePick(
+        ReelPick(
+          titleId: 'p:saved',
+          groupKey: 'gsaved',
+          serverId: 's1',
+          ratingKey: 'saved',
+          title: 'Northern Ferry',
+          at: now.subtract(const Duration(days: 1)),
+        ),
+      );
+      await store.record('p:savedHere', ReelAction.save, deck: 'for-you');
+
+      final list = await forYouCandidates(
+        library: _Library(),
+        store: store,
+        brain: brain,
+        now: now,
+        asks: () async => [
+          _answer('slow sea dramas', ['d']),
+        ],
+        suggested: () async => [
+          _answer('Quiet coastal films', ['e']),
+        ],
+        added: (since) async {
+          expect(since, now.subtract(const Duration(days: 7)));
+          return [
+            (entry: const DeckEntry(serverId: 's1', ratingKey: 'f'), added: now.subtract(const Duration(days: 2))),
+          ];
+        },
+      );
+      expect(brain.asked, containsAll(['p:loved', 'p:lately', 'p:saved', 'p:savedHere']));
+      final byId = {for (final c in list) c.titleId: c};
+      expect(byId.keys.toSet(), {'a', 'both', 'b', 'c', 'g', 'd', 'e', 'f'});
+      expect(list.where((c) => c.titleId == 'both'), hasLength(1));
+      expect(byId['both']!.like, ['Harbor Lights']);
+      expect(byId['both']!.recent, ['Lantern Street']);
+      expect(byId['both']!.score, closeTo(0.9, 1e-9));
+      expect(byId['c']!.saved, ['Northern Ferry']);
+      expect(byId['g']!.saved, ['Quiet Tide']);
+      expect(byId['d']!.askedFor, 'slow sea dramas');
+      expect(byId['e']!.suggested, 'Quiet coastal films');
+      expect(byId['f']!.added, now.subtract(const Duration(days: 2)));
+
+      String? user;
+      await ReelPool(
+        store: store,
+        library: _Library(),
+        clock: () => now,
+        model: (_, u, _) async {
+          user = u;
+          return {'cards': const []};
+        },
+      ).build(list, facts: '');
+      final lines = user!.split('\n');
+      String line(String title) => lines.firstWhere((l) => l.contains(': Title $title'));
+      expect(
+        line('both'),
+        allOf(contains('similar to Harbor Lights'), contains('similar to recent plays Lantern Street')),
+      );
+      expect(line('c'), contains('similar to Reel Saves Northern Ferry'));
+      expect(line('d'), contains('from their ask "slow sea dramas"'));
+      expect(line('e'), contains('from the suggested list "Quiet coastal films"'));
+      expect(line('f'), contains('added to the library 2 days ago'));
+    });
+
+    test('the bound keeps every source: a large taste pool does not crowd out the newest titles', () async {
+      final loved = TitleProfile(
+        id: 'p:loved',
+        kind: TitleKind.movie,
+        title: 'Harbor Lights',
+        myRating: 9,
+        watches: [DateTime(2025, 6, 1)],
+      );
+      final brain = _SeededBrain(
+        watched: [loved],
+        near: {
+          'p:loved': [for (var i = 0; i < 600; i++) (profile: _unseen('t$i'), score: 0.9)],
+        },
+      );
+      final list = await forYouCandidates(
+        library: _Library(),
+        store: store,
+        brain: brain,
+        now: now,
+        asks: () async => const [],
+        suggested: () async => const [],
+        added: (_) async => [
+          for (final k in ['n1', 'n2', 'n3']) (entry: DeckEntry(serverId: 's1', ratingKey: k), added: now),
+        ],
+      );
+      expect(list, hasLength(ReelPool.maxCandidates));
+      expect(list.map((c) => c.titleId), containsAll(['n1', 'n2', 'n3']));
+    });
+
+    test('a why line may name a recent play, a Reel Save or a suggested list', () {
+      const c = PoolCandidate(
+        entry: DeckEntry(serverId: 's1', ratingKey: 'x'),
+        titleId: 'x',
+        score: 1,
+        recent: ['Lantern Street'],
+        saved: ['Northern Ferry'],
+        suggested: 'Quiet coastal films',
+      );
+      expect(ReelPool.checkedWhy('Like Lantern Street, set on the night shift', 'Lantern Street', c), isNotNull);
+      expect(ReelPool.checkedWhy('Another ferry tale after Northern Ferry', 'Northern Ferry', c), isNotNull);
+      expect(ReelPool.checkedWhy('Fits your Quiet coastal films list', 'Quiet coastal films', c), isNotNull);
+      expect(ReelPool.checkedWhy('Like Harbor Lights', 'Harbor Lights', c), isNull);
+    });
+
+    test('a new title is tagged by its day, only within the week', () {
+      expect(ReelPool.addedLine(now, now), 'added to the library today');
+      expect(ReelPool.addedLine(DateTime(2026, 3, 9, 23), now), 'added to the library yesterday');
+      expect(ReelPool.addedLine(DateTime(2026, 3, 4, 8), now), 'added to the library 6 days ago');
+      expect(ReelPool.addedLine(DateTime(2026, 3, 3, 8), now), isNull);
+      expect(ReelPool.addedLine(null, now), isNull);
+    });
+
+    test("prepare gathers before the brain yields only when today's build is due", () async {
+      var gathered = 0;
+      ForYouDeck deck(ReelPool pool) => ForYouDeck(
+        pool: pool,
+        library: _Library(),
+        candidates: () async {
+          gathered++;
+          return [_candidate('p')];
+        },
+        facts: () async => '',
+      );
+      await deck(ReelPool(store: store, library: _Library(), clock: () => now)).prepare();
+      expect(gathered, 1, reason: 'no pool today: the build is due, so the gather runs now');
+
+      await store.cache(
+        ReelPool.dayKey(now),
+        jsonEncode([
+          {'id': 'p', 'sv': 's1', 'rk': 'p'},
+        ]),
+      );
+      await deck(ReelPool(store: store, library: _Library(), clock: () => now)).prepare();
+      expect(gathered, 1, reason: "today's pool is here: nothing to gather");
+
+      final failing = ForYouDeck(
+        pool: ReelPool(store: store, library: _Library(), clock: () => now.add(const Duration(days: 1))),
+        library: _Library(),
+        candidates: () async => throw StateError('index busy'),
+        facts: () async => '',
+      );
+      await failing.prepare();
     });
   });
 

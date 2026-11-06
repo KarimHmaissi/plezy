@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/foundation.dart';
+import 'package:plezy_brain/plezy_brain.dart' show TitleProfile;
 
 import '../../media/catalog_item_ref.dart';
 import '../../media/media_item.dart';
@@ -8,6 +10,7 @@ import '../../media/media_kind.dart';
 import '../../utils/app_logger.dart';
 import '../ai/ai_briefing.dart';
 import '../ai/ai_history.dart';
+import '../ai/ai_suggestions.dart' show AiSuggestions;
 import '../ai/facts/title_facts.dart';
 import '../brain/history_brain.dart';
 import '../library_index/index_database.dart';
@@ -168,6 +171,22 @@ class ForYouDeck extends ReelDeck {
       ),
     );
     return list;
+  }
+
+  /// Today's gather, when the Reel will need it: started when today's build
+  /// is due, or joined when already running. Completes when the gather (the
+  /// brain's similarity reads among it) is done, so the app can wait for it
+  /// before the Reel yields the brain; a failed gather completes too.
+  Future<void> prepare() async {
+    try {
+      final have = _candidates;
+      if (have == null || have.day != pool.today()) {
+        if (!await pool.shouldBuild()) return;
+      }
+      await _todaysCandidates();
+    } catch (e) {
+      appLogger.d('Reel: For You gather failed', error: e);
+    }
   }
 
   /// The public's verdict, 0-10: IMDb, else TMDB, RT audience or the Plex
@@ -336,62 +355,219 @@ class AiAnswerDeck extends ReelDeck {
   }
 }
 
-/// For You candidates: the taste pool (similar unwatched titles to their
-/// best-loved ones) plus the unseen picks of their saved AI answers. Facts
-/// only: code never judges taste here.
+/// How many titles played lately seed For You (newest first).
+const int forYouRecentSeeds = 6;
+
+/// How far back a play still counts as lately.
+const Duration forYouRecentWithin = Duration(days: 30);
+
+/// How many Reel Saves seed For You (newest first).
+const int forYouSaveSeeds = 6;
+
+/// Similar titles taken per seed, as the taste pool does.
+const int forYouPerSeed = 25;
+
+/// At most this many titles added in the last [PoolCandidate.newWithin].
+const int forYouNewTitles = 60;
+
+/// For You candidates, from several sources, each named in the candidate's
+/// line: the taste pool (similar unwatched titles to their best-loved
+/// ones), titles similar to what they played lately and to their Reel
+/// Saves, the unseen picks of their saved AI answers and of the AI page's
+/// suggested lists, and unseen titles added in the last
+/// [PoolCandidate.newWithin]. Facts only: code never judges taste here,
+/// and sets no mix of films and shows. The sources are taken in turn only
+/// so each reaches the list before [ReelPool.maxCandidates] bounds it; a
+/// title from several sources is one candidate with all of their facts.
+///
+/// [asks], [suggested] and [added] stand in for the saved answers, the
+/// suggested lists and the library's newest titles (tests).
 Future<List<PoolCandidate>> forYouCandidates({
   required ReelLibrary library,
   required ReelStore store,
   HistoryBrain? brain,
   DateTime? now,
+  Future<List<AiHistoryEntry>> Function()? asks,
+  Future<List<AiHistoryEntry>> Function()? suggested,
+  Future<List<({DeckEntry entry, DateTime added})>> Function(DateTime since)? added,
 }) async {
   final b = brain ?? HistoryBrain.instance;
   final at = now ?? DateTime.now();
-  final out = <String, PoolCandidate>{};
+  final sources = <List<PoolCandidate>>[];
+
+  // Titles like the given seeds, in order of summed similarity.
+  Future<List<PoolCandidate>> similarTo(
+    List<({String id, String name})> seeds,
+    PoolCandidate Function(TitleProfile p, double score, String seed) make,
+  ) async {
+    final pool = <String, PoolCandidate>{};
+    for (final seed in seeds) {
+      for (final hit in await b.similar(seed.id, limit: forYouPerSeed, watched: false)) {
+        final p = hit.profile;
+        if (!p.inLibrary || p.serverId == null || p.ratingKey == null) continue;
+        final c = make(p, hit.score, seed.name);
+        pool[p.id] = pool[p.id]?.merge(c) ?? c;
+      }
+    }
+    return pool.values.toList()..sort((a, b) => b.score.compareTo(a.score));
+  }
+
+  DeckEntry entryFor(TitleProfile p) => DeckEntry(serverId: p.serverId, ratingKey: p.ratingKey);
+
   try {
     final watched = await b.watchedProfiles();
-    for (final hit in await AiBriefing.tastePool(b, watched, at)) {
-      final p = hit.profile;
-      if (!p.inLibrary || p.serverId == null || p.ratingKey == null) continue;
-      out.putIfAbsent(
-        p.id,
-        () => PoolCandidate(
-          entry: DeckEntry(serverId: p.serverId, ratingKey: p.ratingKey),
-          titleId: p.id,
-          score: hit.score,
-          like: hit.like,
-        ),
-      );
-    }
+    sources.add([
+      for (final hit in await AiBriefing.tastePool(b, watched, at))
+        if (hit.profile case final p when p.inLibrary && p.serverId != null && p.ratingKey != null)
+          PoolCandidate(entry: entryFor(p), titleId: p.id, score: hit.score, like: hit.like),
+    ]);
+    // What they played lately (real dated plays, not imports), newest first.
+    final since = at.subtract(forYouRecentWithin);
+    final recent = [
+      for (final p in watched)
+        if (p.lastWatched case final last? when last.isAfter(since)) p,
+    ]..sort((a, b) => b.lastWatched!.compareTo(a.lastWatched!));
+    final seeds = [for (final p in recent.take(forYouRecentSeeds)) (id: p.id, name: p.title)];
+    sources.add(
+      await similarTo(
+        seeds,
+        (p, score, seed) => PoolCandidate(entry: entryFor(p), titleId: p.id, score: score, recent: [seed]),
+      ),
+    );
   } catch (e) {
     appLogger.d('Reel: taste pool unavailable', error: e);
   }
   try {
-    for (final entry in await AiHistory.page(limit: 23)) {
-      for (final (i, item) in entry.items.take(12).indexed) {
-        final e = entryOf(item);
-        if (e?.rowId == null) continue;
-        final key = 'row:${e!.rowId}';
-        if (out.values.any((c) => c.entry.rowId == e.rowId)) continue;
-        out[key] = PoolCandidate(entry: e, titleId: key, score: 0.5 - i * 0.02, askedFor: entry.label);
-      }
+    // Reel Saves: the synced picks (either device) and this device's saves
+    // within [forYouRecentWithin], newest first.
+    final saves = <String, ({String name, DateTime at})>{
+      for (final p in await store.picks()) p.titleId: (name: p.title, at: p.at),
+    };
+    for (final e in await store.events(since: at.subtract(forYouRecentWithin))) {
+      if (e.action != ReelAction.save.name) continue;
+      final when = DateTime.fromMillisecondsSinceEpoch(e.at);
+      final had = saves[e.titleId];
+      if (had != null && !when.isAfter(had.at)) continue;
+      final name = had?.name ?? (await b.profile(e.titleId))?.title;
+      if (name != null) saves[e.titleId] = (name: name, at: when);
     }
+    final newest = saves.entries.toList()..sort((a, b) => b.value.at.compareTo(a.value.at));
+    final seeds = [for (final s in newest.take(forYouSaveSeeds)) (id: s.key, name: s.value.name)];
+    sources.add(
+      await similarTo(
+        seeds,
+        (p, score, seed) => PoolCandidate(entry: entryFor(p), titleId: p.id, score: score, saved: [seed]),
+      ),
+    );
+  } catch (e) {
+    appLogger.d('Reel: saves unavailable as seeds', error: e);
+  }
+
+  // A saved answer's or suggested list's picks, in its own order.
+  List<PoolCandidate> picksOf(
+    List<AiHistoryEntry> entries,
+    PoolCandidate Function(DeckEntry e, String label, int i) make,
+  ) => [
+    for (final entry in entries)
+      for (final (i, item) in entry.items.take(12).indexed)
+        if (entryOf(item) case final e? when e.rowId != null) make(e, entry.label, i),
+  ];
+
+  try {
+    sources.add(
+      picksOf(
+        await (asks ?? () => AiHistory.page(limit: 23))(),
+        (e, label, i) => PoolCandidate(entry: e, titleId: 'row:${e.rowId}', score: 0.5 - i * 0.02, askedFor: label),
+      ),
+    );
   } catch (e) {
     appLogger.d('Reel: saved answers unavailable', error: e);
   }
+  try {
+    sources.add(
+      picksOf(
+        await (suggested ?? _suggestedLists)(),
+        (e, label, i) => PoolCandidate(entry: e, titleId: 'row:${e.rowId}', score: 0.45 - i * 0.02, suggested: label),
+      ),
+    );
+  } catch (e) {
+    appLogger.d('Reel: suggested lists unavailable', error: e);
+  }
+  try {
+    final since = at.subtract(PoolCandidate.newWithin);
+    sources.add([
+      for (final n in await (added ?? (since) => _addedSince(library, since))(since))
+        PoolCandidate(entry: n.entry, titleId: 'row:${n.entry.rowId}', score: 0.4, added: n.added),
+    ]);
+  } catch (e) {
+    appLogger.d('Reel: newest titles unavailable', error: e);
+  }
+
+  // The sources in turn, each in its own order, up to twice the bound (some
+  // fall to the hard facts below).
+  final taken = <PoolCandidate>[];
+  final rows = <String>{};
+  for (var i = 0; taken.length < ReelPool.maxCandidates * 2 && sources.any((s) => i < s.length); i++) {
+    for (final s in sources) {
+      if (i < s.length && taken.length < ReelPool.maxCandidates * 2) {
+        final row = s[i].entry.rowId;
+        if (row != null && rows.add(row)) taken.add(s[i]);
+      }
+    }
+  }
   // Hard facts only: on the servers, not Kids-only, unseen, not resting.
-  final list = out.values.toList()..sort((a, b) => b.score.compareTo(a.score));
-  final cards = await library.cards([for (final c in list.take(ReelPool.maxCandidates * 2)) c.entry]);
-  final ok = {
+  // Every copy of a card stands for it, so one title from several sources
+  // is one candidate with all their facts, under the card's own copy.
+  final cards = await library.cards([for (final c in taken) c.entry]);
+  final byRow = {
     for (final c in cards)
-      if (c.facts.seen.isUnseen) c.best.id: c,
+      for (final copy in c.title.copies) '${copy.serverId}:${copy.ratingKey}': c,
   };
   final excluded = await store.excluded();
-  return [
-    for (final c in list)
-      if (ok[c.entry.rowId] case final card? when !excluded.contains(card.id))
-        PoolCandidate(entry: c.entry, titleId: card.id, score: c.score, like: c.like, askedFor: c.askedFor),
-  ].take(ReelPool.maxCandidates).toList();
+  final out = <String, PoolCandidate>{};
+  // Every raw hit merged per card (a title can come from several sources).
+  for (final s in sources) {
+    for (final c in s) {
+      final card = byRow[c.entry.rowId];
+      if (card == null || !card.facts.seen.isUnseen || excluded.contains(card.id)) continue;
+      final here = c.onCard(DeckEntry(serverId: card.best.serverId, ratingKey: card.best.ratingKey), card.id);
+      out[card.id] = out[card.id]?.merge(here) ?? here;
+    }
+  }
+  // In the order the sources were taken.
+  final order = <String>{
+    for (final c in taken)
+      if (byRow[c.entry.rowId]?.id case final id? when out.containsKey(id)) id,
+  };
+  return [for (final id in order.take(ReelPool.maxCandidates)) out[id]!];
+}
+
+/// The AI page's suggested lists, as saved (no new call).
+Future<List<AiHistoryEntry>> _suggestedLists() async => [for (final l in (await AiSuggestions.cached()).lists) l.entry];
+
+/// Library titles added since [since], newest first: one row each.
+Future<List<({DeckEntry entry, DateTime added})>> _addedSince(ReelLibrary library, DateTime since) async {
+  final db = await library.database();
+  final rows = await db
+      .customSelect(
+        'SELECT * FROM index_titles WHERE added_at >= ? ORDER BY added_at DESC LIMIT ?',
+        variables: [Variable<int>(since.millisecondsSinceEpoch ~/ 1000), Variable<int>(forYouNewTitles * 2)],
+        readsFrom: {db.indexTitles},
+      )
+      .get();
+  final out = <({DeckEntry entry, DateTime added})>[];
+  final groups = <String>{};
+  for (final r in rows) {
+    final t = db.indexTitles.map(r.data);
+    final secs = t.addedAt;
+    if (secs == null || !groups.add(t.groupKey)) continue;
+    out.add((
+      entry: DeckEntry(serverId: t.serverId, ratingKey: t.ratingKey),
+      added: DateTime.fromMillisecondsSinceEpoch(secs * 1000),
+    ));
+    if (out.length >= forYouNewTitles) break;
+  }
+  return out;
 }
 
 /// The facts block the daily build reads first: how they watch lately, the

@@ -9,13 +9,18 @@ import 'reel_signals.dart';
 import 'reel_store.dart';
 
 /// One For You candidate as code assembles it: facts only, no verdicts.
+/// Each source it came from is named in its candidate line.
 class PoolCandidate {
   const PoolCandidate({
     required this.entry,
     required this.titleId,
     required this.score,
     this.like = const [],
+    this.recent = const [],
+    this.saved = const [],
     this.askedFor,
+    this.suggested,
+    this.added,
   });
 
   final String titleId;
@@ -23,15 +28,65 @@ class PoolCandidate {
   /// A server copy (`serverId` + `ratingKey`).
   final DeckEntry entry;
 
-  /// Similarity to what they love, summed over seeds (code order until the
+  /// Similarity to its seeds, summed over its sources (code order until the
   /// AI build lands).
   final double score;
 
   /// The loved titles it is similar to: the why line's possible anchors.
   final List<String> like;
 
+  /// The titles played lately it is similar to (anchors too).
+  final List<String> recent;
+
+  /// The Reel Saves it is similar to (anchors too).
+  final List<String> saved;
+
   /// A saved AI ask it came from ("like Lost and Dark").
   final String? askedFor;
+
+  /// An AI suggested list it fills (the AI page's "Suggested for you").
+  final String? suggested;
+
+  /// When it reached the servers, for a title added in the last
+  /// [newWithin].
+  final DateTime? added;
+
+  /// How recent an addition still counts as new.
+  static const Duration newWithin = Duration(days: 7);
+
+  /// The anchors a why line may name.
+  List<String> get evidence => [...like, ...recent, ...saved, ?askedFor, ?suggested];
+
+  /// This candidate's facts merged with [other]'s (the same title from
+  /// another source): scores add, anchors join, the first ask or list
+  /// stays.
+  PoolCandidate merge(PoolCandidate other) => PoolCandidate(
+    entry: entry,
+    titleId: titleId,
+    score: score + other.score,
+    like: _join(like, other.like),
+    recent: _join(recent, other.recent),
+    saved: _join(saved, other.saved),
+    askedFor: askedFor ?? other.askedFor,
+    suggested: suggested ?? other.suggested,
+    added: added ?? other.added,
+  );
+
+  /// The same facts under the card's own copy and title id.
+  PoolCandidate onCard(DeckEntry entry, String titleId) => PoolCandidate(
+    entry: entry,
+    titleId: titleId,
+    score: score,
+    like: like,
+    recent: recent,
+    saved: saved,
+    askedFor: askedFor,
+    suggested: suggested,
+    added: added,
+  );
+
+  static List<String> _join(List<String> a, List<String> b) =>
+      b.isEmpty ? a : [...a, ...b.where((x) => !a.contains(x))];
 }
 
 /// The model call the daily build makes: system + user text and the tool it
@@ -253,7 +308,11 @@ class ReelPool {
           ?card.facts.lengthLine(),
           if (card.title.anime) 'anime',
           if (c.like.isNotEmpty) 'similar to ${c.like.take(3).join(', ')}',
+          if (c.recent.isNotEmpty) 'similar to recent plays ${c.recent.take(3).join(', ')}',
+          if (c.saved.isNotEmpty) 'similar to Reel Saves ${c.saved.take(3).join(', ')}',
           if (c.askedFor != null) 'from their ask "${c.askedFor}"',
+          if (c.suggested != null) 'from the suggested list "${c.suggested}"',
+          ?addedLine(c.added, now),
           if (fatigue > 0.05) 'skipped quickly in the Reel lately (fatigue ${fatigue.toStringAsFixed(1)})',
           ...?notes[card.id],
           if (premise != null) 'premise: $premise',
@@ -306,6 +365,22 @@ class ReelPool {
     }
   }
 
+  /// The candidate line's tag for a title added in the last
+  /// [PoolCandidate.newWithin], else null.
+  static String? addedLine(DateTime? added, DateTime now) {
+    if (added == null) return null;
+    // Calendar days; rounded, so a clock change doesn't shift the count.
+    final days =
+        (DateTime(now.year, now.month, now.day).difference(DateTime(added.year, added.month, added.day)).inHours / 24)
+            .round();
+    if (days < 0 || days >= PoolCandidate.newWithin.inDays) return null;
+    return switch (days) {
+      0 => 'added to the library today',
+      1 => 'added to the library yesterday',
+      _ => 'added to the library $days days ago',
+    };
+  }
+
   /// A why line survives only if it names an anchor from this candidate's
   /// own evidence and is at most 16 words; otherwise the card has none.
   static String? checkedWhy(String? why, String? anchor, PoolCandidate c) {
@@ -313,7 +388,7 @@ class ReelPool {
     final a = anchor?.trim();
     if (w == null || w.isEmpty || a == null || a.isEmpty) return null;
     if (w.split(RegExp(r'\s+')).length > 16) return null;
-    final evidence = [...c.like, ?c.askedFor].map((e) => e.toLowerCase());
+    final evidence = c.evidence.map((e) => e.toLowerCase());
     final la = a.toLowerCase();
     if (!evidence.any((e) => e == la || e.contains(la) || la.contains(e))) return null;
     if (!w.toLowerCase().contains(la)) return null;
@@ -326,11 +401,12 @@ You build today's For You feed for one household's TV: a feed of trailers and an
 Choose about $target candidates and put them in the order you think they would most enjoy discovering today. You decide the mix of films and shows, the share of anime, and any weekend or weekday tilt, from the facts.
 - Ratings are labelled with their source; IMDb with its vote count is the most reliable. Few votes means unproven. "Plex audience (source unknown)" is a weaker signal.
 - This is a showcase of the best of their library for them: every card should be worth their evening. Leave out titles the public rates poorly (for example IMDb below about 6 with a fair number of votes), however similar they are to something they liked, unless their own history shows they love exactly that kind of film. Fewer, better cards beat a long list.
+- Candidates come from several places, each named in its line: similar to titles they love, similar to what they played lately, similar to their Reel Saves, their saved asks, the AI page's suggested lists, and titles added to the library this week. These are facts about where a title came from, not a ranking.
 - "skipped quickly in the Reel lately" is a fact, not a ban: show such titles sparingly when an equally good fresh one exists.
 - Passes (Not for me, "Passed on in the Reel lately") are facts about the kind of title, not bans: a pass on one title never rules out its kind.
 - Kids' and family titles only when their own history shows they watch them.
-- why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence ("similar to …" titles or "from their ask …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
-- anchor: the exact evidence title or ask your why line names.
+- why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence (a "similar to …" title, "similar to recent plays …" or "similar to Reel Saves …" title, "from their ask …" or "from the suggested list …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
+- anchor: the exact evidence title, ask or list your why line names.
 - cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.
 - hook: optional, at most ${ReelPremise.hookWords} words: what the title is about, for someone deciding whether to watch it. Write it only from that candidate's own "premise:" text, never from memory, and leave it out when the candidate has none. It is shown on screen, so it must not spoil: only the opening setup, never a twist, a death, an ending or who did it. No ratings or praise words.''';
 

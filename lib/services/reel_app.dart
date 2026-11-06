@@ -83,14 +83,15 @@ abstract final class ReelApp {
       }
     }
 
+    final forYou = ForYouDeck(
+      pool: pool,
+      library: library,
+      candidates: () => forYouCandidates(library: library, store: store),
+      facts: () => forYouFacts(store: store, pool: pool),
+      sharedChanges: Customisation.changed,
+    );
     final decks = <ReelDeck>[
-      ForYouDeck(
-        pool: pool,
-        library: library,
-        candidates: () => forYouCandidates(library: library, store: store),
-        facts: () => forYouFacts(store: store, pool: pool),
-        sharedChanges: Customisation.changed,
-      ),
+      forYou,
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.
@@ -161,17 +162,37 @@ abstract final class ReelApp {
     );
     if (remote != null) _publish(controller, remote);
     // While the Reel plays, the brain's indexer rests and its ONNX session
-    // (about 66 MB) is released; it reopens on the next embed.
+    // (about 66 MB) is released; it reopens on the next embed. On a day
+    // For You gathers its candidates, the brain's similarity reads run
+    // first, then it yields.
     var yielded = false;
     // When a session ends, this device shares its Reel signals so the other
     // device's daily build hears them.
     controller.addListener(() {
       if (controller.active == yielded) return;
       yielded = controller.active;
-      unawaited(HistoryBrain.instance.yieldTo(yielded));
-      if (!yielded) unawaited(pool.signals.publish());
+      if (yielded) {
+        unawaited(_yieldAfter(forYou, stillActive: () => controller.active));
+      } else {
+        unawaited(HistoryBrain.instance.yieldTo(false));
+        unawaited(pool.signals.publish());
+      }
     });
     return controller;
+  }
+
+  /// The longest the brain's yield waits for For You's gather.
+  static const Duration gatherBeforeYield = Duration(seconds: 8);
+
+  /// Yields the brain to the Reel once For You's gather (when one is due
+  /// today) is done, unless the Reel has closed meanwhile.
+  static Future<void> _yieldAfter(ForYouDeck forYou, {required bool Function() stillActive}) async {
+    try {
+      await forYou.prepare().timeout(gatherBeforeYield);
+    } catch (_) {
+      // Too slow: the gather carries on; the Reel yields now.
+    }
+    if (stillActive()) await HistoryBrain.instance.yieldTo(true);
   }
 
   /// Sends the current card to a connected phone at once (it just opened
