@@ -22,7 +22,7 @@ import 'settings_utils.dart';
 /// screen ([ReelDecksScreen]). For You's note and today's rebuild (V2-51,
 /// synced) sit in their own group ([ReelForYouTiles]). The hidden developer
 /// setting (V2-62) shows last, only in a debug build or while debug logging
-/// is on.
+/// is on; on the TV it also holds the clip loudness switch (V2-19).
 class ReelSettingsScreen extends StatelessWidget {
   const ReelSettingsScreen({super.key, this.tv, @visibleForTesting this.debugBuild = kDebugMode});
 
@@ -88,6 +88,15 @@ class ReelSettingsScreen extends StatelessWidget {
                 title: s.developerTools,
                 subtitle: s.developerToolsDescription,
               ),
+              // The TV's clip core only: the phone feed plays on its own
+              // players (V2-19, D9: off until a listening A/B).
+              if (isTv)
+                SettingSwitchTile(
+                  pref: SettingsService.reelClipNormalization,
+                  icon: Symbols.graphic_eq_rounded,
+                  title: s.clipNormalization,
+                  subtitle: s.clipNormalizationDescription,
+                ),
             ],
           ),
         const SizedBox(height: 24),

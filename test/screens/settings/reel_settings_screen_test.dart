@@ -159,6 +159,27 @@ void main() {
     });
   });
 
+  group('clip loudness switch (V2-19, D9)', () {
+    testWidgets('the TV shows it in the developer group, off; the phone never does', (tester) async {
+      await pump(tester, tv: true);
+      expect(find.text(s.clipNormalization), findsNothing, reason: 'hidden with the developer group');
+
+      await settings.write(SettingsService.enableDebugLogging, true);
+      await pump(tester, tv: false);
+      expect(find.text(s.developerTools), findsOneWidget);
+      expect(find.text(s.clipNormalization), findsNothing, reason: 'the phone feed has its own players');
+
+      await pump(tester, tv: true);
+      final tile = find.widgetWithText(SwitchListTile, s.clipNormalization);
+      await tester.scrollUntilVisible(tile, 200);
+      expect(tester.widget<SwitchListTile>(tile).value, isFalse);
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(settings.read(SettingsService.reelClipNormalization), isTrue);
+      expect(settings.read(SettingsService.reelDebugOverlay), isFalse, reason: 'its own pref');
+    });
+  });
+
   test('every choice has its own label', () {
     expect(ReelStartSound.values.map(ReelSettingsScreen.startSoundLabel).toSet(), hasLength(2));
     expect(ReelClipEnd.values.map(ReelSettingsScreen.clipEndLabel).toSet(), hasLength(3));

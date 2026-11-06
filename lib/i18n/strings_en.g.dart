@@ -8819,6 +8819,12 @@ class Translations$reel$settings$en {
 
 	/// en: 'Timings overlay and measuring links. Shown while debug logging is on'
 	String get developerToolsDescription => 'Timings overlay and measuring links. Shown while debug logging is on';
+
+	/// en: 'Even out clip loudness'
+	String get clipNormalization => 'Even out clip loudness';
+
+	/// en: 'For a listening test. Evens out loud and quiet clips, and may pump on songs'
+	String get clipNormalizationDescription => 'For a listening test. Evens out loud and quiet clips, and may pump on songs';
 }
 
 // Path: reel.decks
@@ -11833,6 +11839,8 @@ extension on Translations {
 			'reel.settings.developer' => 'Developer',
 			'reel.settings.developerTools' => 'Reel debug tools',
 			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
+			'reel.settings.clipNormalization' => 'Even out clip loudness',
+			'reel.settings.clipNormalizationDescription' => 'For a listening test. Evens out loud and quiet clips, and may pump on songs',
 			'reel.decks.title' => 'Decks',
 			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
 			'reel.decks.startOn' => 'Start on',
@@ -12204,10 +12212,10 @@ extension on Translations {
 			'collections.collectionName' => 'Collection Name',
 			'collections.enterCollectionName' => 'Enter collection name',
 			'collections.addedToCollection' => 'Added to collection',
-			'collections.errorAddingToCollection' => 'Failed to add to collection',
-			'collections.created' => 'Collection created',
 			_ => null,
 		} ?? switch (path) {
+			'collections.errorAddingToCollection' => 'Failed to add to collection',
+			'collections.created' => 'Collection created',
 			'collections.removeFromCollection' => 'Remove from collection',
 			'collections.removeFromCollectionConfirm' => ({required Object title}) => 'Remove "${title}" from this collection?',
 			'collections.removedFromCollection' => 'Removed from collection',
@@ -12718,10 +12726,10 @@ extension on Translations {
 			'externalPlayer.playerCommand' => 'Command',
 			'externalPlayer.playerPackage' => 'Package Name',
 			'externalPlayer.playerUrlScheme' => 'URL Scheme',
-			'externalPlayer.off' => 'Off',
-			'externalPlayer.launchFailed' => 'Failed to open external player',
 			_ => null,
 		} ?? switch (path) {
+			'externalPlayer.off' => 'Off',
+			'externalPlayer.launchFailed' => 'Failed to open external player',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} is not installed',
 			'externalPlayer.playInExternalPlayer' => 'Play in External Player',
 			'metadataEdit.editMetadata' => 'Edit...',

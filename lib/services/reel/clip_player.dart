@@ -7,6 +7,7 @@ import '../../mpv/player/platform/player_android.dart';
 import '../../mpv/player/player.dart';
 import '../../screens/video_player/wakelock_controller.dart';
 import '../../utils/app_logger.dart';
+import 'reel_developer.dart';
 import 'reel_perf.dart';
 import 'reel_volume.dart';
 
@@ -73,6 +74,10 @@ abstract interface class ClipEngine {
   /// playing elsewhere pauses, and a call or another app pauses the clip.
   Future<bool> requestAudioFocus();
   Future<void> abandonAudioFocus();
+
+  /// Loudness normalisation on this core's audio session (V2-19, D9). A
+  /// fresh core starts with it off.
+  Future<void> setNormalization(bool on);
   Future<void> dispose();
 }
 
@@ -160,6 +165,13 @@ class ExoClipEngine implements ClipEngine {
   @override
   Future<void> abandonAudioFocus() => _p.abandonAudioFocus();
 
+  /// ExoPlayerCore's `AudioNormalizationEffect` (DynamicsProcessing on the
+  /// session). The clip core already decodes to PCM with tunneling off, the
+  /// effect's two preconditions. Set before the core initializes, it rides
+  /// in on the initialize call.
+  @override
+  Future<void> setNormalization(bool on) => _p.setAudioNormalization(on);
+
   @override
   Future<void> dispose() {
     _volume.removeListener(_onVolume);
@@ -207,9 +219,13 @@ class ClipProgress {
 class ClipPlayer {
   /// [wakelock] defaults to the platform's for the real core, and to none
   /// for an injected test engine. [muted] is the saved mute (`reel_muted`).
+  /// [normalize] says whether the core should normalise loudness; it
+  /// defaults to the hidden developer switch ([ReelDeveloper.normalization],
+  /// off by default, D9).
   ClipPlayer({
     ClipEngine Function()? engine,
     int? Function()? plays,
+    bool Function()? normalize,
     ReelPerf? perf,
     WakelockController? wakelock,
     this._muted = false,
@@ -217,6 +233,7 @@ class ClipPlayer {
     this.callLimit = defaultCallLimit,
   }) : _create = engine ?? ExoClipEngine.new,
        _plays = plays ?? _twice,
+       _normalize = normalize ?? _developerNormalization,
        _perf = perf ?? ReelPerf.instance,
        _wakelock = wakelock ?? (engine == null ? WakelockController() : null) {
     phase.addListener(_syncWakelock);
@@ -234,6 +251,10 @@ class ClipPlayer {
   static const Duration fadeIn = Duration(milliseconds: 300);
   static const double dipLevel = 30;
 
+  /// An unmute rises from silence over this instead of jumping to full
+  /// (V2-19): no step is louder than a sixth of the way.
+  static const Duration unmuteFadeIn = fadeIn;
+
   /// A key press older than this when a clip opens is from another visit.
   static const Duration staleKey = Duration(seconds: 30);
 
@@ -243,6 +264,8 @@ class ClipPlayer {
   static const Duration externalPauseGrace = Duration(milliseconds: 250);
 
   static int? _twice() => 2;
+
+  static bool _developerNormalization() => ReelDeveloper.normalization();
 
   /// The longest a clip's open may take. The core's open returns once the
   /// clip is handed to the player (buffering comes after), so an open still
@@ -278,6 +301,13 @@ class ClipPlayer {
   /// loops it for good. Asked at each end, so a change to the clip-end pref
   /// applies to the clip already playing.
   final int? Function() _plays;
+
+  /// Whether the core should normalise loudness (V2-19), asked whenever a
+  /// core is built, at every card and on [syncNormalization].
+  final bool Function() _normalize;
+
+  /// What this session's core was last told: a fresh core starts off.
+  bool _normalized = false;
 
   /// Keeps the screen on while a clip opens or plays (null in tests).
   final WakelockController? _wakelock;
@@ -361,6 +391,10 @@ class ClipPlayer {
     if (existing != null) return existing;
     final e = _create();
     _engine = e;
+    _normalized = false;
+    final normalize = _normalize();
+    appLogger.i('[ReelSound] clip core normalization=${normalize ? 'on' : 'off'}');
+    if (normalize) _applyNormalization(e, true);
     _subs
       ..add(e.completed.listen((done) => done ? _onCompleted() : null))
       ..add(e.firstFrame.listen((_) => _onFirstFrame()))
@@ -399,6 +433,7 @@ class ClipPlayer {
   /// over [fadeIn].
   Future<void> play(ClipSource source, {bool first = false}) async {
     final e = _ensure();
+    syncNormalization();
     final open = ++_opens;
     _openPreloaded = _preloaded == source.uri;
     _perf.markResolved(preloaded: _openPreloaded, origin: source.origin.name);
@@ -517,12 +552,41 @@ class ClipPlayer {
     await _bounded(e.seek(to < Duration.zero ? Duration.zero : to), 'seek');
   }
 
+  /// Mute silences at once. Unmute rises from where the sound is (silence)
+  /// over [unmuteFadeIn] instead of jumping to full (V2-19); a clip still
+  /// opening takes its own ramp once the open lands.
   Future<void> setMuted(bool muted) async {
     _muted = muted;
     _cancelFade();
-    _setLevel(muted ? 0 : 100);
+    if (muted) {
+      _setLevel(0);
+    } else {
+      unawaited(_fadeTo(100, unmuteFadeIn));
+    }
     // A muted session takes no focus, so the first unmute does.
     if (!muted && _wantPlaying) _takeFocus();
+  }
+
+  /// Applies the normalisation switch to the core in use, when it changed
+  /// (the listening A/B flips it while a clip plays, D9). Without a core,
+  /// the next core reads it as it is built.
+  void syncNormalization() {
+    final e = _engine;
+    if (e == null) return;
+    final on = _normalize();
+    if (on == _normalized) return;
+    appLogger.i('[ReelSound] clip core normalization=${on ? 'on' : 'off'} (changed)');
+    _applyNormalization(e, on);
+  }
+
+  void _applyNormalization(ClipEngine e, bool on) {
+    _normalized = on;
+    unawaited(
+      _bounded(
+        e.setNormalization(on),
+        'setNormalization',
+      ).catchError((Object err) => appLogger.w('Reel: setting the clip normalization failed', error: err)),
+    );
   }
 
   /// Hide the native surface while a card is dragged (it can't slide).

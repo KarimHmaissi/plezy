@@ -1838,7 +1838,9 @@
       "showTabDescription": "Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place",
       "developer": "Developer",
       "developerTools": "Reel debug tools",
-      "developerToolsDescription": "Timings overlay and measuring links. Shown while debug logging is on"
+      "developerToolsDescription": "Timings overlay and measuring links. Shown while debug logging is on",
+      "clipNormalization": "Even out clip loudness",
+      "clipNormalizationDescription": "For a listening test. Evens out loud and quiet clips, and may pump on songs"
     },
     "decks": {
       "title": "Decks",

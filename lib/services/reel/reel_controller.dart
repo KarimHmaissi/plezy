@@ -352,6 +352,8 @@ class ReelController extends ChangeNotifier {
   void _onSettingsChanged() {
     if (_disposed) return;
     appLogger.d('Reel: a setting changed; the views take it up now');
+    // The TV's clip core takes the normalisation switch at once (V2-19).
+    clips.syncNormalization();
     notifyListeners();
   }
 

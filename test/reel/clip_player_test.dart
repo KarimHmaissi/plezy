@@ -108,6 +108,9 @@ class FakeClipEngine implements ClipEngine {
   Future<void> abandonAudioFocus() async => calls.add('abandonAudioFocus');
 
   @override
+  Future<void> setNormalization(bool on) async => calls.add('normalization $on');
+
+  @override
   Future<void> dispose() async {
     calls.add('dispose');
     await disposeGate?.future;
@@ -132,6 +135,15 @@ class _SilentEngine extends FakeClipEngine {
   Future<void> pause() async {
     calls.add('pause');
     if (hangPause) await Completer<void>().future;
+  }
+}
+
+/// A core whose normalisation call fails (no effect on the device).
+class _NoNormalizationEngine extends FakeClipEngine {
+  @override
+  Future<void> setNormalization(bool on) async {
+    calls.add('normalization $on');
+    throw PlatformException(code: 'effect', message: 'no loudness effect');
   }
 }
 
@@ -396,6 +408,129 @@ void main() {
       const ClipSource(uri: 'https://cdn.example/c.mp4', origin: ClipOrigin.plexExtra, preloadable: false),
     );
     expect(engine.calls, ['clearPreloads']);
+  });
+
+  group('unmute (V2-19)', () {
+    test('rises from silence over the ramp instead of jumping to full', () {
+      fakeAsync((async) {
+        clips = ClipPlayer(engine: () => engine, muted: true);
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        async.elapse(const Duration(seconds: 1));
+        expect(clips.level, 0);
+
+        engine.volumes.clear();
+        clips.setMuted(false);
+        async.flushMicrotasks();
+        expect(engine.volumes.where((v) => v >= 100), isEmpty, reason: 'no jump to full on the unmute');
+        async.elapse(ClipPlayer.unmuteFadeIn ~/ 6);
+        expect(engine.volumes.last, closeTo(100 / 6, 0.01));
+        async.elapse(ClipPlayer.unmuteFadeIn);
+        expect(clips.level, closeTo(100, 0.01));
+        // Every step rises, and none by more than a sixth of the way.
+        for (var i = 1; i < engine.volumes.length; i++) {
+          expect(engine.volumes[i] - engine.volumes[i - 1], inInclusiveRange(0, 100 / 6 + 0.01));
+        }
+      });
+    });
+
+    test('mute is still at once, and cuts an unmute ramp short', () {
+      fakeAsync((async) {
+        clips = ClipPlayer(engine: () => engine, muted: true);
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        clips.setMuted(false);
+        async.elapse(ClipPlayer.unmuteFadeIn ~/ 2);
+        expect(clips.level, inExclusiveRange(0, 100));
+        clips.setMuted(true);
+        async.flushMicrotasks();
+        expect(clips.level, 0);
+        expect(engine.volumes.last, 0);
+        async.elapse(ClipPlayer.unmuteFadeIn);
+        expect(engine.volumes.last, 0, reason: 'the cancelled ramp sends nothing more');
+      });
+    });
+
+    test('an unmute while a clip opens leaves the open its own ramp', () {
+      fakeAsync((async) {
+        clips = ClipPlayer(engine: () => engine, muted: true);
+        engine.openGate = Completer<void>();
+        clips.play(_a);
+        async.flushMicrotasks();
+        clips.setMuted(false);
+        async.elapse(const Duration(milliseconds: 50));
+        engine.openGate!.complete();
+        async.flushMicrotasks();
+        expect(clips.level, lessThanOrEqualTo(ClipPlayer.dipLevel));
+        async.elapse(const Duration(seconds: 1));
+        expect(clips.level, closeTo(100, 0.01));
+      });
+    });
+  });
+
+  group('loudness normalisation (V2-19, D9)', () {
+    test('off by default: a core is never asked to normalise', () async {
+      await clips.play(_a, first: true);
+      await clips.play(_b);
+      clips.syncNormalization();
+      expect(engine.calls.where((c) => c.startsWith('normalization')), isEmpty);
+    });
+
+    test('switched on, each new core is told before its first open', () async {
+      clips = ClipPlayer(engine: () => engine, normalize: () => true);
+      await clips.play(_a, first: true);
+      final told = engine.calls.indexOf('normalization true');
+      expect(told, isNonNegative);
+      expect(told, lessThan(engine.calls.indexOf('open ${_a.uri}')));
+      await clips.play(_b);
+      expect(engine.calls.where((c) => c == 'normalization true'), hasLength(1), reason: 'once per core');
+
+      await clips.release();
+      engine.calls.clear();
+      await clips.play(_a, first: true);
+      expect(engine.calls, contains('normalization true'), reason: 'a rebuilt core starts off again');
+    });
+
+    test('a flip reaches the core in use at once, and only when it changed', () async {
+      var on = false;
+      clips = ClipPlayer(engine: () => engine, normalize: () => on);
+      await clips.play(_a, first: true);
+      on = true;
+      clips.syncNormalization();
+      clips.syncNormalization();
+      on = false;
+      clips.syncNormalization();
+      expect(engine.calls.where((c) => c.startsWith('normalization')), ['normalization true', 'normalization false']);
+
+      // A flip with no core waits for the next core.
+      await clips.release();
+      on = true;
+      clips.syncNormalization();
+      expect(engine.calls.where((c) => c.startsWith('normalization')), hasLength(2));
+    });
+
+    test('the next card picks up a flip the settings listener missed', () async {
+      var on = false;
+      clips = ClipPlayer(engine: () => engine, normalize: () => on);
+      await clips.play(_a, first: true);
+      on = true;
+      await clips.play(_b);
+      final told = engine.calls.indexOf('normalization true');
+      expect(told, isNonNegative);
+      expect(told, lessThan(engine.calls.indexOf('open ${_b.uri}')));
+    });
+
+    test('a core that throws on the switch never breaks the card', () async {
+      final refusing = _NoNormalizationEngine();
+      engine = refusing;
+      clips = ClipPlayer(engine: () => refusing, normalize: () => true);
+      await clips.play(_a, first: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(refusing.calls, contains('open ${_a.uri}'));
+      expect(clips.phase.value, ClipPhase.loading);
+    });
   });
 
   test('muted stays muted across cards', () async {

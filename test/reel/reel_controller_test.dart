@@ -385,6 +385,7 @@ void main() {
     ReelCellular Function()? cellular,
     bool Function()? metered,
     Listenable? linkChanged,
+    bool Function()? normalize,
   }) => ReelController(
     decks:
         decks ??
@@ -400,6 +401,7 @@ void main() {
     ),
     clips: ClipPlayer(
       plays: plays,
+      normalize: normalize,
       engine: () {
         engines++;
         return engine = FakeClipEngine();
@@ -1042,6 +1044,27 @@ void main() {
     c.dispose();
     expect(() => changed.value++, returnsNormally, reason: 'the listener left with the controller');
     expect(told, 1);
+    changed.dispose();
+  });
+
+  test('the loudness switch reaches the clip core in use at once (V2-19)', () async {
+    final changed = ValueNotifier(0);
+    var on = false;
+    final c = make(settingsChanged: changed, normalize: () => on);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final core = engine;
+    expect(core.calls.where((x) => x.startsWith('normalization')), isEmpty, reason: 'off by default (D9)');
+
+    on = true;
+    changed.value++;
+    expect(core.calls.where((x) => x.startsWith('normalization')), ['normalization true']);
+    on = false;
+    changed.value++;
+    expect(core.calls.where((x) => x.startsWith('normalization')), ['normalization true', 'normalization false']);
+    expect(identical(engine, core), isTrue, reason: 'the same core, not a rebuilt one');
+
+    c.dispose();
     changed.dispose();
   });
 
