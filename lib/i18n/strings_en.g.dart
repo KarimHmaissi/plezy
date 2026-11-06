@@ -8394,6 +8394,8 @@ class Translations$reel$card$en {
 	/// en: 'Theme via AnimeThemes'
 	String get themeCredit => 'Theme via AnimeThemes';
 
+	late final Translations$reel$card$clipKind$en clipKind = Translations$reel$card$clipKind$en.internal(_root);
+
 	/// en: 'Replay'
 	String get replay => 'Replay';
 
@@ -10162,6 +10164,24 @@ class Translations$services$libraryFilter$en {
 	String get noLibraries => 'No libraries available';
 }
 
+// Path: reel.card.clipKind
+class Translations$reel$card$clipKind$en {
+	Translations$reel$card$clipKind$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Trailer'
+	String get trailer => 'Trailer';
+
+	/// en: 'Teaser'
+	String get teaser => 'Teaser';
+
+	/// en: 'Opening ${n}'
+	String opening({required Object n}) => 'Opening ${n}';
+}
+
 /// The flat map containing all translations for locale <en>.
 /// Only for edge cases! For simple maps, use the map function of this library.
 ///
@@ -11732,6 +11752,9 @@ extension on Translations {
 			'reel.card.pickAnotherDeck' => 'Pick another deck to keep going.',
 			'reel.card.decks' => 'Decks',
 			'reel.card.themeCredit' => 'Theme via AnimeThemes',
+			'reel.card.clipKind.trailer' => 'Trailer',
+			'reel.card.clipKind.teaser' => 'Teaser',
+			'reel.card.clipKind.opening' => ({required Object n}) => 'Opening ${n}',
 			'reel.card.replay' => 'Replay',
 			'reel.card.watch' => 'Watch',
 			'reel.card.watchOnTv' => 'Watch on TV',
@@ -12221,11 +12244,11 @@ extension on Translations {
 			'collections.empty' => 'Collection is empty',
 			'collections.deleteCollection' => 'Delete Collection',
 			'collections.deleteConfirm' => ({required Object title}) => 'Delete "${title}"? This can\'t be undone.',
+			_ => null,
+		} ?? switch (path) {
 			'collections.deleted' => 'Collection deleted',
 			'collections.deleteFailed' => 'Failed to delete collection',
 			'collections.deleteFailedWithError' => ({required Object error}) => 'Failed to delete collection: ${error}',
-			_ => null,
-		} ?? switch (path) {
 			'collections.selectCollection' => 'Select Collection',
 			'collections.collectionName' => 'Collection Name',
 			'collections.enterCollectionName' => 'Enter collection name',
@@ -12735,11 +12758,11 @@ extension on Translations {
 			'externalPlayer.useExternalPlayerDescription' => 'Open videos in another app',
 			'externalPlayer.selectPlayer' => 'Select Player',
 			'externalPlayer.customPlayers' => 'Custom Players',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.systemDefault' => 'System Default',
 			'externalPlayer.addCustomPlayer' => 'Add Custom Player',
 			'externalPlayer.playerName' => 'Player Name',
-			_ => null,
-		} ?? switch (path) {
 			'externalPlayer.playerNameHint' => 'My Player',
 			'externalPlayer.playerCommand' => 'Command',
 			'externalPlayer.playerPackage' => 'Package Name',

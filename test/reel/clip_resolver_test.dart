@@ -142,6 +142,8 @@ void main() {
     expect(clip?.source.origin, ClipOrigin.animeTheme);
     expect(clip?.source.uri, 'https://v.animethemes.moe/Show-OP1.webm');
     expect(clip?.assetId, 'at:9');
+    expect(clip?.kind, ClipKind.opening);
+    expect(clip?.number, 1);
     expect(servers.calls, isEmpty, reason: 'no server read when the opening is found');
   });
 
@@ -150,7 +152,8 @@ void main() {
     final clip = await resolver.resolve(film());
     expect(clip?.assetId, 'plex:78');
     expect(clip?.source.uri, startsWith('https://a.example/services/iva/assets/78/'));
-    expect(clip?.label, 'Trailer');
+    expect(clip?.kind, ClipKind.trailer);
+    expect(clip?.number, isNull);
     final cached = await store.cached('src:imdb:tt1');
     expect(cached, isNot(contains('token')), reason: 'never cache a resolved URL');
 
@@ -172,7 +175,7 @@ void main() {
       ),
     );
     expect(clip?.assetId, 'plex:80');
-    expect(clip?.label, 'Teaser');
+    expect(clip?.kind, ClipKind.teaser);
     expect(resolver.slowServers, {'slow'});
 
     servers.calls.clear();
@@ -200,6 +203,104 @@ void main() {
     await store.spoiled('m:imdb:tt1', 'plex:78');
     final clip = await resolver.resolve(film());
     expect(clip?.assetId, 'plex:79');
+  });
+
+  group('the clip kind is cached, never its English words', () {
+    test('a new row stores the kind and the opening number, and no label text', () async {
+      servers.extrasByKey['a:1'] = [_x('80', 'Teaser')];
+      await resolver.resolve(film());
+      final plex = jsonDecode((await store.cached('src:imdb:tt1'))!) as Map<String, dynamic>;
+      expect(plex['lk'], 'teaser');
+      expect(plex.containsKey('ln'), isFalse);
+      expect(plex.containsKey('l'), isFalse);
+
+      await resolver.resolve(
+        const ReelTitle(
+          titleId: 's:tvdb:1',
+          groupKey: 'tvdb:1',
+          title: 'Show',
+          isShow: true,
+          anime: true,
+          tvdbId: 1,
+          copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+        ),
+      );
+      final at = jsonDecode((await store.cached('src:tvdb:1'))!) as Map<String, dynamic>;
+      expect(at['lk'], 'opening');
+      expect(at['ln'], 1);
+      expect(at.containsKey('l'), isFalse);
+    });
+
+    for (final (label, kind) in [
+      ('Teaser', ClipKind.teaser),
+      ('Trailer', ClipKind.trailer),
+      (null, ClipKind.trailer),
+    ]) {
+      test('a Plex row written with the English label ${label ?? '(none)'} still reads as $kind', () async {
+        await store.cache(
+          'src:imdb:tt1',
+          jsonEncode({
+            'v': ClipResolver.sourceFormat,
+            'k': 'plex',
+            'sv': 'a',
+            'pk': '/services/iva/assets/80/video.mp4',
+            'a': 'plex:80',
+            'l': ?label,
+          }),
+        );
+        final clip = await resolver.resolve(film());
+        expect(clip?.assetId, 'plex:80');
+        expect(clip?.kind, kind);
+        expect(servers.calls, isEmpty, reason: 'served from the older row, no server read');
+      });
+    }
+
+    for (final (label, number) in [('Opening 1', 1), ('Opening 2', 2), ('Opening', 1), (null, 1)]) {
+      test('an AnimeThemes row written with the English label ${label ?? '(none)'} reads as opening $number', () async {
+        await store.cache(
+          'src:tvdb:1',
+          jsonEncode({
+            'v': ClipResolver.sourceFormat,
+            'k': 'at',
+            'l': ?label,
+            'c': [
+              {
+                'a': 'at:9',
+                'u': 'https://v.animethemes.moe/Show-OP1.webm',
+                'h': 1080,
+                'sz': 1,
+                'tr': false,
+                'nc': true,
+                'cc': false,
+                'so': null,
+              },
+            ],
+          }),
+        );
+        final clip = await resolver.resolve(
+          const ReelTitle(
+            titleId: 's:tvdb:1',
+            groupKey: 'tvdb:1',
+            title: 'Show',
+            isShow: true,
+            anime: true,
+            tvdbId: 1,
+            copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+          ),
+        );
+        expect(clip?.assetId, 'at:9');
+        expect(clip?.kind, ClipKind.opening);
+        expect(clip?.number, number);
+        expect(atCalls, isEmpty, reason: 'served from the older row');
+      });
+    }
+
+    test('legacy labels parse whatever their case, and unknown words say nothing', () {
+      expect(ClipKind.fromLegacyLabel('teaser'), (ClipKind.teaser, null));
+      expect(ClipKind.fromLegacyLabel('OPENING 3'), (ClipKind.opening, 3));
+      expect(ClipKind.fromLegacyLabel('Featurette'), isNull);
+      expect(ClipKind.fromLegacyLabel(7), isNull);
+    });
   });
 
   test('HD copies are tried before 4K', () async {
@@ -462,7 +563,8 @@ void main() {
       profile.value = cover;
       final again = resolver.repick(clip);
       expect(again.assetId, 'at:2');
-      expect(again.label, clip.label);
+      expect(again.kind, clip.kind);
+      expect(again.number, clip.number);
       expect(again.candidates, clip.candidates);
     });
 
