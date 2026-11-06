@@ -45,6 +45,8 @@ Future<void> launchDeepLink(BuildContext context, DeepLink link, {required bool 
           await ReelProbe.run(context);
         case ReelProbeKind.watchstate:
           await ReelProbe.watchState(context);
+        case ReelProbeKind.extrasShape:
+          await ReelProbe.extrasShape(context);
         case null:
           if (probe != null) appLogger.i('[ReelProbe] developer tools off; opening the Reel');
           // The shell owns the Reel tab.

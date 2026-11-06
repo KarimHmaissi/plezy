@@ -131,8 +131,18 @@ class WatchNextProvider internal constructor(
     val lastEngagementTime: Long,
     val seriesTitle: String?,
     val seasonNumber: Int?,
-    val episodeNumber: Int?
-  )
+    val episodeNumber: Int?,
+    /** A title saved for later (a Reel Save): published as WATCHLIST, not CONTINUE or NEXT. */
+    val watchlist: Boolean = false
+  ) {
+    /** The Play Next type: WATCHLIST for a save, else CONTINUE with progress and NEXT without. */
+    val watchNextType: Int
+      get() = when {
+        watchlist -> TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_WATCHLIST
+        lastPlaybackPosition > 0 -> TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE
+        else -> TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_NEXT
+      }
+  }
 
   internal data class PreparedWatchNextItem(val metadata: WatchNextItem, val localPosterUri: Uri?)
 
@@ -572,20 +582,14 @@ class WatchNextProvider internal constructor(
     previous.type == current.type &&
     previous.seriesTitle == current.seriesTitle &&
     previous.seasonNumber == current.seasonNumber &&
-    previous.episodeNumber == current.episodeNumber
+    previous.episodeNumber == current.episodeNumber &&
+    previous.watchlist == current.watchlist
 
   private fun updateProgressRows(items: List<WatchNextItem>, rows: List<CommittedRow>): Boolean = try {
     val operations = ArrayList<ContentProviderOperation>(items.size)
     items.forEachIndexed { index, item ->
       val values = ContentValues(4).apply {
-        put(
-          TvContractCompat.WatchNextPrograms.COLUMN_WATCH_NEXT_TYPE,
-          if (item.lastPlaybackPosition > 0) {
-            TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE
-          } else {
-            TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_NEXT
-          }
-        )
+        put(TvContractCompat.WatchNextPrograms.COLUMN_WATCH_NEXT_TYPE, item.watchNextType)
         put(TvContractCompat.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS, item.lastEngagementTime)
         put(
           TvContractCompat.WatchNextPrograms.COLUMN_DURATION_MILLIS,
@@ -711,14 +715,9 @@ class WatchNextProvider internal constructor(
 
   internal fun buildProgram(item: PreparedWatchNextItem): WatchNextProgram {
     val metadata = item.metadata
-    val watchNextType = if (metadata.lastPlaybackPosition > 0) {
-      TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE
-    } else {
-      TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_NEXT
-    }
     val builder = WatchNextProgram.Builder()
       .setType(metadata.type)
-      .setWatchNextType(watchNextType)
+      .setWatchNextType(metadata.watchNextType)
       .setTitle(metadata.title)
       .setInternalProviderId(metadata.contentId)
       .setLastEngagementTimeUtcMillis(metadata.lastEngagementTime)

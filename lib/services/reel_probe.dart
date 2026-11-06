@@ -19,12 +19,14 @@ import 'reel/reel_decks.dart';
 import 'reel/reel_library.dart';
 import 'reel/reel_store.dart';
 import 'reel_app.dart';
+import 'reel_extras_shape.dart';
 import 'tmdb/tmdb_key_store.dart';
 
 /// Fork, The Reel measure day (spec §10): clip coverage over the first 50
 /// shows of the For You pool, read only, one request at a time. Started by
 /// `plezy://reel?probe=coverage` over adb; `probe=watchstate` reads the
-/// shown card's watch state. Runs only in a debug build or with the Reel's
+/// shown card's watch state; `probe=extras-shape` counts the shape of the
+/// servers' extras (plan V2-20). Runs only in a debug build or with the Reel's
 /// hidden developer setting on (`ReelDeveloper`, plan V2-62). Logs counts
 /// and response shapes only: never a title, URL, token or key.
 abstract final class ReelProbe {
@@ -93,6 +95,65 @@ abstract final class ReelProbe {
       if (plex != null) await _catalogue(plex, missing.take(catalogue).toList());
     } catch (e, st) {
       appLogger.w('[ReelProbe] failed', error: e, stackTrace: st);
+    } finally {
+      _running = false;
+    }
+  }
+
+  /// The shape of the servers' extras (`plezy://reel?probe=extras-shape`,
+  /// plan V2-20 step 1, D10): every Plex copy of up to 30 titles, For You's
+  /// first and then random library titles, one extras read at a time and
+  /// 60 at most. Reads extras lists only, never a clip. Logs counts only
+  /// ([ExtrasShape]): step 2, picking a variant per device, waits on them.
+  static Future<void> extrasShape(BuildContext context, {int titles = 30}) async {
+    if (_running) return;
+    _running = true;
+    try {
+      final multi = context.read<MultiServerProvider>();
+      final store = ReelStore.instance;
+      final library = ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app());
+
+      final candidates = await forYouCandidates(library: library, store: store);
+      final cards = (await library.cards([for (final c in candidates) c.entry])).take(titles).toList();
+      final fromPool = cards.length;
+      if (cards.length < titles) {
+        final db = await LibraryIndex.instance.database;
+        final rows = await db
+            .customSelect("SELECT * FROM index_titles WHERE type IN ('movie', 'show') ORDER BY random() LIMIT 200")
+            .get();
+        final extra = await library.cards([
+          for (final r in rows)
+            DeckEntry(
+              serverId: r.read<String>('server_id'),
+              ratingKey: r.read<String>('rating_key'),
+              isShow: r.read<String>('type') == 'show',
+            ),
+        ]);
+        final have = {for (final c in cards) c.title.groupKey};
+        for (final c in extra) {
+          if (cards.length >= titles) break;
+          if (have.add(c.title.groupKey)) cards.add(c);
+        }
+      }
+      appLogger.i(
+        '[ReelProbe] extras-shape: ${cards.length} titles ($fromPool from For You, '
+        '${cards.length - fromPool} random library titles)',
+      );
+
+      final sw = Stopwatch()..start();
+      final shape = await probeExtrasShape([for (final c in cards) c.title], (copy) async {
+        final id = ServerId(copy.serverId);
+        final client = multi.getPlexClientForServer(id);
+        if (client == null || !multi.isServerOnline(id)) return null;
+        return client.fetchExtraRows(copy.ratingKey, timeout: const Duration(seconds: 10));
+      }, maxTitles: titles);
+      for (final line in shape.lines()) {
+        appLogger.i(line);
+      }
+      appLogger.i('[ReelProbe] extras-shape done in ${sw.elapsedMilliseconds} ms');
+    } catch (e) {
+      // The type only: a failed read's message can carry a URL.
+      appLogger.w('[ReelProbe] extras-shape failed (${e.runtimeType})');
     } finally {
       _running = false;
     }
