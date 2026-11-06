@@ -123,8 +123,12 @@ abstract final class ReelApp {
     final controller = ReelController(
       decks: decks,
       resolver: resolver,
-      // The mute is kept across launches (V2-22).
-      clips: ClipPlayer(muted: SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false),
+      // The mute is kept across launches (V2-22), and the TV's clip plays
+      // as often as the clip-end pref says (V2-47).
+      clips: ClipPlayer(
+        muted: SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false,
+        plays: () => ReelController.clipEndPref().plays,
+      ),
       store: store,
       media: media,
       onWatch: (item, {required onTv}) async {

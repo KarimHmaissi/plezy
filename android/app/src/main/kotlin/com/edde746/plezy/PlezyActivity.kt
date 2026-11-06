@@ -962,6 +962,8 @@ class PlezyActivity : FlutterActivity() {
         "getDeviceName" -> result.success(getDeviceName())
         "getPerformanceSignals" -> result.success(getPerformanceSignals())
         "getVideoDecodeCapabilities" -> result.success(MediaCodecQuery.hardwareVideoDecodeSupport())
+        // Fork: the Reel's "Muted if other audio is playing" (V2-22).
+        "isMusicActive" -> result.success((getSystemService(Context.AUDIO_SERVICE) as AudioManager).isMusicActive)
         "getBackgroundWorkSignals" -> result.success(
           BackgroundWorkClassifier.toMap(BackgroundWorkDiagnostics.read(this))
         )

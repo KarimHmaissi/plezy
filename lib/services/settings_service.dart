@@ -107,9 +107,9 @@ enum ContinueWatchingAction { play, details }
 
 enum EpisodeAction { play, details }
 
-/// Fork: how a Reel card's sound starts (plan D5). [sound] plays it; once
-/// V2-22 lands it takes audio focus, so music pauses. [mutedIfOtherAudio]
-/// starts muted while other audio is playing.
+/// Fork: how a Reel card's sound starts (plan D5). [sound] plays it and, on
+/// the phone, takes audio focus, so music pauses (V2-22). [mutedIfOtherAudio]
+/// starts muted while other audio is playing and mixes with it.
 enum ReelStartSound { sound, mutedIfOtherAudio }
 
 /// Fork: what a Reel clip does when it ends (plan D6, V2-47).
@@ -787,8 +787,8 @@ class SettingsService extends BaseSharedPreferencesService {
     defaultValue: ReelStartSound.sound,
   );
 
-  /// What a clip does when it ends (D6). Today the TV plays twice then holds,
-  /// the approved default for both devices; the phone loops until V2-47.
+  /// What a clip does when it ends (D6, V2-47): twice then hold on both
+  /// devices; Loop and Next card (Lean back on the TV) as options.
   static const reelClipEnd = EnumPref<ReelClipEnd>(
     'reel_clip_end',
     values: ReelClipEnd.values,
@@ -824,6 +824,10 @@ class SettingsService extends BaseSharedPreferencesService {
   /// the sessions that always show the key hints (V2-28). Reset shows them
   /// again; not exported.
   static const reelHintSessions = IntPref('reel_hint_sessions');
+
+  /// Set once the phone feed has shown its one-time hint for leaving the
+  /// immersive view (V2-31). Per device, like [reelIntroSeen].
+  static const reelImmersiveHintSeen = BoolPref('reel_immersive_hint_seen');
 
   /// Show the Reel tab, which takes Explore's slot (D14). Works like
   /// [showExploreTab]. Today: shown.
@@ -1783,6 +1787,7 @@ class SettingsService extends BaseSharedPreferencesService {
     reelMuted,
     reelIntroSeen,
     reelHintSessions,
+    reelImmersiveHintSeen,
   ];
 
   /// Settings that "Reset All Settings" actually resets.

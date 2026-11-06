@@ -140,6 +140,7 @@ void main() {
       expect(settings.read(SettingsService.reelCaptions), isFalse);
       expect(settings.read(SettingsService.reelIntroSeen), isFalse);
       expect(settings.read(SettingsService.reelHintSessions), 0);
+      expect(settings.read(SettingsService.reelImmersiveHintSeen), isFalse);
       expect(settings.read(SettingsService.showReelTab), isTrue);
     });
 
@@ -186,6 +187,7 @@ void main() {
       await settings.write(SettingsService.reelCaptions, true);
       await settings.write(SettingsService.reelIntroSeen, true);
       await settings.write(SettingsService.reelHintSessions, 4);
+      await settings.write(SettingsService.reelImmersiveHintSeen, true);
       await settings.write(SettingsService.showReelTab, false);
 
       await settings.resetAllSettings();
@@ -198,10 +200,11 @@ void main() {
       expect(settings.read(SettingsService.reelCaptions), isFalse);
       expect(settings.read(SettingsService.reelIntroSeen), isFalse);
       expect(settings.read(SettingsService.reelHintSessions), 0);
+      expect(settings.read(SettingsService.reelImmersiveHintSeen), isFalse);
       expect(settings.read(SettingsService.showReelTab), isTrue);
     });
 
-    test('choices are exported; mute and the intro flag stay on the device', () {
+    test('choices are exported; mute and the one-time flags stay on the device', () {
       final portable = SettingsService.portablePrefs.toSet();
 
       expect(
@@ -218,6 +221,7 @@ void main() {
       expect(portable, isNot(contains(SettingsService.reelMuted)));
       expect(portable, isNot(contains(SettingsService.reelIntroSeen)));
       expect(portable, isNot(contains(SettingsService.reelHintSessions)));
+      expect(portable, isNot(contains(SettingsService.reelImmersiveHintSeen)));
     });
   });
 

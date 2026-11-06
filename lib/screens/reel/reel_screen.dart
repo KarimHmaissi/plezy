@@ -14,18 +14,23 @@ import '../../mixins/refreshable.dart';
 import '../../navigation/navigation_tabs.dart';
 import '../../mixins/tab_visibility_aware.dart';
 import '../../providers/companion_remote_provider.dart';
+import '../../providers/offline_mode_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/memory_trim_policy.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_library.dart';
 import '../../services/reel/reel_perf.dart';
+import '../../services/reel/reel_sound.dart';
 import '../../services/reel/reel_store.dart';
 import '../../services/settings_service.dart';
 import '../../utils/app_logger.dart';
+import '../../theme/mono_theme.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../services/reel/feed_players.dart';
+import '../video_player/wakelock_controller.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
 import 'reel_feed_view.dart';
@@ -58,6 +63,11 @@ class ReelScreen extends StatefulWidget {
   /// A deck asked for from outside the tab (deep link, Reel it, the Fold),
   /// taken by the screen when it next shows.
   static final ValueNotifier<String?> requestedDeck = ValueNotifier(null);
+
+  /// The phone feed is immersive (V2-31): its controls and the system bars
+  /// are hidden, and Back brings them back, so the shell's Back must not
+  /// also step to Home.
+  static final ValueNotifier<bool> immersive = ValueNotifier(false);
 
   /// Opens the Reel tab, on [deck] when given: closes pages above the shell
   /// first so the tab is what shows.
@@ -123,11 +133,24 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _toWatch = false;
 
   /// Phone: the feed's players (the TV plays on the native clip core).
+  /// They take audio focus unless the sound pref says to mix (V2-22), and
+  /// hold the screen on only while a card really plays. A clip plays as
+  /// often as the clip-end pref says, then holds (V2-47).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
+    create: (uri) => PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
+    plays: () => ReelController.clipEndPref().plays,
+    keepAwake: _awake.setEnabled,
     onLooped: (_) => _controller?.clipEnded(),
     onStarted: (id) => _controller?.clipStarted(id),
     onFailed: (id) => unawaited(_controller?.clipFailed(id)),
+    onLeft: (id) => _controller?.clipLeft(id),
   );
+
+  /// Phone: the screen held on while a card plays (V2-22).
+  final WakelockController _awake = WakelockController();
+
+  ReelStartSound get _startSoundPref =>
+      SettingsService.instanceOrNull?.read(SettingsService.reelStartSound) ?? ReelStartSound.sound;
 
   bool get _isTv => PlatformDetector.isTV();
 
@@ -192,6 +215,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (identical(ReelScreen._live, this)) ReelScreen._live = null;
     ReelScreen.requestedDeck.removeListener(_takeRequest);
     ReelScreen.showing.value = false;
+    ReelScreen.immersive.value = false;
     _overlayPref?.removeListener(_onOverlayPref);
     _okPref?.removeListener(_onChanged);
     _feedProbe?.dispose();
@@ -282,8 +306,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted && text != null) showAppSnackBar(context, text);
   }
 
+  /// TV only: the card view is drawn from here. The phone feed listens to
+  /// the controller itself and each page to its own card (V2-02), so a
+  /// swipe doesn't rebuild the whole screen on top of that.
   void _onChanged() {
-    if (mounted) setState(() {});
+    if (mounted && _isTv) setState(() {});
   }
 
   /// TV: only a playing clip lets the card go quiet.
@@ -351,6 +378,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void _remoteStep(Map<String, dynamic> data) {
     final c = _controller;
     if (c == null || !_shown || widget.offline) return;
+    // Someone at the phone: Lean back keeps rolling (V2-47).
+    c.noteInput();
     _held.land();
     _leanBack.poke();
     final dir = data['dir'];
@@ -373,6 +402,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void _remoteAction(String action) {
     final c = _controller;
     if (c == null || !_shown || widget.offline) return;
+    c.noteInput();
     _leanBack.poke();
     // Tonight's picks: a poster tapped on the Fold.
     if (action.startsWith('pick:')) {
@@ -397,7 +427,36 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     ReelScreen.showing.value = true;
     _perf.attachFrames();
     _beginLeanBack();
-    unawaited(_start());
+    unawaited(_visit());
+  }
+
+  /// A visit starts (the tab shown, the app back, Back from the player):
+  /// the phone settles how its sound starts before any card plays.
+  Future<void> _visit() async {
+    // Only from a feed that was let go: a resume that never paused (the
+    // shade pulled down) keeps the sound as it is, and the feed's own clip
+    // must not count as other audio.
+    if (!_isTv && _players.current == null) await _startSound();
+    await _start();
+  }
+
+  /// Phone (V2-22): a visit starts muted when the mute was kept, while the
+  /// connected TV is playing, or, with "Muted if other audio is playing",
+  /// while another app's audio plays. Only the kept mute is saved; the
+  /// others hold for this visit.
+  Future<void> _startSound() async {
+    final remote = context.read<CompanionRemoteProvider?>();
+    final tvPlaying =
+        remote != null && remote.isRemote && remote.isConnected && ReelSound.tvPlaying(remote.nowPlaying.value);
+    final saved = SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false;
+    final pref = _startSoundPref;
+    final otherAudio =
+        !saved && !tvPlaying && pref == ReelStartSound.mutedIfOtherAudio && await ReelSound.otherAudioPlaying();
+    if (!mounted || !_shown) return;
+    final muted = ReelSound.startMuted(saved: saved, pref: pref, tvPlaying: tvPlaying, otherAudio: otherAudio);
+    await _players.setMuted(muted);
+    final c = await _ensure();
+    if (mounted) await c.setMuted(muted, remember: false);
   }
 
   @override
@@ -441,7 +500,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
             return;
           }
         }
-        unawaited(_start());
+        unawaited(_visit());
     }
   }
 
@@ -467,10 +526,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted && _shown && (onTv || !ok)) ReelScreen.showing.value = true;
   }
 
-  /// Fold: On TV mode, offered while connected to a TV as its remote.
+  /// Fold: On TV mode, offered while connected to a TV as its remote. Read
+  /// with `select` so connecting or dropping the TV redraws the feed's
+  /// buttons now that controller changes no longer rebuild this screen.
   VoidCallback? _remoteMode() {
-    final remote = context.read<CompanionRemoteProvider?>();
-    if (remote == null || !remote.isRemote || !remote.isConnected) return null;
+    final connected = context.select<CompanionRemoteProvider?, bool>((r) => r != null && r.isRemote && r.isConnected);
+    if (!connected) return null;
     return () => unawaited(
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ReelRemoteView(deck: _controller?.deck.id))),
     );
@@ -539,6 +600,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       }
       return KeyEventResult.ignored;
     }
+    // Any key is someone there: Lean back's idle stop counts from it (V2-47).
+    if (event is KeyDownEvent || event is KeyRepeatEvent) c.noteInput();
     if (_isTv) {
       // V2-50: the remote's and the CEC bridge's codes, for the device
       // session (recorded only with the overlay's tape on).
@@ -613,34 +676,38 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   @override
   Widget build(BuildContext context) {
     final c = _controller;
+    final Widget body = widget.offline
+        ? const ReelMessage(
+            icon: Symbols.cloud_off_rounded,
+            title: "You're offline",
+            body: 'The Reel plays from your servers. It picks up again once you are back online.',
+          )
+        : c == null
+        ? (_createFailed
+              ? _failed()
+              : _isTv
+              ? const ReelTvSkeleton()
+              : const ReelCurtain())
+        : Stack(
+            fit: StackFit.expand,
+            children: [
+              _isTv ? _tv(c) : _phone(c),
+              ValueListenableBuilder<bool>(
+                valueListenable: _perf.overlay,
+                builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),
+              ),
+            ],
+          );
     return Focus(
       focusNode: _focus,
       autofocus: false,
       onKeyEvent: _onKey,
       child: ColoredBox(
         color: Colors.transparent,
-        child: widget.offline
-            ? const ReelMessage(
-                icon: Symbols.cloud_off_rounded,
-                title: "You're offline",
-                body: 'The Reel plays from your servers. It picks up again once you are back online.',
-              )
-            : c == null
-            ? (_createFailed
-                  ? _failed()
-                  : _isTv
-                  ? const ReelTvSkeleton()
-                  : const ReelCurtain())
-            : Stack(
-                fit: StackFit.expand,
-                children: [
-                  _isTv ? _tv(c) : _phone(c),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: _perf.overlay,
-                    builder: (context, on, _) => on ? _debugOverlay(c) : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
+        // V2-24: the phone feed, its loading curtain included, is always dark.
+        child: _isTv
+            ? body
+            : ReelFeedTheme(palette: context.select<ThemeProvider, MonoPalette>((t) => t.activePalette), child: body),
       ),
     );
   }
@@ -691,7 +758,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   );
 
   Widget _phone(ReelController c) {
-    final onTv = _remoteMode() != null;
+    final remote = _remoteMode();
+    final onTv = remote != null;
     return ReelFeedView(
       controller: c,
       players: _players,
@@ -699,7 +767,13 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onWatch: () => unawaited(_watch(onTv: onTv)),
       onSheet: () => unawaited(_openSheet()),
       onDecks: () => unawaited(showReelDeckPicker(context, c)),
-      onRemote: _remoteMode(),
+      onRemote: remote,
+      // V2-65: a Fold screen switch is timed to the picture moving again.
+      onResize: () => _feedProbe?.screenChanged(),
+      // V2-31: Back in the immersive feed is the feed's, not the shell's.
+      onImmersive: (on) => ReelScreen.immersive.value = on,
+      // V2-08: on mobile data with no Wi-Fi the feed parks only the next card.
+      metered: context.select<OfflineModeProvider?, bool>((p) => p?.isCellularOnly ?? false),
     );
   }
 }

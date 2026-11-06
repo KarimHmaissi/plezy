@@ -6,6 +6,7 @@ import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
 import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
+import '../settings_service.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
 import 'reel_decay.dart';
@@ -65,6 +66,16 @@ class ReelDecidePick {
 
   final ReelPick pick;
   final MediaItem? item;
+}
+
+/// How many times a clip plays before it holds (V2-47, D6): null loops it for
+/// good. Next card plays it once; the feed or Lean back then moves on.
+extension ReelClipEndPlays on ReelClipEnd {
+  int? get plays => switch (this) {
+    ReelClipEnd.loop => null,
+    ReelClipEnd.twiceThenHold => 2,
+    ReelClipEnd.nextCard => 1,
+  };
 }
 
 /// A card as the views draw it.
@@ -163,13 +174,16 @@ class ReelController extends ChangeNotifier {
     this.itemWithNext,
     this.moreLike,
     this.saveMuted,
+    ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
     ReelPrefetcher? prefetcher,
   }) : _clock = clock ?? DateTime.now,
+       _clipEnd = clipEnd ?? clipEndPref,
        _prefetch = prefetcher ?? ReelPrefetcher() {
     clips.phase.addListener(_onPhase);
     memoryRestored?.addListener(_onMemoryRestored);
     resolver.profile?.addListener(_onProfile);
+    ReelStore.picksChanged.addListener(_onPicksChanged);
     decks.forEach(_watchDeck);
   }
 
@@ -276,6 +290,35 @@ class ReelController extends ChangeNotifier {
   /// The direction of travel (1 down the deck, -1 back up it): which way the
   /// prefetch window and the preload lean.
   int _direction = 1;
+
+  /// The clip-end pref, read when a clip ends so a change applies at once.
+  final ReelClipEnd Function() _clipEnd;
+
+  /// What a clip does when it ends (V2-47): the device's pref.
+  ReelClipEnd get clipEnd => _clipEnd();
+
+  /// The device's clip-end pref ([SettingsService.reelClipEnd]).
+  static ReelClipEnd clipEndPref() =>
+      SettingsService.instanceOrNull?.read(SettingsService.reelClipEnd) ?? ReelClipEnd.twiceThenHold;
+
+  /// Lean back (V2-47) stops moving on after this long with no real input,
+  /// so a Reel left playing to an empty room holds its card and lets the
+  /// screen sleep.
+  static const leanBackIdle = Duration(minutes: 30);
+
+  /// The last real input: a key, a touch, a command from the phone, or the
+  /// Reel opening. A card moving on by itself is not input.
+  DateTime? _lastInput;
+
+  /// The view saw real input ([leanBackIdle]).
+  void noteInput() => _lastInput = _clock();
+
+  /// Whether Next card may still move on by itself: there was real input in
+  /// the last [leanBackIdle].
+  bool get mayRollOn {
+    final at = _lastInput;
+    return at != null && _clock().difference(at) < leanBackIdle;
+  }
 
   int _deck = 0;
   final Map<String, List<ReelCardData>> _cards = {};
@@ -500,6 +543,10 @@ class ReelController extends ChangeNotifier {
   Future<void> start({String? deckId}) async {
     if (!_active) _comeBack();
     _setActive(true);
+    // Opening the Reel (or coming back to it) is someone there.
+    noteInput();
+    // The picks are synced: the other device may have saved since.
+    unawaited(_loadSaved());
     // The degrade ladder carries over: coming back from Watch or another tab
     // says nothing about memory. Only the policy's restore resets it.
     if (deckId != null) {
@@ -729,7 +776,10 @@ class ReelController extends ChangeNotifier {
   /// the cursor on from where the last left it, and only the card the
   /// cursor lands on is resolved and opened. Cards passed over were never on
   /// screen, so they record nothing.
-  Future<void> step(int dir) async {
+  ///
+  /// [skipAi] passes over every AI card (Lean back, V2-47): a still has no
+  /// end to move on from, so the channel would stop on it.
+  Future<void> step(int dir, {bool skipAi = false}) async {
     if (cards == null) return;
     final from = page;
     final to = (from + dir).clamp(0, slotCount - 1);
@@ -740,7 +790,7 @@ class ReelController extends ChangeNotifier {
     // A later step moved the cursor on while this one was leaving: that
     // step shows the card it lands on.
     if (gen != _generation) return;
-    await _show(direction: dir);
+    await _show(direction: dir, skipAi: skipAi);
   }
 
   /// Next / previous deck (wraps), with the deck strip.
@@ -890,7 +940,7 @@ class ReelController extends ChangeNotifier {
     return r.item;
   }
 
-  Future<void> _show({int direction = 1}) async {
+  Future<void> _show({int direction = 1, bool skipAi = false}) async {
     if (_disposed) return;
     final gen = ++_generation;
     _direction = direction < 0 ? -1 : 1;
@@ -912,17 +962,18 @@ class ReelController extends ChangeNotifier {
     _plan(list, gen);
     await _resolve(c);
     if (gen != _generation || !_active) return;
-    // An AI card only with room (at most 1 in 6); otherwise the title waits
-    // for another day and the feed moves on. The phone holds them back
-    // before they come on screen instead ([_holdBackAhead]).
+    // An AI card only with room (at most 1 in 6), and never in Lean back;
+    // otherwise the title waits for another day and the feed moves on. The
+    // phone holds them back before they come on screen instead
+    // ([_holdBackAhead]).
     final skipTo = page + (direction == 0 ? 1 : direction);
     if (!externalClips &&
         _clip[c.id] == null &&
-        _sinceAiCard < ReelDecay.aiCardEvery &&
+        (skipAi || _sinceAiCard < ReelDecay.aiCardEvery) &&
         skipTo >= 0 &&
         skipTo < slotCount) {
       _seek(skipTo);
-      return _show(direction: direction == 0 ? 1 : direction);
+      return _show(direction: direction == 0 ? 1 : direction, skipAi: skipAi);
     }
     final clip = _clip[c.id];
     _cardShown = c.id;
@@ -1134,6 +1185,9 @@ class ReelController extends ChangeNotifier {
 
   /// TV: the clock starts on this card's first frame (the core moves from
   /// loading to playing only then; a resume from pause doesn't count).
+  /// With Next card (Lean back, V2-47), a clip that played out moves on to
+  /// the next card with a clip, until [leanBackIdle] passes with no input;
+  /// then it holds with Replay like Twice then hold.
   void _onPhase() {
     final now = clips.phase.value, was = _lastPhase;
     _lastPhase = now;
@@ -1144,6 +1198,8 @@ class ReelController extends ChangeNotifier {
     } else if (was == ClipPhase.loading && now == ClipPhase.playing && _cardSince == null && !_cardFailed) {
       _cardSince = _clock();
       _syncHold();
+    } else if (now == ClipPhase.held && was != ClipPhase.held && _active) {
+      if (clipEnd == ReelClipEnd.nextCard && mayRollOn) unawaited(step(1, skipAi: true));
     }
   }
 
@@ -1197,6 +1253,13 @@ class ReelController extends ChangeNotifier {
     _syncHold();
   }
 
+  /// Phone feed: [cardId] is no longer the page under the thumb (V2-02). A
+  /// start it reported before the swipe committed belonged to a visit that
+  /// ended, so it can't time a later one.
+  void clipLeft(String cardId) {
+    if (_feedStarted?.id == cardId) _feedStarted = null;
+  }
+
   /// Records how the card was left, timed from its first frame: a quick
   /// skip (<2 s) adds fatigue; 8 s or more is a sample; scrolling past in
   /// between records nothing. Left before the first frame, or after the
@@ -1207,7 +1270,8 @@ class ReelController extends ChangeNotifier {
     _cardSince = null;
     _cardFailed = false;
     _cardClip = null;
-    _feedStarted = null;
+    // [_feedStarted] stays: on the phone the step commits when the page
+    // settles (V2-02), after the incoming card has already started playing.
     if (id == null) return;
     final deckId = deck.id;
     if (since == null || failed) {
@@ -1308,32 +1372,87 @@ class ReelController extends ChangeNotifier {
     }
   }
 
+  /// The titles saved and still waiting on the TV's Home (fresh picks),
+  /// so the phone's Save shows as saved (V2-29).
+  final Set<String> _saved = {};
+
+  /// Bumped by every Save, so a picks read that started before it can't
+  /// put back a list without it.
+  int _savedReads = 0;
+
+  /// Whether the card [cardId] is saved: a fresh pick, from this device or
+  /// synced from the other one.
+  bool isSaved(String cardId) => _saved.contains(cardId);
+
+  void _onPicksChanged() => unawaited(_loadSaved());
+
+  Future<void> _loadSaved() async {
+    final read = ++_savedReads;
+    final List<ReelPick> picks;
+    try {
+      picks = await store.picks();
+    } catch (e) {
+      appLogger.w('Reel: saved picks could not be read', error: e);
+      return;
+    }
+    if (_disposed || read != _savedReads) return;
+    final now = _clock();
+    final saved = {
+      for (final p in picks)
+        if (p.isFresh(now)) p.titleId,
+    };
+    if (setEquals(saved, _saved)) return;
+    _saved
+      ..clear()
+      ..addAll(saved);
+    notifyListeners();
+  }
+
   /// One Save: waits on the TV's Home for 3 days and goes to the Plex
-  /// watchlist so it's never lost.
-  Future<void> save() => _act('save', () async {
-    final s = current;
-    final c = s.card;
+  /// watchlist so it's never lost. The card shows as saved at once, and
+  /// goes back if the pick couldn't be kept. [silent] leaves out the
+  /// confirmation (the phone feed's filled Save and burst say it, and a
+  /// toast would float over its buttons); a failure is always said.
+  Future<void> save({bool silent = false}) async {
+    final c = current.card;
     if (c == null) return;
-    await store.savePick(
-      ReelPick(
-        titleId: c.id,
-        groupKey: c.title.groupKey,
-        serverId: c.best.serverId,
-        ratingKey: c.best.ratingKey,
-        title: c.title.title,
-        at: _clock().toUtc(),
-        deck: deck.id,
-      ),
-    );
+    _savedReads++;
+    final added = _saved.add(c.id);
+    if (added) notifyListeners();
+    var kept = false;
+    try {
+      await _act('save', () async {
+        await store.savePick(
+          ReelPick(
+            titleId: c.id,
+            groupKey: c.title.groupKey,
+            serverId: c.best.serverId,
+            ratingKey: c.best.ratingKey,
+            title: c.title.title,
+            at: _clock().toUtc(),
+            deck: deck.id,
+          ),
+        );
+        kept = true;
+        await _afterSave(c, silent: silent);
+      });
+    } finally {
+      if (!kept && added && _saved.remove(c.id)) notifyListeners();
+    }
+  }
+
+  /// After the pick is kept: the event, the watchlist mirror, the Home row
+  /// and the confirmation.
+  Future<void> _afterSave(ReelCardData c, {required bool silent}) async {
     await store.record(c.id, ReelAction.save, deck: deck.id);
-    unawaited(_mirrorToWatchlist(s.item, c));
+    unawaited(_mirrorToWatchlist(_item[c.id], c));
     final seat = onSaved;
     if (seat != null) unawaited(seat().catchError((Object _) {}));
-    _say((reachesTvNow?.call() ?? true) ? savedOnTv : savedForLater);
+    if (!silent) _say((reachesTvNow?.call() ?? true) ? savedOnTv : savedForLater);
     _saves++;
     await _refreshPicks();
     _placeDecideNext(c);
-  });
+  }
 
   /// After the [decideAfterSaves]th Save of the session, the decision card
   /// comes up next: straight after the card just saved, [saved]. Once seen
@@ -1510,9 +1629,19 @@ class ReelController extends ChangeNotifier {
     await clips.replay();
   }
 
-  Future<void> setMuted(bool muted) async {
+  bool get muted => clips.muted;
+
+  /// The mute button (V2-22): an unmute is recorded against the card on
+  /// screen, and the choice is kept for the next card and the next launch
+  /// ([SettingsService.reelMuted]). The phone feed's own players follow it
+  /// from the view. With [remember] off (a visit starting muted while the TV
+  /// plays, or the saved mute put back) nothing is recorded or kept.
+  Future<void> setMuted(bool muted, {bool remember = true}) async {
     final c = current.card;
-    if (!muted && c != null) await store.record(c.id, ReelAction.unmute, deck: deck.id);
+    if (remember) {
+      if (!muted && c != null) await store.record(c.id, ReelAction.unmute, deck: deck.id);
+      await SettingsService.instanceOrNull?.write(SettingsService.reelMuted, muted);
+    }
     await clips.setMuted(muted);
     notifyListeners();
     await saveMuted?.call(muted);
@@ -1653,6 +1782,7 @@ class ReelController extends ChangeNotifier {
     clips.phase.removeListener(_onPhase);
     memoryRestored?.removeListener(_onMemoryRestored);
     resolver.profile?.removeListener(_onProfile);
+    ReelStore.picksChanged.removeListener(_onPicksChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);
     }

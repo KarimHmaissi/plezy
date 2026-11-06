@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
@@ -9,6 +8,8 @@ import '../../focus/focus_theme.dart';
 import '../../media/ids.dart';
 import '../../models/companion_remote/remote_command.dart';
 import '../../providers/companion_remote_provider.dart';
+import '../../services/device_performance.dart';
+import '../../theme/fork_motion.dart';
 import '../../utils/media_image_helper.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/optimized_media_image.dart';
@@ -55,17 +56,22 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
   }
 
   void _step(int dir) {
-    HapticFeedback.selectionClick();
+    ForkMotion.selection();
     _remote.sendCommand(RemoteCommandType.reelStep, data: {'dir': dir});
   }
 
   void _deck(int dir) {
-    HapticFeedback.selectionClick();
+    ForkMotion.selection();
     _remote.sendCommand(RemoteCommandType.reelStep, data: {'deckDir': dir});
   }
 
+  /// Save confirms like any save in the app; the rest tick like a toggle.
   void _act(String action) {
-    HapticFeedback.lightImpact();
+    if (action == 'save') {
+      ForkMotion.success();
+    } else {
+      ForkMotion.selection();
+    }
     _remote.sendCommand(RemoteCommandType.reelAction, data: {'action': action});
   }
 
@@ -149,7 +155,9 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                 },
                 onTap: () => _act('pause'),
                 child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 280),
+                  duration: ForkMotion.reduceMotion(context)
+                      ? Duration.zero
+                      : DevicePerformance.reducedDuration(const Duration(milliseconds: 280)),
                   switchInCurve: Curves.easeOutCubic,
                   transitionBuilder: (child, a) => FadeTransition(
                     opacity: a,

@@ -174,9 +174,9 @@ class ClipProgress {
   int get hashCode => Object.hash(position, length);
 }
 
-/// The Reel's clip player: plays one card's clip, preloads the next, loops a
-/// clip twice and then holds on its last frame, and ramps the sound between
-/// cards. It never reports a timeline, a scrobble or a media session: it
+/// The Reel's clip player: plays one card's clip, preloads the next, plays a
+/// clip as many times as the clip-end pref says (V2-47) and then holds on
+/// its last frame, and ramps the sound between cards. It never reports a timeline, a scrobble or a media session: it
 /// imports none of that code (test/reel/no_reporting_guard_test.dart).
 ///
 /// Sound and screen (V2-22): the first audible clip of a session takes the
@@ -190,11 +190,12 @@ class ClipPlayer {
   /// for an injected test engine. [muted] is the saved mute (`reel_muted`).
   ClipPlayer({
     ClipEngine Function()? engine,
-    this.loops = 2,
+    int? Function()? plays,
     ReelPerf? perf,
     WakelockController? wakelock,
     this._muted = false,
   }) : _create = engine ?? ExoClipEngine.new,
+       _plays = plays ?? _twice,
        _perf = perf ?? ReelPerf.instance,
        _wakelock = wakelock ?? (engine == null ? WakelockController() : null) {
     phase.addListener(_syncWakelock);
@@ -220,13 +221,17 @@ class ClipPlayer {
   /// system made. It rides over the stop an error or a loop sends first.
   static const Duration externalPauseGrace = Duration(milliseconds: 250);
 
+  static int? _twice() => 2;
+
   final ClipEngine Function() _create;
 
   /// The debug overlay's tape (it records nothing unless switched on).
   final ReelPerf _perf;
 
-  /// Plays before holding on the last frame.
-  final int loops;
+  /// How many times a clip plays before it holds on its last frame; null
+  /// loops it for good. Asked at each end, so a change to the clip-end pref
+  /// applies to the clip already playing.
+  final int? Function() _plays;
 
   /// Keeps the screen on while a clip opens or plays (null in tests).
   final WakelockController? _wakelock;
@@ -550,10 +555,12 @@ class ClipPlayer {
     _ended = true;
     _cancelExternalPause();
     _played++;
-    if (_played < loops) {
+    final plays = _plays();
+    if (plays == null || _played < plays) {
       unawaited(e.seek(Duration.zero).then((_) => e.play()));
     } else {
-      // Hold on the last frame; Replay is focused by the view.
+      // Hold on the last frame; Replay is focused by the view, and Lean
+      // back moves on from here (ReelController).
       _wantPlaying = false;
       unawaited(e.pause());
       if (onScreen.value != null) progress.value = ClipProgress(_length, _length);

@@ -8,6 +8,7 @@ import '../media/media_item.dart';
 import '../media/media_item_types.dart';
 import '../media/media_server_client.dart';
 import '../services/device_performance.dart';
+import '../theme/fork_motion.dart';
 import '../utils/content_utils.dart';
 import '../utils/formatters.dart';
 import '../utils/layout_constants.dart';
@@ -178,7 +179,10 @@ class TvSpotlightBackground extends StatelessWidget {
           children: [
             AnimatedOpacity(
               opacity: showArtwork ? 1 : 0,
-              duration: DevicePerformance.reducedDuration(const Duration(milliseconds: 320)),
+              // The Reel's fade (V2-32): at once with reduce motion on too.
+              duration: ForkMotion.reduceMotion(context)
+                  ? Duration.zero
+                  : DevicePerformance.reducedDuration(const Duration(milliseconds: 320)),
               curve: artworkCurve,
               child: Stack(
                 fit: StackFit.expand,
