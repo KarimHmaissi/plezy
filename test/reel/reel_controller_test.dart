@@ -683,6 +683,39 @@ void main() {
       c.dispose();
     });
 
+    test('a warm controller starts a new session on a new day: it can come up again', () async {
+      // Saves are kept by this clock and read back fresh by the store's.
+      var now = DateTime.now();
+      final c = make(
+        clock: () => now,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4'), _card('5'), _card('6')]),
+        ],
+      );
+      await c.start();
+      await c.save();
+      await c.step(1);
+      await c.save();
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      await c.step(1);
+      await c.suspend();
+
+      await c.start();
+      expect(pages(c).where((p) => p == 'decide'), hasLength(1), reason: 'same day: spent');
+      await c.suspend();
+
+      now = DateTime(now.year, now.month, now.day + 1, 12);
+      await c.start();
+      expect(c.current.card?.id, 't3', reason: 'the deck keeps its place');
+      expect(pages(c), ['t1', 't2', 't3', 't4', 't5', 't6', 'decide', 'poolEnd'], reason: 'unplaced again');
+      await c.save();
+      await c.step(1);
+      await c.save();
+      expect(pages(c).indexOf('decide'), 4, reason: 'after the day\'s second Save it comes up next');
+      c.dispose();
+    });
+
     test('at the end of a deck it comes before the end card when there are fresh picks', () async {
       await saved('8');
       await saved('9', ago: const Duration(days: 4));

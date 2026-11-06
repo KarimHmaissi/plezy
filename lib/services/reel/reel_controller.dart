@@ -277,6 +277,11 @@ class ReelController extends ChangeNotifier {
   ({String deck, String? before})? _decide;
   bool _decideSeen = false;
 
+  /// The day the decision card's session began: a warm controller (the TV
+  /// keeps one for days) starts a new one on its first start of a new day,
+  /// so the card isn't spent for good after its first showing.
+  String? _decideDay;
+
   /// Decks whose cursor is on the decision card.
   final Set<String> _onDecide = {};
 
@@ -386,6 +391,14 @@ class ReelController extends ChangeNotifier {
         _cursor.remove(d.id);
         _onDecide.remove(d.id);
       }
+    }
+    if (_decideDay != today) {
+      _decideDay = today;
+      _decide = null;
+      _decideSeen = false;
+      _saves = 0;
+      _pickAt = 0;
+      _onDecide.clear();
     }
     await (_ensureDeck(deck), _refreshPicks()).wait;
     if (!_active) return;
