@@ -42,15 +42,26 @@ class ReelClipCache {
   /// Whether this device has the cache (Android).
   bool get supported => _supported;
 
-  /// A Plex clip's cache key: the server's id and the clip file's part path,
-  /// without any query. Never the clip's URL, which carries the connection
-  /// address and the token: a new address or token still hits, and no token
-  /// lands in the cache's index. Null when the part path looks like it could
-  /// carry a secret (the core refuses such a key too).
+  /// A Plex clip's cache key: the server's id and the clip file's part path.
+  /// Never the clip's URL, which carries the connection address and the
+  /// token: a new address or token still hits, and no token lands in the
+  /// cache's index. The part's own query is kept, sorted and joined with `;`
+  /// (an IVA trailer's `fmt` and `bitrate` name different bytes under one
+  /// path, and the cache must never mix them), less any token parameter.
+  /// Null when the part path looks like it could carry a secret (the core
+  /// refuses such a key too).
   static String? keyFor(String serverId, String partKey) {
-    final path = partKey.split('?').first.split('#').first;
+    final noFragment = partKey.split('#').first;
+    final q = noFragment.indexOf('?');
+    final path = q < 0 ? noFragment : noFragment.substring(0, q);
     if (serverId.isEmpty || path.isEmpty) return null;
-    final key = 'plex:$serverId:$path';
+    final params = q < 0
+        ? const <String>[]
+        : ([
+            for (final p in noFragment.substring(q + 1).split('&'))
+              if (p.isNotEmpty && !p.split('=').first.toLowerCase().contains('token')) p,
+          ]..sort());
+    final key = 'plex:$serverId:$path${params.map((p) => ';$p').join()}';
     if (key.toLowerCase().contains('token') || key.contains('&') || key.contains('://')) return null;
     return key;
   }

@@ -69,6 +69,8 @@ class ClipDiskCacheTest {
   @Test
   fun onlyAPlexClipKeyWithoutASecretIsCacheable() {
     assertTrue(ClipCachePolicy.isCacheable(key))
+    // Dart keeps an IVA part's own query as `;` pairs (ReelClipCache.keyFor).
+    assertTrue(ClipCachePolicy.isCacheable("plex:server-a:/services/iva/assets/87/video.mp4;bitrate=5000;fmt=4"))
     assertFalse(ClipCachePolicy.isCacheable(null))
     assertFalse(ClipCachePolicy.isCacheable("plex:"))
     assertFalse(ClipCachePolicy.isCacheable("at:opening-1"))

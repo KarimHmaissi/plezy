@@ -21,7 +21,19 @@ void main() {
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
   group('keyFor', () {
-    test('the server and the part path, never the address or a query', () {
+    test('two variants of one IVA trailer get two keys; the token never counts', () {
+      // Same path, different bytes: one key would mix their spans on disk.
+      final hd = ReelClipCache.keyFor('server-a', '/services/iva/assets/87/video.mp4?fmt=4&bitrate=5000');
+      final sd = ReelClipCache.keyFor('server-a', '/services/iva/assets/87/video.mp4?fmt=4&bitrate=2000');
+      expect(hd, 'plex:server-a:/services/iva/assets/87/video.mp4;bitrate=5000;fmt=4');
+      expect(sd, isNot(hd));
+      expect(
+        ReelClipCache.keyFor('server-a', '/services/iva/assets/87/video.mp4?bitrate=5000&X-Plex-Token=abc123&fmt=4'),
+        hd,
+      );
+    });
+
+    test('the server and the part path, never the address or a token', () {
       expect(
         ReelClipCache.keyFor('server-a', '/library/parts/41/1700000000/file.mp4'),
         'plex:server-a:/library/parts/41/1700000000/file.mp4',
