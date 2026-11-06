@@ -8,7 +8,10 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.analytics.PlayerId
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,6 +29,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class ClipPreloadTest {
+
+  @After
+  fun releaseDiskCache() = ClipDiskCache.resetForTest()
 
   private fun <T> withClipCore(body: (ExoPlayerCore) -> T): T {
     val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
@@ -49,6 +55,9 @@ class ClipPreloadTest {
   private val ExoPlayerCore.items: Map<String, MediaItem> get() = field(ExoPlayerCore::class.java, "preloadItems") as Map<String, MediaItem>
 
   private val ExoPlayerCore.manager: DefaultPreloadManager get() = field(ExoPlayerCore::class.java, "preloadManager") as DefaultPreloadManager
+
+  @Suppress("UNCHECKED_CAST")
+  private val ExoPlayerCore.rankingData: Map<String, Int> get() = field(ExoPlayerCore::class.java, "preloadRankingData") as Map<String, Int>
 
   private val a = "file:///reel/a.mp4"
   private val b = "file:///reel/b.mp4"
@@ -142,5 +151,74 @@ class ClipPreloadTest {
     assertEquals(ClipPreloadRank.DECK_NEXT, ClipPreloadRank.fromWire("deckNext"))
     assertEquals(ClipPreloadRank.DECK_PREVIOUS, ClipPreloadRank.fromWire("deckPrevious"))
     assertNull(ClipPreloadRank.fromWire("deck"))
+  }
+
+  // --- V2-10: the disk cache ----------------------------------------------
+
+  private val plexKey = "plex:server-a:/library/parts/41/1700000000/file.mp4"
+  private val plexKey2 = "plex:server-a:/library/parts/42/1700000000/file.mp4"
+
+  @Test
+  fun theCardTwoAheadIsADiskPreloadOfAPlexClipOnly() {
+    withClipCore { core ->
+      core.preloadClip(a, ClipPreloadRank.AHEAD, "animeTheme")
+      assertTrue("an AnimeThemes clip never goes to disk (D1)", core.slots.isEmpty())
+      assertEquals(0, core.manager.sourceCount)
+
+      core.preloadClip(b, ClipPreloadRank.AHEAD, "plexExtra", plexKey)
+      assertEquals(mapOf(ClipPreloadRank.AHEAD to b), core.slots)
+      assertEquals(plexKey, core.items[b]!!.localConfiguration!!.customCacheKey)
+      assertTrue(ClipPreloadRank.isCachedRankingData(core.rankingData[b]!!))
+    }
+  }
+
+  @Test
+  fun aDiskPreloadMovingToTheNextCardIsAskedForAgainInMemory() {
+    withClipCore { core ->
+      core.preloadClip(b, ClipPreloadRank.AHEAD, "plexExtra", plexKey)
+      val onDisk = core.items[b]
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey)
+      assertEquals(mapOf(ClipPreloadRank.NEXT to b), core.slots)
+      assertNotSame("a fresh source for the memory stage", onDisk, core.items[b])
+      assertFalse(ClipPreloadRank.isCachedRankingData(core.rankingData[b]!!))
+      assertEquals(plexKey, core.items[b]!!.localConfiguration!!.customCacheKey)
+      assertEquals(1, core.manager.sourceCount)
+    }
+  }
+
+  @Test
+  fun aPlexHeadIsHeldOnlyWhileItIsOnDiskAnAnimeThemesHeadInMemory() {
+    withClipCore { core ->
+      core.preloadClip(c, ClipPreloadRank.DECK_NEXT, "plexExtra", plexKey2)
+      assertTrue("not on disk: no Plex read for a head (D15)", core.slots.isEmpty())
+
+      core.preloadClip(d, ClipPreloadRank.DECK_PREVIOUS, "animeTheme")
+      assertEquals(mapOf(ClipPreloadRank.DECK_PREVIOUS to d), core.slots)
+      assertFalse(ClipPreloadRank.isCachedRankingData(core.rankingData[d]!!))
+      assertEquals(null, core.items[d]!!.localConfiguration!!.customCacheKey)
+    }
+  }
+
+  @Test
+  fun aKeyThatCouldCarryTheTokenIsRefused() {
+    withClipCore { core ->
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", "plex:server-a:/x?X-Plex-Token=abc123")
+      assertEquals(null, core.items[b]!!.localConfiguration!!.customCacheKey)
+    }
+  }
+
+  @Test
+  fun theMainPlayerNeverReachesTheDiskCache() {
+    val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+    activity.setContentView(FrameLayout(activity))
+    val core = ExoPlayerCore(activity)
+    try {
+      assertTrue(core.initialize())
+      assertEquals(null, core.field(ExoPlayerCore::class.java, "clipCache"))
+    } finally {
+      core.dispose()
+      shadowOf(Looper.getMainLooper()).idle()
+    }
+    withClipCore { clip -> assertTrue(clip.field(ExoPlayerCore::class.java, "clipCache") != null) }
   }
 }

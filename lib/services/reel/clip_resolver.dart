@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../../utils/app_logger.dart';
 import 'clip_filter.dart';
 import 'clip_player.dart';
+import 'reel_clip_cache.dart';
 import 'reel_playback_profile.dart';
 import 'reel_store.dart';
 
@@ -361,7 +362,7 @@ class ClipResolver {
   /// server, and never caches a miss:
   /// - a cached opening (AnimeThemes) is used as is;
   /// - a cached Plex clip only when [onDisk] says its bytes are already on
-  ///   this device (nothing does until the disk cache, V2-10);
+  ///   this device (the TV clip core's disk cache, V2-10);
   /// - an anime show with no cached row asks AnimeThemes for its openings
   ///   (a deck's batch in flight is waited for), and an opening found is
   ///   cached as the ladder caches it.
@@ -370,7 +371,7 @@ class ClipResolver {
   Future<ResolvedClip?> lookupWithoutServers(
     ReelTitle t, {
     Set<String> exclude = const {},
-    bool Function(ResolvedClip clip)? onDisk,
+    Future<bool> Function(ResolvedClip clip)? onDisk,
   }) async {
     final banned = {...await store.spoiledAssets(t.titleId), ...exclude};
     final key = 'src:${t.groupKey}';
@@ -383,7 +384,7 @@ class ClipResolver {
       final hit = _fromCache(entry);
       if (hit == null) return null;
       if (hit.source.origin == ClipOrigin.animeTheme) return hit;
-      return onDisk != null && onDisk(hit) ? hit : null;
+      return onDisk != null && await onDisk(hit) ? hit : null;
     }
     if (!(t.anime && t.isShow)) return null;
     final (ops, _) = await _openings(t);
@@ -618,7 +619,12 @@ class ClipResolver {
     final url = servers.clipUrl(serverId, partKey);
     if (url == null) return null;
     return ResolvedClip(
-      source: ClipSource(uri: url, origin: ClipOrigin.plexExtra, preloadable: !_slowServers.contains(serverId)),
+      source: ClipSource(
+        uri: url,
+        origin: ClipOrigin.plexExtra,
+        preloadable: !_slowServers.contains(serverId),
+        cacheKey: ReelClipCache.keyFor(serverId, partKey),
+      ),
       assetId: asset,
       label: label,
       serverId: serverId,

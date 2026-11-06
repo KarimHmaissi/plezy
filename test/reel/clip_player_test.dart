@@ -38,16 +38,28 @@ class FakeClipEngine implements ClipEngine {
   @override
   Player get player => throw UnimplementedError();
 
+  /// The disk cache key each open and preload was sent (V2-10), by
+  /// `open <uri>` / `preload <uri>`.
+  final cacheKeys = <String, String?>{};
+
   @override
-  Future<void> open(String uri) async {
+  Future<void> open(String uri, {String? cacheKey}) async {
     calls.add('open $uri');
+    cacheKeys['open $uri'] = cacheKey;
     await openGate?.future;
   }
 
   /// `preload <uri>` for the next card; other ranks say theirs (V2-09).
   @override
-  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin}) async =>
-      calls.add(rank == ClipPreloadRank.next ? 'preload $uri' : 'preload $uri as ${rank.name}');
+  Future<void> preload(
+    String uri, {
+    ClipPreloadRank rank = ClipPreloadRank.next,
+    ClipOrigin? origin,
+    String? cacheKey,
+  }) async {
+    cacheKeys['preload $uri'] = cacheKey;
+    calls.add(rank == ClipPreloadRank.next ? 'preload $uri' : 'preload $uri as ${rank.name}');
+  }
 
   @override
   Future<void> clearPreloads({ClipPreloadRank? rank}) async =>
@@ -124,7 +136,7 @@ class FakeClipEngine implements ClipEngine {
 /// A core that throws on its open (it couldn't start, or refused the clip).
 class _RefusingEngine extends FakeClipEngine {
   @override
-  Future<void> open(String uri) async {
+  Future<void> open(String uri, {String? cacheKey}) async {
     calls.add('open $uri');
     throw PlatformException(code: 'open', message: 'the core could not open the clip');
   }
@@ -470,6 +482,43 @@ void main() {
       await clips.preload(_a);
       await clips.release();
       expect(clips.preloaded, isEmpty);
+    });
+  });
+
+  group('disk cache (V2-10)', () {
+    const key = 'plex:server-a:/library/parts/41/1700000000/file.mp4';
+    const plex = ClipSource(
+      uri: 'https://cdn.example/p.mp4?X-Plex-Token=abc123',
+      origin: ClipOrigin.plexExtra,
+      cacheKey: key,
+    );
+
+    test('a Plex clip opens and preloads with its cache key; an opening with none', () async {
+      await clips.preload(plex);
+      await clips.preload(_b, rank: ClipPreloadRank.previous);
+      await clips.play(plex);
+      await clips.play(_b);
+      expect(engine.cacheKeys, {
+        'preload ${plex.uri}': key,
+        'preload ${_b.uri}': null,
+        'open ${plex.uri}': key,
+        'open ${_b.uri}': null,
+      });
+    });
+
+    test('the card two ahead holds a Plex clip only (D1: an opening never goes to disk)', () async {
+      await clips.preload(_b, rank: ClipPreloadRank.ahead);
+      expect(engine.calls, isEmpty, reason: 'nothing held, so nothing to clear');
+      expect(clips.preloaded, isEmpty);
+      await clips.preload(_a, rank: ClipPreloadRank.ahead);
+      expect(clips.preloaded, isEmpty, reason: 'a Plex clip without a key is not cached either');
+      await clips.preload(plex, rank: ClipPreloadRank.ahead);
+      expect(engine.calls, ['preload ${plex.uri} as ahead']);
+      expect(clips.preloaded, {ClipPreloadRank.ahead: plex.uri});
+      // Two steps later it is the next card: it moves, as the core rebuilds it in memory.
+      await clips.preload(plex);
+      expect(clips.preloaded, {ClipPreloadRank.next: plex.uri});
+      expect(engine.calls.last, 'preload ${plex.uri}');
     });
   });
 

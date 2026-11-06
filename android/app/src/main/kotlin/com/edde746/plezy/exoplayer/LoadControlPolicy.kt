@@ -162,6 +162,12 @@ internal object LoadControlPolicy {
   const val CLIP_PRELOAD_DECK_HEAD_MS = 2_000L
 
   /**
+   * V2-10: the card two ahead keeps its first five seconds on disk only
+   * (`specifiedRangeCached`), never in memory, so it adds nothing to [CLIP_PRELOAD_TARGET_BYTES].
+   */
+  const val CLIP_PRELOAD_AHEAD_CACHED_MS = 5_000L
+
+  /**
    * V2-09: the most every preloaded clip together may hold in memory. media3 1.11.0 gives the
    * preload player (`PlayerId.PRELOAD`) its own entry of 144179200 bytes
    * (`DEFAULT_TARGET_BUFFER_BYTES_FOR_PRELOAD`, put in by `DefaultLoadControl.Builder()`), and a

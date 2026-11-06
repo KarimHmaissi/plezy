@@ -8811,6 +8811,27 @@ class Translations$reel$settings$en {
 	/// en: 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place'
 	String get showTabDescription => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place';
 
+	/// en: 'Storage'
+	String get storage => 'Storage';
+
+	/// en: 'Clear Reel cache'
+	String get clearCache => 'Clear Reel cache';
+
+	/// en: 'Trailers the Reel keeps on this device so they open faster'
+	String get clearCacheDescription => 'Trailers the Reel keeps on this device so they open faster';
+
+	/// en: '${used} of ${cap} on this device'
+	String clearCacheUsage({required Object used, required Object cap}) => '${used} of ${cap} on this device';
+
+	/// en: 'Remove the trailers the Reel keeps on this device? They download again the next time they play.'
+	String get clearCacheConfirm => 'Remove the trailers the Reel keeps on this device? They download again the next time they play.';
+
+	/// en: 'Reel cache cleared'
+	String get clearCacheDone => 'Reel cache cleared';
+
+	/// en: 'Couldn't clear the Reel cache'
+	String get clearCacheFailed => 'Couldn\'t clear the Reel cache';
+
 	/// en: 'Developer'
 	String get developer => 'Developer';
 
@@ -11836,6 +11857,13 @@ extension on Translations {
 			'reel.settings.captionsDescription' => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles',
 			'reel.settings.showTab' => 'Show the Reel tab',
 			'reel.settings.showTabDescription' => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place',
+			'reel.settings.storage' => 'Storage',
+			'reel.settings.clearCache' => 'Clear Reel cache',
+			'reel.settings.clearCacheDescription' => 'Trailers the Reel keeps on this device so they open faster',
+			'reel.settings.clearCacheUsage' => ({required Object used, required Object cap}) => '${used} of ${cap} on this device',
+			'reel.settings.clearCacheConfirm' => 'Remove the trailers the Reel keeps on this device? They download again the next time they play.',
+			'reel.settings.clearCacheDone' => 'Reel cache cleared',
+			'reel.settings.clearCacheFailed' => 'Couldn\'t clear the Reel cache',
 			'reel.settings.developer' => 'Developer',
 			'reel.settings.developerTools' => 'Reel debug tools',
 			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
@@ -12205,6 +12233,8 @@ extension on Translations {
 			'collections.empty' => 'Collection is empty',
 			'collections.deleteCollection' => 'Delete Collection',
 			'collections.deleteConfirm' => ({required Object title}) => 'Delete "${title}"? This can\'t be undone.',
+			_ => null,
+		} ?? switch (path) {
 			'collections.deleted' => 'Collection deleted',
 			'collections.deleteFailed' => 'Failed to delete collection',
 			'collections.deleteFailedWithError' => ({required Object error}) => 'Failed to delete collection: ${error}',
@@ -12212,8 +12242,6 @@ extension on Translations {
 			'collections.collectionName' => 'Collection Name',
 			'collections.enterCollectionName' => 'Enter collection name',
 			'collections.addedToCollection' => 'Added to collection',
-			_ => null,
-		} ?? switch (path) {
 			'collections.errorAddingToCollection' => 'Failed to add to collection',
 			'collections.created' => 'Collection created',
 			'collections.removeFromCollection' => 'Remove from collection',
@@ -12719,6 +12747,8 @@ extension on Translations {
 			'externalPlayer.useExternalPlayerDescription' => 'Open videos in another app',
 			'externalPlayer.selectPlayer' => 'Select Player',
 			'externalPlayer.customPlayers' => 'Custom Players',
+			_ => null,
+		} ?? switch (path) {
 			'externalPlayer.systemDefault' => 'System Default',
 			'externalPlayer.addCustomPlayer' => 'Add Custom Player',
 			'externalPlayer.playerName' => 'Player Name',
@@ -12726,8 +12756,6 @@ extension on Translations {
 			'externalPlayer.playerCommand' => 'Command',
 			'externalPlayer.playerPackage' => 'Package Name',
 			'externalPlayer.playerUrlScheme' => 'URL Scheme',
-			_ => null,
-		} ?? switch (path) {
 			'externalPlayer.off' => 'Off',
 			'externalPlayer.launchFailed' => 'Failed to open external player',
 			'externalPlayer.appNotInstalled' => ({required Object name}) => '${name} is not installed',

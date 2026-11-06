@@ -112,22 +112,60 @@ internal enum class ClipPreloadRank(val wire: String, val rankingData: Int, val 
   DECK_NEXT("deckNext", 3, LoadControlPolicy.CLIP_PRELOAD_DECK_HEAD_MS),
 
   /** The head of the deck ← goes to. */
-  DECK_PREVIOUS("deckPrevious", 4, LoadControlPolicy.CLIP_PRELOAD_DECK_HEAD_MS);
+  DECK_PREVIOUS("deckPrevious", 4, LoadControlPolicy.CLIP_PRELOAD_DECK_HEAD_MS),
+
+  /**
+   * V2-10: the card two ahead, a Plex clip only, written to the disk cache and never held in
+   * memory ([cachedOnly]).
+   */
+  AHEAD("ahead", 5, LoadControlPolicy.CLIP_PRELOAD_AHEAD_CACHED_MS);
+
+  /** This rank is only ever a disk preload: without the cache or a Plex key it holds nothing. */
+  val cachedOnly: Boolean get() = this == AHEAD
+
+  /**
+   * Whether a clip at this rank goes to disk rather than memory (V2-10): always for [AHEAD]; for
+   * a deck head when it is a Plex clip and the cache is on (plan D15 offers a Plex head only once
+   * its bytes are already on disk, so its preload reads the disk and adds no heap). The next card
+   * and the card behind stay in memory. AnimeThemes clips never reach the disk (D1).
+   */
+  fun usesDisk(cacheable: Boolean): Boolean = cacheable && (this == AHEAD || this == DECK_NEXT || this == DECK_PREVIOUS)
+
+  /** The ranking data a clip at this rank is added with: [CACHED_OFFSET] above it for a disk preload. */
+  fun rankingData(onDisk: Boolean): Int = rankingData + if (onDisk) CACHED_OFFSET else 0
 
   companion object {
     /** The preload manager's current playing index: every rank sorts by its distance from it. */
     const val PLAYING_INDEX = 0
 
+    /**
+     * Added to a disk preload's ranking data (V2-10): the manager sorts by distance from
+     * [PLAYING_INDEX], so every disk preload comes after every memory one, and [status] reads
+     * the stage back from it.
+     */
+    const val CACHED_OFFSET = 100
+
     /** A rank from the method channel; a missing one is [NEXT] (the only preload before V2-09). */
     fun fromWire(wire: String?): ClipPreloadRank? = if (wire == null) NEXT else entries.firstOrNull { it.wire == wire }
 
-    fun ofRankingData(rankingData: Int): ClipPreloadRank? = entries.firstOrNull { it.rankingData == rankingData }
+    fun ofRankingData(rankingData: Int): ClipPreloadRank? = entries.firstOrNull { it.rankingData == rankingData % CACHED_OFFSET }
+
+    /** Whether [rankingData] is a disk preload's ([CACHED_OFFSET]). */
+    fun isCachedRankingData(rankingData: Int): Boolean = rankingData >= CACHED_OFFSET
 
     /**
      * The preload manager's target for a source added with [rankingData]: its rank's range,
-     * loaded into memory. Anything else (it can't happen) gets the next card's.
+     * loaded into memory, or written to the disk cache for a disk preload (V2-10). Anything else
+     * (it can't happen) gets the next card's.
      */
-    fun status(rankingData: Int): DefaultPreloadManager.PreloadStatus = DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(ofRankingData(rankingData)?.loadMs ?: LoadControlPolicy.CLIP_PRELOAD_MS)
+    fun status(rankingData: Int): DefaultPreloadManager.PreloadStatus {
+      val ms = ofRankingData(rankingData)?.loadMs ?: LoadControlPolicy.CLIP_PRELOAD_MS
+      return if (isCachedRankingData(rankingData)) {
+        DefaultPreloadManager.PreloadStatus.specifiedRangeCached(ms)
+      } else {
+        DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(ms)
+      }
+    }
   }
 }
 

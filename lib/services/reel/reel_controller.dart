@@ -11,6 +11,7 @@ import '../memory_trim_policy.dart';
 import '../settings_service.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
+import 'reel_clip_cache.dart';
 import 'reel_data_budget.dart';
 import 'reel_decay.dart';
 import 'reel_deck_prefs.dart';
@@ -273,7 +274,9 @@ class ReelController extends ChangeNotifier {
     ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
     ReelPrefetcher? prefetcher,
+    ReelClipCache? clipCache,
   }) : _clock = clock ?? DateTime.now,
+       _clipCache = clipCache ?? ReelClipCache.instance,
        _clipEnd = clipEnd ?? clipEndPref,
        _prefetch = prefetcher ?? ReelPrefetcher(),
        deckPrefsChanged = deckPrefsChanged ?? Listenable.merge([ReelStore.deckPrefsChanged, Customisation.changed]) {
@@ -292,6 +295,10 @@ class ReelController extends ChangeNotifier {
   final List<ReelDeck> decks;
   final ClipResolver resolver;
   final ClipPlayer clips;
+
+  /// The TV clip core's disk cache (V2-10): which Plex deck heads are on
+  /// disk (D15).
+  final ReelClipCache _clipCache;
   final ReelStore store;
   final ReelMedia media;
   final ReelWatch onWatch;
@@ -1621,7 +1628,8 @@ class ReelController extends ChangeNotifier {
   /// decoded ahead.
   ///
   /// TV (plans V2-09 and V2-11 Wave B): the clip core preloads +1 (rank
-  /// next) and -1 (rank previous) once each is resolved, and after +2 the
+  /// next) and -1 (rank previous) once each is resolved, writes +2's Plex
+  /// clip to disk (rank ahead, V2-10), and after +2 the
   /// heads of the neighbouring decks ([_deckHeads]), only once the card on
   /// screen has shown its first frame. A lean step keeps the next card only;
   /// memory pressure or Stills only keeps none.
@@ -1679,8 +1687,14 @@ class ReelController extends ChangeNotifier {
           ),
         );
       }
-      if (preloads && (offset == 1 || offset == -1)) {
-        final rank = offset == 1 ? ClipPreloadRank.next : ClipPreloadRank.previous;
+      // V2-10: the card two ahead is written to disk (a Plex clip only, the
+      // core holds nothing for any other), so it adds no heap.
+      if (preloads && (offset == 1 || offset == -1 || offset == 2)) {
+        final rank = switch (offset) {
+          1 => ClipPreloadRank.next,
+          -1 => ClipPreloadRank.previous,
+          _ => ClipPreloadRank.ahead,
+        };
         wanted.add(rank);
         tasks.add(
           ReelPrefetchTask(
@@ -1790,6 +1804,7 @@ class ReelController extends ChangeNotifier {
     return switch ((j - index) * _direction) {
       1 => ClipPreloadRank.next,
       -1 when _preloadRanks.contains(ClipPreloadRank.previous) => ClipPreloadRank.previous,
+      2 when _preloadRanks.contains(ClipPreloadRank.ahead) => ClipPreloadRank.ahead,
       _ => null,
     };
   }
@@ -1836,7 +1851,12 @@ class ReelController extends ChangeNotifier {
     ResolvedClip? clip;
     try {
       clip = await resolver
-          .lookupWithoutServers(c.title, exclude: _excluded[c.id] ?? const {})
+          .lookupWithoutServers(
+            c.title,
+            exclude: _excluded[c.id] ?? const {},
+            // V2-10: a Plex head only once the clip core has its bytes on disk.
+            onDisk: (hit) => _clipCache.isOnDisk(hit.source.cacheKey),
+          )
           .timeout(timeouts.lookup);
     } catch (e) {
       appLogger.d('Reel: deck head lookup failed (${e.runtimeType})');

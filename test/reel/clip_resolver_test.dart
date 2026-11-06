@@ -1129,12 +1129,29 @@ void main() {
       expect(atCalls, isEmpty);
     });
 
+    test('a Plex clip carries a disk cache key with no token or address; an opening none (V2-10)', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      final clip = await resolver.resolve(film());
+      expect(clip?.source.cacheKey, 'plex:a:/services/iva/assets/87/video.mp4');
+      expect(clip?.source.uri, contains('token='));
+      expect(clip?.source.cacheKey, isNot(contains('token')));
+      expect(clip?.source.cacheKey, isNot(contains('.example')));
+      // Read back from the row: the same key.
+      expect(
+        (await resolver.lookupWithoutServers(film(), onDisk: (_) async => true))?.source.cacheKey,
+        clip?.source.cacheKey,
+      );
+      final opening = await resolver.resolve(anime);
+      expect(opening?.source.origin, ClipOrigin.animeTheme);
+      expect(opening?.source.cacheKey, isNull);
+    });
+
     test('a cached Plex clip is a head only when its bytes are on disk', () async {
       servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
       await resolver.resolve(film());
       servers.calls.clear();
       expect(await resolver.lookupWithoutServers(film()), isNull);
-      final onDisk = await resolver.lookupWithoutServers(film(), onDisk: (c) => c.assetId == 'plex:87');
+      final onDisk = await resolver.lookupWithoutServers(film(), onDisk: (c) async => c.assetId == 'plex:87');
       expect(onDisk?.assetId, 'plex:87');
       expect(servers.calls, isEmpty);
     });

@@ -128,6 +128,9 @@ class ExoPlayerCore(private val activity: Activity) :
     private const val FPS_SAMPLE_COUNT = 8
     private const val AUDIO_BOUNCE_TIMEOUT_MS = 1000L
 
+    /** V2-10: clip URIs whose disk cache key the clip core remembers. */
+    private const val CLIP_CACHE_KEYS_KEPT = 32
+
     /** Fallback for stacks that only stringify the status instead of raising
      *  [HttpDataSource.InvalidResponseCodeException]. */
     private val RESPONSE_CODE_PATTERN = Regex("""\bResponse code: (\d{3})\b""")
@@ -428,6 +431,27 @@ class ExoPlayerCore(private val activity: Activity) :
 
   /** When each preload (by mediaId) was handed to the manager, for its `[ReelPreload] ready` line. */
   private val preloadAskedAt = HashMap<String, Long>()
+
+  /** Clip mode (V2-10): the ranking data each preload item was added with, by URI. */
+  private val preloadRankingData = HashMap<String, Int>()
+
+  /**
+   * Clip mode (V2-10): the disk cache, when it could open. Only the clip core reaches it; the
+   * main player's data sources never do.
+   */
+  private var clipCache: androidx.media3.datasource.cache.Cache? = null
+
+  /**
+   * Clip mode (V2-10): the disk cache key Dart sent for each clip URI (Plex clips only), the
+   * most recent [CLIP_CACHE_KEYS_KEPT]. A clip opened or preloaded without one streams as
+   * before.
+   */
+  private val clipCacheKeys = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > CLIP_CACHE_KEYS_KEPT
+  }
+
+  /** Clip mode (V2-10): bytes the clip playing has read from disk, for its `[ReelCache]` line. */
+  private val clipCacheBytesRead = AtomicLong()
   private var currentMediaUri: String? = null
   private var currentHeaders: Map<String, String>? = null
   private var currentMediaIsLive: Boolean = false
@@ -844,7 +868,16 @@ class ExoPlayerCore(private val activity: Activity) :
         }.toTypedArray()
       }
 
-      val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory!!, wrappedExtractorsFactory)
+      // V2-10: the clip core reads and writes Plex clips through the process-wide disk cache;
+      // AnimeThemes clips (no key) and the main player stream as before.
+      val cache = if (clipMode) ClipDiskCache.obtain(activity) else null
+      clipCache = cache
+      val playbackDataSourceFactory = if (cache != null) {
+        ClipCacheDataSourceFactory(cache, dataSourceFactory!!, clipCacheEvents)
+      } else {
+        dataSourceFactory!!
+      }
+      val mediaSourceFactory = DefaultMediaSourceFactory(playbackDataSourceFactory, wrappedExtractorsFactory)
         .setSubtitleParserFactory(subtitleParserFactory)
       playbackMediaSourceFactory = mediaSourceFactory
 
@@ -936,6 +969,14 @@ class ExoPlayerCore(private val activity: Activity) :
           .setRenderersFactory(wrappedRenderersFactory)
           .setMediaSourceFactory(mediaSourceFactory)
           .setTrackSelectorFactory(selectorFactory)
+        // V2-10. The Builder's cache never reaches our own media source factory (media3 1.11.0,
+        // javap: setMediaSourceFactory installs a supplier whose setCache is a no-op), so
+        // playback reads the cache through playbackDataSourceFactory above. Here it only turns on
+        // the manager's pre-cache stage (specifiedRangeCached), which writes with this data
+        // source factory (without it, a plain DefaultDataSource with none of our settings).
+        if (cache != null) {
+          builder.setCache(cache).setDataSourceFactory(dataSourceFactory!!)
+        }
         // V2-18: a clip never asks the display for a new refresh rate.
         playerBuilder.setVideoChangeFrameRateStrategy(ClipCorePolicy.VIDEO_CHANGE_FRAME_RATE_STRATEGY)
         builder.buildExoPlayer(playerBuilder).also { player ->
@@ -947,6 +988,11 @@ class ExoPlayerCore(private val activity: Activity) :
           preloadTrackSelector = selectorFactory.created.lastOrNull()?.takeIf { it !== trackSelector }
           player.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
           emitLog("info", "init", "Clip mode: preload manager on, buffer ${bufferDurations.minBufferMs}-${bufferDurations.maxBufferMs}ms")
+          emitLog(
+            "info",
+            "ReelCache",
+            if (cache != null) "disk cache on used=${cache.cacheSpace / 1024}KB" else "disk cache off"
+          )
           emitLog(
             "info",
             "ReelClip",
@@ -1415,6 +1461,7 @@ class ExoPlayerCore(private val activity: Activity) :
       }
     }
     emitLog("error", "player", "Error code=${error.errorCode}: ${error.message}, cause=${causeChain.ifEmpty { "none" }}")
+    if (clipMode) evictClipCacheOnError(error)
     stopFrameWatchdog()
     cancelDecoderHangCheck()
     cancelResumeStallWatchdog()
@@ -2884,6 +2931,8 @@ class ExoPlayerCore(private val activity: Activity) :
     val mediaItemBuilder = MediaItem.Builder()
       .setMediaId(currentMediaGeneration.toString())
       .setUri(uri)
+    // V2-10: a Plex clip's disk cache key (never the URI, which carries the token).
+    if (clipMode) clipCacheKeyFor(uri)?.let(mediaItemBuilder::setCustomCacheKey)
 
     // Every Live TV backend negotiates HLS before opening the native player.
     // Pin the MIME type so tokenized manifests never fall back to progressive
@@ -2929,6 +2978,7 @@ class ExoPlayerCore(private val activity: Activity) :
         "clip",
         "Open clip: preloaded=${preloaded != null} rank=${rank?.wire ?: "none"} held=${preloadSummary()}"
       )
+      logClipCacheOpen(uri)
       if (item != null && preloaded != null) {
         // The preloaded item was built before this open, so its mediaId is "clip:N", not the
         // generation; map it, or every generation-gated event (first frame, decoder checks) for
@@ -3191,7 +3241,10 @@ class ExoPlayerCore(private val activity: Activity) :
         emitLog("debug", "decoder-hang", "First frame rendered — decoder OK")
         logNativeDvFirstFrameIfNeeded()
         logDolbyVisionPlaybackPathIfNeeded()
-        if (clipMode) logClipFirstFrame(mediaGeneration)
+        if (clipMode) {
+          logClipFirstFrame(mediaGeneration)
+          logClipCacheFirstFrame()
+        }
       }
       // STATE_READY fires when the player has enough buffered to start, but
       // the first frame may not be on screen yet (decoder init + keyframe
@@ -4512,40 +4565,132 @@ class ExoPlayerCore(private val activity: Activity) :
    * rank, so at most four. A clip already held at another rank moves to this one with what it
    * has buffered (it keeps its first rank's range); the clip playing is never preloaded.
    * [origin] (`plexExtra` / `animeTheme`) is for the log line only. No-op outside clip mode.
+   *
+   * V2-10: [cacheKey] is a Plex clip's disk cache key. With it (and the cache on), the card two
+   * ahead ([ClipPreloadRank.AHEAD]) and a deck head are written to disk instead of memory
+   * ([ClipPreloadRank.usesDisk]). [ClipPreloadRank.AHEAD] holds nothing without one, and a Plex
+   * deck head is held only while its bytes are still on disk (plan D15: no Plex read for a
+   * head). A clip that moves between a disk rank and a memory rank gets a fresh source with the
+   * new stage; its bytes are on disk by then.
    */
-  internal fun preloadClip(uri: String, rank: ClipPreloadRank = ClipPreloadRank.NEXT, origin: String? = null) {
+  internal fun preloadClip(uri: String, rank: ClipPreloadRank = ClipPreloadRank.NEXT, origin: String? = null, cacheKey: String? = null) {
     val manager = preloadManager ?: return
     if (!clipMode) return
+    if (cacheKey != null) rememberClipCacheKey(uri, cacheKey)
     if (uri == currentMediaUri) {
       emitLog("info", "ReelPreload", "skip rank=${rank.wire}: it is the clip playing")
       return
     }
-    if (preloadSlots[rank] == uri) return
+    val key = clipCacheKeyFor(uri)
+    val cacheable = clipCache != null && key != null
+    if (rank.cachedOnly && !cacheable) {
+      emitLog("info", "ReelPreload", "skip rank=${rank.wire}: ${if (clipCache == null) "no disk cache" else "not a Plex clip"}")
+      clearPreloads(rank)
+      return
+    }
+    if (cacheable && (rank == ClipPreloadRank.DECK_NEXT || rank == ClipPreloadRank.DECK_PREVIOUS) && ClipDiskCache.onDisk(listOf(key!!)).isEmpty()) {
+      emitLog("info", "ReelPreload", "skip rank=${rank.wire}: Plex head no longer on disk key=${ClipCachePolicy.logId(key)}")
+      clearPreloads(rank)
+      return
+    }
+    val rankingData = rank.rankingData(rank.usesDisk(cacheable))
+    // V2-10: a move between disk and memory needs a source asked for the other stage.
+    val heldRankingData = preloadRankingData[uri]
+    val restaged = preloadItems.containsKey(uri) && heldRankingData != null &&
+      ClipPreloadRank.isCachedRankingData(heldRankingData) != ClipPreloadRank.isCachedRankingData(rankingData)
+    if (preloadSlots[rank] == uri && !restaged) return
     val heldAt = preloadSlots.entries.firstOrNull { it.value == uri }?.key
     // Drop the rank's old clip, and any source of this clip no rank holds (the one the player
     // played before: a clip played, then preloaded again as the card behind, starts afresh).
     preloadSlots.remove(rank)
     prunePreloads()
     if (heldAt != null) preloadSlots.remove(heldAt)
+    if (restaged) dropPreloadItem(uri)
     preloadSlots[rank] = uri
     val item = preloadItems[uri] ?: MediaItem.Builder()
       // No headers: clips carry no request headers at all (they are shared across every source
       // on this core, and an AnimeThemes request must never see a Plex header).
       .setUri(uri)
       .setMediaId("clip:${++preloadSerial}")
+      .apply { key?.let(::setCustomCacheKey) }
       .build()
       .also {
         preloadItems[uri] = it
+        preloadRankingData[uri] = rankingData
         preloadAskedAt[it.mediaId] = SystemClock.elapsedRealtime()
-        manager.add(it, rank.rankingData)
+        manager.add(it, rankingData)
       }
     manager.invalidate()
+    val stage = if (ClipPreloadRank.isCachedRankingData(preloadRankingData[uri] ?: rankingData)) "disk" else "memory"
     emitLog(
       "info",
       "ReelPreload",
       "hold rank=${rank.wire} ${item.mediaId}${if (heldAt != null) " (moved from ${heldAt.wire})" else ""} " +
-        "origin=${origin ?: "?"} held=${preloadSummary()}"
+        "origin=${origin ?: "?"} stage=$stage key=${ClipCachePolicy.logId(key)} held=${preloadSummary()}"
     )
+  }
+
+  /** V2-10: remembers [cacheKey] as [uri]'s disk cache key, if it is a usable one. */
+  internal fun rememberClipCacheKey(uri: String, cacheKey: String) {
+    if (!ClipCachePolicy.isCacheable(cacheKey)) {
+      emitLog("warn", "ReelCache", "ignored a cache key that is not a Plex clip key")
+      return
+    }
+    clipCacheKeys[uri] = cacheKey
+  }
+
+  /** V2-10: [uri]'s disk cache key, when the cache is on and Dart sent one. */
+  private fun clipCacheKeyFor(uri: String): String? = if (clipCache == null) null else clipCacheKeys[uri]
+
+  /** `[ReelCache] open`: how much of the clip about to play is already on disk. */
+  private fun logClipCacheOpen(uri: String) {
+    clipCacheBytesRead.set(0)
+    val key = clipCacheKeyFor(uri)
+    if (key == null) {
+      emitLog("info", "ReelCache", "open key=none (${if (clipCache == null) "cache off" else "not cached"})")
+      return
+    }
+    val onDisk = ClipDiskCache.onDisk(listOf(key)).isNotEmpty()
+    emitLog("info", "ReelCache", "open key=${ClipCachePolicy.logId(key)} onDisk=$onDisk")
+  }
+
+  /** `[ReelCache] first frame`: bytes read from disk since the open (all clips on this core). */
+  private fun logClipCacheFirstFrame() {
+    val key = currentMediaUri?.let(::clipCacheKeyFor) ?: return
+    emitLog("info", "ReelCache", "first frame key=${ClipCachePolicy.logId(key)} diskRead=${clipCacheBytesRead.get() / 1024}KB")
+  }
+
+  /**
+   * V2-10: a clip that fails to load or parse may have failed on its cached bytes (a file
+   * replaced on the server, a stale redirect, a short write); drop them, so Dart's one
+   * re-resolve (V2-56) reads it afresh.
+   */
+  private fun evictClipCacheOnError(error: PlaybackException) {
+    val key = currentMediaUri?.let(::clipCacheKeyFor) ?: return
+    if (error.errorCode !in PlaybackException.ERROR_CODE_IO_UNSPECIFIED until PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) return
+    ClipDiskCache.evict(key)
+    emitLog("info", "ReelCache", "evict key=${ClipCachePolicy.logId(key)} after error ${error.errorCode}")
+  }
+
+  /** V2-10: counts the bytes the clip core reads from disk. Called on loading threads. */
+  private val clipCacheEvents = object : androidx.media3.datasource.cache.CacheDataSource.EventListener {
+    override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+      clipCacheBytesRead.addAndGet(cachedBytesRead)
+    }
+
+    override fun onCacheIgnored(reason: Int) {
+      Log.d(TAG, "[ReelCache] cache ignored reason=$reason")
+    }
+  }
+
+  private fun dropPreloadItem(uri: String) {
+    val manager = preloadManager ?: return
+    preloadItems.remove(uri)?.let {
+      manager.remove(it)
+      clipGenerations.remove(it.mediaId)
+      preloadAskedAt.remove(it.mediaId)
+    }
+    preloadRankingData.remove(uri)
   }
 
   /**
@@ -4573,6 +4718,7 @@ class ExoPlayerCore(private val activity: Activity) :
         clipGenerations.remove(it.mediaId)
         preloadAskedAt.remove(it.mediaId)
       }
+      preloadRankingData.remove(u)
     }
   }
 
@@ -4650,6 +4796,10 @@ class ExoPlayerCore(private val activity: Activity) :
     preloadItems.clear()
     preloadSlots.clear()
     preloadAskedAt.clear()
+    preloadRankingData.clear()
+    clipCacheKeys.clear()
+    // The disk cache is process-wide (ClipDiskCache) and stays open for the next core.
+    clipCache = null
     preloadManager?.release()
     preloadManager = null
 

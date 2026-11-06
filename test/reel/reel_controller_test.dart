@@ -20,6 +20,7 @@ import 'package:plezy/services/memory_trim_policy.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
+import 'package:plezy/services/reel/reel_clip_cache.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_data_budget.dart';
 import 'package:plezy/services/reel/reel_deck_prefs.dart';
@@ -33,6 +34,20 @@ import 'package:plezy/utils/app_logger.dart';
 
 import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
+
+/// The clip core's disk cache (V2-10), holding the clips of [keys].
+class _DiskCache extends ReelClipCache {
+  _DiskCache(this.keys) : super(supported: false);
+
+  final Set<String> keys;
+  final asked = <String>[];
+
+  @override
+  Future<Set<String>> onDisk(Iterable<String> keys) async {
+    asked.addAll(keys);
+    return keys.where(this.keys.contains).toSet();
+  }
+}
 
 class _Servers implements ReelServers {
   @override
@@ -387,6 +402,7 @@ void main() {
     bool Function()? metered,
     Listenable? linkChanged,
     bool Function()? normalize,
+    ReelClipCache? clipCache,
   }) => ReelController(
     decks:
         decks ??
@@ -427,6 +443,7 @@ void main() {
     metered: metered,
     linkChanged: linkChanged,
     clock: clock,
+    clipCache: clipCache ?? _DiskCache(const {}),
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
       built.add(id);
@@ -3162,15 +3179,23 @@ void main() {
       );
       await c.start();
       await frame();
-      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')});
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2'), ClipPreloadRank.ahead: clip('3')});
       await c.step(1);
       expect(engine.calls, contains('open ${clip('2')}'));
       await frame();
-      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('3'), ClipPreloadRank.previous: clip('1')});
+      expect(c.clips.preloaded, {
+        ClipPreloadRank.next: clip('3'),
+        ClipPreloadRank.previous: clip('1'),
+        ClipPreloadRank.ahead: clip('4'),
+      });
       expect(engine.calls, contains('preload ${clip('1')} as previous'));
 
       await c.step(-1);
-      expect(engine.calls.last, 'clearPreloads next', reason: 'nothing above card 1: card 3 is let go once 1 opened');
+      expect(
+        engine.calls.reversed.take(2),
+        unorderedEquals(['clearPreloads next', 'clearPreloads ahead']),
+        reason: 'nothing above card 1: cards 3 and 4 are let go once 1 opened',
+      );
       expect(engine.calls, contains('open ${clip('1')}'));
       await frame();
       final ttff = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).first;
@@ -3191,7 +3216,30 @@ void main() {
       await pumpEventQueue();
       expect(c.clips.preloaded, isEmpty);
       await frame();
-      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')});
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2'), ClipPreloadRank.ahead: clip('3')});
+      c.dispose();
+    });
+
+    test('the card two ahead goes to disk with its cache key; an opening two ahead never does (V2-10)', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), animeCard('3'), _card('4')]),
+        ],
+        aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+        animeThemes: themes,
+      );
+      await c.start();
+      await frame();
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')}, reason: '+2 is an AnimeThemes opening (D1)');
+      expect(engine.calls.where((x) => x.endsWith('as ahead')), isEmpty);
+
+      await c.step(1);
+      await frame();
+      // +2 is now card 4, a Plex trailer: preloaded to disk under its key.
+      expect(c.clips.preloaded[ClipPreloadRank.ahead], clip('4'));
+      expect(engine.cacheKeys['preload ${clip('4')}'], 'plex:s1:/services/iva/assets/4/video.mp4');
+      expect(engine.cacheKeys['open ${clip('2')}'], 'plex:s1:/services/iva/assets/2/video.mp4');
+      expect(engine.cacheKeys['preload $opening'], isNull);
       c.dispose();
     });
 
@@ -3311,6 +3359,42 @@ void main() {
         expect(atAsks, isEmpty, reason: "c's opening is cached from its visit");
         expect(c.clips.preloaded[ClipPreloadRank.deckPrevious], opening);
         expect(c.clips.preloaded.containsKey(ClipPreloadRank.deckNext), isFalse);
+        c.dispose();
+      });
+
+      test('a Plex head already on disk is preloaded from it, with no Plex read (V2-10)', () async {
+        const headKey = 'plex:s1:/services/iva/assets/5/video.mp4';
+        final disk = _DiskCache({headKey});
+        final servers = _RecordingServers();
+        final c = make(
+          servers: servers,
+          clipCache: disk,
+          decks: [
+            _Deck('a', [_card('1')]),
+            _Deck('b', [_card('5')]),
+            _Deck('c', [_card('60')]),
+          ],
+        );
+        await c.start();
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        expect(c.deck.id, 'a');
+        servers.reads.clear();
+        disk.asked.clear();
+        await frame();
+        expect(servers.reads, isEmpty, reason: 'a head is never read for');
+        expect(c.clips.preloaded[ClipPreloadRank.deckNext], clip('5'));
+        expect(engine.cacheKeys['preload ${clip('5')}'], headKey);
+        expect(
+          c.clips.preloaded.containsKey(ClipPreloadRank.deckPrevious),
+          isFalse,
+          reason: "c's head is a Plex clip that is not on disk",
+        );
+        expect(disk.asked, containsAll([headKey, 'plex:s1:/services/iva/assets/60/video.mp4']));
         c.dispose();
       });
 

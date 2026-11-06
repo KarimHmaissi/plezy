@@ -215,6 +215,8 @@ class PlayerAndroid extends PlayerBase {
         'hasStartPosition': hasStartPosition,
         'autoPlay': play,
         'isLive': isLive,
+        // V2-10: a Plex clip's disk cache key (clip mode only; never the URL).
+        if (clipMode) 'cacheKey': ?_clipCacheKeys[media.uri],
         if (_contentFrameRate != null) 'contentFrameRate': _contentFrameRate,
         if (externalSubtitles != null && externalSubtitles.isNotEmpty)
           'externalSubtitles': externalSubtitles
@@ -248,10 +250,28 @@ class PlayerAndroid extends PlayerBase {
   /// `previous`, `deckNext` or `deckPrevious`; the core holds one clip per
   /// rank, V2-09). [origin] is for the core's log line. Initializes the core
   /// if needed.
-  Future<void> preloadClip(String uri, {String rank = 'next', String? origin}) async {
+  Future<void> preloadClip(String uri, {String rank = 'next', String? origin, String? cacheKey}) async {
     if (disposed || !clipMode) return;
     await _ensureInitialized();
-    await invoke('preloadClip', {'uri': uri, 'rank': rank, 'origin': ?origin});
+    if (cacheKey != null) rememberClipCacheKey(uri, cacheKey);
+    await invoke('preloadClip', {'uri': uri, 'rank': rank, 'origin': ?origin, 'cacheKey': ?cacheKey});
+  }
+
+  /// Clip mode (V2-10): the disk cache key the next [open] of [uri] sends,
+  /// for the most recent [_clipCacheKeysKept] clips.
+  final Map<String, String> _clipCacheKeys = {};
+  static const int _clipCacheKeysKept = 16;
+
+  /// Clip mode: [open] of [uri] reads and writes the clip core's disk cache
+  /// under [cacheKey] (a Plex clip's, `ReelClipCache.keyFor`).
+  void rememberClipCacheKey(String uri, String cacheKey) {
+    if (!clipMode) return;
+    _clipCacheKeys
+      ..remove(uri)
+      ..[uri] = cacheKey;
+    while (_clipCacheKeys.length > _clipCacheKeysKept) {
+      _clipCacheKeys.remove(_clipCacheKeys.keys.first);
+    }
   }
 
   /// Clip mode: drop [rank]'s preload, or every one when null.

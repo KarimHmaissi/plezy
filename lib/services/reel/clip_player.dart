@@ -16,11 +16,16 @@ import 'reel_volume.dart';
 enum ClipOrigin { plexExtra, animeTheme }
 
 class ClipSource {
-  const ClipSource({required this.uri, required this.origin, this.length, this.preloadable = true});
+  const ClipSource({required this.uri, required this.origin, this.length, this.preloadable = true, this.cacheKey});
 
   final String uri;
   final ClipOrigin origin;
   final Duration? length;
+
+  /// A Plex clip's disk cache key ([ReelClipCache.keyFor], plan V2-10): the
+  /// TV clip core keeps its bytes on disk under it. Null for AnimeThemes
+  /// (D1: never written to disk).
+  final String? cacheKey;
 
   /// Whether the next card may preload this clip. False for a clip on a
   /// server marked slow this session (spec §8: never preloaded off a slow
@@ -42,7 +47,12 @@ enum ClipPreloadRank {
   next,
   previous,
   deckNext,
-  deckPrevious;
+  deckPrevious,
+
+  /// The card two ahead (V2-10): a Plex clip's first 5 s written to the
+  /// disk cache, never held in memory. Holds nothing for a clip without a
+  /// cache key.
+  ahead;
 
   /// A neighbouring deck's head (plan D15: AnimeThemes, or a clip on disk).
   bool get deckHead => this == deckNext || this == deckPrevious;
@@ -53,11 +63,15 @@ enum ClipPreloadRank {
 /// screen, which the Reel never opens; this interface keeps it that way.
 abstract interface class ClipEngine {
   Player get player;
-  Future<void> open(String uri);
+
+  /// Opens [uri]; [cacheKey] (a Plex clip's, V2-10) has the core read and
+  /// write its bytes through the disk cache.
+  Future<void> open(String uri, {String? cacheKey});
 
   /// Buffers [uri]'s first seconds as [rank], in place of what that rank
-  /// held (V2-09).
-  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin});
+  /// held (V2-09); with [cacheKey], the card two ahead and a deck head go to
+  /// disk instead of memory (V2-10).
+  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin, String? cacheKey});
 
   /// Drops [rank]'s preload, or every one when null.
   Future<void> clearPreloads({ClipPreloadRank? rank});
@@ -122,11 +136,18 @@ class ExoClipEngine implements ClipEngine {
   Player get player => _p;
 
   @override
-  Future<void> open(String uri) => _p.open(Media(uri), play: true);
+  Future<void> open(String uri, {String? cacheKey}) {
+    if (cacheKey != null) _p.rememberClipCacheKey(uri, cacheKey);
+    return _p.open(Media(uri), play: true);
+  }
 
   @override
-  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin}) =>
-      _p.preloadClip(uri, rank: rank.name, origin: origin?.name);
+  Future<void> preload(
+    String uri, {
+    ClipPreloadRank rank = ClipPreloadRank.next,
+    ClipOrigin? origin,
+    String? cacheKey,
+  }) => _p.preloadClip(uri, rank: rank.name, origin: origin?.name, cacheKey: cacheKey);
 
   @override
   Future<void> clearPreloads({ClipPreloadRank? rank}) => _p.clearPreloads(rank: rank?.name);
@@ -493,7 +514,7 @@ class ClipPlayer {
       unawaited(_fadeTo(0, outgoingFade));
     }
     try {
-      await e.open(source.uri).timeout(openLimit);
+      await e.open(source.uri, cacheKey: source.cacheKey).timeout(openLimit);
     } on TimeoutException {
       if (open != _opens || !identical(_engine, e)) return;
       appLogger.w('Reel: clip open timed out after ${openLimit.inMilliseconds}ms; the clip core is let go');
@@ -526,12 +547,14 @@ class ClipPlayer {
   /// rank. A clip the rank already holds is left as it is.
   Future<void> preload(ClipSource? source, {ClipPreloadRank rank = ClipPreloadRank.next}) async {
     if (source == null || !source.preloadable) return clearPreload(rank);
+    // The card two ahead is a disk preload of a Plex clip only (V2-10, D1).
+    if (rank == ClipPreloadRank.ahead && source.cacheKey == null) return clearPreload(rank);
     if (_preloaded[rank] == source.uri) return;
     final e = _ensure();
     // A clip held at another rank moves to this one (the core does the same).
     _preloaded.removeWhere((_, uri) => uri == source.uri);
     _preloaded[rank] = source.uri;
-    await _bounded(e.preload(source.uri, rank: rank, origin: source.origin), 'preload');
+    await _bounded(e.preload(source.uri, rank: rank, origin: source.origin, cacheKey: source.cacheKey), 'preload');
   }
 
   /// Empties [rank]'s preload; nothing to do when it holds nothing.
