@@ -2571,6 +2571,39 @@ void main() {
       },
     );
 
+    test("back online, Tonight's picks the caches didn't have offline are read again", () async {
+      final mode = _OfflineMode(true);
+      final media = _RecordingMedia();
+      final c = make(
+        media: media,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+        offlineMode: mode,
+        cachedItem: (_, _) async => null,
+      );
+      await c.start();
+      await c.save();
+      await c.step(1);
+      await c.save();
+      await pumpEventQueue();
+      // (A Save's watchlist mirror is the user's own action, read as online.)
+      final reads = media.reads.length;
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      await pumpEventQueue();
+      expect(c.current.picks.map((p) => p.item), [null, null], reason: 'not in the caches offline');
+      expect(media.reads, hasLength(reads), reason: 'no server read for the picks offline');
+
+      mode.isOffline = false;
+      await c.suspend();
+      await c.start();
+      expect(c.current.kind, ReelSlotKind.decide);
+      await pumpEventQueue();
+      expect(c.current.picks.map((p) => p.item?.id), ['2', '1'], reason: 'read from the server once back online');
+      c.dispose();
+    });
+
     test('no network at all (the profile link) is offline too', () async {
       final servers = _FlakyServers();
       final profile = ValueNotifier(const ReelPlaybackProfile(screen: ReelScreen.tv, maxHeight: 1080));

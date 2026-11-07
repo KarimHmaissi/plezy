@@ -39,8 +39,8 @@ abstract interface class ReelMedia {
   String? imageUrl(String serverId, String? path, {required int width});
 }
 
-/// A card's art and text from the caches alone (plan V2-15, offline): no
-/// server read. Null when nothing is cached.
+/// A card's art and text from the caches alone, with no server read (the
+/// warm start, V2-14, and offline, V2-15). Null when nothing is cached.
 typedef ReelCachedItem = Future<MediaItem?> Function(String serverId, String ratingKey);
 
 /// What the app does when the Reel hands a title over to real playback,
@@ -539,6 +539,12 @@ class ReelController extends ChangeNotifier {
     _clip.clear();
     _unknown.clear();
     _retried.clear();
+    // Back online, a pick the caches didn't have offline is read again
+    // (offline it read the caches alone, and a pick is otherwise read once).
+    if (!now) {
+      _pickItem.removeWhere((_, item) => item == null);
+      _pickReading.removeWhere((id, _) => !_pickItem.containsKey(id));
+    }
   }
 
   /// Offline and playing: says so once per offline spell.
