@@ -11,6 +11,7 @@ import 'ai_spend.dart';
 import 'ai_tools.dart';
 import 'ai_watch_state.dart';
 import 'claude_client.dart';
+import 'facts/title_facts.dart';
 
 /// Fork: what a running request is doing: a short step, or the answer's
 /// text so far.
@@ -111,6 +112,7 @@ class AiAgent {
     this.model = ClaudeModel.sonnet,
     ClaudeClient? claudeClient,
     HistoryBrain? brain,
+    this.ledger,
   }) : _client = claudeClient,
        brain = brain ?? (HistoryBrain.instance.status.value.profiles > 0 ? HistoryBrain.instance : null);
 
@@ -122,6 +124,14 @@ class AiAgent {
   final ClaudeModel model;
   ClaudeClient? _client;
 
+  /// Fork (V2-44): the pick ledger's facts (the Reel's, by title id), read
+  /// once per ask; none when null. Facts on the title lines, never weights.
+  final Future<Map<TitleId, LedgerSummary>> Function()? ledger;
+
+  /// A ledger read that takes longer than this is let go: the ask runs
+  /// without it.
+  static const Duration ledgerTimeout = Duration(seconds: 2);
+
   static const int maxSteps = 10;
 
   /// Thinking effort for each step.
@@ -131,7 +141,7 @@ class AiAgent {
 You are the film and TV helper inside Plezy, a Plex app on the user's TV. The user asks for something to watch; you find it on their own Plex servers and hand back a row of picks.
 
 How to work:
-- The user's library is large (about 30,000 films and 15,000 shows across two servers). You can't see it directly; use the tools.
+- The user's library can be large, across one or more servers. You can't see it directly; use the tools.
 - For "only what's here" requests (genres, years, recently added, unwatched, a person, a library such as Anime or 4K), use search_library and text_search.
 - For taste-based requests ("like X", "awesome 80s action"), use your own knowledge to think of strong candidates, then check them with find_titles. Combine both approaches when useful.
 - For "based on my history" or "for tonight" requests, use the summary of their watching when it's given (no need to call get_history for taste); otherwise call get_history first.
@@ -160,6 +170,29 @@ Questions about the user's own watching:
 - If the tools don't show it, say you don't know or can't find it. Never invent a title, a date or a count.
 - Recommendation requests that lean on history ("something like what I loved last year") still end with show_picks; similar_titles with watched=false finds unwatched titles on the servers like one they watched.''';
 
+  /// Fork (V2-44): added when the pick ledger has facts for this ask.
+  static const String ledgerPrompt = '''
+
+Reel facts on title lines:
+- "shown 3× in the Reel lately, not played yet" means the Reel's clip feed showed it and they haven't watched it since. It is never a rejection: they often start a title weeks after first seeing it. Repeat such a title sparingly when an equally good fresh title fits the request, and never leave one out for that reason alone.
+- "passed on in <month>" means they chose Not for me on it in the Reel. Weigh it as a mild preference against it, not a ban.
+- Ignore these facts when the request names the title, a franchise or person, asks for every title of a kind, or asks about their own history.''';
+
+  /// The ledger's facts for this ask; none when there is no ledger or it
+  /// fails or runs out of time.
+  Future<Map<TitleId, LedgerSummary>> _ledger() async {
+    final read = ledger;
+    if (read == null) return const {};
+    try {
+      final facts = await read().timeout(ledgerTimeout);
+      appLogger.d('AI: pick ledger facts for ${facts.length} titles');
+      return facts;
+    } catch (e) {
+      appLogger.d('AI: pick ledger unavailable, asking without it', error: e);
+      return const {};
+    }
+  }
+
   /// [previous] carries earlier turns of this conversation (request and
   /// picks), so follow-ups like "lighter" or "only films" make sense.
   ///
@@ -179,6 +212,7 @@ Questions about the user's own watching:
       history: brain == null ? null : AiHistoryTools(brain: brain, index: index),
       // Fork: the brain's watched state, loaded once for this ask.
       watch: await WatchStates.load(brain),
+      ledger: await _ledger(),
     );
     final calls = <AiToolCall>[];
     var cost = 0.0;
@@ -224,7 +258,11 @@ Questions about the user's own watching:
             'system': [
               {
                 'type': 'text',
-                'text': brain == null ? systemPrompt : '$systemPrompt$historyPrompt',
+                'text': [
+                  systemPrompt,
+                  if (brain != null) historyPrompt,
+                  if (tools.ledger.isNotEmpty) ledgerPrompt,
+                ].join(),
                 'cache_control': {'type': 'ephemeral'},
               },
               // Fork: their taste up front, so a recommendation needs no
@@ -333,7 +371,9 @@ Questions about the user's own watching:
     appLogger.i(
       'AI: ${DateTime.now().toIso8601String()} ask done in '
       '${(DateTime.now().difference(started).inMilliseconds / 1000).toStringAsFixed(1)}s: $timing, '
-      '${calls.length} tools, \$${cost.toStringAsFixed(4)}${error == null ? '' : ', failed'}',
+      '${calls.length} tools, \$${cost.toStringAsFixed(4)}'
+      '${tools.ledger.isEmpty ? '' : ', ${tools.ledgerFacts} title lines with Reel facts'}'
+      '${error == null ? '' : ', failed'}',
     );
     return _answer(tools, texts, calls, started, cost, input, output, cached, error, timing: timing);
   }

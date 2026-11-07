@@ -34,23 +34,31 @@ class _FakeLookup implements CatalogGenreLookup {
 void main() {
   group('groupWatchlistByGenre', () {
     final genres = <String, List<String>>{
-      'Alien': ['Horror', 'Sci-Fi'],
-      'Carrie': ['Horror'],
-      'Tenet': ['Action', 'Sci-Fi'],
-      'Dune': ['Sci-Fi', 'Adventure'],
-      'Heat': ['Action'],
-      'John Wick': ['Action'],
-      'Picard': ['Drama'],
-      'Severance': ['Drama'],
-      'Bluey': ['Animation'],
+      'Deep Hull': ['Horror', 'Sci-Fi'],
+      'Cellar Door': ['Horror'],
+      'Reverse Run': ['Action', 'Sci-Fi'],
+      'Sand Sea': ['Sci-Fi', 'Adventure'],
+      'City Heist': ['Action'],
+      'Silent Hitman': ['Action'],
+      'Old Captain': ['Drama'],
+      'Glass Office': ['Drama'],
+      'Puppy Days': ['Animation'],
     };
     List<String>? genresFor(CatalogItem item) => genres[item.title];
 
     test('one shelf per primary genre, largest first, Films before TV, small genres in Other', () {
       final split = splitWatchlist([
-        for (final title in ['Alien', 'Tenet', 'Carrie', 'Dune', 'Heat', 'Mystery Film', 'John Wick'])
+        for (final title in [
+          'Deep Hull',
+          'Reverse Run',
+          'Cellar Door',
+          'Sand Sea',
+          'City Heist',
+          'Mystery Film',
+          'Silent Hitman',
+        ])
           _item(title, MediaKind.movie, plex: title),
-        for (final title in ['Picard', 'Bluey', 'Severance']) _item(title, MediaKind.show, plex: title),
+        for (final title in ['Old Captain', 'Puppy Days', 'Glass Office']) _item(title, MediaKind.show, plex: title),
       ]);
 
       final groups = groupWatchlistByGenre(split, genresFor);
@@ -61,13 +69,13 @@ void main() {
             '${g.films ? 'Films' : 'TV'} ${g.genre ?? 'Other'}: ${g.items.map((i) => i.title).join(', ')}',
         ],
         [
-          'Films Action: Tenet, Heat, John Wick',
-          'Films Horror: Alien, Carrie',
-          // Dune is the only title whose primary genre is Sci-Fi (Alien and
-          // Tenet list it second), so it rejoins the genre-less film in Other.
-          'Films Other: Dune, Mystery Film',
-          'TV Drama: Picard, Severance',
-          'TV Other: Bluey',
+          'Films Action: Reverse Run, City Heist, Silent Hitman',
+          'Films Horror: Deep Hull, Cellar Door',
+          // Sand Sea is the only title whose primary genre is Sci-Fi (Deep Hull
+          // and Reverse Run list it second), so it rejoins the genre-less film in Other.
+          'Films Other: Sand Sea, Mystery Film',
+          'TV Drama: Old Captain, Glass Office',
+          'TV Other: Puppy Days',
         ],
       );
     });
@@ -99,10 +107,10 @@ void main() {
 
     test('ties are ordered alphabetically', () {
       final split = splitWatchlist([
-        _item('Heat', MediaKind.movie, plex: 'h'),
-        _item('John Wick', MediaKind.movie, plex: 'j'),
-        _item('Alien', MediaKind.movie, plex: 'a'),
-        _item('Carrie', MediaKind.movie, plex: 'c'),
+        _item('City Heist', MediaKind.movie, plex: 'h'),
+        _item('Silent Hitman', MediaKind.movie, plex: 'j'),
+        _item('Deep Hull', MediaKind.movie, plex: 'a'),
+        _item('Cellar Door', MediaKind.movie, plex: 'c'),
       ]);
       final groups = groupWatchlistByGenre(split, genresFor);
       expect([for (final g in groups) g.genre], ['Action', 'Horror']);

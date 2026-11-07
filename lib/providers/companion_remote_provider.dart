@@ -193,6 +193,10 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
   /// null when nothing is.
   final ValueNotifier<Map<String, dynamic>?> nowPlaying = ValueNotifier(null);
 
+  /// Fork, phone side: the host's Reel card (raw `reelState` data), or null
+  /// when its Reel isn't showing.
+  final ValueNotifier<Map<String, dynamic>?> reelState = ValueNotifier(null);
+
   /// Phone side: the host's customisation snapshots (see `MirrorClient`).
   final StreamController<Map<String, dynamic>> _mirrorSnapshots = StreamController.broadcast();
   Stream<Map<String, dynamic>> get mirrorSnapshots => _mirrorSnapshots.stream;
@@ -1079,6 +1083,9 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
         } else if (command.type == RemoteCommandType.nowPlaying) {
           final data = command.data ?? const {};
           nowPlaying.value = data['state'] == 'stopped' ? null : data;
+        } else if (command.type == RemoteCommandType.reelState) {
+          final data = command.data ?? const {};
+          reelState.value = data['active'] == true ? data : null;
         } else if (command.type == RemoteCommandType.aiAnswer) {
           _aiAnswers.add(command.data ?? const {});
         } else if (command.type == RemoteCommandType.castResult) {
@@ -1119,6 +1126,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
       final intentional = _isIntentionalDisconnect(peer, generation);
       appLogger.d('CompanionRemote: Device disconnected (intentional: $intentional)');
       nowPlaying.value = null;
+      reelState.value = null;
       if (intentional) {
         _session = _session?.copyWith(status: RemoteSessionStatus.disconnected, connectedDevice: null);
         safeNotifyListeners();
@@ -1408,6 +1416,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     // A manual disconnect stops the phone reconnecting on its own.
     if (isRemote) unawaited(_rememberAutoHost(null));
     nowPlaying.value = null;
+    reelState.value = null;
     final leavingGeneration = _remoteGeneration;
     _markIntentionalDisconnect(_peerService, leavingGeneration);
     _markIntentionalDisconnect(_pendingRemotePeer, leavingGeneration);
@@ -1442,6 +1451,7 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
     _aiAnswers.close();
     castResults.dispose();
     nowPlaying.dispose();
+    reelState.dispose();
     hostAiActivity.dispose();
     _mirrorSnapshots.close();
     _catchUp.close();

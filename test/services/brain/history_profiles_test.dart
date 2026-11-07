@@ -104,13 +104,7 @@ void main() {
 
   test('titles only on Trakt use its details; extras match by any id', () {
     final library = LibraryLookup(const []);
-    final play = _play(
-      HistoryKind.movie,
-      DateTime.utc(2023),
-      imdb: 'tt9',
-      source: HistorySource.trakt,
-      traktId: 5,
-    );
+    final play = _play(HistoryKind.movie, DateTime.utc(2023), imdb: 'tt9', source: HistorySource.trakt, traktId: 5);
     final w = groupWatches([play], library).single;
     final p = watchedProfile(
       w,
@@ -125,5 +119,18 @@ void main() {
     final p = libraryProfile(_row('s1:40', imdb: 'tt4'));
     expect((p.id, p.watched, p.inLibrary), ('m:imdb:tt4', false, true));
     expect(p.embedText, contains('A summary.'));
+  });
+
+  test('undated plays record where they were logged: Trakt imports and Plex counts', () {
+    final row = _row('s1:50', imdb: 'tt5', viewCount: 2);
+    final library = LibraryLookup([LibraryRef.of(row)]);
+    final plays = [_play(HistoryKind.movie, DateTime.utc(2019), imdb: 'tt5', source: HistorySource.trakt, bulk: true)];
+    final p = watchedProfile(groupWatches(plays, library).single, row: row);
+    expect(p.watches, isEmpty);
+    expect(p.bulkPlays, 2);
+    expect(p.bulkVia, {'trakt', 'plexUndated'}, reason: 'one Trakt import, one Plex count with no date');
+    final back = TitleProfile.fromJson(p.toJson());
+    expect(back.bulkVia, {'trakt', 'plexUndated'});
+    expect(TitleProfile.fromJson(libraryProfile(_row('s1:51')).toJson()).bulkVia, isEmpty);
   });
 }

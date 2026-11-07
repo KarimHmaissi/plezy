@@ -22,6 +22,9 @@ class PlexCatalogSource with CatalogWatchlistMachinery implements CatalogSource,
 
   PlexCatalogSource(this._client, {this.includeImageVariants = false});
 
+  /// Fork: the Discover client (The Reel's measure-day probe reads extras).
+  PlexDiscoverClient get discover => _client;
+
   @override
   CatalogSourceId get id => CatalogSourceId.plex;
 

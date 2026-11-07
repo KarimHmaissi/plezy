@@ -517,4 +517,209 @@ void main() {
       expect(sentItems(calls).map((m) => m['episodeTitle']), ['Episode 0', 'Episode 1']);
     });
   });
+
+  group('Reel Saves on Play Next (V2-42)', () {
+    List<Map> sent(List<MethodCall> calls) =>
+        ((calls.lastWhere((c) => c.method == 'sync').arguments as Map)['items'] as List).cast<Map>();
+
+    MediaItem episodeOf(String showId, int i, {required int lastViewedAt}) => testMediaItem(
+      id: 'ep-$showId-$i',
+      backend: MediaBackend.plex,
+      kind: MediaKind.episode,
+      title: 'Episode $i',
+      grandparentId: showId,
+      grandparentTitle: 'Show $showId',
+      serverId: 'server-a',
+      serverName: 'Server',
+      lastViewedAt: lastViewedAt,
+    );
+
+    MediaItem title(String id, MediaKind kind, {String serverId = 'server-a'}) => testMediaItem(
+      id: id,
+      backend: MediaBackend.plex,
+      kind: kind,
+      title: 'Title $id',
+      thumbPath: '/thumb-$id',
+      serverId: serverId,
+      serverName: 'Server',
+    );
+
+    ShelfSave save(MediaItem item, int ms) =>
+        ShelfSave(item: item, savedAt: DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true));
+
+    SystemShelfService service({required Future<bool> Function() supported, bool tvos = false}) {
+      final s = SystemShelfService.forTesting(
+        channel: channel,
+        isSupported: supported,
+        isTvosTarget: () => tvos,
+        clock: () => DateTime.fromMillisecondsSinceEpoch(9000000, isUtc: true),
+      );
+      s.beginProfileSession('owner-a');
+      return s;
+    }
+
+    test('saves follow Continue Watching as WATCHLIST, below its lowest time, newest first', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final shelf = service(supported: () async => true);
+      // Continue Watching: show-a (viewed at 5000 s) and the film film-x.
+      final cw = [
+        episodeOf('show-a', 1, lastViewedAt: 5000),
+        testMediaItem(
+          id: 'film-x',
+          backend: MediaBackend.plex,
+          title: 'Title film-x',
+          serverId: 'server-a',
+          serverName: 'Server',
+          lastViewedAt: 6000,
+          viewOffsetMs: 100,
+        ),
+      ];
+      final saves = [
+        save(title('show-b', MediaKind.show), 9000000), // newer than every CW item
+        save(title('show-a', MediaKind.show), 8000000), // its episode is in CW
+        save(title('film-x', MediaKind.movie), 7000000), // already on the row
+        save(title('film-y', MediaKind.movie), 9500000), // newest save
+        save(title('film-z', MediaKind.movie), 1000000), // older than every CW item
+      ];
+
+      expect(
+        await shelf.syncFromContinueWatching('owner-a', cw, (_) => _ShelfClient(), saves: () async => saves),
+        isTrue,
+      );
+
+      final items = sent(calls);
+      expect(items.map((m) => m['contentId']), [
+        'plezy_server-a_ep-show-a-1',
+        'plezy_server-a_film-x',
+        'plezy_server-a_film-y',
+        'plezy_server-a_show-b',
+        'plezy_server-a_film-z',
+      ]);
+      expect(items.take(2).map((m) => m['watchlist']), [null, null]);
+      expect(items.skip(2).map((m) => m['watchlist']), [true, true, true]);
+      expect(items.skip(2).map((m) => m['lastPlaybackPosition']), [0, 0, 0]);
+      expect(items[3]['type'], 'show');
+      // Below the lowest Continue Watching time (5,000,000 ms), strictly
+      // decreasing; a save already older keeps its own save time.
+      expect(items.skip(2).map((m) => m['lastEngagementTime']), [4999999, 4999998, 1000000]);
+    });
+
+    test('with no Continue Watching, each save keeps its save time', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final shelf = service(supported: () async => true);
+      await shelf.syncFromContinueWatching(
+        'owner-a',
+        const [],
+        (_) => _ShelfClient(),
+        saves: () async => [save(title('film-y', MediaKind.movie), 3000), save(title('show-b', MediaKind.show), 4000)],
+      );
+      expect(sent(calls).map((m) => (m['contentId'], m['lastEngagementTime'])), [
+        ('plezy_server-a_show-b', 4000),
+        ('plezy_server-a_film-y', 3000),
+      ]);
+    });
+
+    test('saves only fill what Continue Watching leaves under the 20 cap', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final shelf = service(supported: () async => true);
+      final cw = [for (var i = 0; i < 19; i++) episodeOf('show-$i', 1, lastViewedAt: 5000 - i)];
+      await shelf.syncFromContinueWatching(
+        'owner-a',
+        cw,
+        (_) => _ShelfClient(),
+        saves: () async => [
+          save(title('film-1', MediaKind.movie), 3),
+          save(title('film-2', MediaKind.movie), 2),
+          save(title('film-3', MediaKind.movie), 1),
+        ],
+      );
+      final items = sent(calls);
+      expect(items, hasLength(SystemShelf.maxItems));
+      expect(items.last['contentId'], 'plezy_server-a_film-1');
+      expect(items.where((m) => m['watchlist'] == true), hasLength(1));
+    });
+
+    test('saves are never read where the shelf is unsupported or on tvOS', () async {
+      var reads = 0;
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      Future<List<ShelfSave>> saves() async {
+        reads++;
+        return [save(title('film-y', MediaKind.movie), 3000)];
+      }
+
+      expect(
+        await service(
+          supported: () async => false,
+        ).syncFromContinueWatching('owner-a', const [], (_) => _ShelfClient(), saves: saves),
+        isFalse,
+      );
+      expect(reads, 0);
+
+      expect(
+        await service(
+          supported: () async => true,
+          tvos: true,
+        ).syncFromContinueWatching('owner-a', const [], (_) => _ShelfClient(), saves: saves),
+        isTrue,
+      );
+      expect(reads, 0);
+      expect(sent(calls), isEmpty);
+    });
+
+    test('a failing saves read still publishes Continue Watching', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final shelf = service(supported: () async => true);
+      expect(
+        await shelf.syncFromContinueWatching(
+          'owner-a',
+          [episodeOf('show-a', 1, lastViewedAt: 5000)],
+          (_) => _ShelfClient(),
+          saves: () async => throw StateError('store unavailable'),
+        ),
+        isTrue,
+      );
+      expect(sent(calls).map((m) => m['contentId']), ['plezy_server-a_ep-show-a-1']);
+    });
+
+    test('an owner change while saves are read drops the sync', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      final shelf = service(supported: () async => true);
+      final gate = Completer<List<ShelfSave>>();
+      final pending = shelf.syncFromContinueWatching(
+        'owner-a',
+        const [],
+        (_) => _ShelfClient(),
+        saves: () => gate.future,
+      );
+      await Future<void>.delayed(Duration.zero);
+      shelf.beginProfileSession('owner-b');
+      gate.complete([save(title('film-y', MediaKind.movie), 3000)]);
+      expect(await pending, isFalse);
+      expect(calls.where((c) => c.method == 'sync'), isEmpty);
+    });
+  });
 }

@@ -1359,6 +1359,666 @@ class SyncStampsCompanion extends UpdateCompanion<SyncStampRecord> {
   }
 }
 
+class $ReelEventsTable extends ReelEvents
+    with TableInfo<$ReelEventsTable, ReelEventRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ReelEventsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _titleIdMeta = const VerificationMeta(
+    'titleId',
+  );
+  @override
+  late final GeneratedColumn<String> titleId = GeneratedColumn<String>(
+    'title_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _actionMeta = const VerificationMeta('action');
+  @override
+  late final GeneratedColumn<String> action = GeneratedColumn<String>(
+    'action',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _deckMeta = const VerificationMeta('deck');
+  @override
+  late final GeneratedColumn<String> deck = GeneratedColumn<String>(
+    'deck',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _atMeta = const VerificationMeta('at');
+  @override
+  late final GeneratedColumn<int> at = GeneratedColumn<int>(
+    'at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _secondsMeta = const VerificationMeta(
+    'seconds',
+  );
+  @override
+  late final GeneratedColumn<int> seconds = GeneratedColumn<int>(
+    'seconds',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    titleId,
+    action,
+    deck,
+    at,
+    seconds,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'reel_events';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReelEventRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('title_id')) {
+      context.handle(
+        _titleIdMeta,
+        titleId.isAcceptableOrUnknown(data['title_id']!, _titleIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleIdMeta);
+    }
+    if (data.containsKey('action')) {
+      context.handle(
+        _actionMeta,
+        action.isAcceptableOrUnknown(data['action']!, _actionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_actionMeta);
+    }
+    if (data.containsKey('deck')) {
+      context.handle(
+        _deckMeta,
+        deck.isAcceptableOrUnknown(data['deck']!, _deckMeta),
+      );
+    }
+    if (data.containsKey('at')) {
+      context.handle(_atMeta, at.isAcceptableOrUnknown(data['at']!, _atMeta));
+    } else if (isInserting) {
+      context.missing(_atMeta);
+    }
+    if (data.containsKey('seconds')) {
+      context.handle(
+        _secondsMeta,
+        seconds.isAcceptableOrUnknown(data['seconds']!, _secondsMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ReelEventRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReelEventRecord(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      titleId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title_id'],
+      )!,
+      action: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}action'],
+      )!,
+      deck: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}deck'],
+      )!,
+      at: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}at'],
+      )!,
+      seconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}seconds'],
+      ),
+    );
+  }
+
+  @override
+  $ReelEventsTable createAlias(String alias) {
+    return $ReelEventsTable(attachedDatabase, alias);
+  }
+}
+
+class ReelEventRecord extends DataClass implements Insertable<ReelEventRecord> {
+  final int id;
+
+  /// Brain title id (`m:imdb:tt…`).
+  final String titleId;
+
+  /// `sampled`, `quickSkip`, `toEnd`, `replay`, `unmute`, `watch`,
+  /// `watchOnTv`, `save`, `notForMe`, `spoiled`.
+  final String action;
+  final String deck;
+
+  /// Milliseconds since the epoch.
+  final int at;
+  final int? seconds;
+  const ReelEventRecord({
+    required this.id,
+    required this.titleId,
+    required this.action,
+    required this.deck,
+    required this.at,
+    this.seconds,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['title_id'] = Variable<String>(titleId);
+    map['action'] = Variable<String>(action);
+    map['deck'] = Variable<String>(deck);
+    map['at'] = Variable<int>(at);
+    if (!nullToAbsent || seconds != null) {
+      map['seconds'] = Variable<int>(seconds);
+    }
+    return map;
+  }
+
+  ReelEventsCompanion toCompanion(bool nullToAbsent) {
+    return ReelEventsCompanion(
+      id: Value(id),
+      titleId: Value(titleId),
+      action: Value(action),
+      deck: Value(deck),
+      at: Value(at),
+      seconds: seconds == null && nullToAbsent
+          ? const Value.absent()
+          : Value(seconds),
+    );
+  }
+
+  factory ReelEventRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReelEventRecord(
+      id: serializer.fromJson<int>(json['id']),
+      titleId: serializer.fromJson<String>(json['titleId']),
+      action: serializer.fromJson<String>(json['action']),
+      deck: serializer.fromJson<String>(json['deck']),
+      at: serializer.fromJson<int>(json['at']),
+      seconds: serializer.fromJson<int?>(json['seconds']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'titleId': serializer.toJson<String>(titleId),
+      'action': serializer.toJson<String>(action),
+      'deck': serializer.toJson<String>(deck),
+      'at': serializer.toJson<int>(at),
+      'seconds': serializer.toJson<int?>(seconds),
+    };
+  }
+
+  ReelEventRecord copyWith({
+    int? id,
+    String? titleId,
+    String? action,
+    String? deck,
+    int? at,
+    Value<int?> seconds = const Value.absent(),
+  }) => ReelEventRecord(
+    id: id ?? this.id,
+    titleId: titleId ?? this.titleId,
+    action: action ?? this.action,
+    deck: deck ?? this.deck,
+    at: at ?? this.at,
+    seconds: seconds.present ? seconds.value : this.seconds,
+  );
+  ReelEventRecord copyWithCompanion(ReelEventsCompanion data) {
+    return ReelEventRecord(
+      id: data.id.present ? data.id.value : this.id,
+      titleId: data.titleId.present ? data.titleId.value : this.titleId,
+      action: data.action.present ? data.action.value : this.action,
+      deck: data.deck.present ? data.deck.value : this.deck,
+      at: data.at.present ? data.at.value : this.at,
+      seconds: data.seconds.present ? data.seconds.value : this.seconds,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReelEventRecord(')
+          ..write('id: $id, ')
+          ..write('titleId: $titleId, ')
+          ..write('action: $action, ')
+          ..write('deck: $deck, ')
+          ..write('at: $at, ')
+          ..write('seconds: $seconds')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, titleId, action, deck, at, seconds);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReelEventRecord &&
+          other.id == this.id &&
+          other.titleId == this.titleId &&
+          other.action == this.action &&
+          other.deck == this.deck &&
+          other.at == this.at &&
+          other.seconds == this.seconds);
+}
+
+class ReelEventsCompanion extends UpdateCompanion<ReelEventRecord> {
+  final Value<int> id;
+  final Value<String> titleId;
+  final Value<String> action;
+  final Value<String> deck;
+  final Value<int> at;
+  final Value<int?> seconds;
+  const ReelEventsCompanion({
+    this.id = const Value.absent(),
+    this.titleId = const Value.absent(),
+    this.action = const Value.absent(),
+    this.deck = const Value.absent(),
+    this.at = const Value.absent(),
+    this.seconds = const Value.absent(),
+  });
+  ReelEventsCompanion.insert({
+    this.id = const Value.absent(),
+    required String titleId,
+    required String action,
+    this.deck = const Value.absent(),
+    required int at,
+    this.seconds = const Value.absent(),
+  }) : titleId = Value(titleId),
+       action = Value(action),
+       at = Value(at);
+  static Insertable<ReelEventRecord> custom({
+    Expression<int>? id,
+    Expression<String>? titleId,
+    Expression<String>? action,
+    Expression<String>? deck,
+    Expression<int>? at,
+    Expression<int>? seconds,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (titleId != null) 'title_id': titleId,
+      if (action != null) 'action': action,
+      if (deck != null) 'deck': deck,
+      if (at != null) 'at': at,
+      if (seconds != null) 'seconds': seconds,
+    });
+  }
+
+  ReelEventsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? titleId,
+    Value<String>? action,
+    Value<String>? deck,
+    Value<int>? at,
+    Value<int?>? seconds,
+  }) {
+    return ReelEventsCompanion(
+      id: id ?? this.id,
+      titleId: titleId ?? this.titleId,
+      action: action ?? this.action,
+      deck: deck ?? this.deck,
+      at: at ?? this.at,
+      seconds: seconds ?? this.seconds,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (titleId.present) {
+      map['title_id'] = Variable<String>(titleId.value);
+    }
+    if (action.present) {
+      map['action'] = Variable<String>(action.value);
+    }
+    if (deck.present) {
+      map['deck'] = Variable<String>(deck.value);
+    }
+    if (at.present) {
+      map['at'] = Variable<int>(at.value);
+    }
+    if (seconds.present) {
+      map['seconds'] = Variable<int>(seconds.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReelEventsCompanion(')
+          ..write('id: $id, ')
+          ..write('titleId: $titleId, ')
+          ..write('action: $action, ')
+          ..write('deck: $deck, ')
+          ..write('at: $at, ')
+          ..write('seconds: $seconds')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ReelCacheTable extends ReelCache
+    with TableInfo<$ReelCacheTable, ReelCacheRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ReelCacheTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _keyMeta = const VerificationMeta('key');
+  @override
+  late final GeneratedColumn<String> key = GeneratedColumn<String>(
+    'key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _valueMeta = const VerificationMeta('value');
+  @override
+  late final GeneratedColumn<String> value = GeneratedColumn<String>(
+    'value',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [key, value, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'reel_cache';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReelCacheRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('key')) {
+      context.handle(
+        _keyMeta,
+        key.isAcceptableOrUnknown(data['key']!, _keyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_keyMeta);
+    }
+    if (data.containsKey('value')) {
+      context.handle(
+        _valueMeta,
+        value.isAcceptableOrUnknown(data['value']!, _valueMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_valueMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {key};
+  @override
+  ReelCacheRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReelCacheRecord(
+      key: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}key'],
+      )!,
+      value: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}value'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $ReelCacheTable createAlias(String alias) {
+    return $ReelCacheTable(attachedDatabase, alias);
+  }
+}
+
+class ReelCacheRecord extends DataClass implements Insertable<ReelCacheRecord> {
+  final String key;
+  final String value;
+
+  /// Milliseconds since the epoch.
+  final int updatedAt;
+  const ReelCacheRecord({
+    required this.key,
+    required this.value,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['key'] = Variable<String>(key);
+    map['value'] = Variable<String>(value);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  ReelCacheCompanion toCompanion(bool nullToAbsent) {
+    return ReelCacheCompanion(
+      key: Value(key),
+      value: Value(value),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory ReelCacheRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReelCacheRecord(
+      key: serializer.fromJson<String>(json['key']),
+      value: serializer.fromJson<String>(json['value']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'key': serializer.toJson<String>(key),
+      'value': serializer.toJson<String>(value),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  ReelCacheRecord copyWith({String? key, String? value, int? updatedAt}) =>
+      ReelCacheRecord(
+        key: key ?? this.key,
+        value: value ?? this.value,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
+  ReelCacheRecord copyWithCompanion(ReelCacheCompanion data) {
+    return ReelCacheRecord(
+      key: data.key.present ? data.key.value : this.key,
+      value: data.value.present ? data.value.value : this.value,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReelCacheRecord(')
+          ..write('key: $key, ')
+          ..write('value: $value, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(key, value, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReelCacheRecord &&
+          other.key == this.key &&
+          other.value == this.value &&
+          other.updatedAt == this.updatedAt);
+}
+
+class ReelCacheCompanion extends UpdateCompanion<ReelCacheRecord> {
+  final Value<String> key;
+  final Value<String> value;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const ReelCacheCompanion({
+    this.key = const Value.absent(),
+    this.value = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ReelCacheCompanion.insert({
+    required String key,
+    required String value,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : key = Value(key),
+       value = Value(value),
+       updatedAt = Value(updatedAt);
+  static Insertable<ReelCacheRecord> custom({
+    Expression<String>? key,
+    Expression<String>? value,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (key != null) 'key': key,
+      if (value != null) 'value': value,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ReelCacheCompanion copyWith({
+    Value<String>? key,
+    Value<String>? value,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return ReelCacheCompanion(
+      key: key ?? this.key,
+      value: value ?? this.value,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (key.present) {
+      map['key'] = Variable<String>(key.value);
+    }
+    if (value.present) {
+      map['value'] = Variable<String>(value.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReelCacheCompanion(')
+          ..write('key: $key, ')
+          ..write('value: $value, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$ForkDatabase extends GeneratedDatabase {
   _$ForkDatabase(QueryExecutor e) : super(e);
   $ForkDatabaseManager get managers => $ForkDatabaseManager(this);
@@ -1368,6 +2028,8 @@ abstract class _$ForkDatabase extends GeneratedDatabase {
   late final $ShortlistItemsTable shortlistItems = $ShortlistItemsTable(this);
   late final $ForkSettingsTable forkSettings = $ForkSettingsTable(this);
   late final $SyncStampsTable syncStamps = $SyncStampsTable(this);
+  late final $ReelEventsTable reelEvents = $ReelEventsTable(this);
+  late final $ReelCacheTable reelCache = $ReelCacheTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1378,6 +2040,8 @@ abstract class _$ForkDatabase extends GeneratedDatabase {
     shortlistItems,
     forkSettings,
     syncStamps,
+    reelEvents,
+    reelCache,
   ];
 }
 
@@ -2222,6 +2886,381 @@ typedef $$SyncStampsTableProcessedTableManager =
       SyncStampRecord,
       PrefetchHooks Function()
     >;
+typedef $$ReelEventsTableCreateCompanionBuilder =
+    ReelEventsCompanion Function({
+      Value<int> id,
+      required String titleId,
+      required String action,
+      Value<String> deck,
+      required int at,
+      Value<int?> seconds,
+    });
+typedef $$ReelEventsTableUpdateCompanionBuilder =
+    ReelEventsCompanion Function({
+      Value<int> id,
+      Value<String> titleId,
+      Value<String> action,
+      Value<String> deck,
+      Value<int> at,
+      Value<int?> seconds,
+    });
+
+class $$ReelEventsTableFilterComposer
+    extends Composer<_$ForkDatabase, $ReelEventsTable> {
+  $$ReelEventsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get titleId => $composableBuilder(
+    column: $table.titleId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get action => $composableBuilder(
+    column: $table.action,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get deck => $composableBuilder(
+    column: $table.deck,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get seconds => $composableBuilder(
+    column: $table.seconds,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ReelEventsTableOrderingComposer
+    extends Composer<_$ForkDatabase, $ReelEventsTable> {
+  $$ReelEventsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get titleId => $composableBuilder(
+    column: $table.titleId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get action => $composableBuilder(
+    column: $table.action,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get deck => $composableBuilder(
+    column: $table.deck,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get seconds => $composableBuilder(
+    column: $table.seconds,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ReelEventsTableAnnotationComposer
+    extends Composer<_$ForkDatabase, $ReelEventsTable> {
+  $$ReelEventsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get titleId =>
+      $composableBuilder(column: $table.titleId, builder: (column) => column);
+
+  GeneratedColumn<String> get action =>
+      $composableBuilder(column: $table.action, builder: (column) => column);
+
+  GeneratedColumn<String> get deck =>
+      $composableBuilder(column: $table.deck, builder: (column) => column);
+
+  GeneratedColumn<int> get at =>
+      $composableBuilder(column: $table.at, builder: (column) => column);
+
+  GeneratedColumn<int> get seconds =>
+      $composableBuilder(column: $table.seconds, builder: (column) => column);
+}
+
+class $$ReelEventsTableTableManager
+    extends
+        RootTableManager<
+          _$ForkDatabase,
+          $ReelEventsTable,
+          ReelEventRecord,
+          $$ReelEventsTableFilterComposer,
+          $$ReelEventsTableOrderingComposer,
+          $$ReelEventsTableAnnotationComposer,
+          $$ReelEventsTableCreateCompanionBuilder,
+          $$ReelEventsTableUpdateCompanionBuilder,
+          (
+            ReelEventRecord,
+            BaseReferences<_$ForkDatabase, $ReelEventsTable, ReelEventRecord>,
+          ),
+          ReelEventRecord,
+          PrefetchHooks Function()
+        > {
+  $$ReelEventsTableTableManager(_$ForkDatabase db, $ReelEventsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ReelEventsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ReelEventsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ReelEventsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> titleId = const Value.absent(),
+                Value<String> action = const Value.absent(),
+                Value<String> deck = const Value.absent(),
+                Value<int> at = const Value.absent(),
+                Value<int?> seconds = const Value.absent(),
+              }) => ReelEventsCompanion(
+                id: id,
+                titleId: titleId,
+                action: action,
+                deck: deck,
+                at: at,
+                seconds: seconds,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String titleId,
+                required String action,
+                Value<String> deck = const Value.absent(),
+                required int at,
+                Value<int?> seconds = const Value.absent(),
+              }) => ReelEventsCompanion.insert(
+                id: id,
+                titleId: titleId,
+                action: action,
+                deck: deck,
+                at: at,
+                seconds: seconds,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ReelEventsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ForkDatabase,
+      $ReelEventsTable,
+      ReelEventRecord,
+      $$ReelEventsTableFilterComposer,
+      $$ReelEventsTableOrderingComposer,
+      $$ReelEventsTableAnnotationComposer,
+      $$ReelEventsTableCreateCompanionBuilder,
+      $$ReelEventsTableUpdateCompanionBuilder,
+      (
+        ReelEventRecord,
+        BaseReferences<_$ForkDatabase, $ReelEventsTable, ReelEventRecord>,
+      ),
+      ReelEventRecord,
+      PrefetchHooks Function()
+    >;
+typedef $$ReelCacheTableCreateCompanionBuilder =
+    ReelCacheCompanion Function({
+      required String key,
+      required String value,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$ReelCacheTableUpdateCompanionBuilder =
+    ReelCacheCompanion Function({
+      Value<String> key,
+      Value<String> value,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$ReelCacheTableFilterComposer
+    extends Composer<_$ForkDatabase, $ReelCacheTable> {
+  $$ReelCacheTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ReelCacheTableOrderingComposer
+    extends Composer<_$ForkDatabase, $ReelCacheTable> {
+  $$ReelCacheTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ReelCacheTableAnnotationComposer
+    extends Composer<_$ForkDatabase, $ReelCacheTable> {
+  $$ReelCacheTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get key =>
+      $composableBuilder(column: $table.key, builder: (column) => column);
+
+  GeneratedColumn<String> get value =>
+      $composableBuilder(column: $table.value, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$ReelCacheTableTableManager
+    extends
+        RootTableManager<
+          _$ForkDatabase,
+          $ReelCacheTable,
+          ReelCacheRecord,
+          $$ReelCacheTableFilterComposer,
+          $$ReelCacheTableOrderingComposer,
+          $$ReelCacheTableAnnotationComposer,
+          $$ReelCacheTableCreateCompanionBuilder,
+          $$ReelCacheTableUpdateCompanionBuilder,
+          (
+            ReelCacheRecord,
+            BaseReferences<_$ForkDatabase, $ReelCacheTable, ReelCacheRecord>,
+          ),
+          ReelCacheRecord,
+          PrefetchHooks Function()
+        > {
+  $$ReelCacheTableTableManager(_$ForkDatabase db, $ReelCacheTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ReelCacheTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ReelCacheTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ReelCacheTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> key = const Value.absent(),
+                Value<String> value = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReelCacheCompanion(
+                key: key,
+                value: value,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String key,
+                required String value,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => ReelCacheCompanion.insert(
+                key: key,
+                value: value,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ReelCacheTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ForkDatabase,
+      $ReelCacheTable,
+      ReelCacheRecord,
+      $$ReelCacheTableFilterComposer,
+      $$ReelCacheTableOrderingComposer,
+      $$ReelCacheTableAnnotationComposer,
+      $$ReelCacheTableCreateCompanionBuilder,
+      $$ReelCacheTableUpdateCompanionBuilder,
+      (
+        ReelCacheRecord,
+        BaseReferences<_$ForkDatabase, $ReelCacheTable, ReelCacheRecord>,
+      ),
+      ReelCacheRecord,
+      PrefetchHooks Function()
+    >;
 
 class $ForkDatabaseManager {
   final _$ForkDatabase _db;
@@ -2236,4 +3275,8 @@ class $ForkDatabaseManager {
       $$ForkSettingsTableTableManager(_db, _db.forkSettings);
   $$SyncStampsTableTableManager get syncStamps =>
       $$SyncStampsTableTableManager(_db, _db.syncStamps);
+  $$ReelEventsTableTableManager get reelEvents =>
+      $$ReelEventsTableTableManager(_db, _db.reelEvents);
+  $$ReelCacheTableTableManager get reelCache =>
+      $$ReelCacheTableTableManager(_db, _db.reelCache);
 }

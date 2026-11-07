@@ -1,0 +1,49 @@
+{
+  "data": {
+    "findAnimeByExternalSite": [
+      {
+        "resources": {
+          "nodes": [
+            {
+              "site": "ANILIST",
+              "externalId": 101
+            }
+          ]
+        },
+        "animethemes": [
+          {
+            "type": "OP",
+            "sequence": null,
+            "song": {
+              "title": {
+                "romaji": "Harbor Lights"
+              }
+            },
+            "animethemeentries": [
+              {
+                "episodes": "1-25",
+                "spoiler": false,
+                "nsfw": false,
+                "videos": {
+                  "nodes": [
+                    {
+                      "id": 9001,
+                      "link": "https://v.animethemes.moe/HarborLights-OP1.webm",
+                      "nc": false,
+                      "resolution": 720,
+                      "size": 30000000,
+                      "overlap": "NONE",
+                      "lyrics": false,
+                      "subbed": false,
+                      "source": "BD"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

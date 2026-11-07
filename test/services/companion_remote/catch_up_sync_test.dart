@@ -59,7 +59,7 @@ void main() {
     await phone.writeSetting('watchlist.source', 'trakt');
     await phone.writeSetting('ai.spend.2026-11', '{"usd":1}');
     await phone.writeSetting('comfort.shows', '[]');
-    await phone.writeComfortPaused({2: 'Frasier'});
+    await phone.writeComfortPaused({2: 'Quiet Harbour'});
     await phone.writeHomeLayout(const [], curated: true, revision: 3);
 
     final stamps = await phone.readSyncStamps();

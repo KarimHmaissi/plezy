@@ -6,7 +6,22 @@ import '../i18n/strings.g.dart';
 import '../utils/platform_detector.dart';
 
 /// Navigation tab identifiers
-enum NavigationTabId { discover, explore, watchlist, comfort, ai, history, libraries, liveTv, search, downloads, settings }
+enum NavigationTabId {
+  discover,
+  explore,
+  watchlist,
+  comfort,
+  ai,
+  history,
+  libraries,
+  liveTv,
+  search,
+  downloads,
+  settings,
+
+  /// Fork: The Reel (Android: its clip core is ExoPlayer).
+  reel,
+}
 
 /// Represents a navigation tab with its configuration
 class NavigationTab {
@@ -47,8 +62,10 @@ class NavigationTab {
     bool hasExplore = false,
     bool hasWatchlist = false,
     bool hasComfort = false,
+    bool hasReel = false,
   }) {
     return allNavigationTabs.where((tab) {
+      if (tab.id == NavigationTabId.reel && !hasReel) return false;
       if (isOffline && tab.onlineOnly) return false;
       if (tab.id == NavigationTabId.liveTv && !hasLiveTv) return false;
       if (tab.id == NavigationTabId.explore && !hasExplore) return false;
@@ -70,6 +87,7 @@ class NavigationTab {
     bool hasExplore = false,
     bool hasWatchlist = false,
     bool hasComfort = false,
+    bool hasReel = false,
     required NavigationTabId? preferredStartup,
   }) {
     final tabs = getVisibleTabs(
@@ -78,6 +96,7 @@ class NavigationTab {
       hasExplore: hasExplore,
       hasWatchlist: hasWatchlist,
       hasComfort: hasComfort,
+      hasReel: hasReel,
     );
     if (isOffline && tabs.any((t) => t.id == NavigationTabId.downloads)) {
       return NavigationTabId.downloads;
@@ -105,6 +124,7 @@ String _getHomeLabel() => t.common.home;
 String _getExploreLabel() => t.navigation.explore;
 String _getWatchlistLabel() => t.navigation.watchlist;
 String _getComfortLabel() => t.navigation.comfort;
+String _getReelLabel() => t.navigation.reel;
 String _getAiLabel() => t.navigation.ai;
 String _getHistoryLabel() => t.navigation.history;
 String _getLibrariesLabel() => t.navigation.libraries;
@@ -116,6 +136,9 @@ String _getSettingsLabel() => t.common.settings;
 /// All navigation tabs in display order
 const allNavigationTabs = [
   NavigationTab(id: NavigationTabId.discover, onlineOnly: true, icon: Symbols.home_rounded, getLabel: _getHomeLabel),
+  // Fork: the Reel keeps its tab offline and says so itself (V2-60); a tab
+  // removed under it would drop the session mid-card.
+  NavigationTab(id: NavigationTabId.reel, onlineOnly: false, icon: Symbols.movie_rounded, getLabel: _getReelLabel),
   NavigationTab(
     id: NavigationTabId.libraries,
     onlineOnly: true,

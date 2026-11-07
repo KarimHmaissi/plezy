@@ -16,6 +16,7 @@ import '../system_shelf_service.dart';
 /// plezy://play?type=movie|show&tmdb=<n>|tvdb=<n>|imdb=tt<n>|plex=<hash>[&mode=next|shuffle]
 /// plezy://play?content_id=plezy_<serverId>_<itemId>      (launcher shelf rows)
 /// plezy://live?channel=<channel>[&server=<serverId>][&start=beginning|live]
+/// plezy://reel[?deck=<deckId>][&probe=coverage|watchstate|extras-shape]  (fork: The Reel, Android)
 /// plezy://external-player/<result>/<session>?...           (external player return links)
 /// ```
 ///
@@ -49,6 +50,7 @@ sealed class DeepLink {
       OpenLink.host => OpenLink(profile: profile),
       PlayLink.host => PlayLink._parse(params, profile),
       LiveLink.host => LiveLink._parse(params, profile),
+      ReelLink.host => ReelLink(deck: _param(params, 'deck'), probe: _param(params, 'probe'), profile: profile),
       ExternalPlayerReturnLink.host => ExternalPlayerReturnLink(uri),
       _ => null,
     };
@@ -71,6 +73,23 @@ final class OpenLink extends DeepLink {
 
   @override
   Uri toUri() => DeepLink._uri(host, _profileParam);
+}
+
+/// Fork: `plezy://reel`: open The Reel, on [deck] when the link names one
+/// (`for-you`, `anime-openings`, `most-watched`, `ai:<answerId>`).
+final class ReelLink extends DeepLink {
+  const ReelLink({this.deck, this.probe, super.profile});
+
+  static const host = 'reel';
+
+  final String? deck;
+
+  /// Measure day: `coverage`, `watchstate` or `extras-shape` runs that
+  /// probe instead, when the Reel's developer tools allow it.
+  final String? probe;
+
+  @override
+  Uri toUri() => DeepLink._uri(host, {'deck': ?deck, 'probe': ?probe, ..._profileParam});
 }
 
 /// How a link to a show or season picks what to play.

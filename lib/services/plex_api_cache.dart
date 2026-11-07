@@ -92,8 +92,15 @@ class PlexApiCache extends ApiCache {
   /// [MediaItem] at the boundary. Returns `null` when the endpoint is not
   /// cached or contains no metadata.
   @override
-  Future<MediaItem?> getMetadata(ServerId serverId, String ratingKey) async {
-    final cached = await get(serverId, '/library/metadata/$ratingKey');
+  Future<MediaItem?> getMetadata(ServerId serverId, String ratingKey) async =>
+      _metadataFrom(serverId, await get(serverId, '/library/metadata/$ratingKey'));
+
+  /// Fork (Reel): [getMetadata], but only from a row written within
+  /// [maxAge]. Never reads the network.
+  Future<MediaItem?> getMetadataIfFresh(ServerId serverId, String ratingKey, {required Duration maxAge}) async =>
+      _metadataFrom(serverId, await getIfFresh(serverId, '/library/metadata/$ratingKey', maxAge: maxAge));
+
+  MediaItem? _metadataFrom(ServerId serverId, Map<String, dynamic>? cached) {
     final container = PlexCacheParser.extractMediaContainer(cached);
     final json = PlexCacheParser.extractFirstMetadata(cached);
     if (json == null) return null;

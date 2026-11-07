@@ -190,6 +190,17 @@ class DevicePerformance {
     return 100 << 20; // 100MB
   }
 
+  /// Fork (The Reel, plan §6): the image-cache bytes the Reel's own art may
+  /// hold while it is the active tab. 12MB on a phone (its tier is flat,
+  /// too); 24MB on a TV at 1080p, following the display budget as the TV
+  /// tier does, so the next two cards' art at the thumbnail cap still fits
+  /// beside the card on screen on a 4K surface. MemoryTrimPolicy scales it
+  /// down with a trim ([MemoryTrimPolicy.scaledShare]).
+  static int reelImageBudgetBytes() {
+    if (PlatformDetector.isTV()) return ((24 << 20) * displayBudgetFactor()).round();
+    return 12 << 20;
+  }
+
   /// The Skia GPU resource-cache budget this device runs with: the 48MB cap
   /// on low-end hardware ([_capSkiaResourceCache]), otherwise the engine's own
   /// surface-sized default (physical width × height × 12 × 4 bytes, the
