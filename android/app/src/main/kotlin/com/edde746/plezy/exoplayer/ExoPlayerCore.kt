@@ -872,11 +872,8 @@ class ExoPlayerCore(private val activity: Activity) :
       // AnimeThemes clips (no key) and the main player stream as before.
       val cache = if (clipMode) ClipDiskCache.obtain(activity) else null
       clipCache = cache
-      val playbackDataSourceFactory = if (cache != null) {
-        ClipCacheDataSourceFactory(cache, dataSourceFactory!!, clipCacheEvents)
-      } else {
-        dataSourceFactory!!
-      }
+      val clipCacheFactory = cache?.let { ClipCacheDataSourceFactory(it, dataSourceFactory!!, clipCacheEvents) }
+      val playbackDataSourceFactory = clipCacheFactory ?: dataSourceFactory!!
       val mediaSourceFactory = DefaultMediaSourceFactory(playbackDataSourceFactory, wrappedExtractorsFactory)
         .setSubtitleParserFactory(subtitleParserFactory)
       playbackMediaSourceFactory = mediaSourceFactory
@@ -973,9 +970,10 @@ class ExoPlayerCore(private val activity: Activity) :
         // javap: setMediaSourceFactory installs a supplier whose setCache is a no-op), so
         // playback reads the cache through playbackDataSourceFactory above. Here it only turns on
         // the manager's pre-cache stage (specifiedRangeCached), which writes with this data
-        // source factory (without it, a plain DefaultDataSource with none of our settings).
-        if (cache != null) {
-          builder.setCache(cache).setDataSourceFactory(dataSourceFactory!!)
+        // source factory (without it, a plain DefaultDataSource with none of our settings). It
+        // is the cache path's own upstream, so no redirect target lands in the cache's index.
+        if (clipCacheFactory != null) {
+          builder.setCache(clipCacheFactory.cache).setDataSourceFactory(clipCacheFactory.cacheUpstream)
         }
         // V2-18: a clip never asks the display for a new refresh rate.
         playerBuilder.setVideoChangeFrameRateStrategy(ClipCorePolicy.VIDEO_CHANGE_FRAME_RATE_STRATEGY)

@@ -6,6 +6,9 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.ByteArrayDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheWriter
+import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
@@ -16,6 +19,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -184,6 +188,40 @@ class ClipDiskCacheTest {
     for (k in cache.keys) assertFalse(k, k.contains("abc123") || k.contains("Token", ignoreCase = true))
     // File names are numeric ids, never the key or the URI.
     dir.walkTopDown().filter { it.isFile }.forEach { assertFalse(it.name, it.name.contains("abc123") || it.name.contains("server-a")) }
+  }
+
+  /** An upstream whose server redirected the request: it reports another address, with the token. */
+  private inner class Redirecting : DataSource.Factory {
+    val target: Uri = Uri.parse("https://server-a-edge.invalid/library/parts/41/1700000000/file.mp4?X-Plex-Token=abc123")
+
+    override fun createDataSource(): DataSource {
+      val inner = ByteArrayDataSource(bytes)
+      return object : DataSource by inner {
+        override fun getUri(): Uri? = inner.uri?.let { target }
+      }
+    }
+  }
+
+  @Test
+  fun aRedirectTargetNeverLandsInTheCacheIndex() {
+    val factory = ClipCacheDataSourceFactory(cache, Redirecting())
+    val spec = DataSpec.Builder().setUri(Uri.parse(plexUri)).setKey(key).build()
+    assertArrayEquals(bytes, readAll(factory.createDataSource(), spec))
+    assertEquals(bytes.size.toLong(), cache.getCachedBytes(key, 0, C.LENGTH_UNSET.toLong()))
+    assertNull("no redirect target, so no token or address, in the index", ContentMetadata.getRedirectedUri(cache.getContentMetadata(key)))
+  }
+
+  @Test
+  fun thePreCacheStageKeepsNoRedirectTargetEither() {
+    val factory = ClipCacheDataSourceFactory(cache, Redirecting())
+    // What the preload manager's pre-cache stage builds from Builder.setCache and
+    // setDataSourceFactory (media3 1.11.0, PreCacheHelper.Factory): a plain CacheDataSource
+    // over the upstream it was given, written by a CacheWriter.
+    val preCache = CacheDataSource.Factory().setCache(factory.cache).setUpstreamDataSourceFactory(factory.cacheUpstream)
+    val spec = DataSpec.Builder().setUri(Uri.parse(plexUri)).setKey(key).build()
+    CacheWriter(preCache.createDataSource(), spec, null, null).cache()
+    assertEquals(bytes.size.toLong(), cache.getCachedBytes(key, 0, C.LENGTH_UNSET.toLong()))
+    assertNull(ContentMetadata.getRedirectedUri(cache.getContentMetadata(key)))
   }
 
   // --- ranks --------------------------------------------------------------

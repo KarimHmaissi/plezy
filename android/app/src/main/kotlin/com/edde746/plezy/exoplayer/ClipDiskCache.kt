@@ -230,13 +230,20 @@ internal object ClipDiskCache {
  */
 @OptIn(UnstableApi::class)
 internal class ClipCacheDataSourceFactory(
-  cache: Cache,
+  val cache: Cache,
   private val upstream: DataSource.Factory,
   eventListener: CacheDataSource.EventListener? = null
 ) : DataSource.Factory {
+  /**
+   * [upstream] for every request that writes [cache], here and in the preload manager's
+   * pre-cache stage: it reports each request's own URI, never a redirect's target
+   * ([RequestUriDataSource]).
+   */
+  val cacheUpstream: DataSource.Factory = RequestUriDataSource.Factory(upstream)
+
   private val cached = CacheDataSource.Factory()
     .setCache(cache)
-    .setUpstreamDataSourceFactory(upstream)
+    .setUpstreamDataSourceFactory(cacheUpstream)
     .setCacheKeyFactory(KEY_FACTORY)
     .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     .setEventListener(eventListener)
@@ -294,5 +301,42 @@ internal class ClipCacheRoutingDataSource(private val cached: () -> DataSource, 
     } finally {
       active = null
     }
+  }
+}
+
+/**
+ * [upstream], reporting each request's own URI as its URI and never where a redirect took it
+ * (plan V2-10). CacheDataSource keeps an upstream's redirect target in the cache's index (the
+ * `exo_redir` metadata, media3 1.11.0) whenever it differs from the request's URI, so a server
+ * or proxy redirect that kept the query would write the token and an address there. Nothing
+ * else changes: CacheDataSource asks its upstream for the request's own URI on every open (the
+ * target is only ever reported), and the bytes are the same.
+ */
+@OptIn(UnstableApi::class)
+internal class RequestUriDataSource(private val upstream: DataSource) : DataSource {
+  private var requestUri: Uri? = null
+
+  override fun addTransferListener(transferListener: TransferListener) {
+    upstream.addTransferListener(transferListener)
+  }
+
+  override fun open(dataSpec: DataSpec): Long {
+    requestUri = dataSpec.uri
+    return upstream.open(dataSpec)
+  }
+
+  override fun read(buffer: ByteArray, offset: Int, length: Int): Int = upstream.read(buffer, offset, length)
+
+  override fun getUri(): Uri? = requestUri
+
+  override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
+
+  override fun close() {
+    requestUri = null
+    upstream.close()
+  }
+
+  class Factory(private val upstream: DataSource.Factory) : DataSource.Factory {
+    override fun createDataSource(): DataSource = RequestUriDataSource(upstream.createDataSource())
   }
 }
