@@ -8386,8 +8386,8 @@ class Translations$reel$intro$en {
 	/// en: 'Welcome to the Reel'
 	String get title => 'Welcome to the Reel';
 
-	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.'
-	String get bodyTv => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.';
+	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more. Press Back for the sound button.'
+	String get bodyTv => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more. Press Back for the sound button.';
 
 	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.'
 	String get bodyPhone => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.';
@@ -8466,14 +8466,14 @@ class Translations$reel$card$en {
 	/// en: 'Sound on'
 	String get soundOn => 'Sound on';
 
-	/// en: 'Sound off'
-	String get soundOffBadge => 'Sound off';
+	/// en: '≡ or Back'
+	String get soundButtonKeys => '≡ or Back';
 
-	/// en: 'press ≡ for sound'
-	String get soundOffKey => 'press ≡ for sound';
+	/// en: 'OK'
+	String get soundButtonOk => 'OK';
 
-	/// en: 'Sound off. Press the Menu button for sound.'
-	String get soundOffAnnounce => 'Sound off. Press the Menu button for sound.';
+	/// en: 'Sound off. Press the Menu button, or Back then OK, for sound.'
+	String get soundOffAnnounce => 'Sound off. Press the Menu button, or Back then OK, for sound.';
 
 	/// en: 'Sound on'
 	String get soundOnAnnounce => 'Sound on';
@@ -11924,7 +11924,7 @@ extension on Translations {
 			'navigation.reel' => 'Reel',
 			'navigation.history' => 'History',
 			'reel.intro.title' => 'Welcome to the Reel',
-			'reel.intro.bodyTv' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.',
+			'reel.intro.bodyTv' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more. Press Back for the sound button.',
 			'reel.intro.bodyPhone' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.',
 			'reel.intro.start' => 'Start',
 			'reel.card.emptyTitle' => ({required Object deck}) => 'Nothing in ${deck} yet',
@@ -11950,9 +11950,9 @@ extension on Translations {
 			'reel.card.more' => 'More',
 			'reel.card.onTv' => 'On TV',
 			'reel.card.soundOn' => 'Sound on',
-			'reel.card.soundOffBadge' => 'Sound off',
-			'reel.card.soundOffKey' => 'press ≡ for sound',
-			'reel.card.soundOffAnnounce' => 'Sound off. Press the Menu button for sound.',
+			'reel.card.soundButtonKeys' => '≡ or Back',
+			'reel.card.soundButtonOk' => 'OK',
+			'reel.card.soundOffAnnounce' => 'Sound off. Press the Menu button, or Back then OK, for sound.',
 			'reel.card.soundOnAnnounce' => 'Sound on',
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',

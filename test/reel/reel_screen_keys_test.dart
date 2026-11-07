@@ -206,7 +206,7 @@ void main() {
       expect(c.deck.id, 'a');
     });
 
-    testWidgets('play/pause keys reach the clip; Back goes on to the shell', (tester) async {
+    testWidgets('play/pause keys reach the clip; Back goes to the sound button, then on to the shell', (tester) async {
       await showTv(tester);
       final engine = engines.last;
       engine.calls.clear();
@@ -216,7 +216,14 @@ void main() {
       expect(await press(tester, LogicalKeyboardKey.mediaPlay), isTrue);
       expect(engine.calls, contains('play'));
 
-      expect(await press(tester, LogicalKeyboardKey.escape), isFalse, reason: 'Back belongs to the shell (the rail)');
+      expect(await press(tester, LogicalKeyboardKey.escape), isTrue, reason: 'the first Back is the sound button');
+      expect(find.byKey(const ValueKey('reel-sound-focus')), findsOneWidget);
+      expect(
+        await press(tester, LogicalKeyboardKey.escape),
+        isFalse,
+        reason: 'then Back belongs to the shell (the rail)',
+      );
+      expect(find.byKey(const ValueKey('reel-sound-focus')), findsNothing);
       expect((c.deck.id, title()), ('a', 'Harbor Lights'));
     });
 

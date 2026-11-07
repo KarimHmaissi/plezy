@@ -103,6 +103,23 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-07
+
+### A Sound button on the TV's Reel (branch `feature/reel-sound-button-unlimited-saves`)
+- The TV's Reel now has a **Sound on / Mute button** bottom right, inside
+  the overscan margin, where the "Sound off · press ≡" badge was. Every TV
+  visit still starts muted; the button is always there, in the app's own
+  pill and focus ring (as the card's Replay).
+- **Back on the card focuses it**, OK on it turns the sound on or mutes, ↑
+  goes back to the card, and ↓ ← → move nothing while it is focused. Back
+  on the button goes on to the rail as before, so leaving the Reel takes
+  two Backs. The card keeps the focus and OK on launch.
+- ≡ still turns the sound on, and the button follows every way the sound
+  changes (≡, the sheet, On TV mode, a visit that starts muted again). A
+  tap works too, and a screen reader hears it as a button.
+- Muted, it stays through quiet mode; with the sound on it fades with the
+  card's chrome unless it is focused.
+
 ## 2026-11-06
 
 ### A copy that won't open no longer stops playback (branch `fix/plex-direct-play-503`)

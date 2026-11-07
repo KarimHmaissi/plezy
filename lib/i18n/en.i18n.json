@@ -1688,7 +1688,7 @@
   "reel": {
     "intro": {
       "title": "Welcome to the Reel",
-      "bodyTv": "Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.",
+      "bodyTv": "Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more. Press Back for the sound button.",
       "bodyPhone": "Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.",
       "start": "Start"
     },
@@ -1718,9 +1718,9 @@
       "more": "More",
       "onTv": "On TV",
       "soundOn": "Sound on",
-      "soundOffBadge": "Sound off",
-      "soundOffKey": "press ≡ for sound",
-      "soundOffAnnounce": "Sound off. Press the Menu button for sound.",
+      "soundButtonKeys": "≡ or Back",
+      "soundButtonOk": "OK",
+      "soundOffAnnounce": "Sound off. Press the Menu button, or Back then OK, for sound.",
       "soundOnAnnounce": "Sound on",
       "mute": "Mute",
       "hideControls": "Hide controls",
