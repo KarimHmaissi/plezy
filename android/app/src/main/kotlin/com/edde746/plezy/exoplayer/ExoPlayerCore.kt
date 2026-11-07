@@ -989,7 +989,8 @@ class ExoPlayerCore(private val activity: Activity) :
           emitLog(
             "info",
             "ReelCache",
-            if (cache != null) "disk cache on used=${cache.cacheSpace / 1024}KB" else "disk cache off"
+            // No `cacheSpace` here: on the main thread it would wait for the cache's first load.
+            if (cache != null) "disk cache on" else "disk cache off"
           )
           emitLog(
             "info",

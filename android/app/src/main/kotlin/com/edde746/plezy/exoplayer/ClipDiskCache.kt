@@ -142,10 +142,13 @@ internal object ClipDiskCache {
       return null
     }
     return try {
+      // Called on the main thread as a clip core is built. SimpleCache loads its index and scans
+      // the folder on its own thread while holding the cache's lock (media3 1.11.0), so nothing
+      // here reads from the cache: `cacheSpace` would wait for that whole load.
       SimpleCache(dir, LeastRecentlyUsedCacheEvictor(cap), database(context)).also {
         cache = it
         capBytes = cap
-        Log.i(TAG, "[ReelCache] open cap=${cap / (1024 * 1024)}MB used=${it.cacheSpace / (1024 * 1024)}MB")
+        Log.i(TAG, "[ReelCache] open cap=${cap / (1024 * 1024)}MB")
       }
     } catch (e: Exception) {
       // A second instance on the folder (it can't happen in one process) or a disk error.
