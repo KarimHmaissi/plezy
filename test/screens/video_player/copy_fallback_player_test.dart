@@ -38,6 +38,7 @@ import '../../test_helpers/media_items.dart';
 import '../../test_helpers/mock_player_channels.dart';
 import '../../test_helpers/multi_server_fixtures.dart';
 import '../../test_helpers/playback_report_fakes.dart';
+import '../../test_helpers/player_streams.dart';
 import '../../test_helpers/prefs.dart';
 import '../../test_helpers/pump.dart';
 import '../../test_helpers/watch_together_fakes.dart';
@@ -106,6 +107,8 @@ void main() {
   Future<({VideoPlayerScreenState state, _CopyPlayer player, _CopyServer a, _CopyServer b})> pumpPlayer(
     WidgetTester tester, {
     required bool opens,
+    bool firstFrame = true,
+    bool matchesDisplay = false,
   }) async {
     final a = _CopyServer('server-a', 'Server A', copy: onA);
     final b = _CopyServer('server-b', 'Server B', copy: onB);
@@ -147,7 +150,7 @@ void main() {
         ),
       ),
     );
-    final player = _CopyPlayer(opens: opens);
+    final player = _CopyPlayer(opens: opens, firstFrame: firstFrame, matchesDisplay: matchesDisplay);
     addTearDown(player.dispose);
     key.currentState!.player = player;
     await key.currentState!.debugWirePlayerStreamsForTesting();
@@ -206,6 +209,52 @@ void main() {
 
         await tester.tap(find.text(t.common.close));
         await tester.pump(const Duration(seconds: 5));
+      },
+    );
+  });
+
+  // With display matching on (the Shield), each open waits, paused, inside
+  // its in-place reload for the first frame. A copy that opens and then fails
+  // (503 for the whole window) is still inside that reload when the failure
+  // arrives; the next copy must still be tried, not turned away while the
+  // failed reload lets go of the player.
+  testWidgets('a copy that opens and then fails behind the display-matching hold moves on to the next', (tester) async {
+    await withMockPlayerChannels(
+      methodChannelName: 'com.plezy/mpv_player',
+      eventChannelName: 'com.plezy/mpv_player/events',
+      testBody: () async {
+        await SettingsService.instance.write(SettingsService.matchContentFrameRate, true);
+        final (:state, :player, :a, :b) = await pumpPlayer(
+          tester,
+          opens: true,
+          firstFrame: false,
+          matchesDisplay: true,
+        );
+
+        player.emitError(const PlayerError('Stream unavailable', cause: PlayerError.serverHttp503));
+        await pumpUntil(tester, () => player.openedUris.isNotEmpty, describe: () => '${player.openedUris}');
+        expect(player.openedUris.single, 'https://example.invalid/server-b/202');
+
+        // Server B's 4K opens, then answers 503 for the whole window too.
+        player.emitError(const PlayerError('Stream unavailable', cause: PlayerError.serverHttp503));
+        await pumpUntil(
+          tester,
+          () => player.openedUris.length > 1 || find.text(t.messages.serverBusyTitle).evaluate().isNotEmpty,
+          describe: () => '${player.openedUris}',
+        );
+
+        expect(find.text(t.messages.serverBusyTitle), findsNothing, reason: 'two 1080p copies are still to try');
+        expect(player.openedUris, [
+          'https://example.invalid/server-b/202',
+          'https://example.invalid/server-a/101',
+        ], reason: 'then the next quality down, the highest bitrate first');
+        expect(a.picks, ['a1080']);
+        expect(state.debugCurrentMetadataForTesting.globalKey, onA.globalKey);
+
+        // Leave while that copy still waits for its first frame: the screen
+        // lets go of the open before the player is closed.
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 3));
       },
     );
   });
@@ -274,8 +323,49 @@ class _CopyServer with PlaybackReportRecorder implements MediaServerClient {
 }
 
 class _CopyPlayer extends FakeSyncPlayer {
-  _CopyPlayer({required this.opens}) : super(playing: false, duration: const Duration(minutes: 100));
+  _CopyPlayer({required this.opens, this.firstFrame = true, this.matchesDisplay = false})
+    : super(playing: false, duration: const Duration(minutes: 100));
   final bool opens;
+
+  /// Whether an open gets as far as its first frame; when false the load
+  /// starts and then hangs, as a stream the server keeps refusing does.
+  final bool firstFrame;
+
+  /// Android mpv with display matching on: every open waits, paused, for its
+  /// first frame before the reload that started it lets go of the player.
+  final bool matchesDisplay;
+
+  final _silent = StreamController<void>.broadcast();
+
+  @override
+  Future<void> dispose({bool preserveDisplayMode = false}) async {
+    // Not awaited: its done event waits on listeners the screen's teardown
+    // has no reason to finish first.
+    unawaited(_silent.close());
+    await super.dispose(preserveDisplayMode: preserveDisplayMode);
+  }
+
+  /// With [matchesDisplay], load signals that stay open as a real core's do,
+  /// so an open's outcome waits for its first frame (or an abort) instead of
+  /// settling the moment it subscribes to a closed stream.
+  @override
+  PlayerStreams get streams {
+    final base = super.streams;
+    if (!matchesDisplay) return base;
+    return emptyPlayerStreams(
+      playing: base.playing,
+      buffering: base.buffering,
+      duration: base.duration,
+      rate: base.rate,
+      error: base.error,
+      playbackRestart: base.playbackRestart,
+      fileStarted: base.fileStarted,
+      fileLoaded: _silent.stream,
+      fileLoadFailed: _silent.stream,
+      primaryMediaReady: _silent.stream,
+    );
+  }
+
   int openCalls = 0;
   final openedUris = <String>[];
   final openedStarts = <Duration?>[];
@@ -287,7 +377,7 @@ class _CopyPlayer extends FakeSyncPlayer {
   String get playerType => 'mpv';
 
   @override
-  bool get needsDecoderRefreshAfterDisplaySwitch => false;
+  bool get needsDecoderRefreshAfterDisplaySwitch => matchesDisplay;
 
   @override
   Future<void> setProperty(String name, String value) async {}
@@ -320,7 +410,7 @@ class _CopyPlayer extends FakeSyncPlayer {
     setPosition(media.start ?? Duration.zero);
     emitPlaying(play);
     emitFileStarted();
-    emitPlaybackRestart();
+    if (firstFrame) emitPlaybackRestart();
   }
 
   @override
