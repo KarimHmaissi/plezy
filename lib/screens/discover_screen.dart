@@ -855,7 +855,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // Plex rows Home's own hubs don't include are fetched once those land.
     if (renderChanged && !isNewLoad) unawaited(_loadRows());
     if (isNewLoad) {
-      // Keep charts and other fetched rows current.
+      // Keep charts and other fetched rows current (the Reel row's Saves
+      // read afresh too).
+      HomeRowResolver.forgetReelPicks();
       unawaited(_loadRows(refresh: true));
     }
     _applyPendingTvBrowseRailFocus();

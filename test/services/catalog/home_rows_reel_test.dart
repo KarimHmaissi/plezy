@@ -88,6 +88,7 @@ void main() {
       final store = LocalCustomisationStore(db);
       reel = ReelStore(database: () async => db, settings: () async => store, clock: () => now);
       sources = CatalogSourcesProvider();
+      HomeRowResolver.forgetReelPicks();
     });
 
     tearDown(() async {

@@ -75,6 +75,7 @@ void main() {
     Customisation.debugSetLocalDatabase(db);
     Customisation.debugSetStore(LocalCustomisationStore(db));
     sources = CatalogSourcesProvider();
+    HomeRowResolver.forgetReelPicks();
   });
 
   tearDown(() async {
@@ -115,6 +116,50 @@ void main() {
 
     expect(hub?.items.map((i) => i.id), [for (var i = 1; i <= 25; i++) '$i']);
     expect(a.mostAtOnce, HomeRowResolver.pickFetchesAtOnce);
+  });
+
+  test('a reload reads only the Saves it has not read: a new Save is one read, a removal none', () async {
+    final a = _Server('s1');
+    for (var i = 1; i <= 12; i++) {
+      await save('$i', 's1', 'Title $i', Duration(minutes: i + 1));
+    }
+    HomeRowResolver resolver() => HomeRowResolver(sources: sources, clientFor: (id) => id == 's1' ? a : null);
+
+    await resolver().fetch(row);
+    expect(a.asked, hasLength(12));
+
+    a.asked.clear();
+    await save('13', 's1', 'Title 13', Duration.zero);
+    final hub = await resolver().fetch(row);
+    expect(a.asked, ['13'], reason: 'the other Saves were read already');
+    expect(hub?.items.map((i) => i.id), ['13', for (var i = 1; i <= 12; i++) '$i']);
+
+    a.asked.clear();
+    await ReelStore.instance.removePick('t5');
+    final after = await resolver().fetch(row);
+    expect(a.asked, isEmpty);
+    expect(after?.items.map((i) => i.id), [
+      '13',
+      for (var i = 1; i <= 12; i++)
+        if (i != 5) '$i',
+    ]);
+
+    // Home's full refresh reads them all again (watched state and all).
+    HomeRowResolver.forgetReelPicks();
+    await resolver().fetch(row);
+    expect(a.asked, hasLength(12));
+  });
+
+  test('a Save its server could not read is asked about again on the next load', () async {
+    final a = _Server('s1', failing: {'2'});
+    await save('1', 's1', 'Harbor Lights', const Duration(minutes: 3));
+    await save('2', 's1', 'Lantern Bay', const Duration(minutes: 2));
+    HomeRowResolver resolver() => HomeRowResolver(sources: sources, clientFor: (id) => id == 's1' ? a : null);
+
+    await resolver().fetch(row);
+    a.asked.clear();
+    await resolver().fetch(row);
+    expect(a.asked, ['2']);
   });
 
   test('a title its server fails on, or on a server not connected, is left out', () async {

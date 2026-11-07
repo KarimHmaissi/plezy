@@ -191,6 +191,21 @@ class HomeRowResolver {
   /// Fork: how many Reel Saves the "From the Reel" row reads at once.
   static const int pickFetchesAtOnce = 6;
 
+  /// Fork: the "From the Reel" row's Saves as read, by [_pickKey], kept
+  /// across loads (each load builds a new resolver). A Save or removal in
+  /// the Reel reloads the row; only the Save that changed is read from its
+  /// server, not every Save again (the list has no cap). A Save its server
+  /// could not read is not kept, so it is asked about on the next load.
+  /// Home's full refresh drops them all ([forgetReelPicks]), so the row's
+  /// titles (watched state and all) are read afresh there, as before.
+  static final Map<String, MediaItem> _pickItems = {};
+
+  static String _pickKey(ReelPick pick) => '${pick.serverId}/${pick.ratingKey}@${pick.at.millisecondsSinceEpoch}';
+
+  /// Fork: read every Save of the "From the Reel" row afresh on its next
+  /// load (Home's full refresh).
+  static void forgetReelPicks() => _pickItems.clear();
+
   /// Runs [fetch] over [inputs] with at most [atOnce] running together,
   /// keeping the inputs' order in the results.
   static Future<List<R>> _pooled<T, R>(List<T> inputs, int atOnce, Future<R> Function(T input) fetch) async {
@@ -283,11 +298,21 @@ class HomeRowResolver {
         // next after" card leads when they just finished a show: the
         // show's one read, the same way.
         final entry = _whatsNextEntry();
-        final found = await _pooled(await (reel ?? ReelStore.instance).savedPicks(), pickFetchesAtOnce, (pick) async {
+        final picks = await (reel ?? ReelStore.instance).savedPicks();
+        final current = {for (final pick in picks) _pickKey(pick)};
+        _pickItems.removeWhere((key, _) => !current.contains(key));
+        var read = 0;
+        final found = await _pooled(picks, pickFetchesAtOnce, (pick) async {
+          final key = _pickKey(pick);
+          final known = _pickItems[key];
+          if (known != null) return known;
           final client = clientFor(ServerId(pick.serverId));
           if (client == null) return null;
           try {
-            return await client.fetchItem(pick.ratingKey).timeout(pickFetchTimeout);
+            read++;
+            final item = await client.fetchItem(pick.ratingKey).timeout(pickFetchTimeout);
+            if (item != null) _pickItems[key] = item;
+            return item;
           } catch (e) {
             appLogger.d('Home: Reel pick unavailable', error: e);
             return null;
@@ -300,7 +325,8 @@ class HomeRowResolver {
             if (next == null || item.id != next.id || item.serverId != next.serverId) item,
         ];
         appLogger.i(
-          '[ReelSave] Home row: ${items.length - (next == null ? 0 : 1)} saved titles found, '
+          '[ReelSave] Home row: ${items.length - (next == null ? 0 : 1)} saved titles found '
+          '($read read from a server), '
           "what's-next card ${next == null ? 'none' : 'shown'}",
         );
       default:
