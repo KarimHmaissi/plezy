@@ -626,7 +626,8 @@ class ReelPool {
   /// are kept with an empty list.
   ///
   /// [person] is the day's person for the Person deck (D22): unless today's
-  /// row is already in the build's order, the same call orders their unseen
+  /// row is already in the build's order, or kept for someone else
+  /// ([_personDue]), the same call orders their unseen
   /// titles in its optional `person` array, and today's [personKey] row is
   /// kept in that order. When the call gives no such array, the row keeps
   /// its code order.
@@ -643,7 +644,7 @@ class ReelPool {
     final againList = again.take(maxAgain).toList();
     final newList = (arrivals?.candidates ?? const <PoolCandidate>[]).take(maxNew).toList();
     final now = _clock();
-    final askPerson = person != null && person.candidates.isNotEmpty && !await _personOrdered(now, person.name);
+    final askPerson = person != null && person.candidates.isNotEmpty && await _personDue(now, person.name);
     final personList = askPerson ? person.candidates.take(maxPerson).toList() : const <PoolCandidate>[];
     final (:lines, :idOf, :byRow, :hasPremise) = await _candidateLines(
       list,
@@ -974,11 +975,20 @@ class ReelPool {
     ].join(' · ');
   }
 
-  /// Whether today's Person row here is already in the build's order for
-  /// [name] (a second build the same day doesn't ask again).
-  Future<bool> _personOrdered(DateTime now, String name) async {
+  /// Whether the build orders [name]'s titles: only while today's Person row
+  /// here is theirs in code order, or there is none yet. A row already in
+  /// the build's order isn't asked again, and a row kept for someone else
+  /// stays as it is: the day's person was chosen, and a later gather the
+  /// same day (a rebuild, after some of their titles were watched) never
+  /// swaps them for another.
+  Future<bool> _personDue(DateTime now, String name) async {
     final list = _personList(await _personRow(now));
-    return list != null && list.ai && list.name.toLowerCase() == name.toLowerCase();
+    if (list == null) return true;
+    if (list.name.toLowerCase() != name.toLowerCase()) {
+      appLogger.i('[ReelDeck] person: today\'s person is kept; another gathered later is not ordered');
+      return false;
+    }
+    return !list.ai;
   }
 
   /// Keeps the call's `person` order (known `p` ids only, each once) as

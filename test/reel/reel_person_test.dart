@@ -458,6 +458,24 @@ void main() {
       expect(PersonDeck.nameFor(list), 'Starring Ada Marlow');
     });
 
+    test("a person gathered later the same day never replaces today's kept person", () async {
+      final users = <String>[];
+      final p = pool(
+        model: (_, u, _) async {
+          users.add(u);
+          return answer(['p1']);
+        },
+      );
+      await p.keepPerson(_pick('Ada Marlow', ['x1', 'x2', 'x3']));
+      // A rebuild later the same day gathers someone else (today's person
+      // fell short of unseen titles): the build leaves the day's row alone.
+      await p.build([_candidate('fresh')], facts: '', person: _pick('Bram Tolley', ['y1', 'y2', 'y3']));
+      expect(users.single, isNot(contains('Person (')));
+      final list = await p.cachedPerson();
+      expect((list?.name, list?.ai), ('Ada Marlow', false));
+      expect(list?.entries.map((e) => e.ratingKey), ['x1', 'x2', 'x3']);
+    });
+
     test('the TV shares the person with its pool; a phone shows the TV\'s person over its own', () async {
       await pool(
         model: (_, _, _) async => answer(['p2', 'p1']),
