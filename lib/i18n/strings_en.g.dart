@@ -8444,6 +8444,12 @@ class Translations$reel$card$en {
 	/// en: 'Show controls'
 	String get showControls => 'Show controls';
 
+	/// en: 'Fill the screen'
+	String get fillScreen => 'Fill the screen';
+
+	/// en: 'Fit to the screen'
+	String get fitScreen => 'Fit to the screen';
+
 	/// en: 'Couldn't load ${deck}'
 	String failedTitle({required Object deck}) => 'Couldn\'t load ${deck}';
 
@@ -8554,6 +8560,12 @@ class Translations$reel$toast$en {
 
 	/// en: 'Couldn't save: not connected to the TV'
 	String get notConnected => 'Couldn\'t save: not connected to the TV';
+
+	/// en: 'You're offline. Clips saved on this TV still play; other cards show their pictures.'
+	String get offlineTv => 'You\'re offline. Clips saved on this TV still play; other cards show their pictures.';
+
+	/// en: 'You're offline. The Reel shows pictures until you're back online.'
+	String get offlinePhone => 'You\'re offline. The Reel shows pictures until you\'re back online.';
 }
 
 // Path: reel.moreLike
@@ -8615,8 +8627,8 @@ class Translations$reel$status$en {
 	/// en: 'You're offline'
 	String get offlineTitle => 'You\'re offline';
 
-	/// en: 'The Reel plays from your servers. It picks up again once you are back online.'
-	String get offlineBody => 'The Reel plays from your servers. It picks up again once you are back online.';
+	/// en: 'This deck needs your servers. Try again once you're back online.'
+	String get offlineBody => 'This deck needs your servers. Try again once you\'re back online.';
 
 	/// en: 'The Reel didn't open'
 	String get openFailedTitle => 'The Reel didn\'t open';
@@ -11801,6 +11813,8 @@ extension on Translations {
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
 			'reel.card.showControls' => 'Show controls',
+			'reel.card.fillScreen' => 'Fill the screen',
+			'reel.card.fitScreen' => 'Fit to the screen',
 			'reel.card.failedTitle' => ({required Object deck}) => 'Couldn\'t load ${deck}',
 			'reel.card.failedBodyTv' => 'Press OK to try again, or → for the next deck.',
 			'reel.card.failedBodyTap' => 'Tap to try again.',
@@ -11832,6 +11846,8 @@ extension on Translations {
 			'reel.toast.savedOnTv' => 'On the TV tonight',
 			'reel.toast.savedForLater' => 'Saved, on the TV next time you connect',
 			'reel.toast.notConnected' => 'Couldn\'t save: not connected to the TV',
+			'reel.toast.offlineTv' => 'You\'re offline. Clips saved on this TV still play; other cards show their pictures.',
+			'reel.toast.offlinePhone' => 'You\'re offline. The Reel shows pictures until you\'re back online.',
 			'reel.moreLike.finding' => 'Finding more like this…',
 			'reel.moreLike.upNext' => 'More like this, up next',
 			'reel.moreLike.none' => 'Couldn\'t find more like this right now',
@@ -11843,7 +11859,7 @@ extension on Translations {
 			'reel.decide.hintTv' => '← → choose  ·  OK watch  ·  ↓ keep going',
 			'reel.decide.keepGoing' => 'Swipe up to keep going.',
 			'reel.status.offlineTitle' => 'You\'re offline',
-			'reel.status.offlineBody' => 'The Reel plays from your servers. It picks up again once you are back online.',
+			'reel.status.offlineBody' => 'This deck needs your servers. Try again once you\'re back online.',
 			'reel.status.openFailedTitle' => 'The Reel didn\'t open',
 			'reel.status.openFailedBodyTv' => 'Press OK to try again.',
 			'reel.status.openFailedBodyPhone' => 'Something went wrong getting it ready.',
@@ -12270,12 +12286,12 @@ extension on Translations {
 			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
 			'liveTv.recordSettings.anyTime' => 'Record at any time',
 			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.recordSettings.keepUpTo' => 'Episodes to keep',
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
 			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
 			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
@@ -12784,12 +12800,12 @@ extension on Translations {
 			'performanceOverlay.decoderAndroidHw' => 'Android HW',
 			'performanceOverlay.decoderNvidiaHw' => 'NVIDIA HW',
 			'performanceOverlay.decoderQualcommHw' => 'Qualcomm HW',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.decoderMediatekHw' => 'MediaTek HW',
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
 			'performanceOverlay.decoderSoftware' => 'Software',
 			'performanceOverlay.decoderHardware' => 'Hardware',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'performanceOverlay.signal' => 'Signal',

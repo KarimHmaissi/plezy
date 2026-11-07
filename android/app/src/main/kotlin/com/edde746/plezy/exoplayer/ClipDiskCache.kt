@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.annotation.VisibleForTesting
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
@@ -105,6 +106,25 @@ internal object ClipCachePolicy {
     if (contentLength > 0 && cachedFromStart >= contentLength) return true
     return cachedFromStart >= ON_DISK_MIN_BYTES
   }
+
+  /**
+   * Whether a clip's bytes on disk are dropped after a playback error with [errorCode] (a
+   * `PlaybackException` code). An IO or parsing error may have come from the cached bytes (a file
+   * replaced on the server, a short write), so they go. A connection that failed or timed out
+   * says nothing about them: offline (plan V2-15) a clip on disk whose remainder was never cached
+   * fails that way when it reaches the gap, and its bytes must stay for the next offline visit.
+   * DefaultHttpDataSource and CronetDataSource both report a failed open as
+   * [PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED] and a timed-out one as
+   * [PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT] (media3 1.11.0, javap).
+   */
+  fun evictsAfter(errorCode: Int): Boolean {
+    if (!isIoOrParsing(errorCode)) return false
+    return errorCode != PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED &&
+      errorCode != PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+  }
+
+  /** Whether [errorCode] is an IO (2xxx) or parsing (3xxx) `PlaybackException` code. */
+  fun isIoOrParsing(errorCode: Int): Boolean = errorCode in PlaybackException.ERROR_CODE_IO_UNSPECIFIED until PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
 
   /** A short tag for a key in log lines: the logs never carry a server id. */
   fun logId(key: String?): String = if (key == null) "none" else "%08x".format(key.hashCode())

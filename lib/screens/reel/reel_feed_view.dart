@@ -38,6 +38,7 @@ import '../../widgets/pressable.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
 import 'reel_decide_view.dart';
+import 'reel_pinch.dart';
 
 /// The phone feed's theme (V2-24). The feed paints on black whatever the app
 /// theme is, so its text, buttons and loading and empty states always take the
@@ -146,6 +147,16 @@ enum ReelFeedLayout {
 /// out so the clip plays on black. A pause or a held last frame keeps it
 /// black; an AI card, a card still opening and a clip that broke keep the art.
 ///
+/// Pinch to fill (V2-33): on the layouts where the info sits over the
+/// picture (a phone upright or on its side: the Fold's cover screen), a
+/// two-finger pinch out crops the clip to cover the page and a pinch in fits
+/// it again ([ReelPinchRecognizer]: one finger never answers it, so paging
+/// and the sideways swipe are as they were). The picture follows the fingers
+/// and settles on the app's slow token (at once with reduce motion), and the
+/// choice is kept ([SettingsService.reelFill]) for every card and the next
+/// visit. A screen reader gets it as a custom action. A YouTube card is never
+/// cropped.
+///
 /// With a screen reader (`MediaQuery.accessibleNavigationOf`, V2-54) each
 /// card is one node with Save, More and Hide/Show controls as custom
 /// actions, the Reel starts muted so the clip doesn't talk over it, and the
@@ -189,7 +200,7 @@ class ReelFeedView extends StatefulWidget {
   State<ReelFeedView> createState() => _ReelFeedViewState();
 }
 
-class _ReelFeedViewState extends State<ReelFeedView> {
+class _ReelFeedViewState extends State<ReelFeedView> with SingleTickerProviderStateMixin {
   // keepPage off (V2-65): under a PageStorageKey, page storage would reopen
   // a rebuilt feed on the page it last settled on, not the controller's
   // cursor.
@@ -236,6 +247,17 @@ class _ReelFeedViewState extends State<ReelFeedView> {
 
   /// The one mute a screen reader brings; unmuting after it sticks.
   bool _a11yMuted = false;
+
+  /// Pinch to fill (V2-33): the kept choice, and the picture's way from fit
+  /// (0) to fill (1), which a pinch drags and its release settles.
+  bool _fill = SettingsService.instanceOrNull?.read(SettingsService.reelFill) ?? false;
+  late final AnimationController _fillAnim = AnimationController(vsync: this, value: _fill ? 1 : 0);
+
+  /// Two fingers are on the picture: it centres to grow from the middle.
+  bool _pinching = false;
+
+  /// Where the picture was when the pinch started.
+  double _pinchFrom = 0;
 
   ReelController get _c => widget.controller;
 
@@ -322,6 +344,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     if (_c.artPrecache == _precacheArt) _c.artPrecache = null;
     unawaited(_ended?.cancel());
     _pages.dispose();
+    _fillAnim.dispose();
     _showBars();
     if (_immersive) widget.onImmersive?.call(false);
     super.dispose();
@@ -576,6 +599,49 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     _immersiveByUser(!_immersive);
   }
 
+  /// Two fingers landed on the picture (V2-33): it follows them from here.
+  void _pinchStart() {
+    _fillAnim.stop();
+    _pinchFrom = _fillAnim.value;
+    setState(() => _pinching = true);
+  }
+
+  /// The picture grows or shrinks with the fingers, between fit and fill.
+  void _pinchUpdate(double ratio) {
+    final page = _feedSize ?? MediaQuery.sizeOf(context);
+    final aspect = widget.players.videoFor(_c.slotAt(_page).card?.id ?? '')?.aspectRatio ?? _stillAspect;
+    _fillAnim.value = reelPinchFill(from: _pinchFrom, ratio: ratio, cover: reelFillZoom(page, aspect, 1));
+  }
+
+  /// The pinch let go: out far enough fills, in far enough fits, and a pinch
+  /// that barely moved settles back where it was.
+  void _pinchEnd(double ratio) {
+    if (!mounted) return;
+    setState(() => _pinching = false);
+    _setFill(
+      reelPinchFills(filled: _fill, ratio: ratio),
+      why: 'pinch ×${ratio.toStringAsFixed(2)}',
+    );
+  }
+
+  /// The picture settles on fit or fill, and a change is kept for the next
+  /// card and the next visit.
+  void _setFill(bool fill, {required String why}) {
+    final slow = Theme.of(context).extension<MonoTokens>()?.slow ?? const Duration(milliseconds: 300);
+    unawaited(_fillAnim.animateTo(fill ? 1 : 0, duration: _motion(context, slow), curve: MonoMotion.emphasized));
+    if (fill == _fill) return;
+    setState(() => _fill = fill);
+    ForkMotion.selection();
+    appLogger.i(
+      '[ReelFill] ${fill ? 'fill' : 'fit'} ($why, ${_layout?.name}, ${_feedSize?.width.round()}x${_feedSize?.height.round()})',
+    );
+    final settings = SettingsService.instanceOrNull;
+    if (settings != null) unawaited(settings.write(SettingsService.reelFill, fill));
+  }
+
+  /// The screen reader's Fill / Fit action (V2-33).
+  void _toggleFill() => _setFill(!_fill, why: 'action');
+
   @override
   Widget build(BuildContext context) {
     final count = _c.slotCount;
@@ -663,10 +729,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       case ReelSlotKind.loading:
         return const ReelCurtain();
       case ReelSlotKind.failed:
+        // Offline (V2-15) a deck that couldn't load says why.
+        final offline = _c.offline.value;
         return ReelMessage(
           icon: Symbols.cloud_off_rounded,
-          title: t.reel.card.failedTitle(deck: _c.deck.name),
-          body: t.reel.card.failedBodyPhone,
+          title: offline ? t.reel.status.offlineTitle : t.reel.card.failedTitle(deck: _c.deck.name),
+          body: offline ? t.reel.status.offlineBody : t.reel.card.failedBodyPhone,
           action: FilledButton.tonalIcon(
             onPressed: () => unawaited(_c.retryDeck()),
             icon: const Icon(Symbols.refresh_rounded),
@@ -737,6 +805,9 @@ class _ReelFeedViewState extends State<ReelFeedView> {
       ),
     );
     final onScreen = card.id == _c.slotAt(_page).card?.id;
+    // Pinch to fill (V2-33) where the info sits over the picture; a YouTube
+    // card, laid out stacked above, is never cropped.
+    final pinchable = layout.overlays && !embed;
     // One node per card for a screen reader (V2-54): its texts read
     // together, with Save, More and Hide/Show controls as custom actions.
     // The feed's own scroll actions stay on the PageView above it; the
@@ -750,13 +821,51 @@ class _ReelFeedViewState extends State<ReelFeedView> {
               CustomSemanticsAction(label: t.reel.card.more): widget.onSheet,
               CustomSemanticsAction(label: _immersive ? t.reel.card.showControls : t.reel.card.hideControls):
                   _toggleControls,
+              if (pinchable)
+                CustomSemanticsAction(label: _fill ? t.reel.card.fitScreen : t.reel.card.fillScreen): _toggleFill,
             }
           : null,
-      child: _gestures(slot, card, info, layout, embed: embed),
+      child: _gestures(slot, card, info, layout, embed: embed, pinchable: pinchable),
     );
   }
 
-  Widget _gestures(ReelSlot slot, ReelCardData card, Widget info, ReelFeedLayout layout, {bool embed = false}) {
+  Widget _gestures(
+    ReelSlot slot,
+    ReelCardData card,
+    Widget info,
+    ReelFeedLayout layout, {
+    bool embed = false,
+    bool pinchable = false,
+  }) {
+    // Two fingers anywhere on the page pinch the picture to fill or fit
+    // (V2-33); one finger never reaches it. Kept in the tree with no
+    // recognizer where there is no pinch, so the page below isn't rebuilt
+    // from scratch when the layout changes.
+    return RawGestureDetector(
+      behavior: HitTestBehavior.translucent,
+      excludeFromSemantics: true,
+      gestures: {
+        if (pinchable)
+          ReelPinchRecognizer: GestureRecognizerFactoryWithHandlers<ReelPinchRecognizer>(
+            () => ReelPinchRecognizer(debugOwner: this),
+            (r) => r
+              ..onStart = _pinchStart
+              ..onUpdate = _pinchUpdate
+              ..onEnd = _pinchEnd,
+          ),
+      },
+      child: _swipes(slot, card, info, layout, embed: embed, pinchable: pinchable),
+    );
+  }
+
+  Widget _swipes(
+    ReelSlot slot,
+    ReelCardData card,
+    Widget info,
+    ReelFeedLayout layout, {
+    required bool embed,
+    required bool pinchable,
+  }) {
     // Sideways anywhere on the page hides or shows the controls (not with a
     // screen reader on). Tap, double-tap and long-press live on the picture
     // only, so the buttons answer at once instead of waiting out the
@@ -792,6 +901,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
               held: held && !embed,
               onReplay: _replay,
               minHeight: embed ? ReelYouTube.minSide : 0,
+              fill: pinchable ? _fillAnim : null,
             ),
           );
           Widget tappable(Widget child) => GestureDetector(
@@ -808,19 +918,26 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             children: [
               if (layout.overlays) ...[
                 tappable(
-                  Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      backdrop,
-                      AnimatedAlign(
-                        duration: glide,
-                        curve: Curves.easeOutCubic,
-                        alignment: _immersive || layout == ReelFeedLayout.fullBleed
-                            ? Alignment.center
-                            : const Alignment(0, -0.16),
-                        child: picture,
-                      ),
-                    ],
+                  // A filled picture (V2-33) overhangs its page: the page
+                  // crops it, so it never draws over the next one mid-swipe.
+                  ClipRect(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        backdrop,
+                        AnimatedAlign(
+                          duration: glide,
+                          curve: Curves.easeOutCubic,
+                          // Filled, or under two fingers, it grows from the
+                          // middle so it covers the page evenly.
+                          alignment:
+                              _immersive || layout == ReelFeedLayout.fullBleed || (pinchable && (_fill || _pinching))
+                              ? Alignment.center
+                              : const Alignment(0, -0.16),
+                          child: picture,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 info!,
@@ -1077,6 +1194,10 @@ class _Backdrop extends StatelessWidget {
 ///
 /// A clip that played out holds its last frame with Replay over it (V2-47),
 /// the TV's filled Replay button.
+///
+/// With [fill] (V2-33) the art and the clip scale about the frame's middle
+/// from fit (1) to the [BoxFit.cover] scale for the page ([reelFillZoom]);
+/// the play badge and Replay stay their own size over it.
 class _Picture extends StatelessWidget {
   const _Picture({
     required this.slot,
@@ -1086,6 +1207,7 @@ class _Picture extends StatelessWidget {
     required this.held,
     required this.onReplay,
     this.minHeight = 0,
+    this.fill,
   });
 
   final ReelSlot slot;
@@ -1102,8 +1224,17 @@ class _Picture extends StatelessWidget {
   /// inside it.
   final double minHeight;
 
+  /// Fit (0) to fill (1), where the page pinches (V2-33).
+  final Animation<double>? fill;
+
   @override
   Widget build(BuildContext context) {
+    if (fill != null) {
+      // The page the picture is placed in: what a fill covers.
+      return LayoutBuilder(
+        builder: (context, box) => _frame(context, video?.aspectRatio ?? _stillAspect, page: box.biggest),
+      );
+    }
     if (minHeight <= 0) return _frame(context, video?.aspectRatio ?? _stillAspect);
     return LayoutBuilder(
       builder: (context, box) =>
@@ -1111,85 +1242,106 @@ class _Picture extends StatelessWidget {
     );
   }
 
-  Widget _frame(BuildContext context, double aspect) {
+  Widget _frame(BuildContext context, double aspect, {Size? page}) {
     final v = video;
     final item = slot.item;
     final slow = Theme.of(context).extension<MonoTokens>()?.slow ?? const Duration(milliseconds: 300);
+    final media = _ClipShowing(
+      video: v,
+      builder: (context, showing, drawn) => Stack(
+        fit: StackFit.expand,
+        children: [
+          if (item != null)
+            _ArtFade(
+              key: ValueKey(('reel-still-art', slot.card!.id)),
+              out: showing,
+              child: OptimizedMediaImage(
+                client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
+                imagePath: _artPath(item),
+                // Decoded at the frame it is shown in (plan V2-05), set
+                // rather than read from the frame as it glides; it still
+                // fills whatever the frame is.
+                width: decode.width,
+                height: decode.height,
+                fit: BoxFit.cover,
+                imageType: ImageType.art,
+                onImageProvider: (provider) => ReelArt.track(provider, card: slot.card!.id),
+                placeholder: (_, _) => const ColoredBox(color: Colors.black26),
+                errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
+              ),
+            ),
+          // A native clip comes in with its first frame. A YouTube page
+          // (V2-63) is drawn from when it has loaded: it is see-through
+          // until the player draws, so the art shows behind it (never in
+          // front), and the player is on screen before it is asked to
+          // play (RMF: no automatic playback until it is visible).
+          AnimatedOpacity(
+            opacity: drawn ? 1 : 0,
+            duration: _motion(context, const Duration(milliseconds: 160)),
+            child: v == null ? const SizedBox.shrink() : v.view(),
+          ),
+        ],
+      ),
+    );
+    final badges = <Widget>[
+      AnimatedOpacity(
+        opacity: paused ? 1 : 0,
+        duration: _motion(context, const Duration(milliseconds: 150)),
+        child: Center(
+          child: DecoratedBox(
+            decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Icon(
+                Symbols.play_arrow_rounded,
+                fill: 1,
+                size: 44,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ),
+      ),
+      AnimatedOpacity(
+        opacity: held ? 1 : 0,
+        duration: _motion(context, const Duration(milliseconds: 150)),
+        child: IgnorePointer(
+          ignoring: !held,
+          child: Center(
+            child: FilledButton.icon(
+              onPressed: onReplay,
+              icon: const Icon(Symbols.replay_rounded),
+              label: Text(t.reel.card.replay),
+            ),
+          ),
+        ),
+      ),
+    ];
+    final fill = this.fill;
     return TweenAnimationBuilder<double>(
       // No begin: the first build takes the shape as it is, later ones glide.
       tween: Tween<double>(end: aspect),
       duration: _motion(context, slow),
       curve: MonoMotion.emphasized,
-      builder: (context, aspect, child) => AspectRatio(aspectRatio: aspect, child: child),
-      child: _ClipShowing(
-        video: v,
-        builder: (context, showing, drawn) => Stack(
+      builder: (context, aspect, media) => AspectRatio(
+        aspectRatio: aspect,
+        child: Stack(
           fit: StackFit.expand,
           children: [
-            if (item != null)
-              _ArtFade(
-                key: ValueKey(('reel-still-art', slot.card!.id)),
-                out: showing,
-                child: OptimizedMediaImage(
-                  client: context.tryGetMediaClientWithFallback(serverIdOrNull(slot.card!.best.serverId)),
-                  imagePath: _artPath(item),
-                  // Decoded at the frame it is shown in (plan V2-05), set
-                  // rather than read from the frame as it glides; it still
-                  // fills whatever the frame is.
-                  width: decode.width,
-                  height: decode.height,
-                  fit: BoxFit.cover,
-                  imageType: ImageType.art,
-                  onImageProvider: (provider) => ReelArt.track(provider, card: slot.card!.id),
-                  placeholder: (_, _) => const ColoredBox(color: Colors.black26),
-                  errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
-                ),
-              ),
-            // A native clip comes in with its first frame. A YouTube page
-            // (V2-63) is drawn from when it has loaded: it is see-through
-            // until the player draws, so the art shows behind it (never in
-            // front), and the player is on screen before it is asked to
-            // play (RMF: no automatic playback until it is visible).
-            AnimatedOpacity(
-              opacity: drawn ? 1 : 0,
-              duration: _motion(context, const Duration(milliseconds: 160)),
-              child: v == null ? const SizedBox.shrink() : v.view(),
-            ),
-            AnimatedOpacity(
-              opacity: paused ? 1 : 0,
-              duration: _motion(context, const Duration(milliseconds: 150)),
-              child: Center(
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Icon(
-                      Symbols.play_arrow_rounded,
-                      fill: 1,
-                      size: 44,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            AnimatedOpacity(
-              opacity: held ? 1 : 0,
-              duration: _motion(context, const Duration(milliseconds: 150)),
-              child: IgnorePointer(
-                ignoring: !held,
-                child: Center(
-                  child: FilledButton.icon(
-                    onPressed: onReplay,
-                    icon: const Icon(Symbols.replay_rounded),
-                    label: Text(t.reel.card.replay),
-                  ),
-                ),
-              ),
-            ),
+            if (fill != null && page != null)
+              AnimatedBuilder(
+                animation: fill,
+                child: media,
+                builder: (context, media) =>
+                    Transform.scale(scale: reelFillZoom(page, aspect, fill.value), child: media),
+              )
+            else
+              media!,
+            ...badges,
           ],
         ),
       ),
+      child: media,
     );
   }
 }

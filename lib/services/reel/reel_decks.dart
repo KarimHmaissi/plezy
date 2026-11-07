@@ -147,6 +147,7 @@ class ForYouDeck extends ReelDeck {
     required this.candidates,
     required this.facts,
     this.again,
+    this.offline,
     Listenable? sharedChanges,
     Listenable? clears,
   }) {
@@ -164,6 +165,13 @@ class ForYouDeck extends ReelDeck {
   /// The shows they started and left ([anotherGoCandidates]): the same
   /// daily build orders them for [AnotherGoDeck]. Null: no such deck.
   final Future<List<PoolCandidate>> Function()? again;
+
+  /// Whether the Reel runs offline now (plan V2-15). Offline For You builds
+  /// from what this device keeps: the cached pool, else today's kept code
+  /// order, else code order worked out from the local gather (index and
+  /// brain reads only). Today's build, a model call, never starts offline;
+  /// the next load back online starts it when it is due. Null: never.
+  final bool Function()? offline;
   Future<void>? _building;
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
   ({String day, Future<List<PoolCandidate>> list})? _again;
@@ -364,6 +372,10 @@ class ForYouDeck extends ReelDeck {
   /// Starts today's build when it is due (the first Reel open of the day,
   /// on whichever of its decks it opens).
   Future<void> buildIfDue() async {
+    if (offline?.call() ?? false) {
+      appLogger.d('[ReelDeck] for-you: offline, no build');
+      return;
+    }
     if (await pool.shouldBuild()) _building ??= _buildToday();
   }
 

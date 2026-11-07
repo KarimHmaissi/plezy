@@ -1272,4 +1272,82 @@ void main() {
       expect(atCalls, isEmpty);
     });
   });
+
+  group('offline, a clip from this device alone (V2-15)', () {
+    const anime = ReelTitle(
+      titleId: 's:tvdb:1',
+      groupKey: 'tvdb:1',
+      title: 'Harbor Lights',
+      isShow: true,
+      anime: true,
+      tvdbId: 1,
+      copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+    );
+    Future<bool> anyOnDisk(ResolvedClip _) async => true;
+
+    test('a Plex clip on disk opens at an address that never resolves, by its cache key, with no token', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      final online = await resolver.resolve(film());
+      servers
+        ..calls.clear()
+        ..offline.add('a');
+      final row = await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl);
+
+      final clip = await resolver.lookupOnDisk(film(), onDisk: (c) async => c.assetId == 'plex:87');
+      expect(clip?.source.uri, 'https://reel-offline.invalid/services/iva/assets/87/video.mp4');
+      expect(clip?.source.uri, isNot(contains('token')));
+      expect(clip?.source.cacheKey, online?.source.cacheKey);
+      expect(clip?.assetId, 'plex:87');
+      expect(servers.calls, isEmpty, reason: 'no server read');
+      expect(await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl), row, reason: 'nothing written');
+    });
+
+    test('a connected server still gives its own address (the uncached rest can stream)', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      await resolver.resolve(film());
+      final clip = await resolver.lookupOnDisk(film(), onDisk: anyOnDisk);
+      expect(clip?.source.uri, 'https://a.example/services/iva/assets/87/video.mp4?token=x');
+    });
+
+    test('a Plex clip not on disk is a still', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      await resolver.resolve(film());
+      servers.offline.add('a');
+      expect(await resolver.lookupOnDisk(film(), onDisk: (_) async => false), isNull);
+    });
+
+    test('no row asks nobody and writes no miss', () async {
+      servers.offline.add('a');
+      var asked = 0;
+      expect(
+        await resolver.lookupOnDisk(
+          film(),
+          onDisk: (_) async {
+            asked++;
+            return true;
+          },
+        ),
+        isNull,
+      );
+      expect(await resolver.lookupOnDisk(anime, onDisk: anyOnDisk), isNull, reason: 'AnimeThemes is not asked');
+      expect(asked, 0);
+      expect(servers.calls, isEmpty);
+      expect(atCalls, isEmpty);
+      expect(await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl), isNull);
+      expect(await store.cached('src:tvdb:1', ttl: ReelStore.sourceTtl), isNull);
+    });
+
+    test('a cached opening (memory only, D1), a miss or a spoiled asset is a still', () async {
+      await resolver.resolve(anime);
+      atCalls.clear();
+      expect(await resolver.lookupOnDisk(anime, onDisk: anyOnDisk), isNull);
+      expect(atCalls, isEmpty);
+      await store.cache('src:imdb:tt1', ClipResolver.missRow);
+      expect(await resolver.lookupOnDisk(film(), onDisk: anyOnDisk), isNull);
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      await store.cache('src:imdb:tt1', '');
+      await resolver.resolve(film());
+      expect(await resolver.lookupOnDisk(film(), exclude: {'plex:87'}, onDisk: anyOnDisk), isNull);
+    });
+  });
 }

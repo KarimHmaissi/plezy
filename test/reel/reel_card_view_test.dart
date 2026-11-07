@@ -2,6 +2,7 @@
 // ignore_for_file: close_sinks
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
@@ -22,6 +23,7 @@ import 'package:plezy/services/reel/clip_resolver.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_decks.dart';
 import 'package:plezy/services/reel/reel_library.dart';
+import 'package:plezy/services/reel/reel_playback_profile.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/fork_motion.dart';
@@ -237,6 +239,7 @@ ReelController _controller(
   void Function(FakeClipEngine) onEngine, {
   ReelMedia? media,
   List<ReelDeck> more = const [],
+  ValueListenable<ReelPlaybackProfile>? profile,
 }) {
   resetSharedPreferencesForTest();
   SettingsService.resetForTesting();
@@ -250,6 +253,7 @@ ReelController _controller(
       store: store,
       aniList: (t) async => t.tvdbId == 1 ? 101 : null,
       animeThemes: _animeThemes,
+      profile: profile,
     ),
     clips: ClipPlayer(
       engine: () {
@@ -838,6 +842,25 @@ void main() {
       await tester.pump();
       expect(c.current.card?.id, 't1');
       expect(find.text("Couldn't load Deck A"), findsNothing);
+    });
+
+    testWidgets("offline (V2-15), a deck that couldn't load says the servers are out of reach", (tester) async {
+      final deck = _SwitchDeck('a', 'Deck A', ['1'])..fails = true;
+      c = _controller(
+        db,
+        deck,
+        (_) {},
+        profile: ValueNotifier(
+          const ReelPlaybackProfile(screen: ReelScreen.tv, maxHeight: 1080, link: ReelLink.offline),
+        ),
+      );
+      await tester.runAsync(SettingsService.getInstance);
+      await tester.runAsync(c.start);
+      await pumpView(tester, reduceMotion: true);
+      expect(c.current.kind, ReelSlotKind.failed);
+      expect(find.text("You're offline"), findsOneWidget);
+      expect(find.text("Couldn't load Deck A"), findsNothing);
+      expect(find.text('Try again'), findsOneWidget);
     });
 
     testWidgets("an empty deck shows that deck's own icon", (tester) async {

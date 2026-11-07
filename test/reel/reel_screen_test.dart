@@ -14,6 +14,7 @@ import 'package:plezy/screens/reel/reel_screen.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/library_index/index_database.dart';
+import 'package:plezy/services/offline_mode_source.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
@@ -27,6 +28,21 @@ import 'package:plezy/utils/platform_detector.dart';
 
 import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
+
+/// The app's offline mode, set by the test.
+class _OfflineMode extends ChangeNotifier implements OfflineModeSource {
+  _OfflineMode(this._offline);
+
+  bool _offline;
+
+  @override
+  bool get isOffline => _offline;
+
+  set isOffline(bool v) {
+    _offline = v;
+    notifyListeners();
+  }
+}
 
 class _Servers implements ReelServers {
   @override
@@ -193,7 +209,7 @@ void main() {
     await db.close();
   });
 
-  ReelController make({ReelMedia? media, bool externalClips = false}) => ReelController(
+  ReelController make({ReelMedia? media, bool externalClips = false, OfflineModeSource? offlineMode}) => ReelController(
     decks: [
       _Deck(['1', '2']),
     ],
@@ -209,13 +225,13 @@ void main() {
     onWatch: (_, {required onTv}) async => false,
     addToWatchlist: (_) async => true,
     externalClips: externalClips,
+    offlineMode: offlineMode,
   );
 
   Future<GlobalKey<ReelScreenState>> pump(
     WidgetTester tester,
-    Future<ReelController> Function(BuildContext) create, {
-    bool offline = false,
-  }) async {
+    Future<ReelController> Function(BuildContext) create,
+  ) async {
     tester.view.physicalSize = const Size(1280, 720);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -224,7 +240,7 @@ void main() {
       MaterialApp(
         theme: ThemeData.dark(),
         home: Scaffold(
-          body: ReelScreen(key: key, create: create, offline: offline),
+          body: ReelScreen(key: key, create: create),
         ),
       ),
     );
@@ -397,50 +413,62 @@ void main() {
     expect(calls, 2);
   });
 
-  testWidgets('V2-60: offline keeps the tab with a message and builds nothing until back online', (tester) async {
+  testWidgets('V2-15: offline the tab builds and plays from the device, and says so once', (tester) async {
+    TvDetectionService.debugSetAppleTVOverride(true);
     var calls = 0;
-    final never = Completer<ReelController>();
-    Future<ReelController> create(BuildContext _) {
+    final c = make(offlineMode: _OfflineMode(true));
+    final key = await pump(tester, (_) async {
       calls++;
-      return never.future;
-    }
-
-    final key = await pump(tester, create, offline: true);
+      return c;
+    });
     key.currentState!.onTabShown();
     await settle(tester);
-    expect(find.text("You're offline"), findsOneWidget);
-    expect(calls, 0);
-    expect(find.byType(ReelCurtain), findsNothing);
+    expect(calls, 1);
+    expect(c.active, isTrue);
+    expect(c.offline.value, isTrue);
+    expect(find.text(ReelController.offlineNotice(tv: true)), findsOneWidget, reason: "the app's snackbar");
+    expect(find.text("You're offline"), findsNothing, reason: 'no full-screen message in place of the feed');
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
   });
 
-  testWidgets('V2-60: going offline while playing suspends the session, and coming back starts it', (tester) async {
+  testWidgets('V2-15: going offline while playing starts the visit afresh once it holds, and so does coming back', (
+    tester,
+  ) async {
     TvDetectionService.debugSetAppleTVOverride(true);
-    final c = make();
-    final key = GlobalKey<ReelScreenState>();
-    Widget app(bool offline) => MaterialApp(
-      theme: ThemeData.dark(),
-      home: Scaffold(
-        body: ReelScreen(key: key, create: (_) async => c, offline: offline),
-      ),
-    );
-    tester.view.physicalSize = const Size(1280, 720);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(app(false));
+    final mode = _OfflineMode(false);
+    final c = make(offlineMode: mode);
+    final key = await pump(tester, (_) async => c);
     key.currentState!.onTabShown();
     await settle(tester);
     expect(c.active, isTrue);
+    final online = engine!;
 
-    await tester.pumpWidget(app(true));
+    // A flicker shorter than the settle time restarts nothing.
+    mode.isOffline = true;
+    await tester.pump(const Duration(milliseconds: 300));
+    mode.isOffline = false;
+    await tester.pump(ReelScreen.offlineSettle);
     await settle(tester);
-    expect(c.active, isFalse);
-    expect(engine?.disposed ?? true, isTrue);
-    expect(find.text("You're offline"), findsOneWidget);
+    expect(online.disposed, isFalse);
 
-    await tester.pumpWidget(app(false));
+    mode.isOffline = true;
+    await tester.pump(ReelScreen.offlineSettle);
     await settle(tester);
+    await settle(tester);
+    expect(online.disposed, isTrue, reason: 'every player let go');
+    expect(c.active, isTrue, reason: 'the tab stays and plays offline');
+    expect(c.current.card?.id, 't1');
+    expect(c.current.clip, isNull, reason: 'nothing on disk: a still');
+
+    mode.isOffline = false;
+    await tester.pump(ReelScreen.offlineSettle);
+    await settle(tester);
+    await settle(tester);
+    expect(c.offline.value, isFalse);
     expect(c.active, isTrue);
-    expect(find.text("You're offline"), findsNothing);
+    expect(c.current.clip, isNotNull, reason: 'back online the clip is looked up again');
+    expect(identical(engine, online), isFalse, reason: 'a new clip core');
     await tester.pumpWidget(const SizedBox());
     await settle(tester);
   });

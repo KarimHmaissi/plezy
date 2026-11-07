@@ -111,10 +111,16 @@ class ReelCardView extends StatelessWidget {
       case ReelSlotKind.loading:
         return tv ? const ReelTvSkeleton() : const ReelCurtain();
       case ReelSlotKind.failed:
+        // Offline (V2-15) a deck that couldn't load says why.
+        final offline = controller.offline.value;
         return ReelMessage(
           icon: Symbols.cloud_off_rounded,
-          title: t.reel.card.failedTitle(deck: controller.deck.name),
-          body: tv ? t.reel.card.failedBodyTv : t.reel.card.failedBodyTap,
+          title: offline ? t.reel.status.offlineTitle : t.reel.card.failedTitle(deck: controller.deck.name),
+          body: offline
+              ? t.reel.status.offlineBody
+              : tv
+              ? t.reel.card.failedBodyTv
+              : t.reel.card.failedBodyTap,
           action: FilledButton.tonalIcon(
             onPressed: () => unawaited(controller.retryDeck()),
             icon: const Icon(Symbols.refresh_rounded),

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -245,8 +246,12 @@ class _Video extends ChangeNotifier implements FeedVideo {
   Future<void> setVolume(double volume) async {}
   @override
   Future<void> dispose() async => super.dispose();
+
+  /// The card it plays, so a test can find its picture (V2-33).
+  String card = '';
+
   @override
-  Widget view() => const ColoredBox(color: Colors.teal);
+  Widget view() => ColoredBox(key: ValueKey(('clip-view', card)), color: Colors.teal);
 }
 
 void main() {
@@ -267,6 +272,9 @@ void main() {
   late ValueNotifier<int> restored;
   late ValueNotifier<int> link, settingsChanged;
   late bool onCellular;
+
+  /// No network at all (V2-15).
+  late bool noNetwork;
   late ReelCellular cellular;
   late _Deck first;
   late _Servers servers;
@@ -293,6 +301,7 @@ void main() {
     link = ValueNotifier(0);
     settingsChanged = ValueNotifier(0);
     onCellular = false;
+    noNetwork = false;
     cellular = ReelCellular.dataSaver;
     c = ReelController(
       decks: [
@@ -304,7 +313,7 @@ void main() {
         store: store,
         aniList: (_) async => null,
         animeThemes: (_) async => const {},
-        profile: FakeLinkProfile(() => onCellular, link),
+        profile: FakeLinkProfile(() => onCellular, link, () => noNetwork),
       ),
       clips: ClipPlayer(engine: FakeClipEngine.new),
       store: store,
@@ -341,6 +350,7 @@ void main() {
       create: (uri) {
         final id = uri.pathSegments.last.split('.').first;
         return videos[id] = _Video()
+          ..card = id
           ..ratio = ratios[id] ?? 16 / 9
           ..opening = opening;
       },
@@ -1440,6 +1450,30 @@ void main() {
     expect(find.text('Title 1'), findsOneWidget);
   });
 
+  testWidgets("offline (V2-15), a deck that couldn't load says the servers are out of reach", (tester) async {
+    noNetwork = true;
+    link.value++;
+    first.fails = true;
+    await pump(tester);
+    expect(c.offline.value, isTrue);
+    expect(c.current.kind, ReelSlotKind.failed);
+    expect(find.text("You're offline"), findsOneWidget);
+    expect(find.text("Couldn't load Deck a"), findsNothing);
+    expect(find.text('Try again'), findsOneWidget);
+  });
+
+  testWidgets('offline (V2-15), the feed shows each card as a still', (tester) async {
+    noNetwork = true;
+    link.value++;
+    await pump(tester);
+    expect(c.current.kind, ReelSlotKind.card);
+    expect(c.current.clip, isNull, reason: 'the feed has nothing on disk to play');
+    expect(c.slotAt(1).clip, isNull);
+    expect(find.text('Title 1'), findsOneWidget);
+    // The still's entrance runs out.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   group('metadata landing late (V2-26)', () {
     /// The feed with every item held back until the gate opens; with
     /// [clipLate], the clip lookups too (the clip no longer waits on the
@@ -2239,6 +2273,179 @@ void main() {
       await pump(tester);
       await settle(tester);
       expect(players.muted, isFalse);
+    });
+  });
+
+  group('V2-33: pinch to fill', () {
+    setUp(resetSharedPreferencesForTest);
+
+    /// The scale on card [id]'s picture: 1 at fit (or where there is no
+    /// pinch), the cover scale at fill.
+    double zoom(WidgetTester tester, String id) {
+      final scales = tester
+          .widgetList<Transform>(
+            find.ancestor(of: find.byKey(ValueKey(('clip-view', id))), matching: find.byType(Transform)),
+          )
+          .map((t) => t.transform.getMaxScaleOnAxis())
+          .where((s) => s != 1);
+      return scales.isEmpty ? 1 : scales.first;
+    }
+
+    /// Two fingers on the picture: the one that lands last moves by [top].
+    Future<void> pinch(
+      WidgetTester tester, {
+      double gap = 80,
+      Offset top = Offset.zero,
+      Offset bottom = Offset.zero,
+    }) async {
+      final centre = tester.getCenter(find.byType(PageView)) - const Offset(0, 120);
+      final a = await tester.startGesture(centre + Offset(0, gap / 2), pointer: 21);
+      final b = await tester.startGesture(centre - Offset(0, gap / 2), pointer: 22);
+      for (var i = 0; i < 5; i++) {
+        await b.moveBy(top / 5);
+        await a.moveBy(bottom / 5);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await b.up();
+      await a.up();
+      await tester.pumpAndSettle();
+    }
+
+    Future<bool?> kept(WidgetTester tester) => tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      return (await SettingsService.getInstance()).read(SettingsService.reelFill);
+    });
+
+    // An upright phone 420 x 860: a 16:9 frame is 236.25 tall, so a fill
+    // covers at 860 / 236.25.
+    const cover = 860 / (420 * 9 / 16);
+
+    testWidgets('a pinch out fills the page without paging; a pinch in fits again; both are kept', (tester) async {
+      await tester.runAsync(SettingsService.getInstance);
+      await pump(tester);
+      await settle(tester);
+      expect(zoom(tester, '1'), 1);
+
+      // The newest finger runs up 200: on its own, that would page.
+      await pinch(tester, top: const Offset(0, -200));
+      expect(c.page, 0, reason: 'two fingers never page the feed');
+      expect(zoom(tester, '1'), closeTo(cover, 0.01));
+      expect(await kept(tester), isTrue);
+      // Centred, it covers the page edge to edge, top to bottom.
+      final drawn = tester.getRect(find.byKey(const ValueKey(('clip-view', '1'))));
+      final page = tester.getRect(find.byType(PageView));
+      expect(drawn.top, lessThanOrEqualTo(page.top + 0.5));
+      expect(drawn.bottom, greaterThanOrEqualTo(page.bottom - 0.5));
+      expect(drawn.left, lessThan(page.left));
+
+      await pinch(tester, gap: 300, top: const Offset(0, 100), bottom: const Offset(0, -100));
+      expect(c.page, 0);
+      expect(zoom(tester, '1'), 1);
+      expect(await kept(tester), isFalse);
+    });
+
+    testWidgets('the picture follows the fingers, and a pinch that barely moves settles back', (tester) async {
+      await pump(tester);
+      await settle(tester);
+      final centre = tester.getCenter(find.byType(PageView)) - const Offset(0, 120);
+      final a = await tester.startGesture(centre + const Offset(0, 40), pointer: 21);
+      final b = await tester.startGesture(centre - const Offset(0, 40), pointer: 22);
+      await b.moveBy(const Offset(0, -40));
+      await tester.pump();
+      final mid = zoom(tester, '1');
+      expect(mid, greaterThan(1));
+      expect(mid, lessThan(cover));
+      // Back to a 5 % spread: under the step, so it lets go to fit.
+      await b.moveBy(const Offset(0, 36));
+      await tester.pump();
+      await b.up();
+      await a.up();
+      await tester.pumpAndSettle();
+      expect(zoom(tester, '1'), 1);
+    });
+
+    testWidgets('one finger still pages, and the next card opens filled', (tester) async {
+      await pump(tester);
+      await settle(tester);
+      await pinch(tester, top: const Offset(0, -200));
+      await tester.fling(find.byType(PageView), const Offset(0, -500), 2000);
+      await settle(tester);
+      await tester.pumpAndSettle();
+      expect(c.page, 1);
+      expect(zoom(tester, '2'), closeTo(cover, 0.01));
+    });
+
+    testWidgets('a kept fill opens filled, and a tap still pauses', (tester) async {
+      final settings = (await tester.runAsync(SettingsService.getInstance))!;
+      await tester.runAsync(() => settings.write(SettingsService.reelFill, true));
+      await pump(tester);
+      await settle(tester);
+      expect(zoom(tester, '1'), closeTo(cover, 0.01));
+      expect(videos['1']!.playing, isTrue);
+      await tester.tapAt(tester.getCenter(find.byType(PageView)) - const Offset(0, 120));
+      await tester.pumpAndSettle(kDoubleTapTimeout);
+      expect(videos['1']!.playing, isFalse);
+    });
+
+    testWidgets('with reduce motion the release settles at once', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+        disableAnimations: true,
+      );
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await pump(tester);
+      await settle(tester);
+      final centre = tester.getCenter(find.byType(PageView)) - const Offset(0, 120);
+      final a = await tester.startGesture(centre + const Offset(0, 40), pointer: 21);
+      final b = await tester.startGesture(centre - const Offset(0, 40), pointer: 22);
+      await b.moveBy(const Offset(0, -30));
+      await tester.pump();
+      await b.up();
+      await a.up();
+      await tester.pump();
+      expect(zoom(tester, '1'), closeTo(cover, 0.01));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('two panes have no pinch: the picture stays fitted', (tester) async {
+      await pump(tester, size: const Size(1000, 700));
+      await settle(tester);
+      final centre = tester.getCenter(find.text('Title 1'));
+      final a = await tester.startGesture(centre + const Offset(-300, 40), pointer: 21);
+      final b = await tester.startGesture(centre + const Offset(-300, -40), pointer: 22);
+      await b.moveBy(const Offset(-60, -60));
+      await a.moveBy(const Offset(60, 60));
+      await b.up();
+      await a.up();
+      await tester.pumpAndSettle();
+      expect(zoom(tester, '1'), 1);
+      expect(await kept(tester), isFalse);
+    });
+
+    testWidgets('a screen reader gets Fill the screen and Fit to the screen', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await tester.runAsync(SettingsService.getInstance);
+      await pump(tester);
+      await settle(tester);
+      SemanticsNode node() {
+        SemanticsNode? n = tester.getSemantics(find.text('Title 1'));
+        while (n != null && (n.getSemanticsData().customSemanticsActionIds?.isEmpty ?? true)) {
+          n = n.parent;
+        }
+        return n!;
+      }
+
+      int action(String label) => node().getSemanticsData().customSemanticsActionIds!.firstWhere(
+        (id) => CustomSemanticsAction.getAction(id)!.label == label,
+      );
+
+      node().owner!.performAction(node().id, SemanticsAction.customAction, action('Fill the screen'));
+      await tester.pumpAndSettle();
+      expect(zoom(tester, '1'), closeTo(cover, 0.01));
+      expect(await kept(tester), isTrue);
+      node().owner!.performAction(node().id, SemanticsAction.customAction, action('Fit to the screen'));
+      await tester.pumpAndSettle();
+      expect(zoom(tester, '1'), 1);
+      semantics.dispose();
     });
   });
 }
