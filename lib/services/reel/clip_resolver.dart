@@ -498,7 +498,9 @@ class ClipResolver {
   /// opening (AnimeThemes stays in memory), a YouTube trailer or a cached
   /// miss has none. While its server isn't connected the clip opens at
   /// [offlineUri]: the core reads it from disk by its cache key, and no
-  /// address or token is needed for that.
+  /// address or token is needed for that. The row's lead-in (V2-23) comes
+  /// with it, as it does online: the core keeps learned starts by address,
+  /// so the offline address would otherwise open on the rating card.
   ///
   /// [exclude] as for [lookup].
   Future<ResolvedClip?> lookupOnDisk(
@@ -520,6 +522,7 @@ class ClipResolver {
         entry['a'] as String,
         _kindOf(entry, (ClipKind.trailer, null)).$1,
         offline: true,
+        startAt: leadInOf(entry),
       );
     } catch (_) {
       return null;

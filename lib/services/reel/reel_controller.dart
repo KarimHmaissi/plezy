@@ -653,7 +653,10 @@ class ReelController extends ChangeNotifier {
           onDisk: (hit) => _clipCache.isOnDisk(hit.source.cacheKey),
         )
         .timeout(timeouts.store);
-    appLogger.d('[ReelOffline] ${c.id}: ${clip == null ? 'still' : 'on disk'}');
+    final lead = clip?.source.startAt;
+    appLogger.d(
+      '[ReelOffline] ${c.id}: ${clip == null ? 'still' : 'on disk'}${lead == null ? '' : ' lead=${lead.inMilliseconds}'}',
+    );
     return clip == null ? const ClipLookup.unknown() : ClipLookup.found(clip);
   }
 

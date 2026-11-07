@@ -1372,6 +1372,19 @@ void main() {
       expect((await make().resolve(film()))?.source.startAt, Duration.zero);
     });
 
+    test('offline, a clip on disk keeps its lead-in like the online lookup (V2-15)', () async {
+      Future<bool> anyOnDisk(ResolvedClip _) async => true;
+      await writeRow({'li': 6006, 'lv': ClipResolver.leadInVersion});
+      servers.offline.add('a');
+      final clip = await make().lookupOnDisk(film(), onDisk: anyOnDisk);
+      expect(clip?.source.uri, startsWith('https://reel-offline.invalid/'));
+      expect(clip?.source.startAt, const Duration(milliseconds: 6006));
+      servers.offline.remove('a');
+      await writeRow({'li': 6006});
+      servers.offline.add('a');
+      expect((await make().lookupOnDisk(film(), onDisk: anyOnDisk))?.source.startAt, isNull, reason: 'not measured');
+    });
+
     test('an out-of-range li, another lv or the wrong type reads as not measured', () async {
       for (final extra in [
         {'li': 16000, 'lv': ClipResolver.leadInVersion},
