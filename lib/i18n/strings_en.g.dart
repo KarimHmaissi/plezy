@@ -4552,6 +4552,7 @@ class Translations$reel$en {
 	late final Translations$reel$remote$en remote = Translations$reel$remote$en.internal(_root);
 	late final Translations$reel$deckNames$en deckNames = Translations$reel$deckNames$en.internal(_root);
 	late final Translations$reel$newThisWeek$en newThisWeek = Translations$reel$newThisWeek$en.internal(_root);
+	late final Translations$reel$person$en person = Translations$reel$person$en.internal(_root);
 	late final Translations$reel$deckIntro$en deckIntro = Translations$reel$deckIntro$en.internal(_root);
 
 	/// en: 'From the Reel'
@@ -8731,6 +8732,15 @@ class Translations$reel$deckNames$en {
 	/// en: 'New this week'
 	String get newThisWeek => 'New this week';
 
+	/// en: 'A person you love'
+	String get person => 'A person you love';
+
+	/// en: 'Directed by ${name}'
+	String directedBy({required Object name}) => 'Directed by ${name}';
+
+	/// en: 'Starring ${name}'
+	String starring({required Object name}) => 'Starring ${name}';
+
 	/// en: '#$n show this week'
 	String showThisWeek({required Object n}) => '#${n} show this week';
 
@@ -8767,6 +8777,31 @@ class Translations$reel$newThisWeek$en {
 
 	/// en: '${films}, ${shows} arrived. ${worth}'
 	String line({required Object films, required Object shows, required Object worth}) => '${films}, ${shows} arrived. ${worth}';
+}
+
+// Path: reel.person
+class Translations$reel$person$en {
+	Translations$reel$person$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: '(one) {You've watched ${n} title with them.} (other) {You've watched ${n} titles with them.}'
+	String watched({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: 'You\'ve watched ${n} title with them.',
+		other: 'You\'ve watched ${n} titles with them.',
+	);
+
+	/// en: '(zero) {None you haven't seen.} (one) {${n} you haven't seen.} (other) {${n} you haven't seen.}'
+	String unseen({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		zero: 'None you haven\'t seen.',
+		one: '${n} you haven\'t seen.',
+		other: '${n} you haven\'t seen.',
+	);
+
+	/// en: '${watched} ${unseen}'
+	String line({required Object watched, required Object unseen}) => '${watched} ${unseen}';
 }
 
 // Path: reel.deckIntro
@@ -11929,12 +11964,18 @@ extension on Translations {
 			'reel.deckNames.animeOpenings' => 'Anime openings',
 			'reel.deckNames.mostWatched' => 'Most Watched',
 			'reel.deckNames.newThisWeek' => 'New this week',
+			'reel.deckNames.person' => 'A person you love',
+			'reel.deckNames.directedBy' => ({required Object name}) => 'Directed by ${name}',
+			'reel.deckNames.starring' => ({required Object name}) => 'Starring ${name}',
 			'reel.deckNames.showThisWeek' => ({required Object n}) => '#${n} show this week',
 			'reel.deckNames.filmThisWeek' => ({required Object n}) => '#${n} film this week',
 			'reel.newThisWeek.films' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} film', other: '${n} films', ), 
 			'reel.newThisWeek.shows' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} show', other: '${n} shows', ), 
 			'reel.newThisWeek.worth' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, zero: 'None worth a look yet.', one: '${n} worth a look.', other: '${n} worth a look.', ), 
 			'reel.newThisWeek.line' => ({required Object films, required Object shows, required Object worth}) => '${films}, ${shows} arrived. ${worth}',
+			'reel.person.watched' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'You\'ve watched ${n} title with them.', other: 'You\'ve watched ${n} titles with them.', ), 
+			'reel.person.unseen' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, zero: 'None you haven\'t seen.', one: '${n} you haven\'t seen.', other: '${n} you haven\'t seen.', ), 
+			'reel.person.line' => ({required Object watched, required Object unseen}) => '${watched} ${unseen}',
 			'reel.deckIntro.start' => 'Start',
 			'reel.deckIntro.hintTv' => 'OK or ↓ first card  ·  → next deck',
 			'reel.deckIntro.swipe' => 'Or swipe up for the first card',
@@ -12322,14 +12363,14 @@ extension on Translations {
 			'liveTv.editRuleAction' => 'Edit',
 			'liveTv.recordingRuleUpdated' => 'Recording rule updated',
 			'liveTv.guideReloadRequested' => 'Guide refresh requested',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.guideReloadFailed' => 'Couldn\'t refresh the guide',
 			'liveTv.rulesProcessRequested' => 'Rule re-evaluation requested',
 			'liveTv.rulesProcessFailed' => 'Couldn\'t re-evaluate recording rules',
 			'liveTv.recordShow' => 'Record show',
 			'liveTv.recordSettings.startEarly' => 'Start early (seconds)',
 			'liveTv.recordSettings.endLate' => 'End late (seconds)',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.recordSettings.newOnly' => 'Only new episodes',
 			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
 			'liveTv.recordSettings.anyTime' => 'Record at any time',
@@ -12836,14 +12877,14 @@ extension on Translations {
 			'performanceOverlay.maxCll' => 'MaxCLL',
 			'performanceOverlay.maxFall' => 'MaxFALL',
 			'performanceOverlay.cacheUsed' => 'Cache Used',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.cacheLimit' => 'Cache Limit',
 			'performanceOverlay.speed' => 'Speed',
 			'performanceOverlay.player' => 'Player',
 			'performanceOverlay.playMethod' => 'Play Method',
 			'performanceOverlay.memory' => 'Memory',
 			'performanceOverlay.uiFps' => 'UI FPS',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.fps' => 'FPS',
 			'performanceOverlay.decoderAndroidHw' => 'Android HW',
 			'performanceOverlay.decoderNvidiaHw' => 'NVIDIA HW',

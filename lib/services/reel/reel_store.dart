@@ -37,7 +37,7 @@ enum ReelAction {
 }
 
 /// What one daily [ReelStore.sweep] deleted: old pool rows (`pool:`,
-/// `again:` and `week:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
+/// `again:`, `week:` and `person:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
 /// rows, and old events.
 typedef ReelSweep = ({int pools, int days, int sources, int metas, int events});
 
@@ -164,6 +164,11 @@ class ReelStore {
   /// `week:<first day>` rows (New this week, D22) are kept this many days
   /// after their week began: this week's and last week's.
   static const int weeksKept = 14;
+
+  /// `person:<day>` rows (the Person deck, D22) are kept this many days:
+  /// the deck's rotation remembers who it featured that long
+  /// (ReelPool.personRest).
+  static const int personsKept = 14;
 
   /// The card a deck's next cold start opens at once (V2-04, ReelHead):
   /// one row per deck on this device, swept with the day rows once it hasn't
@@ -310,6 +315,7 @@ class ReelStore {
   /// The daily sweep, at most once per day on this device: `pool:` rows
   /// older than [poolsKept] days, `again:` rows older than [daysKept] days,
   /// `week:` rows whose week began more than [weeksKept] days ago,
+  /// `person:` rows older than [personsKept] days,
   /// `deck:` and `cursor:` rows not written for [daysKept] days, `src:` rows
   /// past [sourceTtl], `head:` rows not written for [daysKept] days,
   /// `meta:` rows not written for [metadataKept], and old
@@ -333,7 +339,10 @@ class ReelStore {
     }
 
     final pools =
-        await olderThan('pool:', poolsKept) + await olderThan('again:', daysKept) + await olderThan('week:', weeksKept);
+        await olderThan('pool:', poolsKept) +
+        await olderThan('again:', daysKept) +
+        await olderThan('week:', weeksKept) +
+        await olderThan('person:', personsKept);
     final dayRowsBefore = nowMs - const Duration(days: daysKept).inMilliseconds;
     final days =
         await (db.delete(db.reelCache)..where(

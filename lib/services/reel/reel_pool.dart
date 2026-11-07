@@ -95,8 +95,10 @@ class PoolCandidate {
 /// The pool the host shares: its day (`YYYY-MM-DD`), rows, "Give it
 /// another go" rows (empty when the build gave none), when it was built
 /// (null on a pool shared before builds were stamped), when today's build
-/// was cleared since ([ReelPool.clearToday]), and the week's New this week
-/// list as kept ([ReelPool.weekKey]; null when there is none).
+/// was cleared since ([ReelPool.clearToday]), the week's New this week
+/// list as kept ([ReelPool.weekKey]; null when there is none), and the
+/// day's Person deck as kept ([ReelPool.personKey]; null when there is
+/// none).
 typedef SharedPool = ({
   String day,
   List<Object?> rows,
@@ -104,7 +106,25 @@ typedef SharedPool = ({
   int? at,
   int? cleared,
   Map<String, Object?>? week,
+  Map<String, Object?>? person,
 });
+
+/// What names a Person deck's person (D22): the role they have in more of
+/// the titles they watched ("Directed by …" or "Starring …").
+enum PersonRole { director, cast }
+
+/// The day's person for the Person deck (D22) as code gathers it: who,
+/// the role the deck names them by, how many titles with them they have
+/// watched (a real, dated watch each), and their unseen titles on the
+/// servers as candidates, in code order (best public score first).
+typedef PersonPick = ({String name, PersonRole role, int watched, List<PoolCandidate> candidates});
+
+/// The day's Person deck as kept ([ReelPool.personKey]): its day
+/// (`YYYY-MM-DD`), the person, how many titles with them they have
+/// watched, whether the daily build ordered it ([ai]; code order until it
+/// does), and its titles as the remainder (titles gone through since the
+/// day began are left out, see [ReelPool.cachedPerson]).
+typedef PersonList = ({String day, String name, PersonRole role, int watched, bool ai, List<DeckEntry> entries});
 
 /// The week's arrivals as the daily build is shown them (New this week,
 /// D22): the unseen ones as candidates, newest first, each with its
@@ -192,6 +212,22 @@ class ReelPool {
   /// of the week. Swept once older than [ReelStore.weeksKept] days.
   static String weekKey(DateTime d) => 'week:${weekOf(d)}';
 
+  /// The day's Person deck (D22): who it is about and their titles, kept
+  /// when the day's person is chosen (code order) and again when the daily
+  /// build orders it. The kept rows are also the rotation's memory: a
+  /// person featured in the last [personRest] days waits
+  /// ([featuredPeople]). Swept once older than [ReelStore.personsKept]
+  /// days.
+  static String personKey(DateTime d) => 'person:${dateOf(d)}';
+
+  /// A person featured in the Person deck waits this many days (today
+  /// included) before the deck features them again, while someone else
+  /// qualifies.
+  static const int personRest = ReelStore.personsKept;
+
+  /// At most this many of the person's unseen titles go to the daily build.
+  static const int maxPerson = 40;
+
   /// Today's day key, by this pool's clock.
   String today() => dayKey(_clock());
 
@@ -218,6 +254,7 @@ class ReelPool {
           at: j['at'] is int ? j['at'] as int : null,
           cleared: j['cleared'] is int ? j['cleared'] as int : null,
           week: j['week'] is Map ? (j['week'] as Map).cast<String, Object?>() : null,
+          person: j['person'] is Map ? (j['person'] as Map).cast<String, Object?>() : null,
         );
       }
     } catch (_) {}
@@ -283,6 +320,125 @@ class ReelPool {
     if (await store.cached(weekKey(now)) != null) return false;
     final share = (await shared())?.week;
     return share == null || share['week'] != weekOf(now);
+  }
+
+  /// Today's Person deck (D22) as its remainder (titles gone through in
+  /// the Reel since the day began are left out). The [host] reads its own
+  /// row first, then the one it shares; a phone reads the host's shared row
+  /// first, so both devices show the same person once the host has chosen,
+  /// then its own. Null when no person is kept for today.
+  Future<PersonList?> cachedPerson() async {
+    final now = _clock();
+    final day = dateOf(now);
+    final own = await _personRow(now);
+    final share = (await shared())?.person;
+    final hostRow = share != null && share['day'] == day ? share : null;
+    final row = host ? own ?? hostRow : hostRow ?? own;
+    final list = _personList(row);
+    if (list == null) return null;
+    final gone = await goneThrough(since: DateTime(now.year, now.month, now.day));
+    return (
+      day: list.day,
+      name: list.name,
+      role: list.role,
+      watched: list.watched,
+      ai: list.ai,
+      entries: [
+        for (final r in list.rows)
+          if (r.id == null || !gone.contains(r.id)) r.entry,
+      ],
+    );
+  }
+
+  /// Who the Person deck featured over the last [personRest] days (today
+  /// included), this device's own rows and the shared one: each person's
+  /// name (lower case) and the newest day (`YYYY-MM-DD`) they were featured.
+  Future<Map<String, String>> featuredPeople() async {
+    final now = _clock();
+    final out = <String, String>{};
+    final share = (await shared())?.person;
+    if (_personList(share) case final s?) out[s.name.toLowerCase()] = s.day;
+    for (var back = 0; back < personRest; back++) {
+      final list = _personList(await _personRow(now.subtract(Duration(days: back))));
+      if (list == null) continue;
+      final key = list.name.toLowerCase();
+      final have = out[key];
+      if (have == null || have.compareTo(list.day) < 0) out[key] = list.day;
+    }
+    return out;
+  }
+
+  /// Keeps [pick] as today's person in code order, unless today already
+  /// has a row here (its person was chosen, and the build may have ordered
+  /// it). Nothing is shared: the host shares it with its next build.
+  Future<void> keepPerson(PersonPick pick) async {
+    final now = _clock();
+    if (await store.cached(personKey(now)) != null) return;
+    await _writePerson(
+      now,
+      pick,
+      ai: false,
+      rows: [
+        for (final c in pick.candidates) {'id': c.titleId, 'sv': c.entry.serverId, 'rk': c.entry.ratingKey},
+      ],
+    );
+  }
+
+  Future<void> _writePerson(
+    DateTime now,
+    PersonPick pick, {
+    required bool ai,
+    required List<Map<String, Object?>> rows,
+  }) async {
+    await store.cache(
+      personKey(now),
+      jsonEncode({
+        'day': dateOf(now),
+        'at': now.millisecondsSinceEpoch,
+        'name': pick.name,
+        'role': pick.role.name,
+        'watched': pick.watched,
+        'ai': ai,
+        'rows': rows,
+      }),
+    );
+    appLogger.i(
+      '[ReelDeck] person: ${dateOf(now)} kept, ${pick.role.name}, watched ${pick.watched}, '
+      '${pick.candidates.length} unseen, ${rows.length} kept in ${ai ? 'the build\'s' : 'code'} order',
+    );
+  }
+
+  static Map<String, Object?> _row(ReelCardData card) => {
+    'id': card.id,
+    'sv': card.best.serverId,
+    'rk': card.best.ratingKey,
+  };
+
+  /// This device's own Person row for [day], or null.
+  Future<Map<String, Object?>?> _personRow(DateTime day) async {
+    try {
+      final raw = await store.cached(personKey(day));
+      final j = raw == null ? null : jsonDecode(raw);
+      return j is Map ? j.cast<String, Object?>() : null;
+    } catch (e) {
+      appLogger.d('Reel: the Person deck row is unavailable', error: e);
+      return null;
+    }
+  }
+
+  static ({String day, String name, PersonRole role, int watched, bool ai, List<({String? id, DeckEntry entry})> rows})?
+  _personList(Map<String, Object?>? row) {
+    if (row == null) return null;
+    final day = row['day'], name = row['name'], rows = row['rows'];
+    if (day is! String || name is! String || name.trim().isEmpty || rows is! List) return null;
+    return (
+      day: day,
+      name: name,
+      role: row['role'] == PersonRole.director.name ? PersonRole.director : PersonRole.cast,
+      watched: row['watched'] is int ? row['watched'] as int : 0,
+      ai: row['ai'] == true,
+      rows: _rows(rows.cast<Object?>()),
+    );
   }
 
   Future<List<DeckEntry>?> _remainder(
@@ -390,9 +546,10 @@ class ReelPool {
   /// today stays as the stopgap but is marked cleared: the TV drops its own
   /// copy of today and builds again, and a phone waits for that build
   /// rather than spending a call of its own. Until the new build lands,
-  /// For You reads the newest earlier pool's remainder. Returns whether
-  /// this device does the rebuild ([shouldBuild]); false on a phone whose
-  /// TV builds.
+  /// For You reads the newest earlier pool's remainder. Today's Person deck
+  /// row stays: its person was chosen for the day, and an order the build
+  /// already gave is kept. Returns whether this device does the rebuild
+  /// ([shouldBuild]); false on a phone whose TV builds.
   Future<bool> clearToday() async {
     final now = _clock();
     await store.uncache(dayKey(now));
@@ -467,11 +624,18 @@ class ReelPool {
   /// gives no such array, nothing is kept and the next day's build asks
   /// again; with no unseen arrival there is nothing to ask, and the counts
   /// are kept with an empty list.
+  ///
+  /// [person] is the day's person for the Person deck (D22): unless today's
+  /// row is already in the build's order, the same call orders their unseen
+  /// titles in its optional `person` array, and today's [personKey] row is
+  /// kept in that order. When the call gives no such array, the row keeps
+  /// its code order.
   Future<List<DeckEntry>?> build(
     List<PoolCandidate> candidates, {
     required String facts,
     List<PoolCandidate> again = const [],
     NewArrivals? arrivals,
+    PersonPick? person,
   }) async {
     final call = model;
     if (call == null || candidates.isEmpty) return null;
@@ -479,9 +643,11 @@ class ReelPool {
     final againList = again.take(maxAgain).toList();
     final newList = (arrivals?.candidates ?? const <PoolCandidate>[]).take(maxNew).toList();
     final now = _clock();
+    final askPerson = person != null && person.candidates.isNotEmpty && !await _personOrdered(now, person.name);
+    final personList = askPerson ? person.candidates.take(maxPerson).toList() : const <PoolCandidate>[];
     final (:lines, :idOf, :byRow, :hasPremise) = await _candidateLines(
       list,
-      also: [for (final c in againList) c.entry, for (final c in newList) c.entry],
+      also: [for (final c in againList) c.entry, for (final c in newList) c.entry, for (final c in personList) c.entry],
     );
     if (lines.isEmpty) return null;
     final againLines = <String>[];
@@ -502,6 +668,15 @@ class ReelPool {
       newOf[id] = card;
       newLines.add(newLine(id, card, c.added, now));
     }
+    final personLines = <String>[];
+    final personOf = <String, ReelCardData>{};
+    for (final (i, c) in personList.indexed) {
+      final card = byRow[c.entry.rowId];
+      if (card == null) continue;
+      final id = 'p${i + 1}';
+      personOf[id] = card;
+      personLines.add(personLine(id, card, person!.name));
+    }
     final user = StringBuffer('$facts\n\nCandidates:\n${lines.join('\n')}');
     if (againLines.isNotEmpty) {
       user.write(
@@ -519,10 +694,18 @@ class ReelPool {
       // Nothing unseen arrived: the week is judged without asking.
       await _keepWeek(const [], const {}, arrivals, now);
     }
+    if (personLines.isNotEmpty) {
+      user.write(
+        '\n\nPerson (${person!.name}, ${person.role == PersonRole.director ? 'a director' : 'an actor'}: '
+        'they have watched ${person.watched} titles with them; their titles on the servers they have not seen '
+        'are listed; for the "${person.name}" deck only, never For You cards):\n${personLines.join('\n')}',
+      );
+    }
     try {
       final input = await call(systemPrompt('about $target'), user.toString(), _tool);
       await _keepAgain(input?['another_go'], againOf, now);
       if (arrivals != null && newLines.isNotEmpty) await _keepWeek(input?['new_this_week'], newOf, arrivals, now);
+      if (personLines.isNotEmpty) await _keepPersonOrder(input?['person'], personOf, person!, now);
       final (:out, :ids) = _picked(input?['cards'], idOf, byRow, hasPremise);
       if (out.isEmpty) return null;
       final rows = [
@@ -534,6 +717,7 @@ class ReelPool {
         try {
           final againRows = await _againRows(now);
           final week = await _weekRow(now);
+          final personRow = await _personRow(now);
           await store.sharePool(
             jsonEncode({
               'day': dateOf(now),
@@ -541,6 +725,7 @@ class ReelPool {
               'entries': rows,
               'again': ?againRows,
               'week': ?week,
+              'person': ?personRow,
             }),
           );
         } catch (e) {
@@ -775,6 +960,48 @@ class ReelPool {
     }
   }
 
+  /// One "Person" line: the title, its facts and what the person did on it.
+  static String personLine(String id, ReelCardData card, String name) {
+    bool names(String list) => list.split('|').any((n) => n.trim().toLowerCase() == name.trim().toLowerCase());
+    return [
+      '$id: ${card.title.title}${card.best.year == null ? '' : ' (${card.best.year})'}',
+      card.title.isShow ? 'show' : 'film',
+      if (card.facts.genres.isNotEmpty) card.facts.genres.take(3).join('/'),
+      card.facts.modelLine(),
+      ?card.facts.lengthLine(),
+      if (card.title.anime) 'anime',
+      names(card.best.directors) ? 'directed by them' : 'with them in the cast',
+    ].join(' · ');
+  }
+
+  /// Whether today's Person row here is already in the build's order for
+  /// [name] (a second build the same day doesn't ask again).
+  Future<bool> _personOrdered(DateTime now, String name) async {
+    final list = _personList(await _personRow(now));
+    return list != null && list.ai && list.name.toLowerCase() == name.toLowerCase();
+  }
+
+  /// Keeps the call's `person` order (known `p` ids only, each once) as
+  /// today's [personKey] row. An answer with no such array leaves the row
+  /// in code order; an empty array is the build's answer that none of
+  /// their titles is worth the evening.
+  Future<void> _keepPersonOrder(Object? ids, Map<String, ReelCardData> personOf, PersonPick pick, DateTime now) async {
+    if (ids is! List) {
+      appLogger.i('[ReelDeck] person: the build gave no order; code order stays');
+      return;
+    }
+    final used = <String>{};
+    await _writePerson(
+      now,
+      pick,
+      ai: true,
+      rows: [
+        for (final id in ids)
+          if (personOf['$id'] case final card? when used.add('$id')) _row(card),
+      ],
+    );
+  }
+
   /// The candidate line's tag for a title added in the last
   /// [PoolCandidate.newWithin], else null.
   static String? addedLine(DateTime? added, DateTime now) {
@@ -817,13 +1044,14 @@ Choose $count candidates and put them in the order you think they would most enj
 - "skipped quickly in the Reel lately" is a fact, not a ban: show such titles sparingly when an equally good fresh one exists.
 - Passes (Not for me, "Passed on in the Reel lately") are facts about the kind of title, not bans: a pass on one title never rules out its kind.
 - Kids' and family titles only when their own history shows they watch them.
-- "In their own words", when the facts have it, is the household's own note to you about this feed. Where it disagrees with the defaults above (the rating bar, the mix, kids' titles, how often a skipped or passed-on kind comes back), follow their note. It never changes the rules for why, anchor, cluster, hook, another_go and new_this_week below.
+- "In their own words", when the facts have it, is the household's own note to you about this feed. Where it disagrees with the defaults above (the rating bar, the mix, kids' titles, how often a skipped or passed-on kind comes back), follow their note. It never changes the rules for why, anchor, cluster, hook, another_go, new_this_week and person below.
 - why: optional, at most 16 words, about why they would like it. It is shown on screen to the household, so write it to them in the second person ("you", "your ask"), never "they" or "their". It must name one anchor from that candidate's evidence (a "similar to …" title, "similar to recent plays …" or "similar to Reel Saves …" title, "from their ask …" or "from the suggested list …") together with that anchor's real fact. Leave it out when there's nothing honest to say; about half the cards should have none. Never mention ratings, praise words or plot beyond the premise.
 - anchor: the exact evidence title, ask or list your why line names.
 - cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.
 - hook: optional, at most ${ReelPremise.hookWords} words: what the title is about, for someone deciding whether to watch it. Write it only from that candidate's own "premise:" text, never from memory, and leave it out when the candidate has none. It is shown on screen, so it must not spoil: only the opening setup, never a twist, a death, an ending or who did it. No ratings or praise words.
 - another_go: optional, only when there is an "Another go" list. Those are shows they started and left: "sampled" (an episode or two, long ago) or "paused" (not watched for two to six months). Give the ids (g1, g2, …) of the ones worth another go today, in the order you would offer them, and leave out any their history says they gave up on for good. They are a separate deck: never put a g id in cards.
-- new_this_week: optional, only when there is a "New this week" list. Those are titles that reached their servers this week and they have not seen. Give the ids (n1, n2, …) of the few worth a look this week, best first, by the same bar as the cards: a short weekly shortlist, never padding; an empty array when none is. They are a separate deck: never put an n id in cards or another_go.''';
+- new_this_week: optional, only when there is a "New this week" list. Those are titles that reached their servers this week and they have not seen. Give the ids (n1, n2, …) of the few worth a look this week, best first, by the same bar as the cards: a short weekly shortlist, never padding; an empty array when none is. They are a separate deck: never put an n id in cards or another_go.
+- person: optional, only when there is a "Person" list. Those are titles on their servers with one person whose work they have watched a lot, and they have not seen them. Give the ids (p1, p2, …) in the order you would offer them, best first, leaving out any not worth their evening by the same bar as the cards. They are a separate deck: never put a p id in cards, another_go or new_this_week.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'reel_pool',
@@ -856,6 +1084,11 @@ Choose $count candidates and put them in the order you think they would most enj
         'new_this_week': {
           'type': 'array',
           'description': 'Ids from the "New this week" list (e.g. n4) worth a look, best first; optional',
+          'items': {'type': 'string'},
+        },
+        'person': {
+          'type': 'array',
+          'description': 'Ids from the "Person" list (e.g. p2), best first; optional',
           'items': {'type': 'string'},
         },
       },

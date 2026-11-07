@@ -162,6 +162,7 @@ class ForYouDeck extends ReelDeck {
     required this.facts,
     this.again,
     this.arrivals,
+    this.person,
     Listenable? sharedChanges,
     Listenable? clears,
   }) {
@@ -185,6 +186,12 @@ class ForYouDeck extends ReelDeck {
   /// build judges them for [NewThisWeekDeck] once a week. Null: no such
   /// deck.
   final Future<NewArrivals> Function()? arrivals;
+
+  /// The day's person for the Person deck ([personPick]): gathered once a
+  /// day ([todaysPerson]) and kept ([ReelPool.keepPerson]), so the same
+  /// daily build orders their titles. Null: no such deck.
+  final Future<PersonPick?> Function()? person;
+  ({String day, Future<PersonPick?> pick})? _person;
   Future<void>? _building;
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
   ({String day, Future<List<PoolCandidate>> list})? _again;
@@ -382,6 +389,32 @@ class ForYouDeck extends ReelDeck {
     return list;
   }
 
+  /// [person], gathered once a day and kept as today's Person deck
+  /// ([ReelPool.keepPerson]); the deck and the build share it. A failed
+  /// gather is null and isn't kept.
+  Future<PersonPick?> todaysPerson() {
+    final gather = person;
+    if (gather == null) return Future.value();
+    final day = pool.today();
+    final have = _person;
+    if (have != null && have.day == day) return have.pick;
+    Future<PersonPick?> run() async {
+      try {
+        final pick = await gather();
+        if (pick != null) await pool.keepPerson(pick);
+        return pick;
+      } catch (e) {
+        appLogger.d('Reel: Person deck gather failed', error: e);
+        if (_person?.day == day) _person = null;
+        return null;
+      }
+    }
+
+    final pick = run();
+    _person = (day: day, pick: pick);
+    return pick;
+  }
+
   /// Starts today's build when it is due (the first Reel open of the day,
   /// on whichever of its decks it opens).
   Future<void> buildIfDue() async {
@@ -398,7 +431,7 @@ class ForYouDeck extends ReelDeck {
       if (have == null || have.day != pool.today()) {
         if (!await pool.shouldBuild()) return;
       }
-      await (_todaysCandidates(), todaysAgain()).wait;
+      await (_todaysCandidates(), todaysAgain(), todaysPerson()).wait;
     } catch (e) {
       appLogger.d('Reel: For You gather failed', error: e);
     }
@@ -438,6 +471,7 @@ class ForYouDeck extends ReelDeck {
         facts: await facts(),
         again: await todaysAgain(),
         arrivals: await _weekArrivals(),
+        person: await todaysPerson(),
       );
       if (built != null) _rebuilt.bump();
     } catch (e) {

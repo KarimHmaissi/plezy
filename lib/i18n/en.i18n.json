@@ -1813,6 +1813,9 @@
       "animeOpenings": "Anime openings",
       "mostWatched": "Most Watched",
       "newThisWeek": "New this week",
+      "person": "A person you love",
+      "directedBy": "Directed by ${name}",
+      "starring": "Starring ${name}",
       "showThisWeek": "#$n show this week",
       "filmThisWeek": "#$n film this week"
     },
@@ -1831,6 +1834,18 @@
         "other": "${n} worth a look."
       },
       "line": "${films}, ${shows} arrived. ${worth}"
+    },
+    "person": {
+      "watched": {
+        "one": "You've watched ${n} title with them.",
+        "other": "You've watched ${n} titles with them."
+      },
+      "unseen": {
+        "zero": "None you haven't seen.",
+        "one": "${n} you haven't seen.",
+        "other": "${n} you haven't seen."
+      },
+      "line": "${watched} ${unseen}"
     },
     "deckIntro": {
       "start": "Start",

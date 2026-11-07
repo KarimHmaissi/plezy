@@ -28,6 +28,7 @@ IconData reelDeckIcon(String id) => switch (id) {
   'fits-tonight' => Symbols.bedtime_rounded,
   'another-go' => Symbols.replay_rounded,
   'new-this-week' => Symbols.new_releases_rounded,
+  'person' => Symbols.person_rounded,
   'anime-openings' => Symbols.music_note_rounded,
   'most-watched' => Symbols.trending_up_rounded,
   _ => Symbols.chat_bubble_rounded,

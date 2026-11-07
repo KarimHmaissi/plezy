@@ -69,6 +69,9 @@ const _benignExits = {
   'lib/services/reel/reel_decks.dart → lib/services/ai/ai_suggestions.dart',
   'lib/services/reel/reel_decks.dart → lib/services/ai/facts/title_facts.dart',
   'lib/services/reel/reel_decks.dart → lib/services/brain/history_brain.dart',
+  // The Person deck (D22): the brain's watched titles, read only, to find
+  // the people they watch most.
+  'lib/services/reel/reel_person.dart → lib/services/brain/history_brain.dart',
   'lib/services/reel/reel_library.dart → lib/services/ai/facts/index_title_facts_source.dart',
   'lib/services/reel/reel_library.dart → lib/services/ai/facts/title_facts.dart',
   // A month's name for the daily build's "last watched" facts.
