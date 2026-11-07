@@ -673,7 +673,7 @@ void main() {
   });
 
   group('V2-65: a screen switch keeps the card', () {
-    // The Fold's cover screen, then its inner screen.
+    // A foldable's cover screen, then its inner screen.
     const cover = Size(420, 860);
     const inner = Size(840, 760);
 
@@ -1896,7 +1896,7 @@ void main() {
     });
   });
 
-  group('V2-30: layouts for the Fold, and the frame glides', () {
+  group('V2-30: layouts for foldables, and the frame glides', () {
     // The cover screen upright and on its side; the inner screen upright and
     // on its side.
     const cover = Size(420, 860);

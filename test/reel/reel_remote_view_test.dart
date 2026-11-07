@@ -93,7 +93,7 @@ void main() {
   });
 
   testWidgets('swiping the card up steps the TV, even on a screen short enough to scroll', (tester) async {
-    // The Fold's cover screen: the list scrolls, so a swipe on it must not
+    // A foldable's cover screen: the list scrolls, so a swipe on it must not
     // be taken by the scroll view.
     final remote = await pump(tester, size: const Size(400, 560));
     remote.sent.clear();

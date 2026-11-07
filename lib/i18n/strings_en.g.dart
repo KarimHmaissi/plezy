@@ -3314,8 +3314,8 @@ class Translations$aiTab$en {
 	/// en: 'Follow up'
 	String get followUpTitle => 'Follow up';
 
-	/// en: 'e.g. a short funny film, or something like Severance'
-	String get askHint => 'e.g. a short funny film, or something like Severance';
+	/// en: 'e.g. a short funny film, or a twisty sci-fi series'
+	String get askHint => 'e.g. a short funny film, or a twisty sci-fi series';
 
 	/// en: 'Looking for: ${request}'
 	String thinking({required Object request}) => 'Looking for: ${request}';
@@ -7332,8 +7332,8 @@ class Translations$aiComposer$en {
 	/// en: 'Where next?'
 	String get followUpHeadline => 'Where next?';
 
-	/// en: 'Action anime like Attack on Titan'
-	String get example1 => 'Action anime like Attack on Titan';
+	/// en: 'Action anime with giant battles'
+	String get example1 => 'Action anime with giant battles';
 
 	/// en: 'Something cosy for a Sunday afternoon'
 	String get example2 => 'Something cosy for a Sunday afternoon';
@@ -11449,7 +11449,7 @@ extension on Translations {
 			'aiTab.followUp' => 'Follow up',
 			'aiTab.askTitle' => 'What do you feel like watching?',
 			'aiTab.followUpTitle' => 'Follow up',
-			'aiTab.askHint' => 'e.g. a short funny film, or something like Severance',
+			'aiTab.askHint' => 'e.g. a short funny film, or a twisty sci-fi series',
 			'aiTab.thinking' => ({required Object request}) => 'Looking for: ${request}',
 			'aiTab.preparingTonight' => 'Picking a few things for tonight…',
 			'aiTab.newConversation' => 'New conversation',
@@ -13242,7 +13242,7 @@ extension on Translations {
 			'aiComposer.eyebrow' => 'ASK YOUR LIBRARY',
 			'aiComposer.headline' => 'What are we watching?',
 			'aiComposer.followUpHeadline' => 'Where next?',
-			'aiComposer.example1' => 'Action anime like Attack on Titan',
+			'aiComposer.example1' => 'Action anime with giant battles',
 			'aiComposer.example2' => 'Something cosy for a Sunday afternoon',
 			'aiComposer.example3' => '80s action, easy to watch',
 			'aiComposer.example4' => 'Surprise me with a Marvel film',

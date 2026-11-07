@@ -722,7 +722,7 @@ class _AiComposerState extends State<AiComposer> with TickerProviderStateMixin, 
       key: const ValueKey('compose'),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // The Fold's cover screen with the keyboard up leaves ~400dp:
+          // A foldable's cover screen with the keyboard up leaves ~400dp:
           // there the page anchors above the keyboard and slims down.
           final h = constraints.maxHeight;
           final short = !isTv && h < 620;

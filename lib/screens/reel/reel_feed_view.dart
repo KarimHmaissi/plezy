@@ -68,12 +68,12 @@ enum ReelFeedLayout {
   /// foot on a scrim.
   phone,
 
-  /// A phone on its side (the Fold's cover screen turned): the picture fills
+  /// A phone on its side (a foldable's cover screen turned): the picture fills
   /// the screen and the controls go, the way the immersive view hides them.
   /// Swiping left or Back brings them back over the picture.
   fullBleed,
 
-  /// 600 dp wide or more and not two-pane (the Fold's inner screen held
+  /// 600 dp wide or more and not two-pane (a foldable's inner screen held
   /// upright): the picture at the top, the info below it, so nothing covers
   /// the foot of the picture where captions and lyrics sit.
   stacked,
@@ -118,7 +118,7 @@ enum ReelFeedLayout {
 /// half swipe never snaps the outgoing picture back to its first frame. The
 /// pages either side are built ahead (`allowImplicitScrolling`).
 ///
-/// A screen switch (V2-65): the Fold moving between its screens, or turning,
+/// A screen switch (V2-65): a foldable moving between its screens, or turning,
 /// changes the window's size without recreating the activity
 /// (`android:configChanges` covers it) and without touching the players'
 /// surfaces (`video_player_android` 2.12.2 drops a texture's surface only on
@@ -149,7 +149,7 @@ enum ReelFeedLayout {
 /// black; an AI card, a card still opening and a clip that broke keep the art.
 ///
 /// Pinch to fill (V2-33): on the layouts where the info sits over the
-/// picture (a phone upright or on its side: the Fold's cover screen), a
+/// picture (a phone upright or on its side: a foldable's cover screen), a
 /// two-finger pinch out crops the clip to cover the page and a pinch in fits
 /// it again ([ReelPinchRecognizer]: one finger never answers it, so paging
 /// and the sideways swipe are as they were). The picture follows the fingers

@@ -28,8 +28,8 @@ typedef MergedPlexHub = ({String rowId, MediaHub hub, List<String> sources});
 /// Key that identifies one title across servers and libraries.
 String _itemKey(MediaItem item) => item.guid ?? '${item.kind.name}|${item.title}|${item.year}';
 
-/// Merge rows with the same title ("Oh, The Horror!" from five movie
-/// libraries, two "Halloween Movies" collections) into one row, in first
+/// Merge rows with the same title ("Spooky Picks" from several movie
+/// libraries, two "Seasonal Scares" collections) into one row, in first
 /// appearance order. Items repeated across the parts appear once.
 List<MergedPlexHub> mergePlexHubs(Iterable<MediaHub> hubs) {
   final order = <String>[];

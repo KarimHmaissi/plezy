@@ -1771,8 +1771,8 @@ class PlexClient
 
   /// The Continue Watching hub hides anything older than the server's
   /// OnDeckWindow (about 16 weeks), but `/library/onDeck` still lists those
-  /// in-progress items — on a live account, a dozen half-watched films last
-  /// touched months ago. Append the [onDeck] ones the hub left out (same
+  /// in-progress items, such as half-watched films last touched
+  /// months ago. Append the [onDeck] ones the hub left out (same
   /// item, or an episode of a show the hub already has, is skipped) so Home's
   /// "Pick back up" row can show them.
   void _addOlderOnDeckItems(List<PlexMetadataDto> result, List<PlexMetadataDto> onDeck) {

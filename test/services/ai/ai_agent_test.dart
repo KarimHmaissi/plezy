@@ -35,13 +35,13 @@ void main() {
             {
               'ratingKey': '1',
               'type': 'movie',
-              'title': 'Heat',
+              'title': 'Hard Pursuit',
               'year': 1995,
               'Genre': [
                 {'tag': 'Crime'},
               ],
               'Guid': [
-                {'id': 'imdb://tt0113277'},
+                {'id': 'imdb://tt9000011'},
               ],
             },
             serverId: 's',
@@ -82,7 +82,7 @@ void main() {
             'name': 'find_titles',
             'input': {
               'titles': [
-                {'title': 'Heat', 'year': 1995},
+                {'title': 'Hard Pursuit', 'year': 1995},
                 {'title': 'Thief', 'year': 1981},
               ],
             },
@@ -110,7 +110,7 @@ void main() {
     );
     final answer = await agent.ask('crime films');
 
-    expect(answer.picks.map((p) => p.title.title), ['Heat']);
+    expect(answer.picks.map((p) => p.title.title), ['Hard Pursuit']);
     expect(answer.unknownPickIds, ['s:999']);
     expect(answer.intro, 'A great crime film:');
     expect(requests, hasLength(2), reason: 'no extra round trip after show_picks');
@@ -120,7 +120,7 @@ void main() {
     expect(((messages[1]['content'] as List).first as Map)['type'], 'thinking');
     final result = (messages[2]['content'] as List).single as Map;
     expect(result['tool_use_id'], 't1');
-    expect(result['content'], contains('Heat (1995)'));
+    expect(result['content'], contains('Hard Pursuit (1995)'));
     expect(result['content'], contains('Not on the servers: Thief (1981)'));
 
     // Request shape: Sonnet with adaptive thinking, cached system, fallbacks.

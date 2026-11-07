@@ -146,8 +146,8 @@ class IndexTitleFactsSource implements TitleFactsSource {
   static TitleFacts factsOf(TitleRef ref, List<IndexedTitle> copies, {TitleProfile? profile, required DateTime now}) {
     final best = _best(copies);
     final kids = copies.where((t) => isKidsLibrary(t.libraryTitle)).length;
-    // The best watch evidence any copy holds (a copy watched on Main still
-    // counts when the 4K copy on Xtra has no plays).
+    // The best watch evidence any copy holds (a copy watched on one server still
+    // counts when the 4K copy on another has no plays).
     final watchedCopy = copies.reduce((a, b) => _watchScore(a) >= _watchScore(b) ? a : b);
     final row = WatchState.of(watchedCopy, profile);
     return TitleFacts(

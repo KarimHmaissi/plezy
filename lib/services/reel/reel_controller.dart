@@ -1299,7 +1299,7 @@ class ReelController extends ChangeNotifier {
 
   ReelSlot get current => slotAt(page);
 
-  /// The next three slots, for the Fold remote.
+  /// The next three slots, for the phone remote.
   List<ReelSlot> get upNext {
     final p = page;
     return [for (var i = p + 1; i <= p + 3; i++) slotAt(i)];
@@ -2139,7 +2139,7 @@ class ReelController extends ChangeNotifier {
   Future<void> openDeck(String id) => openAt(id);
 
   /// Opens deck [id] on the card for [groupKey] (On TV mode: the TV opens
-  /// on the card the Fold was showing). A title that isn't in this device's
+  /// on the card the phone was showing). A title that isn't in this device's
   /// list of the deck, or no [groupKey], leaves the deck on its own cursor.
   Future<void> openAt(String id, [String? groupKey]) async {
     final i = await _deckIndex(id);
@@ -3060,7 +3060,7 @@ class ReelController extends ChangeNotifier {
     selectPick(s.pick + dir);
   }
 
-  /// The decision card: chooses pick [i] (a tap, or the Fold's On TV mode).
+  /// The decision card: chooses pick [i] (a tap, or the phone's On TV mode).
   void selectPick(int i) {
     final s = current;
     if (s.kind != ReelSlotKind.decide || s.picks.isEmpty) return;
@@ -3415,7 +3415,7 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The playback profile changed (the Fold switched screens, the network
+  /// The playback profile changed (a foldable switched screens, the network
   /// changed, data saver was turned on): every resolved card except the one
   /// on screen picks its file again, so the next card plays at the new
   /// height. The card on screen keeps its file until it is shown again.

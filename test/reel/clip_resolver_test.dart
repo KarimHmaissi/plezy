@@ -546,7 +546,7 @@ void main() {
       expect(row['v'], ClipResolver.sourceFormat);
       expect((row['c'] as List).length, 4);
 
-      // The Fold folds: the cover screen's profile.
+      // The foldable folds: the cover screen's profile.
       profile.value = cover;
       final folded = await resolver.lookup(harbor);
       expect(folded.clip?.assetId, 'at:2');

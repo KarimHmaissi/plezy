@@ -27,7 +27,7 @@ enum WatchdogTrim { none, halved, cleared }
 ///   clears it too. Nothing here ever calls [ImageCache.clearLiveImages], which
 ///   would blank artwork still on screen;
 /// * after [backgroundStepDownAfter] in the background both caches drop to
-///   their floors, handing the memory to whatever the family is watching.
+///   their floors, handing the memory to whatever is playing.
 ///
 /// Budgets come back to the device tier's sizes ([DevicePerformance]) on
 /// resume, and in the foreground [restoreCooldown] after the last trim once

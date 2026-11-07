@@ -183,7 +183,7 @@ void main() {
                 {'tag': 'Drama'},
               ],
             },
-            serverId: key.startsWith('x') ? 'xtra' : 'main',
+            serverId: key.startsWith('x') ? 'srv-b' : 'main',
             serverName: 'S',
             libraryKey: library,
             libraryTitle: library,
@@ -232,7 +232,7 @@ void main() {
       final out = await s.load([ref]);
       expect(out[ref.id]!.seen.isUnseen, isFalse);
       expect(s.peek('main:1')?.seen.kind, out[ref.id]!.seen.kind);
-      expect(s.peek('xtra:x2'), same(s.peek('main:1')));
+      expect(s.peek('srv-b:x2'), same(s.peek('main:1')));
     });
 
     test('a Trakt-logged title the servers call unwatched reads as logged', () async {

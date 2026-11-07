@@ -876,7 +876,7 @@ void main() {
     });
   }
 
-  group('On TV mode opens on the Fold\'s card (V2-48)', () {
+  group('On TV mode opens on the phone\'s card (V2-48)', () {
     List<ReelDeck> two() => [
       _Deck('a', [_card('1'), _card('2'), _card('3')]),
       _Deck('b', [_card('4'), _card('5'), _card('6')]),
@@ -1277,7 +1277,7 @@ void main() {
     var told = 0;
     c.addListener(() => told++);
 
-    // The Fold folds to its cover screen.
+    // The foldable folds to its cover screen.
     profile.value = const ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
     expect(c.current.clip?.height, 1080, reason: 'the clip on screen keeps playing its file');
     expect(c.slotAt(1).clip?.height, 720);

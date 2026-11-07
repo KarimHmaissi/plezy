@@ -261,7 +261,7 @@ void main() {
     expect(c.current.kind, ReelSlotKind.intro);
     await c.openAt('n', 'g4');
     expect(c.deck.id, 'n');
-    expect(c.current.card?.id, 't4', reason: 'the Fold asked for this card: it opens, not the intro');
+    expect(c.current.card?.id, 't4', reason: 'the phone asked for this card: it opens, not the intro');
     expect(c.page, 1);
     c.dispose();
   });
@@ -278,7 +278,7 @@ void main() {
     c.dispose();
   });
 
-  test('the Fold remote hears the intro line', () async {
+  test('the phone remote hears the intro line', () async {
     final c = make([
       _IntroDeck('a', [_card('1')]),
     ]);

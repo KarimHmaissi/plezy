@@ -63,7 +63,7 @@ class ReelScreen extends StatefulWidget {
   /// native video surface behind Flutter shows.
   static final ValueNotifier<bool> showing = ValueNotifier(false);
 
-  /// A deck asked for from outside the tab (deep link, Reel it, the Fold),
+  /// A deck asked for from outside the tab (deep link, Reel it, the phone),
   /// taken by the screen when it next shows.
   static final ValueNotifier<String?> requestedDeck = ValueNotifier(null);
 
@@ -72,7 +72,7 @@ class ReelScreen extends StatefulWidget {
   /// also step to Home.
   static final ValueNotifier<bool> immersive = ValueNotifier(false);
 
-  /// The title the Fold was on when it asked for [requestedDeck] (its
+  /// The title the phone was on when it asked for [requestedDeck] (its
   /// `groupKey`), so the TV opens on that card.
   static String? _requestedCard;
 
@@ -110,7 +110,7 @@ class ReelScreen extends StatefulWidget {
 
   /// Opens the Reel tab, on [deck] when given: closes pages above the shell
   /// first so the tab is what shows. Does nothing while the Reel is turned
-  /// off ([enabled]). [fromRemote]: the Fold's On TV mode asked for it, so
+  /// off ([enabled]). [fromRemote]: the phone's On TV mode asked for it, so
   /// the first-run intro waits (see [_introDeferred]). [groupKey]: the
   /// title to open [deck] on, when this device's list of it has it.
   static void open(BuildContext context, {String? deck, String? groupKey, bool fromRemote = false}) {
@@ -122,7 +122,7 @@ class ReelScreen extends StatefulWidget {
     MainTabSwitcher.select?.call(NavigationTabId.reel);
   }
 
-  /// Set once the Fold's On TV mode has opened the Reel: the phone is
+  /// Set once the phone's On TV mode has opened the Reel: the phone is
   /// driving it and can't press OK on the TV, so the first-run intro waits
   /// until the next launch rather than hold the TV's Reel back.
   static bool _introDeferred = false;
@@ -603,7 +603,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (c == null || !_shown || _intro) return;
     c.noteInput();
     _leanBack.poke();
-    // Tonight's picks: a poster tapped on the Fold.
+    // Tonight's picks: a poster tapped on the phone.
     if (action.startsWith('pick:')) {
       final i = int.tryParse(action.substring(5));
       if (i != null) c.selectPick(i);
@@ -1149,7 +1149,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onSheet: () => unawaited(_openSheet()),
       onDecks: () => unawaited(showReelDeckPicker(context, c)),
       onRemote: onTv ? _remoteMode : null,
-      // V2-65: a Fold screen switch is timed to the picture moving again.
+      // V2-65: a foldable screen switch is timed to the picture moving again.
       onResize: () => _feedProbe?.screenChanged(),
       // V2-31: Back in the immersive feed is the feed's, not the shell's.
       onImmersive: (on) => ReelScreen.immersive.value = on,

@@ -44,7 +44,7 @@ class PoolCandidate {
   /// The Reel Saves it is similar to (anchors too).
   final List<String> saved;
 
-  /// A saved AI ask it came from ("like Lost and Dark").
+  /// A saved AI ask it came from ("like Harbor Lights").
   final String? askedFor;
 
   /// An AI suggested list it fills (the AI page's "Suggested for you").

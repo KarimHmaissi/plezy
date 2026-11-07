@@ -19,7 +19,7 @@ import '../../widgets/companion_remote/remote_button.dart';
 import '../../widgets/optimized_media_image.dart';
 import '../../widgets/stat_chip.dart';
 
-/// Fork: the Fold's On TV mode. The TV's Reel plays; the phone shows its
+/// Fork: the phone's On TV mode. The TV's Reel plays; the phone shows its
 /// card and the next three and sends `reelStep` / `reelAction`. The phone
 /// plays nothing. A full remote (V2-49): previous and next, play and pause,
 /// the TV's Reel volume, and a More menu with the TV sheet's card actions.
@@ -181,7 +181,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
               // The swipes live on the picture: the list itself scrolls on
-              // a short screen (the Fold's cover), so it can't own them.
+              // a short screen (a foldable's cover), so it can't own them.
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onVerticalDragEnd: (d) {
