@@ -345,7 +345,7 @@ abstract final class AiSuggestions {
       try {
         final store = await brain.store;
         seed = store.idsByTitle(like).firstOrNull;
-        // "Like" a live-action title keeps animation out: a list like Dune
+        // "Like" a live-action title keeps animation out: a sci-fi epics list
         // shouldn't fill with animated films that share its genres.
         final seedGenres = seed == null ? null : store.profile(seed)?.genres;
         if (seedGenres != null && !seedGenres.any((g) => g.toLowerCase() == 'animation')) none.add('animation');

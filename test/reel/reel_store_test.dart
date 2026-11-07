@@ -26,6 +26,18 @@ void main() {
   ReelPick pick(String id, DateTime at) =>
       ReelPick(titleId: id, groupKey: 'g$id', serverId: 's', ratingKey: 'rk$id', title: 'Title $id', at: at);
 
+  test('V2-23: patchCached rewrites a row and keeps its age; a missing row is left alone', () async {
+    await store.cache('src:g1', '{"v":3}');
+    final at = await store.cachedAt('src:g1');
+    now = now.add(const Duration(days: 20));
+    expect(await store.patchCached('src:g1', (v) => v.replaceFirst('}', ',"li":6006}')), isTrue);
+    expect(await store.cached('src:g1'), '{"v":3,"li":6006}');
+    expect(await store.cachedAt('src:g1'), at);
+    expect(await store.patchCached('src:g1', (_) => null), isFalse);
+    expect(await store.patchCached('src:missing', (_) => '{}'), isFalse);
+    expect(await store.cached('src:missing'), isNull);
+  });
+
   test('picks wait 3 days, newest first, at most 3', () async {
     await store.savePick(pick('a', now.subtract(const Duration(days: 4))));
     await store.savePick(pick('b', now.subtract(const Duration(hours: 5))));
@@ -68,6 +80,18 @@ void main() {
     expect(await store.fatigueOf('other'), 0);
   });
 
+  test('V2-14: used since a time: any event counts, unplayed included', () async {
+    final week = now.subtract(const Duration(days: 7));
+    expect(await store.usedSince(week), isFalse);
+    await ReelStore(
+      database: () async => db,
+      clock: () => now.subtract(const Duration(days: 8)),
+    ).record('t', ReelAction.sampled);
+    expect(await store.usedSince(week), isFalse);
+    await store.record('t', ReelAction.unplayed);
+    expect(await store.usedSince(week), isTrue);
+  });
+
   test('cache entries expire after their ttl', () async {
     await store.cache('src:g1', '{"k":"plex:1"}');
     expect(await store.cached('src:g1', ttl: ReelStore.sourceTtl), isNotNull);
@@ -79,6 +103,15 @@ void main() {
   group('daily sweep', () {
     Future<Set<String>> keys() async => {for (final r in await db.select(db.reelCache).get()) r.key};
 
+    test("V2-04: a deck's head card row goes once it hasn't been written for 3 days", () async {
+      final old = ReelStore(database: () async => db, clock: () => now.subtract(const Duration(days: 4)));
+      await old.cache(ReelStore.headKey('anime-openings'), '{}');
+      await store.cache(ReelStore.headKey('for-you'), '{}');
+      final swept = await store.sweep();
+      expect(swept?.days, 1);
+      expect(await keys(), {ReelStore.headKey('for-you'), ReelStore.sweptKey});
+    });
+
     test('drops old pools, stale day rows, expired sources, old metadata and old events', () async {
       String day(int back) => ReelStore.dayStamp(now.subtract(Duration(days: back)));
       // Written over the past days, each on its own day.
@@ -88,6 +121,7 @@ void main() {
         await at.cache('pool:${day(back)}', '[]');
         if (back > 4) continue;
         await at.cache('again:${day(back)}', '[]');
+        await at.cache('next:${day(back)}', '{}');
         await at.cache('deck:for-you:${day(back)}', '[]');
         await at.cache('cursor:ai:a1:${day(back)}', '4');
       }
@@ -105,13 +139,15 @@ void main() {
 
       final swept = await store.sweep();
 
-      // Pools older than 30 days and Give it another go orders older than
-      // 3; the pools in between stay for the signals' cluster labels.
-      expect(swept, (pools: 3, days: 2, sources: 1, metas: 1, events: 1));
+      // Pools older than 30 days, and Give it another go and What's next
+      // orders older than 3; the pools in between stay for the signals'
+      // cluster labels.
+      expect(swept, (pools: 5, days: 2, sources: 1, metas: 1, events: 1));
       expect(await keys(), {
         for (final back in [0, 1, 2, 3, 4, 29]) 'pool:${day(back)}',
         for (var back = 0; back < 3; back++) ...[
           'again:${day(back)}',
+          'next:${day(back)}',
           'deck:for-you:${day(back)}',
           'cursor:ai:a1:${day(back)}',
         ],
@@ -124,6 +160,19 @@ void main() {
         ReelStore.sweptKey,
       });
       expect((await store.events(since: DateTime.utc(2000))).map((e) => e.titleId), ['t-old']);
+    });
+
+    test("V2-14: a deck's cursor and kept list rows go with the day rows", () async {
+      final old = ReelStore(database: () async => db, clock: () => now.subtract(const Duration(days: 4)));
+      final then = now.subtract(const Duration(days: 4));
+      await old.cache(ReelStore.cursorKey('for-you', then), '{"id":"t1"}');
+      await old.cache(ReelStore.deckKey('for-you', then), '[]');
+      await store.cache(ReelStore.cursorKey('for-you', now), '{"id":"t2"}');
+      expect(ReelStore.cursorKey('for-you', now), 'cursor:for-you:2026-11-06');
+      expect(ReelStore.deckKey('for-you', now), 'deck:for-you:2026-11-06');
+      final swept = await store.sweep();
+      expect(swept?.days, 2);
+      expect(await keys(), {ReelStore.cursorKey('for-you', now), ReelStore.sweptKey});
     });
 
     test('runs once a day; calls made together share one run', () async {

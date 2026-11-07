@@ -115,5 +115,16 @@ void main() {
   test('every deck has an icon; answers share one', () {
     expect(reelDeckIcon('ai:1'), reelDeckIcon('ai:2'));
     expect({for (final d in decks) reelDeckIcon(d.id)}, hasLength(3));
+    final builtIn = [
+      'for-you',
+      'fits-tonight',
+      'another-go',
+      'new-this-week',
+      'person',
+      'anime-openings',
+      'most-watched',
+    ];
+    expect({for (final id in builtIn) reelDeckIcon(id)}, hasLength(builtIn.length), reason: 'each its own');
+    expect(builtIn.map(reelDeckIcon), isNot(contains(reelDeckIcon('ai:1'))));
   });
 }

@@ -17,6 +17,7 @@ import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/services/data_aggregation_service.dart';
 import 'package:plezy/services/library_events/library_event_service.dart';
 import 'package:plezy/services/multi_server_manager.dart';
+import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/utils/continue_watching_logo_notifier.dart';
 import 'package:plezy/utils/deletion_notifier.dart';
@@ -386,6 +387,45 @@ void main() {
     await provider.syncToOnlineServers({'server_1', 'server_2'});
     await pumpEventQueue();
     expect(shelfSyncs.map((sync) => sync.$1), ['profile-a']);
+  });
+
+  test('a Reel Save re-publishes the launcher shelf with the last rows, only after a first pass (V2-42)', () async {
+    ReelStore.picksChanged.value++;
+    await pumpEventQueue();
+    expect(shelfSyncs, isEmpty, reason: 'nothing published yet: no empty Continue Watching over the launcher');
+
+    aggregation.onDeckResult = () => [_item('a')];
+    aggregation.hubsResult = () => [_hub('hub')];
+    await provider.load();
+    await pumpEventQueue();
+    expect(shelfSyncs, hasLength(1));
+
+    ReelStore.picksChanged.value++;
+    await pumpEventQueue();
+    expect(shelfSyncs, hasLength(2));
+    expect(shelfSyncs.last.$1, 'profile-a');
+    expect(shelfSyncs.last.$2.map((item) => item.id), shelfSyncs.first.$2.map((item) => item.id));
+  });
+
+  test('a disposed provider ignores Reel Saves (V2-42)', () async {
+    final calls = <String>[];
+    final other = DiscoverProvider(
+      multiServer,
+      hiddenLibraries,
+      libraries,
+      profileId: 'profile-b',
+      isProfileBinding: () => isBinding,
+      syncSystemShelf: (owner, items) async => calls.add(owner),
+    );
+    aggregation.onDeckResult = () => [_item('a')];
+    aggregation.hubsResult = () => [_hub('hub')];
+    await other.load();
+    await pumpEventQueue();
+    expect(calls, ['profile-b']);
+    other.dispose();
+    ReelStore.picksChanged.value++;
+    await pumpEventQueue();
+    expect(calls, ['profile-b']);
   });
 
   test('null profile owner never publishes to the system shelf', () async {

@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.SurfaceView
@@ -52,12 +53,16 @@ import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.analytics.PlayerId
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.source.ClippingMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
+import androidx.media3.exoplayer.source.preload.PreloadException
+import androidx.media3.exoplayer.source.preload.PreloadManagerListener
 import androidx.media3.exoplayer.source.preload.TargetPreloadStatusControl
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -83,6 +88,7 @@ import com.edde746.plezy.shared.FrameRateManager
 import com.edde746.plezy.shared.PlayerSurfaceHost
 import com.edde746.plezy.shared.SurfacePlayerCore
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetProvider
@@ -122,6 +128,18 @@ class ExoPlayerCore(private val activity: Activity) :
     private const val MAX_PLAYBACK_SPEED = 8f
     private const val FPS_SAMPLE_COUNT = 8
     private const val AUDIO_BOUNCE_TIMEOUT_MS = 1000L
+
+    /** V2-10: clip URIs whose disk cache key the clip core remembers. */
+    private const val CLIP_CACHE_KEYS_KEPT = 32
+
+    /** V2-23: a clip open keeps the lead-in detector paused until its first frame + this. */
+    private const val LEAD_IN_RESUME_AFTER_FRAME_MS = 1_000L
+
+    /** V2-23: an open that never shows a frame lets the detector go on after this. */
+    private const val LEAD_IN_OPEN_PAUSE_MAX_MS = 8_000L
+
+    /** V2-23: the clip core buffering this long aborts a detection (`reason=buffering`). */
+    private const val LEAD_IN_BUFFERING_ABORT_MS = 2_000L
 
     /** Fallback for stacks that only stringify the status instead of raising
      *  [HttpDataSource.InvalidResponseCodeException]. */
@@ -229,7 +247,11 @@ class ExoPlayerCore(private val activity: Activity) :
   private var hadSelectedTextTrack: Boolean = false
   private var httpDataSourceFactory: HttpDataSource.Factory? = null
   private var dataSourceFactory: DefaultDataSource.Factory? = null
+  /** The selector the player uses. In clip mode it comes from [RecordingTrackSelectorFactory]. */
   private var trackSelector: DefaultTrackSelector? = null
+
+  /** Clip mode: the preload manager's own selector, kept in step with [trackSelector]. */
+  private var preloadTrackSelector: DefaultTrackSelector? = null
   private var tunnelingUserEnabled: Boolean = true
   private var tunnelingDisabledForAudioCodec: Boolean = false
 
@@ -316,6 +338,9 @@ class ExoPlayerCore(private val activity: Activity) :
   private var decoderInitName: String? = null
   private var audioDecoderInitName: String? = null
   private var lastAudioTrackConfig: AudioSink.AudioTrackConfig? = null
+
+  /** AudioTracks this core has initialised: unchanged between two clips means the track was reused. */
+  private var audioTrackInits = 0
   private val directAudioOutputBlockedAfterFailure = mutableSetOf<String>()
   private val loggedDirectAudioRecoveryBlocks = mutableSetOf<String>()
   private var audioRecoveryAttempts: Int = 0
@@ -399,8 +424,81 @@ class ExoPlayerCore(private val activity: Activity) :
   var clipMode = false
     private set
   private var preloadManager: DefaultPreloadManager? = null
+
+  /** This core's `[ReelCore]` serial number; 0 until a player is built. */
+  private var coreSerial = 0
+
+  /** MediaCodecs this core's renderers made (see [PlayerCoreCounts]); bumped on the playback thread. */
+  private val coreVideoCodecs = AtomicInteger()
+  private val coreAudioCodecs = AtomicInteger()
+
+  /** Clip mode: every clip in the preload manager, by URI: the ranked ones and the one playing. */
   private val preloadItems = LinkedHashMap<String, MediaItem>()
-  private var preloadRank = 0
+
+  /** Clip mode (V2-09): the clip each [ClipPreloadRank] holds, by URI. */
+  private val preloadSlots = java.util.EnumMap<ClipPreloadRank, String>(ClipPreloadRank::class.java)
+  private var preloadSerial = 0
+
+  /** When each preload (by mediaId) was handed to the manager, for its `[ReelPreload] ready` line. */
+  private val preloadAskedAt = HashMap<String, Long>()
+
+  /** Clip mode (V2-10): the ranking data each preload item was added with, by URI. */
+  private val preloadRankingData = HashMap<String, Int>()
+
+  /**
+   * Clip mode (V2-10): the disk cache, when it could open. Only the clip core reaches it; the
+   * main player's data sources never do.
+   */
+  private var clipCache: androidx.media3.datasource.cache.Cache? = null
+
+  /**
+   * Clip mode (V2-10): the disk cache key Dart sent for each clip URI (Plex clips only), the
+   * most recent [CLIP_CACHE_KEYS_KEPT]. A clip opened or preloaded without one streams as
+   * before.
+   */
+  private val clipCacheKeys = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > CLIP_CACHE_KEYS_KEPT
+  }
+
+  /** Clip mode (V2-10): bytes the clip playing has read from disk, for its `[ReelCache]` line. */
+  private val clipCacheBytesRead = AtomicLong()
+
+  /**
+   * Clip mode (V2-23): the lead-in policy Dart sent ([setLeadInPolicy]). [leadInMeasure] runs the
+   * detector; [leadInClip] also starts clips at their learned start. Both off until Dart says.
+   */
+  private var leadInMeasure = false
+  private var leadInClip = false
+
+  /** Clip mode (V2-23): each clip's known start in ms, by URI: Dart's (its `src:` row) or the detector's. */
+  private val clipStarts = lruMap<Long>()
+
+  /** Clip mode (V2-23): each clip's origin (`plexExtra` / `animeTheme`) and whether it may be measured. */
+  private val clipOrigins = lruMap<String>()
+  private val clipMeasure = lruMap<Boolean>()
+
+  /** Clip mode (V2-23): the start each preload item was built with, by URI. */
+  private val preloadItemStarts = HashMap<String, Long>()
+
+  /**
+   * Clip mode (V2-23, R6): the start the clip playing was opened with. Every reload of the same
+   * open (decoder or audio recovery, a DV reload) builds its item with this, never with a start
+   * learned or turned off since, so its saved position stays right.
+   */
+  private var openStartMs = 0L
+
+  /** Clip mode (V2-23): clips whose clipped source failed this session; never clipped again. */
+  private val clipStartRefused = HashSet<String>()
+
+  /** V2-23: this core is a main player, counted in [MainPlaybackGate]. */
+  private var countedInPlaybackGate = false
+
+  private val leadInResumeAfterOpen = Runnable { LeadInDetector.queue.resume("open") }
+  private val leadInBufferingAbort = Runnable { LeadInDetector.queue.cancelAll("buffering", this) }
+
+  private fun <V> lruMap(): LinkedHashMap<String, V> = object : LinkedHashMap<String, V>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, V>?): Boolean = size > CLIP_CACHE_KEYS_KEPT
+  }
   private var currentMediaUri: String? = null
   private var currentHeaders: Map<String, String>? = null
   private var currentMediaIsLive: Boolean = false
@@ -579,7 +677,10 @@ class ExoPlayerCore(private val activity: Activity) :
 
   @Volatile private var activeDoviMp4Wrapper: DoviExtractorWrapper? = null
 
-  private fun getConfiguredDvMode(): DvConversionMode {
+  // V2-18: a clip core never converts DV, whatever the display or the debug override says.
+  private fun getConfiguredDvMode(): DvConversionMode = ClipCorePolicy.dvMode(clipMode) { mainPlayerDvMode() }
+
+  private fun mainPlayerDvMode(): DvConversionMode {
     val override = debugDvModeOverride
     if (override != null) return override
 
@@ -587,6 +688,20 @@ class ExoPlayerCore(private val activity: Activity) :
     emitLog("info", "dv-auto", decision.logMessage())
     return decision.mode
   }
+
+  /** The parameters every selector this core builds starts from (main player and clip core alike). */
+  private fun configureTrackSelector(selector: DefaultTrackSelector) {
+    selector.setParameters(
+      selector.buildUponParameters()
+        // Recover passthrough when HDMI capabilities flap (Shield refresh-rate / AVR link drop):
+        // the sink temporarily falls back to PCM, and this flag lets the selector re-pick the
+        // encoded audio track when capabilities come back. See androidx/media#2258.
+        .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+    )
+  }
+
+  private fun identity(selector: Any?): String = selector?.let { "@" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
 
   fun initialize(
     tunnelingEnabled: Boolean = true,
@@ -693,23 +808,27 @@ class ExoPlayerCore(private val activity: Activity) :
 
       Log.d(TAG, "SurfaceView added to content view")
 
-      // Create track selector with text tracks enabled
-      trackSelector = DefaultTrackSelector(activity).apply {
-        setParameters(
-          buildUponParameters()
-            // Recover passthrough when HDMI capabilities flap (Shield refresh-rate / AVR link drop):
-            // the sink temporarily falls back to PCM, and this flag lets the selector re-pick the
-            // encoded audio track when capabilities come back. See androidx/media#2258.
-            .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-        )
+      // Create track selector with text tracks enabled. Clip mode builds its selectors inside
+      // the preload manager's factory instead (see below), with the same parameters.
+      if (!clipMode) {
+        trackSelector = DefaultTrackSelector(activity).apply(::configureTrackSelector)
       }
 
       // Create ExoPlayer with FFmpeg audio decoder fallback
       val audioAttributes = buildMovieAudioAttributes()
 
       // Use DefaultRenderersFactory with FFmpeg fallback for unsupported or blocked audio codecs.
+      coreVideoCodecs.set(0)
+      coreAudioCodecs.set(0)
       val renderersFactory = PlezyRenderersFactory(activity).apply {
+        onCodecCreated = { configuration ->
+          if (MimeTypes.isVideo(configuration.format.sampleMimeType)) {
+            coreVideoCodecs.incrementAndGet()
+          } else {
+            coreAudioCodecs.incrementAndGet()
+          }
+          PlayerCoreCounts.onCodecCreated()
+        }
         audioDiagnosticsLogger = { level, prefix, message -> emitLog(level, prefix, message) }
         videoDiagnosticsLogger = { level, prefix, message -> emitLog(level, prefix, message) }
         shouldBlockDirectAudioOutput = { format -> this@ExoPlayerCore.shouldBlockDirectAudioOutput(format, "sink support") }
@@ -796,7 +915,13 @@ class ExoPlayerCore(private val activity: Activity) :
         }.toTypedArray()
       }
 
-      val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory!!, wrappedExtractorsFactory)
+      // V2-10: the clip core reads and writes Plex clips through the process-wide disk cache;
+      // AnimeThemes clips (no key) and the main player stream as before.
+      val cache = if (clipMode) ClipDiskCache.obtain(activity) else null
+      clipCache = cache
+      val clipCacheFactory = cache?.let { ClipCacheDataSourceFactory(it, dataSourceFactory!!, clipCacheEvents) }
+      val playbackDataSourceFactory = clipCacheFactory ?: dataSourceFactory!!
+      val mediaSourceFactory = DefaultMediaSourceFactory(playbackDataSourceFactory, wrappedExtractorsFactory)
         .setSubtitleParserFactory(subtitleParserFactory)
       playbackMediaSourceFactory = mediaSourceFactory
 
@@ -829,6 +954,8 @@ class ExoPlayerCore(private val activity: Activity) :
       val loadControl = if (clipMode) {
         DefaultLoadControl.Builder()
           .setTargetBufferBytes(LoadControlPolicy.CLIP_TARGET_BYTES)
+          // V2-09: every preload together, or media3's own preload entry (137.5 MiB) applies.
+          .setPlayerTargetBufferBytes(PlayerId.PRELOAD.name, LoadControlPolicy.CLIP_PRELOAD_TARGET_BYTES)
           .setPrioritizeTimeOverSizeThresholds(false)
           .setBufferDurationsMs(
             bufferDurations.minBufferMs,
@@ -862,7 +989,6 @@ class ExoPlayerCore(private val activity: Activity) :
       )
 
       val playerBuilder = ExoPlayer.Builder(activity)
-        .setTrackSelector(trackSelector!!)
         .setLoadControl(loadControl)
         .setAudioAttributes(audioAttributes, false) // We handle audio focus manually
         .setMediaSourceFactory(mediaSourceFactory)
@@ -873,22 +999,59 @@ class ExoPlayerCore(private val activity: Activity) :
       exoPlayer = if (clipMode) {
         // The preload manager and the player share the playback thread, load control,
         // renderers and bandwidth meter, so a preloaded source plays without re-preparing.
-        // Every item it holds is the next card: keep its first seconds in memory.
-        val statusControl = TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> {
-          DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(LoadControlPolicy.CLIP_PRELOAD_MS)
+        // Each item is added with its rank's ranking data (V2-09): the next card keeps 3 s, the
+        // card behind 1 s and a neighbouring deck's head 2 s, in memory.
+        val statusControl = TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> { rankingData ->
+          ClipPreloadRank.status(rankingData)
         }
+        // buildExoPlayer replaces the ExoPlayer.Builder's track selector with one from the
+        // preload manager's factory, and build() makes a second one for preloading (media3
+        // 1.11.0). Supply the factory, so both carry our parameters and we hold the player's.
+        val selectorFactory = RecordingTrackSelectorFactory(::configureTrackSelector)
         val builder = DefaultPreloadManager.Builder(activity, statusControl)
           .setLoadControl(loadControl)
           .setRenderersFactory(wrappedRenderersFactory)
           .setMediaSourceFactory(mediaSourceFactory)
-        builder.buildExoPlayer(playerBuilder).also {
-          preloadManager = builder.build()
-          it.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
+          .setTrackSelectorFactory(selectorFactory)
+        // V2-10. The Builder's cache never reaches our own media source factory (media3 1.11.0,
+        // javap: setMediaSourceFactory installs a supplier whose setCache is a no-op), so
+        // playback reads the cache through playbackDataSourceFactory above. Here it only turns on
+        // the manager's pre-cache stage (specifiedRangeCached), which writes with this data
+        // source factory (without it, a plain DefaultDataSource with none of our settings). It
+        // is the cache path's own upstream, so no redirect target lands in the cache's index.
+        if (clipCacheFactory != null) {
+          builder.setCache(clipCacheFactory.cache).setDataSourceFactory(clipCacheFactory.cacheUpstream)
+        }
+        // V2-18: a clip never asks the display for a new refresh rate.
+        playerBuilder.setVideoChangeFrameRateStrategy(ClipCorePolicy.VIDEO_CHANGE_FRAME_RATE_STRATEGY)
+        builder.buildExoPlayer(playerBuilder).also { player ->
+          trackSelector = selectorFactory.created.lastOrNull()
+          preloadManager = builder.build().also { manager ->
+            manager.setCurrentPlayingIndex(ClipPreloadRank.PLAYING_INDEX)
+            manager.addListener(preloadListener)
+          }
+          preloadTrackSelector = selectorFactory.created.lastOrNull()?.takeIf { it !== trackSelector }
+          player.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
           emitLog("info", "init", "Clip mode: preload manager on, buffer ${bufferDurations.minBufferMs}-${bufferDurations.maxBufferMs}ms")
+          emitLog(
+            "info",
+            "ReelCache",
+            // No `cacheSpace` here: on the main thread it would wait for the cache's first load.
+            if (cache != null) "disk cache on" else "disk cache off"
+          )
+          emitLog(
+            "info",
+            "ReelClip",
+            "selector player=${identity(trackSelector)} preload=${identity(preloadTrackSelector)} " +
+              "attached=${player.trackSelector === trackSelector} dv=${dvMode.name} " +
+              "frameRate=${ClipCorePolicy.frameRateStrategyName(player.videoChangeFrameRateStrategy)}"
+          )
         }
       } else {
-        playerBuilder.build()
+        playerBuilder.setTrackSelector(trackSelector!!).build()
       }
+      coreSerial = PlayerCoreCounts.onCreated()
+      emitLog("info", "ReelCore", "create core#$coreSerial clip=$clipMode ${PlayerCoreCounts.summary()}")
 
       // Add ASS overlay view to the full-screen surfaceContainer (NOT the zoom-scaled
       // videoAspectContainer): the libass frame = screen, and mpv-style ass_set_margins
@@ -1030,6 +1193,12 @@ class ExoPlayerCore(private val activity: Activity) :
 
       // Start position update loop
       startPositionUpdates()
+
+      // V2-23: a main player stops the Reel's lead-in detector for as long as it lives.
+      if (!clipMode && !countedInPlaybackGate) {
+        countedInPlaybackGate = true
+        MainPlaybackGate.up()
+      }
 
       isInitialized = true
       Log.d(TAG, "Initialized successfully")
@@ -1217,6 +1386,7 @@ class ExoPlayerCore(private val activity: Activity) :
     emitLog("debug", "state", stateStr)
     emitCurrentSeekable()
 
+    if (clipMode) syncLeadInBuffering(state == Player.STATE_BUFFERING)
     when (state) {
       Player.STATE_BUFFERING -> {
         delegate?.onPropertyChange("paused-for-cache", true)
@@ -1344,6 +1514,9 @@ class ExoPlayerCore(private val activity: Activity) :
       }
     }
     emitLog("error", "player", "Error code=${error.errorCode}: ${error.message}, cause=${causeChain.ifEmpty { "none" }}")
+    // V2-23: a clipped open that can't be clipped plays from 0 instead (no re-resolve, no evict).
+    if (clipMode && openStartMs > 0L) illegalClipping(error)?.let { if (reopenUnclipped(it)) return }
+    if (clipMode) evictClipCacheOnError(error)
     stopFrameWatchdog()
     cancelDecoderHangCheck()
     cancelResumeStallWatchdog()
@@ -1759,6 +1932,10 @@ class ExoPlayerCore(private val activity: Activity) :
    */
   private fun retryWithDvConversion(reason: String): Boolean {
     if (dv7RetryAttempted) return false
+    if (clipMode) {
+      emitLog("debug", "dv-fallback", "Skipping DV conversion retry for $reason: clip core never converts DV")
+      return false
+    }
     if (debugDvModeOverride == DvConversionMode.DISABLED) {
       emitLog("debug", "dv-fallback", "Skipping DV conversion retry for $reason: native/disabled mode is forced")
       return false
@@ -2736,7 +2913,13 @@ class ExoPlayerCore(private val activity: Activity) :
     val shouldTunnel = calculateTunnelingEnabled() ?: return
     selectorChanged = updateCurrentTunnelingState(reason, shouldTunnel) || selectorChanged
     builder.setTunnelingEnabled(shouldTunnel)
-    if (selectorChanged) selector.parameters = builder.build()
+    if (selectorChanged) {
+      val parameters = builder.build()
+      selector.parameters = parameters
+      // Clip mode: the next card is preloaded with the preload manager's own selector. Keep it
+      // on the same parameters, so the preloaded tracks are the ones the player will select.
+      preloadTrackSelector?.parameters = ClipCorePolicy.preloadParameters(parameters)
+    }
   }
 
   private fun calculateTunnelingEnabled(): Boolean? {
@@ -2803,6 +2986,10 @@ class ExoPlayerCore(private val activity: Activity) :
     val mediaItemBuilder = MediaItem.Builder()
       .setMediaId(currentMediaGeneration.toString())
       .setUri(uri)
+    // V2-10: a Plex clip's disk cache key (never the URI, which carries the token).
+    if (clipMode) clipCacheKeyFor(uri)?.let(mediaItemBuilder::setCustomCacheKey)
+    // V2-23 (R6): the clip playing starts where its open said, on every reload of that open.
+    if (clipMode && uri == currentMediaUri) applyClipStart(mediaItemBuilder, openStartMs)
 
     // Every Live TV backend negotiates HLS before opening the native player.
     // Pin the MIME type so tokenized manifests never fall back to progressive
@@ -2838,8 +3025,27 @@ class ExoPlayerCore(private val activity: Activity) :
   private fun setCurrentMediaSource(player: ExoPlayer, uri: String, positionMs: Long) {
     if (clipMode) {
       val item = preloadItems[uri]
-      val preloaded = item?.let { preloadManager?.getMediaSource(it) }
-      emitLog("info", "clip", "Open clip: preloaded=${preloaded != null}")
+      var preloaded = item?.let { preloadManager?.getMediaSource(it) }
+      // V2-23: a preload built with another start is never used; media3 would rebuild its period
+      // anyway (the preload's key holds its start position).
+      val itemStart = preloadItemStarts[uri] ?: 0L
+      if (preloaded != null && itemStart != openStartMs) {
+        emitLog("info", "ReelLeadIn", "stale-start id=${ClipCachePolicy.logId(clipCacheKeyFor(uri))} preloaded=$itemStart wanted=$openStartMs")
+        preloaded = null
+      }
+      // The clip leaves its rank as it starts playing: the rank is free for the next ask, and
+      // the item stays in the manager (it is the player's source now) until the next prune.
+      val rank = preloadSlots.entries.firstOrNull { it.value == uri }?.key
+      if (rank != null) preloadSlots.remove(rank)
+      emitLog(
+        "info",
+        "clip",
+        "Open clip: preloaded=${preloaded != null} rank=${rank?.wire ?: "none"} held=${preloadSummary()}"
+      )
+      if (openStartMs > 0L) {
+        emitLog("info", "ReelLeadIn", "apply id=${ClipCachePolicy.logId(clipCacheKeyFor(uri))} start=$openStartMs via=clip rank=${rank?.wire ?: "none"}")
+      }
+      logClipCacheOpen(uri)
       if (item != null && preloaded != null) {
         // The preloaded item was built before this open, so its mediaId is "clip:N", not the
         // generation; map it, or every generation-gated event (first frame, decoder checks) for
@@ -3027,6 +3233,7 @@ class ExoPlayerCore(private val activity: Activity) :
       audioTrackConfig: AudioSink.AudioTrackConfig
     ) {
       lastAudioTrackConfig = audioTrackConfig
+      audioTrackInits++
       val audioFormat = selectedAudioFormat()
       persistRuntimePlaybackDiagnostics(audioFormat, audioDecoderInitName ?: "direct")
       emitLog(
@@ -3035,6 +3242,16 @@ class ExoPlayerCore(private val activity: Activity) :
         "AudioTrack initialized: input=${audioFormat?.let { formatAudioSummary(it) } ?: "unknown"}, " +
           "decoder=${audioDecoderInitName ?: "direct/bypass"}, ${describeAudioTrackConfig(audioTrackConfig)}"
       )
+      if (clipMode) {
+        // V2-18: the soundbar re-locks only when the AudioTrack changes; one line per change.
+        emitLog(
+          "info",
+          "ReelClip",
+          "audio gen=${mediaGenerationAt(eventTime) ?: -1} init#$audioTrackInits " +
+            "input=${audioFormat?.let { "ch=${it.channelCount} ${it.sampleRate}Hz" } ?: "unknown"} " +
+            "output=[${describeAudioTrackConfig(audioTrackConfig)}]"
+        )
+      }
       // A passthrough-type codec (AC3/EAC3/DTS/TrueHD…) force-decoded to PCM must not
       // stay on a tunneled AudioTrack: some Amlogic/AOSP boxes deliver the PCM frames
       // but render silence (#1458). Generalizes the original TrueHD-only guard to every
@@ -3091,6 +3308,13 @@ class ExoPlayerCore(private val activity: Activity) :
         emitLog("debug", "decoder-hang", "First frame rendered — decoder OK")
         logNativeDvFirstFrameIfNeeded()
         logDolbyVisionPlaybackPathIfNeeded()
+        if (clipMode) {
+          logClipFirstFrame(mediaGeneration)
+          logClipCacheFirstFrame()
+          // V2-23 (R11): the detector goes on 1 s after the clip's first frame.
+          handler.removeCallbacks(leadInResumeAfterOpen)
+          handler.postDelayed(leadInResumeAfterOpen, LEAD_IN_RESUME_AFTER_FRAME_MS)
+        }
       }
       // STATE_READY fires when the player has enough buffered to start, but
       // the first frame may not be on screen yet (decoder init + keyframe
@@ -3518,6 +3742,15 @@ class ExoPlayerCore(private val activity: Activity) :
     currentHeaders = headers
     currentMediaIsLive = isLive
     resetPlaybackProgress(startPositionMs)
+    if (clipMode) {
+      // V2-23: the clip playing is never read by the detector (no cache-lock fight), its start is
+      // pinned for this open (R6), and the detector stays out of the way until its first frame.
+      LeadInDetector.queue.cancel(uri, "opened")
+      openStartMs = clipStartFor(uri)
+      LeadInDetector.queue.pause("open")
+      handler.removeCallbacks(leadInResumeAfterOpen)
+      handler.postDelayed(leadInResumeAfterOpen, LEAD_IN_OPEN_PAUSE_MAX_MS)
+    }
 
     // Apply auth/custom headers to the HTTP DataSource for this session
     httpDataSourceFactory?.setDefaultRequestProperties(
@@ -3872,8 +4105,16 @@ class ExoPlayerCore(private val activity: Activity) :
     setVisible(false)
   }
 
-  fun seekTo(positionMs: Long) {
+  fun seekTo(positionMs: Long, exact: Boolean = false) {
     val player = exoPlayer ?: return
+    if (exact && clipMode) {
+      // V2-23: a clip opened before its start was learned lands exactly on it (Replay, the loop,
+      // a late answer); the clip core's own seeks stay on the previous keyframe.
+      player.setSeekParameters(SeekParameters.EXACT)
+      seekTo(positionMs)
+      player.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
+      return
+    }
     val durationMs = player.duration
     val clampedPositionMs = if (!currentMediaIsLive && durationMs != C.TIME_UNSET && durationMs > 0L) {
       positionMs.coerceIn(0L, durationMs)
@@ -4195,6 +4436,12 @@ class ExoPlayerCore(private val activity: Activity) :
     matchResolution: Boolean,
     onComplete: (switched: Boolean) -> Unit
   ) {
+    if (clipMode) {
+      // V2-18: a clip never switches the display mode, even if a caller asks.
+      emitLog("info", "ReelClip", "setVideoFrameRate($fps) refused: clip core keeps the display mode")
+      onComplete(false)
+      return
+    }
     val mgr = frameRateManager
     if (mgr == null) {
       onComplete(false)
@@ -4396,36 +4643,477 @@ class ExoPlayerCore(private val activity: Activity) :
 
   // Cleanup
 
-  /**
-   * Clip mode: buffer the first seconds of [uri] for the next card, dropping any older
-   * preload (only the next card is ever held). No-op outside clip mode.
-   */
   /** Clip mode: the generation each preloaded item was opened under (its mediaId is "clip:N"). */
   private val clipGenerations = HashMap<String, Int>()
 
-  fun preloadClip(uri: String) {
+  /**
+   * Clip mode (V2-09): buffer the first seconds of [uri] as [rank] (the next card, the card behind
+   * or a neighbouring deck's head), in place of whatever that rank held. At most one clip per
+   * rank, so at most four. A clip already held at another rank moves to this one with what it
+   * has buffered (it keeps its first rank's range); the clip playing is never preloaded.
+   * [origin] (`plexExtra` / `animeTheme`) is for the log line only. No-op outside clip mode.
+   *
+   * V2-10: [cacheKey] is a Plex clip's disk cache key. With it (and the cache on), the card two
+   * ahead ([ClipPreloadRank.AHEAD]) and a deck head are written to disk instead of memory
+   * ([ClipPreloadRank.usesDisk]). [ClipPreloadRank.AHEAD] holds nothing without one, and a Plex
+   * deck head is held only while its bytes are still on disk (plan D15: no Plex read for a
+   * head). A clip that moves between a disk rank and a memory rank gets a fresh source with the
+   * new stage; its bytes are on disk by then.
+   */
+  internal fun preloadClip(
+    uri: String,
+    rank: ClipPreloadRank = ClipPreloadRank.NEXT,
+    origin: String? = null,
+    cacheKey: String? = null,
+    startMs: Long? = null,
+    measure: Boolean? = null
+  ) {
     val manager = preloadManager ?: return
-    if (!clipMode || preloadItems.containsKey(uri)) return
-    clearPreloads(keep = currentMediaUri)
-    // No headers: clips carry no request headers at all (they are shared across every source
-    // on this core, and an AnimeThemes request must never see a Plex header).
-    val item = MediaItem.Builder().setUri(uri).setMediaId("clip:${++preloadRank}").build()
-    preloadItems[uri] = item
-    manager.add(item, preloadRank)
-    manager.setCurrentPlayingIndex(preloadRank - 1)
-    manager.invalidate()
+    if (!clipMode) return
+    if (cacheKey != null) rememberClipCacheKey(uri, cacheKey)
+    rememberClipLeadIn(uri, startMs, measure, origin)
+    try {
+      holdPreload(manager, uri, rank, origin)
+    } finally {
+      cancelLeadInsOutsideWindow()
+    }
   }
 
-  /** Clip mode: release every preloaded source except [keep]'s. */
-  fun clearPreloads(keep: String? = null) {
+  private fun holdPreload(manager: DefaultPreloadManager, uri: String, rank: ClipPreloadRank, origin: String?) {
+    if (uri == currentMediaUri) {
+      emitLog("info", "ReelPreload", "skip rank=${rank.wire}: it is the clip playing")
+      return
+    }
+    val key = clipCacheKeyFor(uri)
+    val cacheable = clipCache != null && key != null
+    if (rank.cachedOnly && !cacheable) {
+      emitLog("info", "ReelPreload", "skip rank=${rank.wire}: ${if (clipCache == null) "no disk cache" else "not a Plex clip"}")
+      clearPreloads(rank)
+      return
+    }
+    if (cacheable && (rank == ClipPreloadRank.DECK_NEXT || rank == ClipPreloadRank.DECK_PREVIOUS) && ClipDiskCache.onDisk(listOf(key!!)).isEmpty()) {
+      emitLog("info", "ReelPreload", "skip rank=${rank.wire}: Plex head no longer on disk key=${ClipCachePolicy.logId(key)}")
+      clearPreloads(rank)
+      return
+    }
+    val rankingData = rank.rankingData(rank.usesDisk(cacheable))
+    // V2-10: a move between disk and memory needs a source asked for the other stage.
+    val heldRankingData = preloadRankingData[uri]
+    val start = clipStartFor(uri)
+    // V2-23: so does a clip whose start changed (learned, or the setting flipped); an equal start
+    // never restages (R7).
+    val startChanged = preloadItems.containsKey(uri) && (preloadItemStarts[uri] ?: 0L) != start
+    val restaged = (
+      preloadItems.containsKey(uri) && heldRankingData != null &&
+        ClipPreloadRank.isCachedRankingData(heldRankingData) != ClipPreloadRank.isCachedRankingData(rankingData)
+      ) ||
+      startChanged
+    if (preloadSlots[rank] == uri && !restaged) return
+    if (startChanged) emitLog("info", "ReelLeadIn", "restage id=${ClipCachePolicy.logId(key)} start=$start")
+    val heldAt = preloadSlots.entries.firstOrNull { it.value == uri }?.key
+    // Drop the rank's old clip, and any source of this clip no rank holds (the one the player
+    // played before: a clip played, then preloaded again as the card behind, starts afresh).
+    preloadSlots.remove(rank)
+    prunePreloads()
+    if (heldAt != null) preloadSlots.remove(heldAt)
+    if (restaged) dropPreloadItem(uri)
+    preloadSlots[rank] = uri
+    val item = preloadItems[uri] ?: MediaItem.Builder()
+      // No headers: clips carry no request headers at all (they are shared across every source
+      // on this core, and an AnimeThemes request must never see a Plex header).
+      .setUri(uri)
+      .setMediaId("clip:${++preloadSerial}")
+      .apply { key?.let(::setCustomCacheKey) }
+      .also { applyClipStart(it, start) }
+      .build()
+      .also {
+        preloadItems[uri] = it
+        preloadItemStarts[uri] = start
+        preloadRankingData[uri] = rankingData
+        preloadAskedAt[it.mediaId] = SystemClock.elapsedRealtime()
+        manager.add(it, rankingData)
+      }
+    manager.invalidate()
+    val stage = if (ClipPreloadRank.isCachedRankingData(preloadRankingData[uri] ?: rankingData)) "disk" else "memory"
+    emitLog(
+      "info",
+      "ReelPreload",
+      "hold rank=${rank.wire} ${item.mediaId}${if (heldAt != null) " (moved from ${heldAt.wire})" else ""} " +
+        "origin=${origin ?: "?"} stage=$stage key=${ClipCachePolicy.logId(key)} start=${preloadItemStarts[uri] ?: 0} held=${preloadSummary()}"
+    )
+  }
+
+  // --- V2-23: lead-in skip ------------------------------------------------
+
+  /**
+   * V2-23: what Dart knows about [uri]: its start ([startMs] null means unknown, never "play from
+   * 0", R7), whether it may be measured, and its origin.
+   */
+  internal fun rememberClipLeadIn(uri: String, startMs: Long?, measure: Boolean?, origin: String?) {
+    if (!clipMode) return
+    origin?.let { clipOrigins[uri] = it }
+    measure?.let { clipMeasure[uri] = it }
+    if (startMs != null && startMs >= 0L && uri !in clipStartRefused) clipStarts[uri] = startMs
+  }
+
+  /**
+   * V2-23: where [uri] starts: its known start when the policy clips and it is a Plex clip with a
+   * disk cache key (never AnimeThemes, never YouTube); else 0.
+   */
+  private fun clipStartFor(uri: String): Long {
+    if (!clipMode || !leadInClip || uri in clipStartRefused) return 0L
+    if (clipOrigins[uri] != null && clipOrigins[uri] != "plexExtra") return 0L
+    if (clipCacheKeyFor(uri) == null) return 0L
+    val start = clipStarts[uri] ?: return 0L
+    return if (start in LeadInPolicy.MIN_CUT_MS..LeadInPolicy.MAX_CUT_MS) start else 0L
+  }
+
+  private fun applyClipStart(builder: MediaItem.Builder, startMs: Long) {
+    if (startMs <= 0L) return
+    builder.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs).build())
+  }
+
+  /**
+   * V2-23: the lead-in policy. [enabled] is "Skip trailer intros"; [measureOnly] (developer) runs
+   * the detector and logs it but never clips. Held preloads follow at once (restaged when their
+   * start changes); the clip playing keeps its start until its next open.
+   */
+  internal fun setLeadInPolicy(enabled: Boolean, measureOnly: Boolean) {
+    if (!clipMode) return
+    val measure = enabled || measureOnly
+    val clip = enabled && !measureOnly
+    if (measure == leadInMeasure && clip == leadInClip) return
+    leadInMeasure = measure
+    leadInClip = clip
+    emitLog("info", "ReelLeadIn", "policy measure=$measure clip=$clip")
+    if (!measure) LeadInDetector.queue.cancelAll("setting", this)
     val manager = preloadManager ?: return
-    val drop = preloadItems.keys.filter { it != keep }
-    for (u in drop) {
+    for ((rank, uri) in preloadSlots.entries.toList()) holdPreload(manager, uri, rank, clipOrigins[uri])
+  }
+
+  /** V2-23: a detection runs only for the next card and the card two ahead (D15). */
+  private fun cancelLeadInsOutsideWindow() {
+    val keep = setOfNotNull(preloadSlots[ClipPreloadRank.NEXT], preloadSlots[ClipPreloadRank.AHEAD])
+    LeadInDetector.queue.cancelExcept(this, keep, "leftWindow")
+  }
+
+  /**
+   * V2-23: a preload of [mediaItem] landed. The card two ahead (its pre-cache closed, so no cache
+   * lock is held, R1) or the next card asks for a detection when its start is unknown.
+   */
+  private fun maybeDetectLeadIn(mediaItem: MediaItem, rank: ClipPreloadRank?) {
+    if (rank != ClipPreloadRank.NEXT && rank != ClipPreloadRank.AHEAD) return
+    if (!leadInMeasure) return
+    val uri = preloadItems.entries.firstOrNull { it.value == mediaItem }?.key ?: return
+    if (clipOrigins[uri] != "plexExtra" || clipMeasure[uri] != true) return
+    if (clipStarts.containsKey(uri) || uri in clipStartRefused) return
+    val key = clipCacheKeyFor(uri) ?: return
+    val cache = clipCache ?: return
+    val upstream = dataSourceFactory ?: return
+    if (LeadInDetector.queue.answered(key) || LeadInDetector.queue.busyWith(uri)) return
+    LeadInDetector.queue.request(
+      LeadInJob(
+        uri = uri,
+        key = key,
+        rank = rank,
+        owner = this,
+        log = { line -> emitLog("info", "ReelLeadIn", line) },
+        source = { control -> leadInSource(uri, key, cache, upstream, control) },
+        onResult = ::onLeadInOutcome
+      )
+    )
+  }
+
+  /** The detector's reader for [uri]: the clip cache path with [key] on every request. */
+  private fun leadInSource(
+    uri: String,
+    key: String,
+    cache: androidx.media3.datasource.cache.Cache,
+    upstream: androidx.media3.datasource.DataSource.Factory,
+    control: LeadInControl
+  ): FrameSource {
+    val events = object : androidx.media3.datasource.cache.CacheDataSource.EventListener {
+      override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+        control.bytesFromCache.addAndGet(cachedBytesRead)
+      }
+
+      override fun onCacheIgnored(reason: Int) = Unit
+    }
+    val keyed = KeyedDataSourceFactory(ClipCacheDataSourceFactory(cache, upstream, events), key, { control.cancelled }, control.bytesRead)
+    return MediaFrameSource(Uri.parse(uri), keyed, LeadInDetector.codecs, control) { keyed.position.get() }
+  }
+
+  /**
+   * V2-23: a detection ended (main thread). A definite answer is kept for the session, restages
+   * the clip's held preload, makes one exact seek when it is the clip playing and still before
+   * its cut (§3.5), and goes to Dart (`reel-lead-in`, keyed by the token-free cache key, R12).
+   */
+  internal fun onLeadInOutcome(outcome: LeadInOutcome) {
+    if (disposing || preloadManager == null || outcome.job.owner !== this || !outcome.definite) return
+    val job = outcome.job
+    val uri = job.uri
+    val start = outcome.startMs
+    ClipDiskCache.rememberLeadBytes(job.key, outcome.leadBytes)
+    // Whether the answer is for the clip playing, opened unclipped: only then do Dart's Replay, loop
+    // and RW land on the start. An open that came in before this answer is already clipped (it read
+    // clipStarts), and a seek to the start there would skip that much real picture.
+    val playingUnclipped = uri == currentMediaUri && openStartMs == 0L
+    if (leadInClip && uri !in clipStartRefused) {
+      clipStarts[uri] = start
+      val rank = preloadSlots.entries.firstOrNull { it.value == uri }?.key
+      val manager = preloadManager
+      if (rank != null && manager != null) {
+        holdPreload(manager, uri, rank, clipOrigins[uri])
+        cancelLeadInsOutsideWindow()
+      }
+      if (uri == currentMediaUri && openStartMs == 0L && start > 0L) {
+        val position = exoPlayer?.currentPosition ?: 0L
+        if (!hasRenderedVideoFrameForMedia || position < start - 1_000L) {
+          emitLog("info", "ReelLeadIn", "apply id=${job.logId} start=$start via=seek rank=none")
+          seekTo(start, exact = true)
+        }
+      }
+    }
+    emitLeadIn(job.key, start, outcome.decision?.kind ?: "none", outcome.skipReason ?: outcome.decision?.reason ?: "ok", playingUnclipped)
+  }
+
+  private fun emitLeadIn(key: String, startMs: Long, kind: String, reason: String, playingUnclipped: Boolean = false) {
+    delegate?.onEvent(
+      "reel-lead-in",
+      mapOf(
+        "cacheKey" to key,
+        "startMs" to startMs,
+        "kind" to kind,
+        "ver" to LeadInPolicy.VERSION,
+        "reason" to reason,
+        "playingUnclipped" to playingUnclipped
+      )
+    )
+  }
+
+  /** V2-23: the clip core buffering pauses the detector; 2 s of it aborts the detection. */
+  private fun syncLeadInBuffering(buffering: Boolean) {
+    handler.removeCallbacks(leadInBufferingAbort)
+    if (buffering) {
+      LeadInDetector.queue.pause("buffering")
+      handler.postDelayed(leadInBufferingAbort, LEAD_IN_BUFFERING_ABORT_MS)
+    } else {
+      LeadInDetector.queue.resume("buffering")
+    }
+  }
+
+  /** The clipping failure in [error]'s cause chain, if any. */
+  private fun illegalClipping(error: Throwable): ClippingMediaSource.IllegalClippingException? {
+    var t: Throwable? = error
+    while (t != null) {
+      if (t is ClippingMediaSource.IllegalClippingException) return t
+      t = t.cause
+    }
+    return null
+  }
+
+  /**
+   * V2-23: the clip playing couldn't be clipped: it plays from 0, its start is dropped for the
+   * session, and Dart keeps `li:0` (`lr:clip`). Never through `clipFailed`, which would forget
+   * the row, read Plex again and evict good bytes.
+   */
+  private fun reopenUnclipped(e: ClippingMediaSource.IllegalClippingException): Boolean {
+    val uri = currentMediaUri ?: return false
+    val player = exoPlayer ?: return false
+    val key = clipCacheKeyFor(uri)
+    emitLog("warn", "ReelLeadIn", "apply failed id=${ClipCachePolicy.logId(key)} reason=${e.reason}")
+    clipStartRefused += uri
+    clipStarts.remove(uri)
+    openStartMs = 0L
+    setCurrentMediaSource(player, uri, 0L)
+    player.prepare()
+    player.playWhenReady = true
+    if (preloadItemStarts[uri]?.let { it > 0L } == true) dropPreloadItem(uri)
+    key?.let { emitLeadIn(it, 0L, "none", "clip") }
+    return true
+  }
+
+  /** V2-23: a clipped preload that can't be clipped is held again from 0. */
+  private fun onPreloadClippingFailed(mediaItem: MediaItem, e: ClippingMediaSource.IllegalClippingException) {
+    val uri = preloadItems.entries.firstOrNull { it.value == mediaItem }?.key ?: return
+    if ((preloadItemStarts[uri] ?: 0L) <= 0L) return
+    val key = clipCacheKeyFor(uri)
+    emitLog("warn", "ReelLeadIn", "apply failed id=${ClipCachePolicy.logId(key)} reason=${e.reason} rank=preload")
+    clipStartRefused += uri
+    clipStarts.remove(uri)
+    val rank = preloadSlots.entries.firstOrNull { it.value == uri }?.key
+    val manager = preloadManager
+    if (rank != null && manager != null) holdPreload(manager, uri, rank, clipOrigins[uri])
+    key?.let { emitLeadIn(it, 0L, "none", "clip") }
+  }
+
+  /** V2-10: remembers [cacheKey] as [uri]'s disk cache key, if it is a usable one. */
+  internal fun rememberClipCacheKey(uri: String, cacheKey: String) {
+    if (!ClipCachePolicy.isCacheable(cacheKey)) {
+      emitLog("warn", "ReelCache", "ignored a cache key that is not a Plex clip key")
+      return
+    }
+    clipCacheKeys[uri] = cacheKey
+  }
+
+  /** V2-10: [uri]'s disk cache key, when the cache is on and Dart sent one. */
+  private fun clipCacheKeyFor(uri: String): String? = if (clipCache == null) null else clipCacheKeys[uri]
+
+  /** `[ReelCache] open`: how much of the clip about to play is already on disk. */
+  private fun logClipCacheOpen(uri: String) {
+    clipCacheBytesRead.set(0)
+    val key = clipCacheKeyFor(uri)
+    if (key == null) {
+      emitLog("info", "ReelCache", "open key=none (${if (clipCache == null) "cache off" else "not cached"})")
+      return
+    }
+    val onDisk = ClipDiskCache.onDisk(listOf(key)).isNotEmpty()
+    emitLog("info", "ReelCache", "open key=${ClipCachePolicy.logId(key)} onDisk=$onDisk")
+  }
+
+  /** `[ReelCache] first frame`: bytes read from disk since the open (all clips on this core). */
+  private fun logClipCacheFirstFrame() {
+    val key = currentMediaUri?.let(::clipCacheKeyFor) ?: return
+    emitLog("info", "ReelCache", "first frame key=${ClipCachePolicy.logId(key)} diskRead=${clipCacheBytesRead.get() / 1024}KB")
+  }
+
+  /**
+   * V2-10: a clip that fails to load or parse may have failed on its cached bytes (a file
+   * replaced on the server, a stale redirect, a short write); drop them, so Dart's one
+   * re-resolve (V2-56) reads it afresh. A failed or timed-out connection keeps them (V2-15,
+   * [ClipCachePolicy.evictsAfter]).
+   */
+  private fun evictClipCacheOnError(error: PlaybackException) {
+    val key = currentMediaUri?.let(::clipCacheKeyFor) ?: return
+    if (!ClipCachePolicy.evictsAfter(error.errorCode)) {
+      if (ClipCachePolicy.isIoOrParsing(error.errorCode)) {
+        emitLog("info", "ReelCache", "keep key=${ClipCachePolicy.logId(key)} after network error ${error.errorCode}")
+      }
+      return
+    }
+    ClipDiskCache.evict(key)
+    emitLog("info", "ReelCache", "evict key=${ClipCachePolicy.logId(key)} after error ${error.errorCode}")
+  }
+
+  /** V2-10: counts the bytes the clip core reads from disk. Called on loading threads. */
+  private val clipCacheEvents = object : androidx.media3.datasource.cache.CacheDataSource.EventListener {
+    override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+      clipCacheBytesRead.addAndGet(cachedBytesRead)
+    }
+
+    override fun onCacheIgnored(reason: Int) {
+      Log.d(TAG, "[ReelCache] cache ignored reason=$reason")
+    }
+  }
+
+  private fun dropPreloadItem(uri: String) {
+    val manager = preloadManager ?: return
+    preloadItems.remove(uri)?.let {
+      manager.remove(it)
+      clipGenerations.remove(it.mediaId)
+      preloadAskedAt.remove(it.mediaId)
+    }
+    preloadRankingData.remove(uri)
+    preloadItemStarts.remove(uri)
+  }
+
+  /**
+   * Clip mode: drop [rank]'s preload, or every rank's when null. The clip playing stays in the
+   * manager: it is the player's source.
+   */
+  internal fun clearPreloads(rank: ClipPreloadRank? = null) {
+    if (preloadManager == null) return
+    val had = preloadSlots.size
+    if (rank == null) preloadSlots.clear() else preloadSlots.remove(rank)
+    prunePreloads()
+    if (had != preloadSlots.size) {
+      emitLog("info", "ReelPreload", "clear rank=${rank?.wire ?: "all"} held=${preloadSummary()}")
+    }
+    cancelLeadInsOutsideWindow()
+  }
+
+  /** Releases every source in the manager that no rank holds and isn't the clip playing. */
+  private fun prunePreloads() {
+    val manager = preloadManager ?: return
+    val keep = preloadSlots.values.toHashSet()
+    currentMediaUri?.let(keep::add)
+    for (u in preloadItems.keys.filter { it !in keep }) {
       preloadItems.remove(u)?.let {
         manager.remove(it)
         clipGenerations.remove(it.mediaId)
+        preloadAskedAt.remove(it.mediaId)
       }
+      preloadRankingData.remove(u)
+      preloadItemStarts.remove(u)
     }
+  }
+
+  /** The ranks held and the sources in the manager, for the `[ReelPreload]` lines. */
+  private fun preloadSummary(): String = "[${preloadSlots.keys.joinToString(",") { it.wire }}] sources=${preloadItems.size}"
+
+  /** `[ReelPreload] ready` / `failed` lines: how long each rank's preload took to land. */
+  private val preloadListener = object : PreloadManagerListener {
+    override fun onCompleted(mediaItem: MediaItem) {
+      if (disposing) return
+      val askedAt = preloadAskedAt.remove(mediaItem.mediaId) ?: return
+      val rank = preloadSlots.entries.firstOrNull { preloadItems[it.value] == mediaItem }?.key
+      emitLog(
+        "info",
+        "ReelPreload",
+        "ready rank=${rank?.wire ?: "none"} ${mediaItem.mediaId} after=${SystemClock.elapsedRealtime() - askedAt}ms"
+      )
+      maybeDetectLeadIn(mediaItem, rank)
+    }
+
+    override fun onError(error: PreloadException) {
+      if (disposing) return
+      val mediaItem = error.mediaItem
+      preloadAskedAt.remove(mediaItem.mediaId)
+      val rank = preloadSlots.entries.firstOrNull { preloadItems[it.value] == mediaItem }?.key
+      emitLog("info", "ReelPreload", "failed rank=${rank?.wire ?: "none"} ${mediaItem.mediaId}: ${error.cause?.javaClass?.simpleName ?: error.message}")
+      illegalClipping(error)?.let { onPreloadClippingFailed(mediaItem, it) }
+    }
+  }
+
+  /**
+   * The `[ReelClip]` line for one clip's first frame: video range and frame-rate strategy (the
+   * HDR badge and refresh-rate checks), the audio input against the AudioTrack it is playing
+   * through (the 5.1 / stereo re-lock check), and whether the player's selector is ours.
+   */
+  private fun logClipFirstFrame(mediaGeneration: Int) {
+    val player = exoPlayer ?: return
+    emitLog(
+      "info",
+      "ReelClip",
+      ClipCorePolicy.describeClip(
+        generation = mediaGeneration,
+        video = currentVideoFormat,
+        audio = selectedAudioFormat(),
+        audioOutput = lastAudioTrackConfig?.let(::describeAudioTrackConfig) ?: "not yet",
+        audioTrackInits = audioTrackInits,
+        dvMode = dvMode,
+        frameRateStrategy = player.videoChangeFrameRateStrategy,
+        selectorAttached = trackSelector != null && player.trackSelector === trackSelector
+      )
+    )
+  }
+
+  /**
+   * The `[ReelCore]` release line, after the player's release has returned. `codecs` is how many
+   * MediaCodecs this core made: on the Shield each one leaves a display listener on the now-dead
+   * playback thread (see [PlayerCoreCounts]), so a wake's dead-thread handler count should match
+   * the running `codecsOnReleasedCores`.
+   */
+  private fun logCoreReleased() {
+    val video = coreVideoCodecs.get()
+    val audio = coreAudioCodecs.get()
+    PlayerCoreCounts.onReleased(video + audio)
+    emitLog(
+      "info",
+      "ReelCore",
+      "release core#$coreSerial clip=$clipMode codecs=${video + audio} (video=$video audio=$audio) " +
+        PlayerCoreCounts.summary()
+    )
   }
 
   fun dispose() {
@@ -4434,6 +5122,24 @@ class ExoPlayerCore(private val activity: Activity) :
     check(Looper.myLooper() == Looper.getMainLooper())
     Log.d(TAG, "Disposing")
     preloadItems.clear()
+    preloadSlots.clear()
+    preloadAskedAt.clear()
+    preloadRankingData.clear()
+    preloadItemStarts.clear()
+    clipCacheKeys.clear()
+    clipStarts.clear()
+    clipOrigins.clear()
+    clipMeasure.clear()
+    clipStartRefused.clear()
+    openStartMs = 0L
+    // V2-23: the detector stops with the clip core; a main player leaves the gate.
+    if (clipMode) LeadInDetector.release(this)
+    if (countedInPlaybackGate) {
+      countedInPlaybackGate = false
+      MainPlaybackGate.down()
+    }
+    // The disk cache is process-wide (ClipDiskCache) and stays open for the next core.
+    clipCache = null
     preloadManager?.release()
     preloadManager = null
 
@@ -4492,10 +5198,14 @@ class ExoPlayerCore(private val activity: Activity) :
     subtitleTrackGroupMap.clear()
     exoPlayer?.clearVideoSurface()
     exoPlayer?.removeListener(this)
-    exoPlayer?.release()
+    exoPlayer?.let { player ->
+      player.release()
+      logCoreReleased()
+    }
     exoPlayer = null
     renderersFactory = null
     trackSelector = null
+    preloadTrackSelector = null
     httpDataSourceFactory = null
     dataSourceFactory = null
     playbackMediaSourceFactory = null

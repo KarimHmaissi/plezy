@@ -143,6 +143,7 @@ void main() {
       expect(settings.read(SettingsService.reelIntroSeen), isFalse);
       expect(settings.read(SettingsService.reelHintSessions), 0);
       expect(settings.read(SettingsService.reelImmersiveHintSeen), isFalse);
+      expect(settings.read(SettingsService.reelFill), isFalse);
       expect(settings.read(SettingsService.showReelTab), isTrue);
     });
 
@@ -215,6 +216,7 @@ void main() {
       await settings.write(SettingsService.reelIntroSeen, true);
       await settings.write(SettingsService.reelHintSessions, 4);
       await settings.write(SettingsService.reelImmersiveHintSeen, true);
+      await settings.write(SettingsService.reelFill, true);
       await settings.write(SettingsService.showReelTab, false);
 
       await settings.resetAllSettings();
@@ -229,6 +231,7 @@ void main() {
       expect(settings.read(SettingsService.reelIntroSeen), isFalse);
       expect(settings.read(SettingsService.reelHintSessions), 0);
       expect(settings.read(SettingsService.reelImmersiveHintSeen), isFalse);
+      expect(settings.read(SettingsService.reelFill), isFalse);
       expect(settings.read(SettingsService.showReelTab), isTrue);
     });
 
@@ -251,6 +254,14 @@ void main() {
       expect(portable, isNot(contains(SettingsService.reelIntroSeen)));
       expect(portable, isNot(contains(SettingsService.reelHintSessions)));
       expect(portable, isNot(contains(SettingsService.reelImmersiveHintSeen)));
+      expect(portable, isNot(contains(SettingsService.reelFill)));
+    });
+
+    test('the clip loudness switch is off and stays on the device (V2-19, D9)', () async {
+      final settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.reelClipNormalization), isFalse);
+      expect(SettingsService.portablePrefs, isNot(contains(SettingsService.reelClipNormalization)));
     });
   });
 

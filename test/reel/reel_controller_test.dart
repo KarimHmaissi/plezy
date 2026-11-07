@@ -17,9 +17,11 @@ import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/customisation/mirror_store.dart';
 import 'package:plezy/services/memory_trim_policy.dart';
+import 'package:plezy/services/offline_mode_source.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
+import 'package:plezy/services/reel/reel_clip_cache.dart';
 import 'package:plezy/services/reel/reel_controller.dart';
 import 'package:plezy/services/reel/reel_data_budget.dart';
 import 'package:plezy/services/reel/reel_deck_prefs.dart';
@@ -29,9 +31,40 @@ import 'package:plezy/services/reel/reel_playback_profile.dart';
 import 'package:plezy/services/reel/reel_prefetcher.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/utils/app_logger.dart';
 
 import '../test_helpers/prefs.dart';
+import '../test_helpers/reel_link.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
+
+/// The app's offline mode (no server it can reach), set by the test.
+class _OfflineMode extends ChangeNotifier implements OfflineModeSource {
+  _OfflineMode(this._offline);
+
+  bool _offline;
+
+  @override
+  bool get isOffline => _offline;
+
+  set isOffline(bool v) {
+    _offline = v;
+    notifyListeners();
+  }
+}
+
+/// The clip core's disk cache (V2-10), holding the clips of [keys].
+class _DiskCache extends ReelClipCache {
+  _DiskCache(this.keys) : super(supported: false);
+
+  final Set<String> keys;
+  final asked = <String>[];
+
+  @override
+  Future<Set<String>> onDisk(Iterable<String> keys) async {
+    asked.addAll(keys);
+    return keys.where(this.keys.contains).toSet();
+  }
+}
 
 class _Servers implements ReelServers {
   @override
@@ -385,6 +418,12 @@ void main() {
     ReelCellular Function()? cellular,
     bool Function()? metered,
     Listenable? linkChanged,
+    bool Function()? normalize,
+    bool Function()? skipIntros,
+    bool Function()? leadInMeasureOnly,
+    ReelClipCache? clipCache,
+    OfflineModeSource? offlineMode,
+    ReelCachedItem? cachedItem,
   }) => ReelController(
     decks:
         decks ??
@@ -396,10 +435,14 @@ void main() {
       store: store,
       aniList: aniList ?? (_) async => null,
       animeThemes: animeThemes ?? (_) async => const {},
-      profile: profile,
+      // The link is the profile's (one source for the data budget too).
+      profile: profile ?? (metered == null ? null : FakeLinkProfile(metered, linkChanged)),
     ),
     clips: ClipPlayer(
       plays: plays,
+      normalize: normalize,
+      skipIntros: skipIntros,
+      leadInMeasureOnly: leadInMeasureOnly,
       engine: () {
         engines++;
         return engine = FakeClipEngine();
@@ -421,9 +464,10 @@ void main() {
     settingsChanged: settingsChanged,
     deckPrefsChanged: deckPrefsChanged,
     cellular: cellular,
-    metered: metered,
-    linkChanged: linkChanged,
     clock: clock,
+    clipCache: clipCache ?? _DiskCache(const {}),
+    offlineMode: offlineMode,
+    cachedItem: cachedItem,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
       built.add(id);
@@ -832,7 +876,7 @@ void main() {
     });
   }
 
-  group('On TV mode opens on the Fold\'s card (V2-48)', () {
+  group('On TV mode opens on the phone\'s card (V2-48)', () {
     List<ReelDeck> two() => [
       _Deck('a', [_card('1'), _card('2'), _card('3')]),
       _Deck('b', [_card('4'), _card('5'), _card('6')]),
@@ -929,6 +973,11 @@ void main() {
     await c.step(1);
     await Future<void>.delayed(Duration.zero);
     expect(engine.calls, contains('open https://s1.example/services/iva/assets/2/video.mp4'));
+    // Already resolved, the next card still waits for this one's first
+    // frame before the core buffers it (V2-09, V2-11 Wave B).
+    expect(engine.calls, isNot(contains('preload https://s1.example/services/iva/assets/3/video.mp4')));
+    engine.firstFrameCtl.add(null);
+    await Future<void>.delayed(Duration.zero);
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/3/video.mp4'));
     c.dispose();
     link.dispose();
@@ -967,6 +1016,30 @@ void main() {
     engine.firstFrameCtl.add(null);
     await pumpEventQueue();
     expect(engine.calls, contains('preload https://s1.example/services/iva/assets/2/video.mp4'));
+    c.dispose();
+  });
+
+  test('the data budget reads the link from the playback profile, the one source the clip file uses', () async {
+    const wifi = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
+    const mobile = ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular);
+    final profile = ValueNotifier<ReelPlaybackProfile>(wifi);
+    addTearDown(profile.dispose);
+    final c = make(cellular: () => ReelCellular.dataSaver, profile: profile);
+    // What a view sees each time the controller tells it something.
+    final seen = <(ReelDataBudget, ReelLink)>[];
+    c.addListener(() => seen.add((c.dataBudget, c.resolver.playback.link)));
+    expect(c.dataBudget, ReelDataBudget.full);
+
+    profile.value = mobile;
+    expect(c.dataBudget, ReelDataBudget.saver);
+    expect(seen, [(ReelDataBudget.saver, ReelLink.cellular)], reason: 'never a budget from another link');
+
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
+    expect(c.dataBudget, ReelDataBudget.full, reason: 'off mobile data with the same notice');
+    expect(seen.last, (ReelDataBudget.full, ReelLink.unmetered));
+
+    profile.value = const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 0, link: ReelLink.offline);
+    expect(c.dataBudget, ReelDataBudget.full, reason: 'offline is not mobile data');
     c.dispose();
   });
 
@@ -1042,6 +1115,27 @@ void main() {
     c.dispose();
     expect(() => changed.value++, returnsNormally, reason: 'the listener left with the controller');
     expect(told, 1);
+    changed.dispose();
+  });
+
+  test('the loudness switch reaches the clip core in use at once (V2-19)', () async {
+    final changed = ValueNotifier(0);
+    var on = false;
+    final c = make(settingsChanged: changed, normalize: () => on);
+    await c.start();
+    await Future<void>.delayed(Duration.zero);
+    final core = engine;
+    expect(core.calls.where((x) => x.startsWith('normalization')), isEmpty, reason: 'off by default (D9)');
+
+    on = true;
+    changed.value++;
+    expect(core.calls.where((x) => x.startsWith('normalization')), ['normalization true']);
+    on = false;
+    changed.value++;
+    expect(core.calls.where((x) => x.startsWith('normalization')), ['normalization true', 'normalization false']);
+    expect(identical(engine, core), isTrue, reason: 'the same core, not a rebuilt one');
+
+    c.dispose();
     changed.dispose();
   });
 
@@ -1183,7 +1277,7 @@ void main() {
     var told = 0;
     c.addListener(() => told++);
 
-    // The Fold folds to its cover screen.
+    // The foldable folds to its cover screen.
     profile.value = const ReelPlaybackProfile(screen: ReelScreen.compactPortrait, maxHeight: 720);
     expect(c.current.clip?.height, 1080, reason: 'the clip on screen keeps playing its file');
     expect(c.slotAt(1).clip?.height, 720);
@@ -2297,6 +2391,260 @@ void main() {
     });
   });
 
+  group('offline (V2-15)', () {
+    String diskKey(String asset) => ReelClipCache.keyFor('s1', '/services/iva/assets/$asset/video.mp4')!;
+    String offlineUri(String asset) => 'https://reel-offline.invalid/services/iva/assets/$asset/video.mp4';
+    List<ReelDeck> deckOf3() => [
+      _Deck('a', [_card('1'), _card('2'), _card('3')]),
+    ];
+
+    /// Online once, so each card's clip answer is cached as the app would
+    /// have it: the `src:` rows, by group key.
+    Future<Map<String, String?>> resolvedOnline() async {
+      final online = make(servers: _FlakyServers(), decks: deckOf3(), externalClips: true);
+      await online.start();
+      await online.step(1);
+      await online.step(1);
+      await pumpEventQueue();
+      online.dispose();
+      return {
+        for (final g in ['g1', 'g2', 'g3']) g: await store.cached('src:$g'),
+      };
+    }
+
+    List<String?> said(ReelController c) {
+      final out = <String?>[];
+      c.toast.addListener(() {
+        if (c.toast.value != null) out.add(c.toast.value);
+      });
+      return out;
+    }
+
+    test('TV: only clips already on disk play; the rest are stills, shown, never skipped', () async {
+      final rows = await resolvedOnline();
+      expect(rows.values, everyElement(contains('plex:a')));
+      final servers = _FlakyServers()..offline.add('s1');
+      final disk = _DiskCache({diskKey('a1'), diskKey('a3')});
+      final c = make(servers: servers, clipCache: disk, decks: deckOf3(), offlineMode: _OfflineMode(true));
+      final toasts = said(c);
+      await c.start();
+      expect(c.offline.value, isTrue);
+      expect(c.current.card?.id, 't1');
+      expect(c.current.clip?.source.uri, offlineUri('a1'), reason: 'no address or token: read from disk by its key');
+      expect(engine.cacheKeys['open ${offlineUri('a1')}'], diskKey('a1'));
+
+      await c.step(1);
+      expect(c.current.card?.id, 't2', reason: 'a still, not an AI card skipped over');
+      expect(c.current.clip, isNull);
+      await c.step(1);
+      expect(c.current.card?.id, 't3');
+      expect(c.current.clip?.source.uri, offlineUri('a3'));
+      await pumpEventQueue();
+
+      expect(servers.reads, 0, reason: 'no server asked');
+      for (final g in rows.keys) {
+        expect(await store.cached('src:$g'), rows[g], reason: 'no miss or new row written');
+      }
+      expect(toasts, [ReelController.offlineNotice(tv: true)], reason: 'said once');
+      c.dispose();
+    });
+
+    test('TV: two stills in a row are both shown (the 1-in-6 AI-card rule is not for stills offline)', () async {
+      await resolvedOnline();
+      final c = make(
+        servers: _FlakyServers()..offline.add('s1'),
+        clipCache: _DiskCache({diskKey('a3')}),
+        decks: deckOf3(),
+        offlineMode: _OfflineMode(true),
+      );
+      await c.start();
+      expect(c.current.card?.id, 't1');
+      expect(c.current.clip, isNull);
+      await c.step(1);
+      expect(c.current.card?.id, 't2');
+      expect(c.current.clip, isNull);
+      await c.step(1);
+      expect(c.current.card?.id, 't3');
+      expect(c.current.clip?.source.uri, offlineUri('a3'));
+      c.dispose();
+    });
+
+    test('TV: a clip with no cached row, or a cached opening, is a still, and nothing is asked', () async {
+      var themeAsks = 0;
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(
+        servers: servers,
+        decks: deckOf3(),
+        offlineMode: _OfflineMode(true),
+        animeThemes: (_) async {
+          themeAsks++;
+          return const {};
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.clip, isNull);
+      expect(servers.reads, 0);
+      expect(themeAsks, 0);
+      expect(await store.cached('src:g1'), isNull, reason: 'unknown offline, never a cached miss');
+      c.dispose();
+    });
+
+    test("phone: every card is a still (the feed can't read the disk cache), and none is held back", () async {
+      await resolvedOnline();
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(
+        servers: servers,
+        externalClips: true,
+        clipCache: _DiskCache({diskKey('a1'), diskKey('a2'), diskKey('a3')}),
+        decks: [
+          _ArrangedDeck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+        offlineMode: _OfflineMode(true),
+      );
+      final toasts = said(c);
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.clip, isNull);
+      expect(c.slotAt(1).clip, isNull);
+      expect(c.cards?.length, 3, reason: 'stills offline are not AI cards with no room');
+      expect(servers.reads, 0);
+      expect(toasts, [ReelController.offlineNotice(tv: false)]);
+      c.dispose();
+    });
+
+    test('offline, a card reads its art and text from the caches alone', () async {
+      final media = _RecordingMedia();
+      final cachedReads = <String>[];
+      final c = make(
+        media: media,
+        externalClips: true,
+        offlineMode: _OfflineMode(true),
+        cachedItem: (serverId, ratingKey) async {
+          cachedReads.add(ratingKey);
+          return null;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(media.reads, isEmpty, reason: 'no server read that cannot answer');
+      expect(cachedReads, contains('1'));
+      c.dispose();
+    });
+
+    test(
+      'going offline mid-session drops the answers; back online the clips come back and it says so again next time',
+      () async {
+        final mode = _OfflineMode(false);
+        final servers = _FlakyServers();
+        final disk = _DiskCache({diskKey('a1')});
+        final c = make(servers: servers, clipCache: disk, decks: deckOf3(), offlineMode: mode);
+        final toasts = said(c);
+        final heard = <bool>[];
+        c.offline.addListener(() => heard.add(c.offline.value));
+        await c.start();
+        expect(c.current.clip?.source.uri, 'https://s1.example/services/iva/assets/a1/video.mp4');
+
+        servers.offline.add('s1');
+        mode.isOffline = true;
+        expect(heard, [true]);
+        expect(toasts, [ReelController.offlineNotice(tv: true)]);
+        // The screen starts the visit afresh (ReelScreen._onOffline).
+        await c.suspend();
+        await c.start();
+        expect(c.current.clip?.source.uri, offlineUri('a1'));
+        final reads = servers.reads;
+        await c.step(1);
+        expect(c.current.clip, isNull);
+        expect(servers.reads, reads);
+
+        servers.offline.clear();
+        mode.isOffline = false;
+        expect(heard, [true, false]);
+        await c.suspend();
+        await c.start();
+        expect(c.current.clip?.source.uri, 'https://s1.example/services/iva/assets/a2/video.mp4');
+        expect(toasts, hasLength(1), reason: 'back online says nothing');
+
+        c.toast.value = null; // the notice's 3 s are up
+        mode.isOffline = true;
+        expect(toasts, hasLength(2), reason: 'a new offline spell says it once more');
+        await c.start();
+        expect(toasts, hasLength(2));
+        c.dispose();
+      },
+    );
+
+    test("back online, Tonight's picks the caches didn't have offline are read again", () async {
+      final mode = _OfflineMode(true);
+      final media = _RecordingMedia();
+      final c = make(
+        media: media,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+        offlineMode: mode,
+        cachedItem: (_, _) async => null,
+      );
+      await c.start();
+      await c.save();
+      await c.step(1);
+      await c.save();
+      await pumpEventQueue();
+      // (A Save's watchlist mirror is the user's own action, read as online.)
+      final reads = media.reads.length;
+      await c.step(1);
+      expect(c.current.kind, ReelSlotKind.decide);
+      await pumpEventQueue();
+      expect(c.current.picks.map((p) => p.item), [null, null], reason: 'not in the caches offline');
+      expect(media.reads, hasLength(reads), reason: 'no server read for the picks offline');
+
+      mode.isOffline = false;
+      await c.suspend();
+      await c.start();
+      expect(c.current.kind, ReelSlotKind.decide);
+      await pumpEventQueue();
+      expect(c.current.picks.map((p) => p.item?.id), ['2', '1'], reason: 'read from the server once back online');
+      c.dispose();
+    });
+
+    test('no network at all (the profile link) is offline too', () async {
+      final servers = _FlakyServers();
+      final profile = ValueNotifier(const ReelPlaybackProfile(screen: ReelScreen.tv, maxHeight: 1080));
+      final c = make(servers: servers, decks: deckOf3(), profile: profile);
+      expect(c.offline.value, isFalse);
+      profile.value = const ReelPlaybackProfile(screen: ReelScreen.tv, maxHeight: 1080, link: ReelLink.offline);
+      expect(c.offline.value, isTrue);
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, 0);
+      expect(c.current.clip, isNull);
+      c.dispose();
+    });
+
+    test('TV: a clip from disk that stops offline is a still; its row stays and nothing is asked again', () async {
+      final rows = await resolvedOnline();
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(
+        servers: servers,
+        clipCache: _DiskCache({diskKey('a1')}),
+        decks: deckOf3(),
+        offlineMode: _OfflineMode(true),
+      );
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+      engine.errorCtl.add(const PlayerError('network gone past the cached bytes'));
+      await pumpEventQueue();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(c.current.clip, isNull);
+      expect(c.current.card?.id, 't1');
+      expect(await store.cached('src:g1'), rows['g1'], reason: 'not forgotten offline');
+      expect(servers.reads, 0);
+      expect(engine.calls.where((x) => x.startsWith('open ')), hasLength(1), reason: 'no second clip looked for');
+      c.dispose();
+    });
+  });
+
   group('one prefetch queue (V2-11)', () {
     List<ReelDeck> deckOf(int n) => [
       _Deck('a', [for (var i = 1; i <= n; i++) _card('$i')]),
@@ -2412,6 +2760,39 @@ void main() {
       await pumpEventQueue();
       expect(servers.reads, ['1', '2']);
       expect(c.slotAt(2).resolved, isFalse);
+      c.dispose();
+    });
+
+    test('on mobile data on Normal the window is as on Wi-Fi (V2-53)', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      addTearDown(profile.dispose);
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), profile: profile, cellular: () => ReelCellular.normal);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(c.dataBudget, ReelDataBudget.full);
+      expect(servers.reads, ['1', '2', '3'], reason: 'the window follows the budget, not the link alone');
+      c.dispose();
+    });
+
+    test('off mobile data the window widens at once, from the profile\'s link', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      addTearDown(profile.dispose);
+      final servers = _RecordingServers();
+      final c = make(servers: servers, decks: deckOf(4), profile: profile, cellular: () => ReelCellular.dataSaver);
+      await c.start();
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2']);
+
+      profile.value = const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 1080);
+      await pumpEventQueue();
+      expect(servers.reads, ['1', '2', '3'], reason: 'the link moved: the window is planned again');
       c.dispose();
     });
 
@@ -2715,6 +3096,33 @@ void main() {
       await c.switchDeck(1);
       final wrapped = c.deckStrip.value!;
       expect([wrapped.previous?.id, wrapped.current.id, wrapped.next?.id], ['b', 'c', 'a']);
+      c.dispose();
+    });
+
+    test('two quick presses move two decks on, and a press back returns', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1')]),
+          _Deck('b', [_card('2')]),
+          _Deck('c', [_card('3')]),
+          _Deck('d', [_card('4')]),
+        ],
+      );
+      await c.start();
+      expect(c.current.card?.id, 't1');
+      // The second press lands while the first is still leaving its card.
+      await Future.wait([c.switchDeck(1), c.switchDeck(1)]);
+      expect(c.deck.id, 'c');
+      expect(c.current.card?.id, 't3');
+      expect(c.deckStrip.value?.current.id, 'c');
+
+      await Future.wait([c.switchDeck(1), c.switchDeck(1), c.switchDeck(-1)]);
+      expect(c.deck.id, 'd');
+      expect(c.current.card?.id, 't4');
+
+      await Future.wait([c.switchDeck(1), c.switchDeck(-1)]);
+      expect(c.deck.id, 'd', reason: 'forward then back is where it started');
+      expect(c.current.card?.id, 't4');
       c.dispose();
     });
 
@@ -3068,6 +3476,456 @@ void main() {
       await expectLater(c.moveDeck('ai:7', -1), completes);
       expect(ids(c.shownDecks), ['for-you', 'anime-openings', 'most-watched', 'ai:7']);
       expect(c.toast.value, ReelController.notConnected);
+      c.dispose();
+    });
+  });
+
+  group('TV preload ranks (V2-09, V2-11 Wave B)', () {
+    String clip(String id) => 'https://s1.example/services/iva/assets/$id/video.mp4';
+    const opening = 'https://v.animethemes.moe/Harbor-Lights-OP1.webm';
+
+    /// An anime show whose opening AnimeThemes has (AniList 101).
+    ReelCardData animeCard(String id) {
+      final c = _card(id);
+      return ReelCardData(
+        title: ReelTitle(
+          titleId: 't$id',
+          groupKey: 'g$id',
+          title: 'Harbor Lights',
+          isShow: true,
+          anime: true,
+          tvdbId: 1,
+          copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+        ),
+        facts: c.facts,
+        best: c.best,
+      );
+    }
+
+    late List<List<int>> atAsks;
+    Future<Map<int, Map<String, dynamic>>> themes(List<int> ids) async {
+      atAsks.add(ids);
+      return {
+        101: {
+          'animethemes': [
+            {
+              'type': 'OP',
+              'sequence': 1,
+              'animethemeentries': [
+                {
+                  'episodes': '1-12',
+                  'videos': [
+                    {'id': 9, 'link': opening, 'nc': true, 'resolution': 1080, 'overlap': 'NONE'},
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+
+    setUp(() => atAsks = []);
+
+    Future<void> frame() async {
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+    }
+
+    test('the card behind is kept with the next one, so a reversal opens a preload', () async {
+      MemoryLogOutput.clearLogs();
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+      );
+      await c.start();
+      await frame();
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2'), ClipPreloadRank.ahead: clip('3')});
+      await c.step(1);
+      expect(engine.calls, contains('open ${clip('2')}'));
+      await frame();
+      expect(c.clips.preloaded, {
+        ClipPreloadRank.next: clip('3'),
+        ClipPreloadRank.previous: clip('1'),
+        ClipPreloadRank.ahead: clip('4'),
+      });
+      expect(engine.calls, contains('preload ${clip('1')} as previous'));
+
+      await c.step(-1);
+      expect(
+        engine.calls.reversed.take(2),
+        unorderedEquals(['clearPreloads next', 'clearPreloads ahead']),
+        reason: 'nothing above card 1: cards 3 and 4 are let go once 1 opened',
+      );
+      expect(engine.calls, contains('open ${clip('1')}'));
+      await frame();
+      final ttff = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).first;
+      expect(ttff, contains('preloaded=true rank=previous'));
+      expect(c.clips.preloaded, {
+        ClipPreloadRank.previous: clip('2'),
+      }, reason: 'travelling up, the card behind is the one below');
+      c.dispose();
+    });
+
+    test('preloads wait for the first frame of the card on screen', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.clips.preloaded, isEmpty);
+      await frame();
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2'), ClipPreloadRank.ahead: clip('3')});
+      c.dispose();
+    });
+
+    test('a preload still waiting on its clip when the card changes waits for the new first frame', () async {
+      final servers = _RecordingServers(gated: '3');
+      final c = make(
+        servers: servers,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+      );
+      await c.start();
+      await frame();
+      // Card 3's extras are still on their way: its preload (two ahead) waits.
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')});
+      await c.step(1);
+      expect(engine.calls, contains('open ${clip('2')}'));
+      servers.gate.complete();
+      await pumpEventQueue();
+      expect(
+        engine.calls.where((x) => x.startsWith('preload ${clip('3')}')),
+        isEmpty,
+        reason: "card 2's clip is opening: nothing else goes to the core before its first frame",
+      );
+      await frame();
+      expect(engine.calls, contains('preload ${clip('3')}'), reason: 'now the next card, preloaded as next');
+      expect(c.clips.preloaded[ClipPreloadRank.next], clip('3'));
+      c.dispose();
+    });
+
+    test('the card two ahead goes to disk with its cache key; an opening two ahead never does (V2-10)', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), animeCard('3'), _card('4')]),
+        ],
+        aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+        animeThemes: themes,
+      );
+      await c.start();
+      await frame();
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')}, reason: '+2 is an AnimeThemes opening (D1)');
+      expect(engine.calls.where((x) => x.endsWith('as ahead')), isEmpty);
+
+      await c.step(1);
+      await frame();
+      // +2 is now card 4, a Plex trailer: preloaded to disk under its key.
+      expect(c.clips.preloaded[ClipPreloadRank.ahead], clip('4'));
+      expect(engine.cacheKeys['preload ${clip('4')}'], 'plex:s1:/services/iva/assets/4/video.mp4');
+      expect(engine.cacheKeys['open ${clip('2')}'], 'plex:s1:/services/iva/assets/2/video.mp4');
+      expect(engine.cacheKeys['preload $opening'], isNull);
+      c.dispose();
+    });
+
+    test('on mobile data only the next card is preloaded, and no deck head', () async {
+      final profile = ValueNotifier(
+        const ReelPlaybackProfile(screen: ReelScreen.large, maxHeight: 720, link: ReelLink.cellular),
+      );
+      final c = make(
+        profile: profile,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+          _Deck('b', [animeCard('50')]),
+        ],
+        aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+        animeThemes: themes,
+      );
+      await c.start();
+      await frame();
+      await c.switchDeck(1);
+      await c.switchDeck(-1);
+      await frame();
+      await c.step(1);
+      await frame();
+      expect(c.clips.preloaded.keys, [ClipPreloadRank.next]);
+      c.dispose();
+      profile.dispose();
+    });
+
+    test('memory pressure drops every rank and plans none', () async {
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+      );
+      await c.start();
+      await frame();
+      await c.step(1);
+      await frame();
+      expect(c.clips.preloaded, hasLength(2));
+      await c.trimMemory();
+      expect(c.clips.preloaded, isEmpty);
+      await c.step(1);
+      await frame();
+      expect(c.clips.preloaded, isEmpty);
+      c.dispose();
+    });
+
+    group('neighbouring deck heads (D15)', () {
+      test("an anime deck's head is preloaded after the first frame, and → opens it preloaded", () async {
+        MemoryLogOutput.clearLogs();
+        final servers = _RecordingServers();
+        final c = make(
+          servers: servers,
+          decks: [
+            _Deck('a', [_card('1'), _card('2')]),
+            _Deck('b', [animeCard('50'), _card('51')]),
+            _Deck('c', [_card('60')]),
+          ],
+          aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+          animeThemes: themes,
+        );
+        await c.start();
+        await frame();
+        expect(c.clips.preloaded.keys, [ClipPreloadRank.next], reason: 'no other deck is loaded yet');
+        // Visit b and c once, then come back to a: b's head is the anime show.
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        expect(c.deck.id, 'a');
+        expect(c.clips.preloaded.containsKey(ClipPreloadRank.deckNext), isFalse, reason: 'not before the first frame');
+        servers.reads.clear();
+        await frame();
+        expect(c.clips.preloaded[ClipPreloadRank.deckNext], opening);
+        expect(engine.calls, contains('preload $opening as deckNext'));
+        expect(
+          c.clips.preloaded.containsKey(ClipPreloadRank.deckPrevious),
+          isFalse,
+          reason: "c's head is a Plex clip that isn't on disk",
+        );
+        expect(servers.reads, isEmpty, reason: 'no Plex read for a head (card 2 was read on the first visit)');
+
+        await c.switchDeck(1);
+        expect(c.deck.id, 'b');
+        expect(engine.calls, contains('open $opening'));
+        await frame();
+        final ttff = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).first;
+        expect(ttff, contains('preloaded=true rank=deckNext'));
+        c.dispose();
+      });
+
+      test('a Plex head is never read for and its rank stays empty; a cached opening asks nothing', () async {
+        final servers = _RecordingServers();
+        final c = make(
+          servers: servers,
+          decks: [
+            _Deck('a', [_card('1')]),
+            _Deck('b', [_card('5')]),
+            _Deck('c', [animeCard('50')]),
+          ],
+          aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+          animeThemes: themes,
+        );
+        await c.start();
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        expect(c.deck.id, 'a');
+        servers.reads.clear();
+        atAsks.clear();
+        await frame();
+        expect(servers.reads, isEmpty, reason: "b's head (a Plex clip) is never read for");
+        expect(atAsks, isEmpty, reason: "c's opening is cached from its visit");
+        expect(c.clips.preloaded[ClipPreloadRank.deckPrevious], opening);
+        expect(c.clips.preloaded.containsKey(ClipPreloadRank.deckNext), isFalse);
+        c.dispose();
+      });
+
+      test('a Plex head already on disk is preloaded from it, with no Plex read (V2-10)', () async {
+        const headKey = 'plex:s1:/services/iva/assets/5/video.mp4';
+        final disk = _DiskCache({headKey});
+        final servers = _RecordingServers();
+        final c = make(
+          servers: servers,
+          clipCache: disk,
+          decks: [
+            _Deck('a', [_card('1')]),
+            _Deck('b', [_card('5')]),
+            _Deck('c', [_card('60')]),
+          ],
+        );
+        await c.start();
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        expect(c.deck.id, 'a');
+        servers.reads.clear();
+        disk.asked.clear();
+        await frame();
+        expect(servers.reads, isEmpty, reason: 'a head is never read for');
+        expect(c.clips.preloaded[ClipPreloadRank.deckNext], clip('5'));
+        expect(engine.cacheKeys['preload ${clip('5')}'], headKey);
+        expect(
+          c.clips.preloaded.containsKey(ClipPreloadRank.deckPrevious),
+          isFalse,
+          reason: "c's head is a Plex clip that is not on disk",
+        );
+        expect(disk.asked, containsAll([headKey, 'plex:s1:/services/iva/assets/60/video.mp4']));
+        c.dispose();
+      });
+
+      test('with two decks there is one neighbour: → and ← are the same deck', () async {
+        final c = make(
+          decks: [
+            _Deck('a', [_card('1')]),
+            _Deck('b', [animeCard('50')]),
+          ],
+          aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+          animeThemes: themes,
+        );
+        await c.start();
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        await c.switchDeck(1);
+        await frame();
+        expect(c.clips.preloaded, {ClipPreloadRank.deckNext: opening});
+        c.dispose();
+      });
+    });
+  });
+  group('V2-23: a trailer\'s lead-in', () {
+    String clip(String id) => 'https://s1.example/services/iva/assets/$id/video.mp4';
+    String key(String id) => 'plex:s1:/services/iva/assets/$id/video.mp4';
+    const opening = 'https://v.animethemes.moe/Harbor-Lights-OP1.webm';
+
+    Future<void> frame() async {
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+    }
+
+    Future<Map<String, dynamic>> row(String id) async =>
+        jsonDecode((await store.cached('src:g$id'))!) as Map<String, dynamic>;
+
+    test('reaches every card with that clip, opens there, and is kept on the src: row', () async {
+      final c = make();
+      await c.start();
+      await frame();
+      expect(engine.measures['preload ${clip('2')}'], isTrue, reason: 'a Plex trailer may be measured');
+      engine.leadInCtl.add(ClipLeadIn(cacheKey: key('2'), start: const Duration(milliseconds: 6006)));
+      await pumpEventQueue();
+      expect((await row('2'))['li'], 6006);
+      expect((await row('2'))['lv'], ClipResolver.leadInVersion);
+      await c.step(1);
+      expect(engine.startAts['open ${clip('2')}'], const Duration(milliseconds: 6006));
+      c.dispose();
+    });
+
+    test('a learned start survives the core going away: the next open is clipped (Watch → Back)', () async {
+      final c = make();
+      await c.start();
+      await frame();
+      engine.leadInCtl.add(ClipLeadIn(cacheKey: key('1'), start: const Duration(milliseconds: 4004)));
+      await pumpEventQueue();
+      await c.suspend();
+      final before = engines;
+      await c.start();
+      await pumpEventQueue();
+      expect(engines, before + 1, reason: 'a fresh core');
+      expect(engine.startAts['open ${clip('1')}'], const Duration(milliseconds: 4004));
+      c.dispose();
+    });
+
+    test('is not kept while Skip trailer intros is off or only measuring', () async {
+      for (final (skip, measureOnly) in [(false, false), (true, true)]) {
+        final c = make(skipIntros: () => skip, leadInMeasureOnly: () => measureOnly);
+        await c.start();
+        await frame();
+        engine.leadInCtl.add(ClipLeadIn(cacheKey: key('2'), start: const Duration(milliseconds: 6006)));
+        await pumpEventQueue();
+        expect((await row('2')).containsKey('li'), isFalse, reason: 'skip=$skip measureOnly=$measureOnly');
+        await c.step(1);
+        expect(engine.startAts['open ${clip('2')}'], isNull);
+        c.dispose();
+      }
+    });
+
+    test('an AnimeThemes opening is never sent to be measured', () async {
+      ReelCardData animeCard(String id) {
+        final c = _card(id);
+        return ReelCardData(
+          title: ReelTitle(
+            titleId: 't$id',
+            groupKey: 'g$id',
+            title: 'Harbor Lights',
+            isShow: true,
+            anime: true,
+            tvdbId: 1,
+            copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+          ),
+          facts: c.facts,
+          best: c.best,
+        );
+      }
+
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), animeCard('2'), _card('3')]),
+        ],
+        aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+        animeThemes: (ids) async => {
+          101: {
+            'animethemes': [
+              {
+                'type': 'OP',
+                'sequence': 1,
+                'animethemeentries': [
+                  {
+                    'episodes': '1-12',
+                    'videos': [
+                      {'id': 9, 'link': opening, 'nc': true, 'resolution': 1080, 'overlap': 'NONE'},
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      );
+      await c.start();
+      await frame();
+      expect(engine.measures['preload $opening'], isFalse);
+      expect(engine.measures['preload ${clip('3')}'], isTrue);
+      await c.step(1);
+      expect(engine.measures['open $opening'], isFalse);
+      expect(engine.startAts['open $opening'], isNull);
+      c.dispose();
+    });
+
+    test('a settings change sends the policy to the core', () async {
+      var skip = true;
+      final changed = ValueNotifier(0);
+      final c = make(skipIntros: () => skip, settingsChanged: changed);
+      await c.start();
+      await frame();
+      expect(engine.leadInPolicies, [(enabled: true, measureOnly: false)]);
+      skip = false;
+      changed.value++;
+      await pumpEventQueue();
+      expect(engine.leadInPolicies.last, (enabled: false, measureOnly: false));
       c.dispose();
     });
   });

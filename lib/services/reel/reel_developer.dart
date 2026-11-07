@@ -5,10 +5,19 @@ import '../settings_service.dart';
 /// The measure-day probes a `plezy://reel?probe=…` link names.
 enum ReelProbeKind {
   /// Clip coverage over the For You pool (`probe=coverage`).
-  coverage,
+  coverage('coverage'),
 
   /// The shown card's watch state on the server (`probe=watchstate`).
-  watchstate,
+  watchstate('watchstate'),
+
+  /// The shape of the servers' extras: Media per extra, resolution,
+  /// bitrate, codecs, channels (`probe=extras-shape`, plan V2-20).
+  extrasShape('extras-shape');
+
+  const ReelProbeKind(this.link);
+
+  /// The name a `plezy://reel?probe=…` link gives it.
+  final String link;
 }
 
 /// Fork: the Reel's hidden developer setting (plan V2-62). The debug
@@ -38,12 +47,31 @@ abstract final class ReelDeveloper {
     return visible(debugBuild: debugBuild, settings: s);
   }
 
+  /// Whether the TV's clip core normalises loudness (V2-19, D9): off unless
+  /// the developer group's switch is on, and like the tools it counts only
+  /// while its row could show. Off is the shipped default until a listening
+  /// A/B on the soundbar says otherwise.
+  static bool normalization({bool debugBuild = kDebugMode, SettingsService? settings}) {
+    final s = settings ?? SettingsService.instanceOrNull;
+    if (s == null || !s.read(SettingsService.reelClipNormalization)) return false;
+    return visible(debugBuild: debugBuild, settings: s);
+  }
+
+  /// Whether the TV's clip core only measures trailer lead-ins (V2-23): off
+  /// unless the developer group's switch is on, and like the tools it counts
+  /// only while its row could show.
+  static bool leadInMeasureOnly({bool debugBuild = kDebugMode, SettingsService? settings}) {
+    final s = settings ?? SettingsService.instanceOrNull;
+    if (s == null || !s.read(SettingsService.reelLeadInMeasureOnly)) return false;
+    return visible(debugBuild: debugBuild, settings: s);
+  }
+
   /// The probe a link named [name] may run, or null when the link should
   /// just open the Reel: no probe, an unknown one, or the tools are off in
   /// a release build.
   static ReelProbeKind? probe(String? name, {bool debugBuild = kDebugMode, SettingsService? settings}) {
     if (name == null) return null;
-    final kind = ReelProbeKind.values.where((k) => k.name == name).firstOrNull;
+    final kind = ReelProbeKind.values.where((k) => k.link == name).firstOrNull;
     if (kind == null) return null;
     return debugBuild || on(debugBuild: debugBuild, settings: settings) ? kind : null;
   }

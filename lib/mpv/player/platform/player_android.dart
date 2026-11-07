@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:collection/collection.dart';
 import 'package:flutter/services.dart';
 
@@ -6,6 +8,19 @@ import '../../../services/device_performance.dart';
 import '../../../services/settings_service.dart';
 import '../../models.dart';
 import '../player_base.dart';
+
+/// A clip's lead-in as the clip core measured it (Reel V2-23): where its
+/// picture starts ([startMs], 0 for none), keyed by the clip's token-free
+/// disk cache key, never its URL. [playingUnclipped]: the core was playing
+/// that clip, opened before its start was known, when the answer came.
+typedef ReelLeadInEvent = ({
+  String cacheKey,
+  int startMs,
+  String kind,
+  int version,
+  String reason,
+  bool playingUnclipped,
+});
 
 /// Android implementation using ExoPlayer with ASS subtitle support via libass-android.
 class PlayerAndroid extends PlayerBase {
@@ -92,8 +107,31 @@ class PlayerAndroid extends PlayerBase {
   @override
   bool get audioPassthroughActive => _audioPassthroughEnabled;
 
+  /// Clip mode (V2-23): each lead-in the clip core measured.
+  final StreamController<ReelLeadInEvent> _leadIns = StreamController.broadcast();
+  Stream<ReelLeadInEvent> get leadIns => _leadIns.stream;
+
+  /// Clip mode (V2-23): the lead-in policy last asked for, sent as the core
+  /// comes up and on every change.
+  ({bool enabled, bool measureOnly})? _leadInPolicy;
+
   @override
   void handlePlayerEvent(String name, Map? data) {
+    if (name == 'reel-lead-in') {
+      final key = data?['cacheKey'];
+      final start = data?['startMs'];
+      if (key is String && start is int && !_leadIns.isClosed) {
+        _leadIns.add((
+          cacheKey: key,
+          startMs: start,
+          kind: data?['kind'] is String ? data!['kind'] as String : 'none',
+          version: data?['ver'] is int ? data!['ver'] as int : 0,
+          reason: data?['reason'] is String ? data!['reason'] as String : 'ok',
+          playingUnclipped: data?['playingUnclipped'] == true,
+        ));
+      }
+      return;
+    }
     if (name == 'backend-switched') {
       // Native player switched from ExoPlayer to MPV due to unsupported format.
       // Clear stale ExoPlayer tracks so applyTrackSelectionWhenReady waits for
@@ -165,6 +203,10 @@ class PlayerAndroid extends PlayerBase {
         final volume = _clipVolume ?? 0;
         await invoke('setVolume', {'volume': volume});
         if (!disposed) setVolumeState(volume);
+        final policy = _leadInPolicy;
+        if (policy != null) {
+          await invoke('setLeadInPolicy', {'enabled': policy.enabled, 'measureOnly': policy.measureOnly});
+        }
       }
       if (disposed) throw StateError('Player was disposed during initialization');
 
@@ -227,6 +269,10 @@ class PlayerAndroid extends PlayerBase {
         'hasStartPosition': hasStartPosition,
         'autoPlay': play,
         'isLive': isLive,
+        // V2-10: a Plex clip's disk cache key (clip mode only; never the URL).
+        if (clipMode) 'cacheKey': ?_clipCacheKeys[media.uri],
+        // V2-23: what the Reel knows of the clip's lead-in (clip mode only).
+        if (clipMode) ...?_clipLeadIns[media.uri],
         if (_contentFrameRate != null) 'contentFrameRate': _contentFrameRate,
         if (externalSubtitles != null && externalSubtitles.isNotEmpty)
           'externalSubtitles': externalSubtitles
@@ -256,18 +302,100 @@ class PlayerAndroid extends PlayerBase {
     }
   }
 
-  /// Clip mode: buffer the first seconds of [uri] for the next card (only
-  /// one preload is held). Initializes the core if needed.
-  Future<void> preloadClip(String uri) async {
+  /// Clip mode: buffer the first seconds of [uri] as [rank] (`next`,
+  /// `previous`, `deckNext` or `deckPrevious`; the core holds one clip per
+  /// rank, V2-09). [origin] is for the core's log line. Initializes the core
+  /// if needed.
+  ///
+  /// V2-23: [startMs] is the clip's learned start (null: unknown, which the
+  /// core never reads as "from 0"); [measure] lets the core measure it.
+  Future<void> preloadClip(
+    String uri, {
+    String rank = 'next',
+    String? origin,
+    String? cacheKey,
+    int? startMs,
+    bool? measure,
+  }) async {
     if (disposed || !clipMode) return;
     await _ensureInitialized();
-    await invoke('preloadClip', {'uri': uri});
+    if (cacheKey != null) rememberClipCacheKey(uri, cacheKey);
+    await invoke('preloadClip', {
+      'uri': uri,
+      'rank': rank,
+      'origin': ?origin,
+      'cacheKey': ?cacheKey,
+      'startMs': ?startMs,
+      'measure': ?measure,
+    });
   }
 
-  /// Clip mode: drop any preloaded next card.
-  Future<void> clearPreloads() async {
+  /// Clip mode (V2-23): the lead-in each [open] of a clip sends, for the most
+  /// recent [_clipCacheKeysKept] clips.
+  final Map<String, Map<String, Object>> _clipLeadIns = {};
+
+  /// Clip mode (V2-23): the next [open] of [uri] tells the core its learned
+  /// start ([startMs], null when unknown), whether it may be measured and its
+  /// [origin].
+  void rememberClipStart(String uri, {int? startMs, bool measure = false, String? origin}) {
+    if (!clipMode) return;
+    _clipLeadIns
+      ..remove(uri)
+      ..[uri] = {'clipStartMs': ?startMs, 'measureLeadIn': measure, 'origin': ?origin};
+    while (_clipLeadIns.length > _clipCacheKeysKept) {
+      _clipLeadIns.remove(_clipLeadIns.keys.first);
+    }
+  }
+
+  /// Clip mode (V2-23): "Skip trailer intros" ([enabled]) and the developer's
+  /// [measureOnly]. Kept for a core not up yet, which takes it as it comes up.
+  Future<void> setLeadInPolicy({required bool enabled, required bool measureOnly}) async {
+    if (disposed || !clipMode) return;
+    final policy = (enabled: enabled, measureOnly: measureOnly);
+    _leadInPolicy = policy;
+    await _applyWhenInitialized(
+      () => invoke('setLeadInPolicy', {'enabled': enabled, 'measureOnly': measureOnly}),
+      () => _leadInPolicy == policy,
+    );
+  }
+
+  /// Clip mode (V2-23): an exact seek, for a clip opened before its start
+  /// was learned (Replay and the loop land on the start, not a keyframe).
+  Future<void> seekClipExact(Duration position) async {
+    if (disposed || !clipMode) return;
+    await runSeek(position, () => invoke('seek', {'positionMs': position.inMilliseconds, 'exact': true}));
+  }
+
+  /// Clip mode: initializes the native core with no media (the Reel's cold
+  /// open, V2-04), so the first [open] doesn't wait for it. Initializing
+  /// builds the player, its surface (hidden) and its load control; no
+  /// decoder is allocated until an open hands the player a clip.
+  Future<void> warmClip() async {
+    if (disposed || !clipMode) return;
+    await _ensureInitialized();
+  }
+
+  /// Clip mode (V2-10): the disk cache key the next [open] of [uri] sends,
+  /// for the most recent [_clipCacheKeysKept] clips.
+  final Map<String, String> _clipCacheKeys = {};
+  static const int _clipCacheKeysKept = 16;
+
+  /// Clip mode: [open] of [uri] reads and writes the clip core's disk cache
+  /// under [cacheKey] (a Plex clip's, `ReelClipCache.keyFor`).
+  void rememberClipCacheKey(String uri, String cacheKey) {
+    if (!clipMode) return;
+    _clipCacheKeys
+      ..remove(uri)
+      ..[uri] = cacheKey;
+    while (_clipCacheKeys.length > _clipCacheKeysKept) {
+      _clipCacheKeys.remove(_clipCacheKeys.keys.first);
+    }
+  }
+
+  /// Clip mode: drop [rank]'s preload, or every one when null.
+  Future<void> clearPreloads({String? rank}) async {
     if (disposed || !clipMode || !initialized) return;
-    await invoke('clearPreloads');
+    await invoke('clearPreloads', {'rank': ?rank});
   }
 
   @override

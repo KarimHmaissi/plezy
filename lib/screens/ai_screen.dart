@@ -121,7 +121,7 @@ class _PendingAsk {
 
   final String request;
 
-  /// What the chip shows ("more like Severance" rather than the prompt).
+  /// What the chip shows ("more like Harbor Lights" rather than the prompt).
   final String label;
   final String? replaceId;
   final List<({String request, AiAnswer answer})> previous;

@@ -47,7 +47,7 @@ void main() {
     final result = await TitleCopies(finder.call).movie(
       title: 'Low Tide',
       year: 2025,
-      ids: const ExternalIds(tmdb: 1233413, imdb: 'tt31193180'),
+      ids: const ExternalIds(tmdb: 900001, imdb: 'tt9000001'),
       abort: abort,
     );
 
@@ -56,7 +56,7 @@ void main() {
     expect(query.kind, MediaKind.movie);
     expect(query.title, 'Low Tide');
     expect(query.year, 2025);
-    expect(query.ids.tmdb, 1233413);
+    expect(query.ids.tmdb, 900001);
     expect(finder.aborts.single, same(abort));
     expect([for (final item in result.items) item.serverId], ['server-a', 'server-b']);
     expect(result.isComplete, isTrue);
@@ -68,7 +68,7 @@ void main() {
     await TitleCopies(finder.call).episode(
       showTitle: 'Distant Orbit',
       showYear: 2015,
-      showIds: const ExternalIds(tvdb: 280619),
+      showIds: const ExternalIds(tvdb: 900002),
       season: 3,
       episode: 7,
     );
@@ -77,7 +77,7 @@ void main() {
     expect(query.kind, MediaKind.episode);
     expect(query.showTitle, 'Distant Orbit');
     expect(query.showYear, 2015);
-    expect(query.showIds.tvdb, 280619);
+    expect(query.showIds.tvdb, 900002);
     expect(query.season, 3);
     expect(query.episode, 7);
   });
@@ -119,11 +119,11 @@ void main() {
         index: 7,
       );
 
-      final query = TitleCopies.queryFor(item, showIds: const ExternalIds(tvdb: 280619))!;
+      final query = TitleCopies.queryFor(item, showIds: const ExternalIds(tvdb: 900002))!;
 
       expect(query.kind, MediaKind.episode);
       expect(query.showTitle, 'Distant Orbit');
-      expect(query.showIds.tvdb, 280619);
+      expect(query.showIds.tvdb, 900002);
       expect(query.season, 3);
       expect(query.episode, 7);
     });

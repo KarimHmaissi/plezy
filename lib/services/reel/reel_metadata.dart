@@ -70,6 +70,15 @@ class ReelMetadata {
     return source.parse(serverId, json);
   }
 
+  /// The item from the caches alone (V2-14's warm start, which reads no
+  /// server): the app's cached row, else the Reel's own row, of any age.
+  /// Null when neither has it.
+  Future<MediaItem?> cachedItem(String serverId, String ratingKey) async {
+    final scope = source.scope(serverId);
+    if (scope == null) return null;
+    return await source.cached(serverId, ratingKey) ?? _parse(serverId, await store.cached(key(scope, ratingKey)));
+  }
+
   MediaItem? _parse(String serverId, String? raw) {
     if (raw == null || raw.isEmpty) return null;
     try {

@@ -65,6 +65,6 @@ abstract final class AiMoreLikeThis {
     final details = [kind, ?seed.year?.toString(), if (seed.guid != null) 'guid ${seed.guid}'].join(', ');
     return 'More like "${seed.title}" ($details): find films and shows similar to it in tone, themes and '
         'feel. Leave "${seed.title}" itself out. Name the row (show_picks title) in a few words that '
-        'include "${seed.title}", e.g. "Twisty sci-fi like Severance".';
+        'include "${seed.title}", e.g. "Quiet coastal dramas like Harbor Lights".';
   }
 }

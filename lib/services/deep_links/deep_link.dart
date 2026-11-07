@@ -16,7 +16,7 @@ import '../system_shelf_service.dart';
 /// plezy://play?type=movie|show&tmdb=<n>|tvdb=<n>|imdb=tt<n>|plex=<hash>[&mode=next|shuffle]
 /// plezy://play?content_id=plezy_<serverId>_<itemId>      (launcher shelf rows)
 /// plezy://live?channel=<channel>[&server=<serverId>][&start=beginning|live]
-/// plezy://reel[?deck=<deckId>][&probe=coverage]          (fork: The Reel, Android)
+/// plezy://reel[?deck=<deckId>][&probe=coverage|watchstate|extras-shape]  (fork: The Reel, Android)
 /// plezy://external-player/<result>/<session>?...           (external player return links)
 /// ```
 ///
@@ -84,7 +84,8 @@ final class ReelLink extends DeepLink {
 
   final String? deck;
 
-  /// Measure day: `coverage` runs the clip coverage probe instead.
+  /// Measure day: `coverage`, `watchstate` or `extras-shape` runs that
+  /// probe instead, when the Reel's developer tools allow it.
   final String? probe;
 
   @override

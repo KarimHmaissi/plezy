@@ -93,7 +93,7 @@ void main() {
   });
 
   testWidgets('swiping the card up steps the TV, even on a screen short enough to scroll', (tester) async {
-    // The Fold's cover screen: the list scrolls, so a swipe on it must not
+    // A foldable's cover screen: the list scrolls, so a swipe on it must not
     // be taken by the scroll view.
     final remote = await pump(tester, size: const Size(400, 560));
     remote.sent.clear();
@@ -283,5 +283,20 @@ void main() {
       expect(tester.getRect(find.text('Playing on TV')).top, greaterThan(chip.bottom));
       expect(tester.takeException(), isNull);
     });
+  });
+
+  testWidgets("a deck's intro card on the TV shows its line in place of the card (D22)", (tester) async {
+    final state = {
+      ..._state(),
+      'deck': 'new-this-week',
+      'deckName': 'New this week',
+      'card': null,
+      'poolEnd': false,
+      'intro': {'line': '4 films, 2 shows arrived. 3 worth a look.'},
+    };
+    await pump(tester, state: state);
+    expect(find.text('4 films, 2 shows arrived. 3 worth a look.'), findsOneWidget);
+    expect(find.text('Nothing on this deck yet.'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 }

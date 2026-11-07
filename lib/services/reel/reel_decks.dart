@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/foundation.dart';
@@ -43,6 +44,59 @@ abstract class ReelDeck {
   Listenable? get rebuilt => null;
 
   Future<List<ReelCardData>> load();
+
+  /// How many of a deck's entries are matched to cards first (V2-04): the
+  /// first card waits for these only, and the rest follow.
+  static const int headEntries = 10;
+
+  /// The deck's list in two parts (V2-04): its first [head] entries'
+  /// cards, then a call that loads the rest, so the first card shows
+  /// before the whole deck is matched. A deck that can't split its list
+  /// loads it whole, with nothing to follow.
+  Future<ReelDeckParts> loadParts(int head) async => ReelDeckParts(await load());
+
+  /// The deck's intro card (build plan §4, card kind 3): a line worked out
+  /// when the deck last loaded, shown before its first card. Null: the deck
+  /// opens on its first card. Read after [load].
+  ReelDeckIntro? get intro => null;
+}
+
+/// A deck's intro card: one computed line about the deck ("12 films, 4
+/// shows arrived. 3 worth a look.").
+@immutable
+class ReelDeckIntro {
+  const ReelDeckIntro({required this.line});
+
+  final String line;
+}
+
+/// A deck's list as [ReelDeck.loadParts] gives it: the cards to show now,
+/// and the call that loads the rest (null: there is no rest). The rest may
+/// repeat a title already in [head]; the controller leaves repeats out.
+class ReelDeckParts {
+  const ReelDeckParts(this.head, [this.rest]);
+
+  final List<ReelCardData> head;
+  final Future<List<ReelCardData>> Function()? rest;
+
+  /// [entries] matched by [cards]: the first [head] now, the rest when
+  /// asked. A list no longer than [head] is matched whole.
+  static Future<ReelDeckParts> split(
+    List<DeckEntry> entries,
+    int head,
+    Future<List<ReelCardData>> Function(List<DeckEntry> entries) cards,
+  ) async {
+    if (entries.length <= head) return ReelDeckParts(await cards(entries));
+    final more = entries.sublist(head);
+    return ReelDeckParts(await cards(entries.sublist(0, head)), () => cards(more));
+  }
+
+  /// Both parts passed through [f] (a deck that filters or reshapes
+  /// another deck's cards).
+  ReelDeckParts map(List<ReelCardData> Function(List<ReelCardData> cards) f) {
+    final later = rest;
+    return ReelDeckParts(f(head), later == null ? null : () async => f(await later()));
+  }
 }
 
 /// Applies a deck's hard rules: unseen only unless it keeps seen titles,
@@ -87,6 +141,9 @@ class EntriesDeck extends ReelDeck {
 
   @override
   Future<List<ReelCardData>> load() async => library.cards(await entries());
+
+  @override
+  Future<ReelDeckParts> loadParts(int head) async => ReelDeckParts.split(await entries(), head, library.cards);
 }
 
 /// For You: today's pool (or yesterday's remainder while today's builds),
@@ -104,6 +161,10 @@ class ForYouDeck extends ReelDeck {
     required this.candidates,
     required this.facts,
     this.again,
+    this.offline,
+    this.arrivals,
+    this.person,
+    this.next,
     Listenable? sharedChanges,
     Listenable? clears,
   }) {
@@ -121,9 +182,34 @@ class ForYouDeck extends ReelDeck {
   /// The shows they started and left ([anotherGoCandidates]): the same
   /// daily build orders them for [AnotherGoDeck]. Null: no such deck.
   final Future<List<PoolCandidate>> Function()? again;
+
+  /// Whether the Reel runs offline now (plan V2-15). Offline For You builds
+  /// from what this device keeps: the cached pool, else today's kept code
+  /// order, else code order worked out from the local gather (index and
+  /// brain reads only). Today's build, a model call, never starts offline;
+  /// the next load back online starts it when it is due. Null: never.
+  final bool Function()? offline;
+
+  /// The week's arrivals ([newThisWeekArrivals]): gathered for a build
+  /// only while the week is due ([ReelPool.weekDue]), so the same daily
+  /// build judges them for [NewThisWeekDeck] once a week. Null: no such
+  /// deck.
+  final Future<NewArrivals> Function()? arrivals;
+
+  /// The day's person for the Person deck ([personPick]): gathered once a
+  /// day ([todaysPerson]) and kept ([ReelPool.keepPerson]), so the same
+  /// daily build orders their titles. Null: no such deck.
+  final Future<PersonPick?> Function()? person;
+  ({String day, Future<PersonPick?> pick})? _person;
+
+  /// The show they just finished and the titles like it
+  /// ([whatsNextList]): the same daily build orders them for
+  /// [WhatsNextDeck]. Null: no such deck.
+  final Future<WhatsNextList?> Function()? next;
   Future<void>? _building;
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
   ({String day, Future<List<PoolCandidate>> list})? _again;
+  ({String day, Future<WhatsNextList?> list})? _next;
 
   /// The shared pool as last seen (its day, build and clear), so only a new
   /// one fires [rebuilt].
@@ -148,11 +234,107 @@ class ForYouDeck extends ReelDeck {
 
   @override
   Future<List<ReelCardData>> load() async {
+    final (:pooled, :kept) = await _entries();
+    if (pooled != null) return library.cards(pooled);
+    if (kept != null) return library.cards(kept);
+    return _codeOrder();
+  }
+
+  /// Today's pool (or yesterday's remainder) splits: its first entries are
+  /// matched first, and so does today's kept code order ([snapshotKey]).
+  /// Code order worked out now ranks the whole list, so it loads whole.
+  @override
+  Future<ReelDeckParts> loadParts(int head) async {
+    final (:pooled, :kept) = await _entries();
+    if (pooled != null) return ReelDeckParts.split(pooled, head, library.cards);
+    if (kept != null) return ReelDeckParts.split(kept, head, library.cards);
+    return ReelDeckParts(await _codeOrder());
+  }
+
+  /// The cached pool's entries ([pooled]), else today's kept code order
+  /// ([kept], [snapshotKey]); both null when code order is worked out now.
+  /// With [build], starts today's build when it is due, as the last step:
+  /// code order straight after it joins the build's gather.
+  Future<({List<DeckEntry>? pooled, List<DeckEntry>? kept})> _entries({bool build = true}) async {
     _sharedSeen = _seen(await pool.shared());
     final cached = await pool.cachedPool();
-    await buildIfDue();
-    if (cached != null && cached.isNotEmpty) return library.cards(cached);
-    return worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
+    final pooled = cached != null && cached.isNotEmpty ? cached : null;
+    final kept = pooled == null ? await _snapshot() : null;
+    if (build) await buildIfDue();
+    return (pooled: pooled, kept: kept);
+  }
+
+  /// The row keeping today's code order (V2-14): For You's cards in the
+  /// order code gave them, for the day, so a later load (the Reel's open
+  /// after the warm start, or a reopen) skips the gather. Read only while
+  /// there is no pool; swept with the day rows.
+  String snapshotKey() => ReelStore.deckKey(id, pool.now());
+
+  /// Code order: worked out from today's gather, and kept for the day
+  /// ([snapshotKey]). An empty order isn't kept, so the next load gathers
+  /// again.
+  Future<List<ReelCardData>> _codeOrder() async {
+    final cards = worthShowing(await library.cards(await pool.codeOrder(await _todaysCandidates())));
+    if (cards.isNotEmpty) {
+      try {
+        await pool.store.cache(snapshotKey(), _encodeSnapshot(cards));
+      } catch (e) {
+        appLogger.d('Reel: For You code order not kept', error: e);
+      }
+    }
+    return cards;
+  }
+
+  static String _encodeSnapshot(List<ReelCardData> cards) => jsonEncode([
+    for (final c in cards) {'id': c.id, 'sv': c.best.serverId, 'rk': c.best.ratingKey},
+  ]);
+
+  /// Today's kept code order ([snapshotKey]), or null when there is none.
+  Future<List<DeckEntry>?> _snapshot() async {
+    final String? raw;
+    try {
+      raw = await pool.store.cached(snapshotKey());
+    } catch (e) {
+      appLogger.d('Reel: For You code order unavailable', error: e);
+      return null;
+    }
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw);
+      if (j is! List) return null;
+      final entries = [
+        for (final r in j)
+          if (r is Map && r['sv'] is String && r['rk'] is String)
+            DeckEntry(serverId: r['sv'] as String, ratingKey: r['rk'] as String),
+      ];
+      return entries.isEmpty ? null : entries;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The warm start (V2-14, ReelWarmer): makes sure today's list is ready
+  /// before the Reel opens, without starting a build. Returns what it found:
+  /// `pool` (today's pool or an earlier one's remainder), `kept` (today's
+  /// code order was already kept), `kept N` (code order worked out now and
+  /// kept, N cards) or `empty`.
+  Future<String> keepToday() async {
+    final (:pooled, :kept) = await _entries(build: false);
+    if (pooled != null) return 'pool';
+    if (kept != null) return 'kept';
+    final cards = await _codeOrder();
+    return cards.isEmpty ? 'empty' : 'kept ${cards.length}';
+  }
+
+  /// The warm start: the first [n] cards of today's list as the Reel's open
+  /// will load them (the pool, else the kept code order), matched from the
+  /// index only. Never starts a build or a gather: empty when neither is
+  /// there.
+  Future<List<ReelCardData>> firstCards(int n) async {
+    final (:pooled, :kept) = await _entries(build: false);
+    final entries = pooled ?? kept;
+    if (entries == null) return const [];
+    return library.cards(entries.take(n).toList());
   }
 
   /// The synced data changed (a sync or a TV snapshot): when it brought the
@@ -222,9 +404,56 @@ class ForYouDeck extends ReelDeck {
     return list;
   }
 
+  /// [person], gathered once a day and kept as today's Person deck
+  /// ([ReelPool.keepPerson]); the deck and the build share it. A failed
+  /// gather is null and isn't kept.
+  Future<PersonPick?> todaysPerson() {
+    final gather = person;
+    if (gather == null) return Future.value();
+    final day = pool.today();
+    final have = _person;
+    if (have != null && have.day == day) return have.pick;
+    Future<PersonPick?> run() async {
+      try {
+        final pick = await gather();
+        if (pick != null) await pool.keepPerson(pick);
+        return pick;
+      } catch (e) {
+        appLogger.d('Reel: Person deck gather failed', error: e);
+        if (_person?.day == day) _person = null;
+        return null;
+      }
+    }
+
+    final pick = run();
+    _person = (day: day, pick: pick);
+    return pick;
+  }
+
+  /// [next], gathered once a day: the build orders it. A failed gather is
+  /// none and isn't kept.
+  Future<WhatsNextList?> todaysNext() {
+    final gather = next;
+    if (gather == null) return Future.value();
+    final day = pool.today();
+    final have = _next;
+    if (have != null && have.day == day) return have.list;
+    final list = gather().catchError((Object e) {
+      appLogger.d("Reel: what's-next gather failed", error: e);
+      if (_next?.day == day) _next = null;
+      return null;
+    });
+    _next = (day: day, list: list);
+    return list;
+  }
+
   /// Starts today's build when it is due (the first Reel open of the day,
   /// on whichever of its decks it opens).
   Future<void> buildIfDue() async {
+    if (offline?.call() ?? false) {
+      appLogger.d('[ReelDeck] for-you: offline, no build');
+      return;
+    }
     if (await pool.shouldBuild()) _building ??= _buildToday();
   }
 
@@ -238,7 +467,7 @@ class ForYouDeck extends ReelDeck {
       if (have == null || have.day != pool.today()) {
         if (!await pool.shouldBuild()) return;
       }
-      await (_todaysCandidates(), todaysAgain()).wait;
+      await (_todaysCandidates(), todaysAgain(), todaysPerson(), todaysNext()).wait;
     } catch (e) {
       appLogger.d('Reel: For You gather failed', error: e);
     }
@@ -273,7 +502,14 @@ class ForYouDeck extends ReelDeck {
   /// once the TV's shared pool is stale); nothing schedules it.
   Future<void> _buildToday() async {
     try {
-      final built = await pool.build(await _todaysCandidates(), facts: await facts(), again: await todaysAgain());
+      final built = await pool.build(
+        await _todaysCandidates(),
+        facts: await facts(),
+        again: await todaysAgain(),
+        arrivals: await _weekArrivals(),
+        person: await todaysPerson(),
+        next: await todaysNext(),
+      );
       if (built != null) _rebuilt.bump();
     } catch (e) {
       appLogger.w('Reel: For You build failed', error: e);
@@ -282,9 +518,180 @@ class ForYouDeck extends ReelDeck {
     }
   }
 
+  /// The week's arrivals for today's build, only while the week is due; a
+  /// failed gather is null (the week waits for the next build).
+  Future<NewArrivals?> _weekArrivals() async {
+    final gather = arrivals;
+    if (gather == null) return null;
+    try {
+      if (!await pool.weekDue()) return null;
+      return await gather();
+    } catch (e) {
+      appLogger.d('Reel: the week\'s arrivals are unavailable', error: e);
+      return null;
+    }
+  }
+
   /// Tests and the History page: wait for a build in flight.
   Future<void> get building => _building ?? Future.value();
 }
+
+/// New this week (D22, build plan §3): what reached the servers this week,
+/// one card per title across servers, unseen only, as the daily build
+/// judged it: the build's `new_this_week` list in its order
+/// ([ReelPool.cachedWeek]), never raw `addedAt`. The list turns over once a
+/// week ([ReelPool.weekStartsOn]); until the week's build lands the deck
+/// is empty. It opens on an intro card with the week's counts. It follows
+/// For You's day and takes its fresh builds through For You's [rebuilt].
+class NewThisWeekDeck extends ReelDeck {
+  NewThisWeekDeck({required this.forYou, required this.library});
+
+  final ForYouDeck forYou;
+  final ReelLibrary library;
+  ReelDeckIntro? _intro;
+
+  static const String deckId = 'new-this-week';
+
+  @override
+  String get id => deckId;
+  @override
+  String get name => t.reel.deckNames.newThisWeek;
+  @override
+  bool get keepsSeen => false;
+
+  /// The build's order is kept as it is: a short list the build chose.
+  @override
+  bool get raw => true;
+  @override
+  bool get daily => true;
+  @override
+  Listenable get rebuilt => forYou.rebuilt;
+  @override
+  ReelDeckIntro? get intro => _intro;
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    // The first Reel open of the day may land here: it starts today's build
+    // (which judges the week when it is due) without waiting for it.
+    try {
+      await forYou.buildIfDue();
+    } catch (e) {
+      appLogger.d('Reel: build check failed', error: e);
+    }
+    final week = await forYou.pool.cachedWeek();
+    if (week == null) {
+      _intro = null;
+      appLogger.i('[ReelDeck] new-this-week: no list for this week yet');
+      return const [];
+    }
+    final cards = await library.cards(week.entries);
+    _intro = ReelDeckIntro(
+      line: introLine(films: week.films, shows: week.shows, worth: week.chosen),
+    );
+    appLogger.i(
+      '[ReelDeck] new-this-week: week of ${week.week}, ${week.films} films, ${week.shows} shows, '
+      '${week.chosen} chosen, ${cards.length} left',
+    );
+    return cards;
+  }
+
+  /// "12 films, 4 shows arrived. 3 worth a look."
+  static String introLine({required int films, required int shows, required int worth}) {
+    final s = t.reel.newThisWeek;
+    return s.line(
+      films: s.films(n: films),
+      shows: s.shows(n: shows),
+      worth: s.worth(n: worth),
+    );
+  }
+}
+
+/// The week's arrivals for the daily build (D22): titles whose first copy
+/// on any server arrived in the last [PoolCandidate.newWithin] (a title
+/// already on another server, or an upgraded copy, is not new), one per
+/// title across servers. The counts are every such title but Kids-only
+/// ones; the candidates are the unseen ones not resting, newest first, at
+/// most [ReelPool.maxNew]. Index reads only. [added] stands in for the
+/// index (tests).
+Future<NewArrivals> newThisWeekArrivals({
+  required ReelLibrary library,
+  required ReelStore store,
+  DateTime? now,
+  Future<List<({DeckEntry entry, DateTime added})>> Function(DateTime since)? added,
+}) async {
+  final since = (now ?? DateTime.now()).subtract(PoolCandidate.newWithin);
+  final arrived = await (added ?? (since) => _arrivedSince(library, since))(since);
+  final cards = await library.cards([for (final a in arrived) a.entry]);
+  final byRow = {
+    for (final c in cards)
+      for (final copy in c.title.copies) '${copy.serverId}:${copy.ratingKey}': c,
+  };
+  final excluded = await store.excluded();
+  var films = 0, shows = 0;
+  final counted = <String>{};
+  final out = <PoolCandidate>[];
+  for (final a in arrived) {
+    final card = byRow[a.entry.rowId];
+    if (card == null || !counted.add(card.id)) continue;
+    card.title.isShow ? shows++ : films++;
+    if (!card.facts.seen.isUnseen || excluded.contains(card.id) || out.length >= ReelPool.maxNew) continue;
+    out.add(
+      PoolCandidate(
+        entry: DeckEntry(serverId: card.best.serverId, ratingKey: card.best.ratingKey),
+        titleId: card.id,
+        score: 0,
+        added: a.added,
+      ),
+    );
+  }
+  appLogger.i('[ReelDeck] new-this-week: $films films, $shows shows arrived, ${out.length} unseen');
+  return (candidates: out, films: films, shows: shows);
+}
+
+/// Index titles that arrived since [since], newest first, one row per
+/// title (`group_key`): a title with any copy older than [since] is left
+/// out, so a second server's copy or an upgrade doesn't count as new.
+Future<List<({DeckEntry entry, DateTime added})>> _arrivedSince(ReelLibrary library, DateTime since) async {
+  final db = await library.database();
+  final secs = since.millisecondsSinceEpoch ~/ 1000;
+  final rows = await db
+      .customSelect(
+        'SELECT * FROM index_titles WHERE added_at >= ? ORDER BY added_at DESC LIMIT ?',
+        variables: [Variable<int>(secs), Variable<int>(arrivalsRead)],
+        readsFrom: {db.indexTitles},
+      )
+      .get();
+  final titles = [for (final r in rows) db.indexTitles.map(r.data)];
+  final groups = {for (final t in titles) t.groupKey}.toList();
+  final older = <String>{};
+  for (var i = 0; i < groups.length; i += 400) {
+    final chunk = groups.sublist(i, i + 400 > groups.length ? groups.length : i + 400);
+    final hits = await db
+        .customSelect(
+          'SELECT DISTINCT group_key FROM index_titles WHERE added_at < ? '
+          'AND group_key IN (${List.filled(chunk.length, '?').join(',')})',
+          variables: [Variable<int>(secs), for (final k in chunk) Variable<String>(k)],
+          readsFrom: {db.indexTitles},
+        )
+        .get();
+    older.addAll(hits.map((r) => r.read<String>('group_key')));
+  }
+  final out = <({DeckEntry entry, DateTime added})>[];
+  final seen = <String>{};
+  for (final t in titles) {
+    final at = t.addedAt;
+    if (at == null || older.contains(t.groupKey) || !seen.add(t.groupKey)) continue;
+    out.add((
+      entry: DeckEntry(serverId: t.serverId, ratingKey: t.ratingKey),
+      added: DateTime.fromMillisecondsSinceEpoch(at * 1000),
+    ));
+  }
+  return out;
+}
+
+/// At most this many index rows are read for a week's arrivals (copies on
+/// several servers included).
+const int arrivalsRead = 1000;
 
 /// Fits tonight keeps films this long or shorter, in minutes (D8).
 const int fitsTonightFilmMinutes = 110;
@@ -315,8 +722,14 @@ class FitsTonightDeck extends ReelDeck {
   Listenable get rebuilt => forYou.rebuilt;
 
   @override
-  Future<List<ReelCardData>> load() async => [
-    for (final c in await forYou.load())
+  Future<List<ReelCardData>> load() async => _fitting(await forYou.load());
+
+  /// For You's parts, each kept to what fits.
+  @override
+  Future<ReelDeckParts> loadParts(int head) async => (await forYou.loadParts(head)).map(_fitting);
+
+  static List<ReelCardData> _fitting(List<ReelCardData> cards) => [
+    for (final c in cards)
       if (fitLine(c.facts) case final chip?)
         ReelCardData(
           title: c.title,
@@ -399,6 +812,145 @@ class AnotherGoDeck extends ReelDeck {
   /// A show in no Kids library, sampled or paused by its merged seen state.
   static bool fits(TitleFacts f) =>
       f.isShow && !f.inKidsLibrary && (f.seen.kind == SeenKind.sampled || f.seen.kind == SeenKind.paused);
+}
+
+/// How recently a show must have been finished (or caught up on) to seed
+/// "What's next after" (D22): its newest real play, at most this long ago.
+const Duration whatsNextWithin = Duration(days: 14);
+
+/// The Home card for "What's next after" shows this long after the show's
+/// newest play, like a Save on Home ([ReelPick.fresh]).
+const Duration whatsNextHomeFor = Duration(days: 3);
+
+/// An active show: at least this many real plays within [whatsNextWithin],
+/// so one episode seen again on a show finished long ago never seeds it.
+const int whatsNextActivePlays = 2;
+
+/// The newest shows with recent plays read for a seed.
+const int whatsNextLooked = 12;
+
+/// The show "What's next after" is for (D22): the newest show they finished
+/// or caught up on, by its merged seen state ([SeenKind.finished]), while
+/// they were watching it: at least [whatsNextActivePlays] real plays within
+/// [within], the newest within it, and at least one of them a first watch
+/// of an episode ([firstWatchesSince]), so a rewatch of a show finished
+/// long ago never seeds it. On the servers, never a Kids library's. Facts
+/// only (the brain's watched shows and the index); null when none.
+Future<ReelCardData?> whatsNextSeed({
+  required ReelLibrary library,
+  HistoryBrain? brain,
+  DateTime? now,
+  Duration within = whatsNextWithin,
+}) async {
+  final b = brain ?? HistoryBrain.instance;
+  final since = (now ?? DateTime.now()).subtract(within);
+  final recent = [
+    for (final p in await b.watchedProfiles())
+      if (!p.isMovie && p.inLibrary && p.serverId != null && p.ratingKey != null)
+        if (p.watches.where((w) => w.isAfter(since)).length >= whatsNextActivePlays && firstWatchesSince(p, since)) p,
+  ]..sort((a, b) => b.lastWatched!.compareTo(a.lastWatched!));
+  if (recent.isEmpty) return null;
+  final cards = await library.cards([
+    for (final p in recent.take(whatsNextLooked)) DeckEntry(serverId: p.serverId, ratingKey: p.ratingKey, isShow: true),
+  ]);
+  for (final c in cards) {
+    final seen = c.facts.seen;
+    final last = seen.last;
+    if (c.title.isShow &&
+        seen.kind == SeenKind.finished &&
+        !c.facts.inKidsLibrary &&
+        last != null &&
+        last.isAfter(since)) {
+      return c;
+    }
+  }
+  return null;
+}
+
+/// Whether some episode of show [p] was watched for the first time after
+/// [since]: fewer plays (dated and undated) before [since] than distinct
+/// episodes watched means not every episode had been seen by then. A
+/// rewatch of a show seen through long ago has at least one play before
+/// [since] for each episode, so it is never one.
+bool firstWatchesSince(TitleProfile p, DateTime since) {
+  final before = p.watches.where((w) => !w.isAfter(since)).length + p.bulkPlays;
+  return before < p.episodesWatched;
+}
+
+/// The seed ([whatsNextSeed]) and the unseen titles like it
+/// ([moreLikeCandidates]: on the servers, not Kids-only, unseen, not
+/// resting, the show itself left out), for the daily build to order; null
+/// when there is no seed or nothing like it.
+Future<WhatsNextList?> whatsNextList({
+  required ReelLibrary library,
+  required ReelStore store,
+  HistoryBrain? brain,
+  DateTime? now,
+}) async {
+  final seed = await whatsNextSeed(library: library, brain: brain, now: now);
+  if (seed == null) return null;
+  final candidates = await moreLikeCandidates(seed, library: library, store: store, brain: brain);
+  appLogger.i('[ReelNext] seed ${seed.id} (${seed.facts.seen.line()}): ${candidates.length} titles like it');
+  return candidates.isEmpty ? null : (seed: seed, candidates: candidates);
+}
+
+/// What's next after (a finished show; D22, build plan §3 and §7): unseen
+/// titles like the show they just finished or caught up on ([seed]).
+/// Ordered by the daily build's optional `whats_next` array (the For You
+/// call; no call of its own, D3), when a build ordered this show; else in
+/// code order: [candidates] by similarity, kept to what the public rates
+/// ([ForYouDeck.worthShowing]). It follows For You's day and fresh builds.
+/// Opened from its Home card (the "From the Reel" row) and
+/// `plezy://reel?deck=whats-next`.
+class WhatsNextDeck extends ReelDeck {
+  WhatsNextDeck({required this.seed, required this.forYou, required this.library, required this.candidates});
+
+  static const String deckId = 'whats-next';
+
+  /// The show they finished.
+  final ReelCardData seed;
+  final ForYouDeck forYou;
+  final ReelLibrary library;
+
+  /// The titles like [seed], for code order.
+  final Future<List<PoolCandidate>> Function() candidates;
+
+  @override
+  String get id => deckId;
+  @override
+  String get name => t.reel.deckNames.whatsNext(title: seed.title.title);
+  @override
+  bool get keepsSeen => false;
+  @override
+  bool get daily => true;
+  @override
+  Listenable get rebuilt => forYou.rebuilt;
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    final ordered = await forYou.pool.cachedNext(seed.id);
+    // The first Reel open of the day may land here: it starts today's build
+    // (which orders this deck too) without waiting for it.
+    try {
+      await forYou.buildIfDue();
+    } catch (e) {
+      appLogger.d('Reel: build check failed', error: e);
+    }
+    if (ordered != null && ordered.isNotEmpty) {
+      final cards = await library.cards(ordered);
+      appLogger.i('[ReelNext] deck for ${seed.id}: ${cards.length} cards in the build\'s order');
+      return [
+        for (final c in cards)
+          if (c.id != seed.id) c,
+      ];
+    }
+    final code = ForYouDeck.worthShowing(await library.cards([for (final c in await candidates()) c.entry]));
+    appLogger.i('[ReelNext] deck for ${seed.id}: ${code.length} cards in code order (no build order yet)');
+    return [
+      for (final c in code)
+        if (c.id != seed.id) c,
+    ];
+  }
 }
 
 /// The shows [AnotherGoDeck] offers, in code order: paused before sampled,

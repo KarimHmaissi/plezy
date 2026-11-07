@@ -142,6 +142,8 @@ void main() {
     expect(clip?.source.origin, ClipOrigin.animeTheme);
     expect(clip?.source.uri, 'https://v.animethemes.moe/Show-OP1.webm');
     expect(clip?.assetId, 'at:9');
+    expect(clip?.kind, ClipKind.opening);
+    expect(clip?.number, 1);
     expect(servers.calls, isEmpty, reason: 'no server read when the opening is found');
   });
 
@@ -150,7 +152,8 @@ void main() {
     final clip = await resolver.resolve(film());
     expect(clip?.assetId, 'plex:78');
     expect(clip?.source.uri, startsWith('https://a.example/services/iva/assets/78/'));
-    expect(clip?.label, 'Trailer');
+    expect(clip?.kind, ClipKind.trailer);
+    expect(clip?.number, isNull);
     final cached = await store.cached('src:imdb:tt1');
     expect(cached, isNot(contains('token')), reason: 'never cache a resolved URL');
 
@@ -172,7 +175,7 @@ void main() {
       ),
     );
     expect(clip?.assetId, 'plex:80');
-    expect(clip?.label, 'Teaser');
+    expect(clip?.kind, ClipKind.teaser);
     expect(resolver.slowServers, {'slow'});
 
     servers.calls.clear();
@@ -200,6 +203,104 @@ void main() {
     await store.spoiled('m:imdb:tt1', 'plex:78');
     final clip = await resolver.resolve(film());
     expect(clip?.assetId, 'plex:79');
+  });
+
+  group('the clip kind is cached, never its English words', () {
+    test('a new row stores the kind and the opening number, and no label text', () async {
+      servers.extrasByKey['a:1'] = [_x('80', 'Teaser')];
+      await resolver.resolve(film());
+      final plex = jsonDecode((await store.cached('src:imdb:tt1'))!) as Map<String, dynamic>;
+      expect(plex['lk'], 'teaser');
+      expect(plex.containsKey('ln'), isFalse);
+      expect(plex.containsKey('l'), isFalse);
+
+      await resolver.resolve(
+        const ReelTitle(
+          titleId: 's:tvdb:1',
+          groupKey: 'tvdb:1',
+          title: 'Show',
+          isShow: true,
+          anime: true,
+          tvdbId: 1,
+          copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+        ),
+      );
+      final at = jsonDecode((await store.cached('src:tvdb:1'))!) as Map<String, dynamic>;
+      expect(at['lk'], 'opening');
+      expect(at['ln'], 1);
+      expect(at.containsKey('l'), isFalse);
+    });
+
+    for (final (label, kind) in [
+      ('Teaser', ClipKind.teaser),
+      ('Trailer', ClipKind.trailer),
+      (null, ClipKind.trailer),
+    ]) {
+      test('a Plex row written with the English label ${label ?? '(none)'} still reads as $kind', () async {
+        await store.cache(
+          'src:imdb:tt1',
+          jsonEncode({
+            'v': ClipResolver.sourceFormat,
+            'k': 'plex',
+            'sv': 'a',
+            'pk': '/services/iva/assets/80/video.mp4',
+            'a': 'plex:80',
+            'l': ?label,
+          }),
+        );
+        final clip = await resolver.resolve(film());
+        expect(clip?.assetId, 'plex:80');
+        expect(clip?.kind, kind);
+        expect(servers.calls, isEmpty, reason: 'served from the older row, no server read');
+      });
+    }
+
+    for (final (label, number) in [('Opening 1', 1), ('Opening 2', 2), ('Opening', 1), (null, 1)]) {
+      test('an AnimeThemes row written with the English label ${label ?? '(none)'} reads as opening $number', () async {
+        await store.cache(
+          'src:tvdb:1',
+          jsonEncode({
+            'v': ClipResolver.sourceFormat,
+            'k': 'at',
+            'l': ?label,
+            'c': [
+              {
+                'a': 'at:9',
+                'u': 'https://v.animethemes.moe/Show-OP1.webm',
+                'h': 1080,
+                'sz': 1,
+                'tr': false,
+                'nc': true,
+                'cc': false,
+                'so': null,
+              },
+            ],
+          }),
+        );
+        final clip = await resolver.resolve(
+          const ReelTitle(
+            titleId: 's:tvdb:1',
+            groupKey: 'tvdb:1',
+            title: 'Show',
+            isShow: true,
+            anime: true,
+            tvdbId: 1,
+            copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+          ),
+        );
+        expect(clip?.assetId, 'at:9');
+        expect(clip?.kind, ClipKind.opening);
+        expect(clip?.number, number);
+        expect(atCalls, isEmpty, reason: 'served from the older row');
+      });
+    }
+
+    test('legacy labels parse whatever their case, and unknown words say nothing', () {
+      expect(ClipKind.fromLegacyLabel('teaser'), (ClipKind.teaser, null));
+      expect(ClipKind.fromLegacyLabel('OPENING 3'), (ClipKind.opening, 3));
+      expect(ClipKind.fromLegacyLabel('Featurette'), isNull);
+      expect(ClipKind.fromLegacyLabel(7), isNull);
+    });
   });
 
   test('HD copies are tried before 4K', () async {
@@ -445,7 +546,7 @@ void main() {
       expect(row['v'], ClipResolver.sourceFormat);
       expect((row['c'] as List).length, 4);
 
-      // The Fold folds: the cover screen's profile.
+      // The foldable folds: the cover screen's profile.
       profile.value = cover;
       final folded = await resolver.lookup(harbor);
       expect(folded.clip?.assetId, 'at:2');
@@ -462,7 +563,8 @@ void main() {
       profile.value = cover;
       final again = resolver.repick(clip);
       expect(again.assetId, 'at:2');
-      expect(again.label, clip.label);
+      expect(again.kind, clip.kind);
+      expect(again.number, clip.number);
       expect(again.candidates, clip.candidates);
     });
 
@@ -1087,6 +1189,262 @@ void main() {
       expect(requests, AnimeThemesClient.perMinute);
       expect(refused, 5, reason: 'past the cap a lookup is unknown, never "no record"');
       expect(AnimeThemesClient.perMinute, lessThan(90), reason: "under the API's 90 a minute");
+    });
+  });
+
+  group('a neighbouring deck head, without a Plex read (V2-09, D15)', () {
+    const anime = ReelTitle(
+      titleId: 's:tvdb:1',
+      groupKey: 'tvdb:1',
+      title: 'Harbor Lights',
+      isShow: true,
+      anime: true,
+      tvdbId: 1,
+      copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+    );
+
+    test('an anime show with no row asks AnimeThemes only, and caches the opening it finds', () async {
+      final clip = await resolver.lookupWithoutServers(anime);
+      expect(clip?.source.origin, ClipOrigin.animeTheme);
+      expect(clip?.source.uri, 'https://v.animethemes.moe/Show-OP1.webm');
+      expect(servers.calls, isEmpty, reason: 'no Plex read');
+      expect(atCalls, [
+        [101],
+      ]);
+      // The real lookup then plays the same clip from the row.
+      expect((await resolver.resolve(anime))?.source.uri, clip?.source.uri);
+      expect(servers.calls, isEmpty);
+      expect(atCalls, hasLength(1));
+    });
+
+    test('an anime show with no opening is no head, and nothing is cached', () async {
+      atRecords = {};
+      expect(await resolver.lookupWithoutServers(anime), isNull);
+      expect(servers.calls, isEmpty);
+      expect(await store.cached('src:tvdb:1', ttl: ReelStore.sourceTtl), isNull, reason: 'Plex was never asked');
+    });
+
+    test('a title with no row that is not an anime show is no head, and nothing is read', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      expect(await resolver.lookupWithoutServers(film()), isNull);
+      expect(servers.calls, isEmpty);
+      expect(atCalls, isEmpty);
+    });
+
+    test('a Plex clip carries a disk cache key with no token or address; an opening none (V2-10)', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      final clip = await resolver.resolve(film());
+      expect(clip?.source.cacheKey, 'plex:a:/services/iva/assets/87/video.mp4');
+      expect(clip?.source.uri, contains('token='));
+      expect(clip?.source.cacheKey, isNot(contains('token')));
+      expect(clip?.source.cacheKey, isNot(contains('.example')));
+      // Read back from the row: the same key.
+      expect(
+        (await resolver.lookupWithoutServers(film(), onDisk: (_) async => true))?.source.cacheKey,
+        clip?.source.cacheKey,
+      );
+      final opening = await resolver.resolve(anime);
+      expect(opening?.source.origin, ClipOrigin.animeTheme);
+      expect(opening?.source.cacheKey, isNull);
+    });
+
+    test('a cached Plex clip is a head only when its bytes are on disk', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      await resolver.resolve(film());
+      servers.calls.clear();
+      expect(await resolver.lookupWithoutServers(film()), isNull);
+      final onDisk = await resolver.lookupWithoutServers(film(), onDisk: (c) async => c.assetId == 'plex:87');
+      expect(onDisk?.assetId, 'plex:87');
+      expect(servers.calls, isEmpty);
+    });
+
+    test('a cached miss, or a spoiled or failed asset, is no head', () async {
+      await resolver.resolve(anime);
+      expect(await resolver.lookupWithoutServers(anime, exclude: {'at:9'}), isNull);
+      await store.cache('src:imdb:tt1', ClipResolver.missRow);
+      expect(await resolver.lookupWithoutServers(film()), isNull);
+    });
+
+    test('a cached opening needs no AnimeThemes call either', () async {
+      await resolver.resolve(anime);
+      atCalls.clear();
+      expect((await resolver.lookupWithoutServers(anime))?.source.origin, ClipOrigin.animeTheme);
+      expect(atCalls, isEmpty);
+    });
+  });
+
+  group('offline, a clip from this device alone (V2-15)', () {
+    const anime = ReelTitle(
+      titleId: 's:tvdb:1',
+      groupKey: 'tvdb:1',
+      title: 'Harbor Lights',
+      isShow: true,
+      anime: true,
+      tvdbId: 1,
+      copies: [ReelCopy(serverId: 'a', ratingKey: '5')],
+    );
+    Future<bool> anyOnDisk(ResolvedClip _) async => true;
+
+    test('a Plex clip on disk opens at an address that never resolves, by its cache key, with no token', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      final online = await resolver.resolve(film());
+      servers
+        ..calls.clear()
+        ..offline.add('a');
+      final row = await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl);
+
+      final clip = await resolver.lookupOnDisk(film(), onDisk: (c) async => c.assetId == 'plex:87');
+      expect(clip?.source.uri, 'https://reel-offline.invalid/services/iva/assets/87/video.mp4');
+      expect(clip?.source.uri, isNot(contains('token')));
+      expect(clip?.source.cacheKey, online?.source.cacheKey);
+      expect(clip?.assetId, 'plex:87');
+      expect(servers.calls, isEmpty, reason: 'no server read');
+      expect(await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl), row, reason: 'nothing written');
+    });
+
+    test('a connected server still gives its own address (the uncached rest can stream)', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      await resolver.resolve(film());
+      final clip = await resolver.lookupOnDisk(film(), onDisk: anyOnDisk);
+      expect(clip?.source.uri, 'https://a.example/services/iva/assets/87/video.mp4?token=x');
+    });
+
+    test('a Plex clip not on disk is a still', () async {
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      await resolver.resolve(film());
+      servers.offline.add('a');
+      expect(await resolver.lookupOnDisk(film(), onDisk: (_) async => false), isNull);
+    });
+
+    test('no row asks nobody and writes no miss', () async {
+      servers.offline.add('a');
+      var asked = 0;
+      expect(
+        await resolver.lookupOnDisk(
+          film(),
+          onDisk: (_) async {
+            asked++;
+            return true;
+          },
+        ),
+        isNull,
+      );
+      expect(await resolver.lookupOnDisk(anime, onDisk: anyOnDisk), isNull, reason: 'AnimeThemes is not asked');
+      expect(asked, 0);
+      expect(servers.calls, isEmpty);
+      expect(atCalls, isEmpty);
+      expect(await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl), isNull);
+      expect(await store.cached('src:tvdb:1', ttl: ReelStore.sourceTtl), isNull);
+    });
+
+    test('a cached opening (memory only, D1), a miss or a spoiled asset is a still', () async {
+      await resolver.resolve(anime);
+      atCalls.clear();
+      expect(await resolver.lookupOnDisk(anime, onDisk: anyOnDisk), isNull);
+      expect(atCalls, isEmpty);
+      await store.cache('src:imdb:tt1', ClipResolver.missRow);
+      expect(await resolver.lookupOnDisk(film(), onDisk: anyOnDisk), isNull);
+      servers.extrasByKey['a:1'] = [_x('87', 'Trailer')];
+      await store.cache('src:imdb:tt1', '');
+      await resolver.resolve(film());
+      expect(await resolver.lookupOnDisk(film(), exclude: {'plex:87'}, onDisk: anyOnDisk), isNull);
+    });
+  });
+
+  group('a trailer\'s lead-in rides on its src: row (V2-23)', () {
+    Future<Map<String, dynamic>> row() async =>
+        jsonDecode((await store.cached('src:imdb:tt1'))!) as Map<String, dynamic>;
+
+    Future<void> writeRow(Map<String, dynamic> extra) async {
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      await resolver.resolve(film());
+      final j = await row()
+        ..remove('li')
+        ..remove('lv')
+        ..remove('lr');
+      await store.cache('src:imdb:tt1', jsonEncode({...j, ...extra}));
+    }
+
+    test('a row with li and lv gives the clip its start; 0 is measured with no lead-in', () async {
+      await writeRow({'li': 6006, 'lv': ClipResolver.leadInVersion});
+      expect((await make().resolve(film()))?.source.startAt, const Duration(milliseconds: 6006));
+      await writeRow({'li': 0, 'lv': ClipResolver.leadInVersion});
+      expect((await make().resolve(film()))?.source.startAt, Duration.zero);
+    });
+
+    test('offline, a clip on disk keeps its lead-in like the online lookup (V2-15)', () async {
+      Future<bool> anyOnDisk(ResolvedClip _) async => true;
+      await writeRow({'li': 6006, 'lv': ClipResolver.leadInVersion});
+      servers.offline.add('a');
+      final clip = await make().lookupOnDisk(film(), onDisk: anyOnDisk);
+      expect(clip?.source.uri, startsWith('https://reel-offline.invalid/'));
+      expect(clip?.source.startAt, const Duration(milliseconds: 6006));
+      servers.offline.remove('a');
+      await writeRow({'li': 6006});
+      servers.offline.add('a');
+      expect((await make().lookupOnDisk(film(), onDisk: anyOnDisk))?.source.startAt, isNull, reason: 'not measured');
+    });
+
+    test('an out-of-range li, another lv or the wrong type reads as not measured', () async {
+      for (final extra in [
+        {'li': 16000, 'lv': ClipResolver.leadInVersion},
+        {'li': 200, 'lv': ClipResolver.leadInVersion},
+        {'li': 6006, 'lv': ClipResolver.leadInVersion + 1},
+        {'li': '6006', 'lv': ClipResolver.leadInVersion},
+        {'li': 6006},
+      ]) {
+        await writeRow(extra);
+        expect((await make().resolve(film()))?.source.startAt, isNull, reason: '$extra');
+      }
+    });
+
+    test('an older row with no li still resolves from the cache, in the same format', () async {
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      await resolver.resolve(film());
+      expect((await row()).containsKey('li'), isFalse);
+      expect((await row())['v'], ClipResolver.sourceFormat);
+      servers.calls.clear();
+      final again = await make().resolve(film());
+      expect(again?.source.startAt, isNull);
+      expect(servers.calls, isEmpty, reason: 'no re-resolve for an older row');
+    });
+
+    test('rememberLeadIn writes only on the measured clip\'s row and keeps its age', () async {
+      var now = DateTime(2026, 1, 10);
+      final settings = LocalCustomisationStore(db);
+      store = ReelStore(database: () async => db, settings: () async => settings, clock: () => now);
+      resolver = make();
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      final clip = (await resolver.resolve(film()))!;
+      final writtenAt = await store.cachedAt('src:imdb:tt1');
+
+      now = now.add(const Duration(days: 29));
+      expect(await resolver.rememberLeadIn(film(), clip, const Duration(milliseconds: 6006)), isTrue);
+      expect((await row())['li'], 6006);
+      expect((await row())['lv'], ClipResolver.leadInVersion);
+      expect(await store.cachedAt('src:imdb:tt1'), writtenAt, reason: 'the 30-day identity TTL is never extended');
+      now = now.add(const Duration(days: 2));
+      expect(await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl), isNull, reason: 'it still expires on time');
+
+      // Another file under the same title: never written.
+      now = DateTime(2026, 1, 10);
+      await store.cache('src:imdb:tt1', jsonEncode({...await row(), 'a': 'plex:79'}));
+      expect(await resolver.rememberLeadIn(film(), clip, const Duration(milliseconds: 4000)), isFalse);
+      expect((await row())['li'], 6006);
+    });
+
+    test('a 0 keeps its reason; an AnimeThemes clip is never written', () async {
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      final clip = (await resolver.resolve(film()))!;
+      await resolver.rememberLeadIn(film(), clip, Duration.zero, reason: 'hdr');
+      expect((await row())['li'], 0);
+      expect((await row())['lr'], 'hdr');
+      final theme = ResolvedClip(
+        source: const ClipSource(uri: 'https://v.example/op.webm', origin: ClipOrigin.animeTheme),
+        assetId: 'at:9',
+        kind: ClipKind.opening,
+      );
+      expect(await resolver.rememberLeadIn(film(), theme, const Duration(milliseconds: 6006)), isFalse);
     });
   });
 }

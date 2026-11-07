@@ -24,7 +24,7 @@ enum ReelSheetAction {
   arrangeDecks,
 }
 
-/// Long-press OK (or the menu key) on the TV, long-press on the Fold: the
+/// Long-press OK (or the menu key) on the TV, long-press on the phone: the
 /// app's own menu sheet, Save first and focused, then the rarer choices, the
 /// Reel's settings and every shown deck. Never prompted after a skip;
 /// swiping past is the normal "no".
@@ -33,7 +33,7 @@ enum ReelSheetAction {
 /// ([okAction], D12), and the clip's sound (V2-50): the phone has both on
 /// the card itself.
 ///
-/// [watchHere]: the Fold is connected to a TV, so its Watch goes there;
+/// [watchHere]: the phone is connected to a TV, so its Watch goes there;
 /// "Watch here" comes first and plays the title on the phone instead.
 ///
 /// A deck's second action (hold OK or the menu key on it) opens its own

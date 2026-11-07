@@ -11,7 +11,7 @@ void main() {
       ],
     },
     'comfortPaused': [
-      {'traktId': 7, 'title': 'Frasier'},
+      {'traktId': 7, 'title': 'Quiet Harbour'},
     ],
     'settings': {'ai.history.index': '["abc"]'},
   };
@@ -21,7 +21,7 @@ void main() {
     final home = await store.readHomeLayout();
     expect(home!.rows.single.id, 'ai:abc');
     expect(home.revision, 3);
-    expect(await store.readComfortPaused(), {7: 'Frasier'});
+    expect(await store.readComfortPaused(), {7: 'Quiet Harbour'});
     expect(await store.readSetting('ai.history.index'), '["abc"]');
   });
 

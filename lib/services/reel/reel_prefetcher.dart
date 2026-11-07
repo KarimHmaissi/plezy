@@ -5,8 +5,10 @@ import 'clip_resolver.dart';
 
 /// What a prefetch task does for its card, in the order a card's stages
 /// run: its clip first, then its art and text (plan V2-11), then, for the
-/// next two cards, its art decoded into the image cache (plan V2-13).
-enum ReelPrefetchStage { resolve, metadata, art }
+/// next two cards, its art decoded into the image cache (plan V2-13), then,
+/// on the TV, its clip's first seconds buffered on the clip core (the
+/// native preload, plans V2-09 and V2-11 Wave B).
+enum ReelPrefetchStage { resolve, metadata, art, preload }
 
 /// One piece of work for one card near the one on screen.
 class ReelPrefetchTask {
@@ -16,14 +18,14 @@ class ReelPrefetchTask {
     required this.stage,
     required this.lane,
     required this._run,
-  }) : assert(ReelPrefetcher.offsets.contains(offset)),
+  }) : assert(ReelPrefetcher.order.contains(offset)),
        _offset = offset;
 
   final String cardId;
 
   /// Where the card sits from the one on screen, in the direction of travel:
   /// 0 is the card on screen, 1 the next, -1 the one behind, 2 the one after
-  /// next.
+  /// next; [ReelPrefetcher.deckHead] for a neighbouring deck's head.
   int get offset => _offset;
   int _offset;
   final ReelPrefetchStage stage;
@@ -36,9 +38,9 @@ class ReelPrefetchTask {
 
   String get key => ReelPrefetcher.keyOf(cardId, stage);
 
-  /// Its place in the queue: by distance ([ReelPrefetcher.offsets]), then
-  /// by stage.
-  int get rank => ReelPrefetcher.offsets.indexOf(offset) * ReelPrefetchStage.values.length + stage.index;
+  /// Its place in the queue: by distance ([ReelPrefetcher.order]), then by
+  /// stage.
+  int get rank => ReelPrefetcher.order.indexOf(offset) * ReelPrefetchStage.values.length + stage.index;
 
   void _finish(bool ran) {
     if (!_done.isCompleted) _done.complete(ran);
@@ -62,13 +64,25 @@ class ReelPrefetchTask {
 ///   and its answer is kept for when the card comes round.
 /// - **Hold.** While the card on screen's clip is opening, only its own
 ///   tasks run ([hold]), until its first frame ([release]) or [holdCap].
+/// - **Deck heads.** The heads of the neighbouring decks come last, after
+///   +2 ([deckHead]), and only once the card on screen has shown its first
+///   frame or turned out not to play ([release]); [holdCap] never lets them
+///   go (plan V2-09: neighbour preloads start after the first frame).
 /// - **Clear.** On Watch, suspend, a deck change or memory pressure the
 ///   queue empties ([clear]).
 class ReelPrefetcher {
   ReelPrefetcher({this.holdCap = const Duration(seconds: 4), this.taskCap = const Duration(seconds: 60)});
 
-  /// The queue's order, by distance from the card on screen.
+  /// The cards of the deck on screen worth fetching, by distance from the
+  /// card on screen.
   static const List<int> offsets = [0, 1, -1, 2];
+
+  /// A neighbouring deck's head (the card → or ← lands on): queued after
+  /// +2 (plans V2-09 and V2-11 Wave B).
+  static const int deckHead = 3;
+
+  /// The queue's order.
+  static const List<int> order = [...offsets, deckHead];
 
   /// The cards worth fetching on a metered or offline link, or under memory
   /// pressure: the one on screen and the next.
@@ -97,6 +111,11 @@ class ReelPrefetcher {
   /// server.
   static String artLaneOf(String serverId) => '$serverId~art';
 
+  /// The lane of the native preload for one rank of the clip core (V2-09):
+  /// each rank in a lane of its own, so a preload waiting on its card's clip
+  /// never holds up another rank's.
+  static String preloadLaneOf(String rank) => '~preload/$rank';
+
   /// The lane a card's clip lookup starts in: AnimeThemes for an anime
   /// show, else the server the ladder asks first (an HD copy before 4K).
   static String laneFor(ReelTitle t) {
@@ -110,6 +129,10 @@ class ReelPrefetcher {
   final Map<String, int> _busy = {};
   int _generation = -1;
   bool _held = false;
+
+  /// The card on screen has shown its first frame (or won't play) since the
+  /// last [hold]: the deck heads may go.
+  bool _framed = true;
   Timer? _holdTimer;
   bool _disposed = false;
 
@@ -117,22 +140,64 @@ class ReelPrefetcher {
   bool get held => _held;
 
   /// Holds the lookahead from now: a new card's clip is opening. Lifts on
-  /// [release], or by itself after [holdCap].
+  /// [release], or by itself after [holdCap] (except for the deck heads,
+  /// which wait for [release]).
   void hold() {
     if (_disposed) return;
     _holdTimer?.cancel();
     _held = true;
-    _holdTimer = Timer(holdCap, release);
+    _framed = false;
+    _holdTimer = Timer(holdCap, _capped);
   }
 
-  /// The card on screen's clip showed its first frame (or won't play): the
-  /// lookahead goes on.
-  void release() {
-    _holdTimer?.cancel();
+  /// The hold ran out with no first frame: the cards of this deck go on.
+  void _capped() {
     _holdTimer = null;
     if (!_held) return;
     _held = false;
+    _wake(_liftWaiters);
     _pump();
+  }
+
+  /// Whether the deck heads are waiting for the card on screen's first
+  /// frame.
+  bool get headsHeld => !_framed;
+
+  /// The card on screen's clip showed its first frame (or won't play): the
+  /// lookahead goes on, deck heads included.
+  void release() {
+    _holdTimer?.cancel();
+    _holdTimer = null;
+    if (!_held && _framed) return;
+    _held = false;
+    _framed = true;
+    _wake(_liftWaiters);
+    _wake(_framedWaiters);
+    _pump();
+  }
+
+  /// Completes once the lookahead may go on: at once when it isn't [held],
+  /// else on [release] or [holdCap]. With [heads], on [release] only (the
+  /// deck heads' rule). A task that started before a new card's clip began
+  /// opening (it was waiting on its card's clip, say) waits here before it
+  /// hands the clip core anything, so the open on screen never shares it
+  /// with a preload (V2-09).
+  Future<void> whenLifted({bool heads = false}) {
+    if (_disposed || (heads ? _framed : !_held)) return Future.value();
+    final waiter = Completer<void>();
+    (heads ? _framedWaiters : _liftWaiters).add(waiter);
+    return waiter.future;
+  }
+
+  final List<Completer<void>> _liftWaiters = [];
+  final List<Completer<void>> _framedWaiters = [];
+
+  static void _wake(List<Completer<void>> waiters) {
+    final all = [...waiters];
+    waiters.clear();
+    for (final w in all) {
+      if (!w.isCompleted) w.complete();
+    }
   }
 
   /// Queued tasks, in the order they would run (for the debug overlay and
@@ -203,6 +268,8 @@ class ReelPrefetcher {
     _disposed = true;
     _holdTimer?.cancel();
     _holdTimer = null;
+    _wake(_liftWaiters);
+    _wake(_framedWaiters);
     clear();
   }
 
@@ -221,6 +288,7 @@ class ReelPrefetcher {
     for (final t in [..._queued]) {
       final onScreen = t.offset == 0;
       if (!onScreen && (_held || (_busy[t.lane] ?? 0) > 0)) continue;
+      if (t.offset == deckHead && !_framed) continue;
       _queued.remove(t);
       _start(t);
     }

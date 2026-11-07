@@ -7,7 +7,7 @@ import 'package:plezy/services/comfort/comfort_picker.dart';
 void main() {
   group('Comfort list description', () {
     test('reads paused Trakt ids from the marker', () {
-      expect(parsePausedTraktIds('Paused in Plezy: Stargate SG-1, Lost [plezy:paused=trakt:1234,trakt:5678]'), {
+      expect(parsePausedTraktIds('Paused in Plezy: Star Relay, Island Hours [plezy:paused=trakt:1234,trakt:5678]'), {
         1234,
         5678,
       });
@@ -21,10 +21,13 @@ void main() {
     });
 
     test('writing keeps the user\'s own text and appends one marker line', () {
-      final written = writePausedTraktIds('Shows I fall asleep to\nNo horror', {1234: 'Stargate SG-1', 5678: 'Lost'});
+      final written = writePausedTraktIds('Easy evening shows\nNothing too dark', {
+        1234: 'Star Relay',
+        5678: 'Island Hours',
+      });
       expect(
         written,
-        'Shows I fall asleep to\nNo horror\nPaused in Plezy: Stargate SG-1, Lost [plezy:paused=trakt:1234,trakt:5678]',
+        'Easy evening shows\nNothing too dark\nPaused in Plezy: Star Relay, Island Hours [plezy:paused=trakt:1234,trakt:5678]',
       );
       expect(parsePausedTraktIds(written), {1234, 5678});
     });
@@ -50,19 +53,19 @@ void main() {
 
   group('pickComfortEpisode', () {
     test('every show gets an equal chance regardless of episode count', () async {
-      final episodes = {'Friends': List.generate(236, (i) => 'F$i'), 'Fawlty': List.generate(12, (i) => 'W$i')};
+      final episodes = {'Flatmates': List.generate(236, (i) => 'F$i'), 'Seaside Inn': List.generate(12, (i) => 'W$i')};
       final rng = Random(42);
-      final counts = <String, int>{'Friends': 0, 'Fawlty': 0};
+      final counts = <String, int>{'Flatmates': 0, 'Seaside Inn': 0};
       for (var i = 0; i < 2000; i++) {
         final pick = await pickComfortEpisode<String, String>(
-          shows: const ['Friends', 'Fawlty'],
+          shows: const ['Flatmates', 'Seaside Inn'],
           episodesFor: (show) async => episodes[show]!,
           random: rng,
         );
         counts[pick!.show] = counts[pick.show]! + 1;
       }
-      expect(counts['Friends']! / 2000, closeTo(0.5, 0.05));
-      expect(counts['Fawlty']! / 2000, closeTo(0.5, 0.05));
+      expect(counts['Flatmates']! / 2000, closeTo(0.5, 0.05));
+      expect(counts['Seaside Inn']! / 2000, closeTo(0.5, 0.05));
     });
 
     test('skips shows with no local episodes or failing lookups', () async {

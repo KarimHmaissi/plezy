@@ -34,6 +34,7 @@ import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../settings/reel_settings_screen.dart';
 import '../../services/reel/feed_players.dart';
+import '../../services/reel/feed_youtube_webview.dart';
 import '../video_player/wakelock_controller.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
@@ -53,21 +54,16 @@ import 'reel_stuck.dart';
 /// its player whenever the tab is hidden, a page covers it, or the app goes
 /// to the background.
 class ReelScreen extends StatefulWidget {
-  const ReelScreen({super.key, required this.create, this.offline = false});
+  const ReelScreen({super.key, required this.create});
 
   /// Builds the session from the app's services (`ReelApp.controller`).
   final Future<ReelController> Function(BuildContext context) create;
-
-  /// The app is offline (no server reachable). The tab stays, with a
-  /// message in place of the feed; nothing plays or resolves until it is
-  /// back online.
-  final bool offline;
 
   /// Whether the Reel is the visible tab: the shell goes see-through so the
   /// native video surface behind Flutter shows.
   static final ValueNotifier<bool> showing = ValueNotifier(false);
 
-  /// A deck asked for from outside the tab (deep link, Reel it, the Fold),
+  /// A deck asked for from outside the tab (deep link, Reel it, the phone),
   /// taken by the screen when it next shows.
   static final ValueNotifier<String?> requestedDeck = ValueNotifier(null);
 
@@ -76,7 +72,7 @@ class ReelScreen extends StatefulWidget {
   /// also step to Home.
   static final ValueNotifier<bool> immersive = ValueNotifier(false);
 
-  /// The title the Fold was on when it asked for [requestedDeck] (its
+  /// The title the phone was on when it asked for [requestedDeck] (its
   /// `groupKey`), so the TV opens on that card.
   static String? _requestedCard;
 
@@ -114,7 +110,7 @@ class ReelScreen extends StatefulWidget {
 
   /// Opens the Reel tab, on [deck] when given: closes pages above the shell
   /// first so the tab is what shows. Does nothing while the Reel is turned
-  /// off ([enabled]). [fromRemote]: the Fold's On TV mode asked for it, so
+  /// off ([enabled]). [fromRemote]: the phone's On TV mode asked for it, so
   /// the first-run intro waits (see [_introDeferred]). [groupKey]: the
   /// title to open [deck] on, when this device's list of it has it.
   static void open(BuildContext context, {String? deck, String? groupKey, bool fromRemote = false}) {
@@ -126,7 +122,7 @@ class ReelScreen extends StatefulWidget {
     MainTabSwitcher.select?.call(NavigationTabId.reel);
   }
 
-  /// Set once the Fold's On TV mode has opened the Reel: the phone is
+  /// Set once the phone's On TV mode has opened the Reel: the phone is
   /// driving it and can't press OK on the TV, so the first-run intro waits
   /// until the next launch rather than hold the TV's Reel back.
   static bool _introDeferred = false;
@@ -143,6 +139,11 @@ class ReelScreen extends StatefulWidget {
   /// afresh, as a tab hidden and shown again does, rather than resuming a
   /// clip core and connections that may have died meanwhile.
   static const Duration longAway = Duration(minutes: 30);
+
+  /// Offline (V2-15): how long the session's offline state must hold before
+  /// the visit starts afresh in the new mode, so a server status that
+  /// flickers while the servers connect doesn't restart the Reel twice.
+  static const Duration offlineSettle = Duration(seconds: 1);
 
   /// The longest building the session may take before the screen says it
   /// couldn't open, with Retry. A build that lands later is still taken.
@@ -207,8 +208,13 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _ownPage = false;
 
   /// How the next visit's sound starts, settled in [_visit] and taken by
-  /// the controller in [_start] before its first card plays (a late build
-  /// and Retry included).
+  /// the controller in [_start] before its first card plays. It is kept
+  /// while the build runs, so a build that lands after the screen gave up
+  /// on it ([ReelScreen.createLimit]), or the one Retry makes, still starts
+  /// the way the visit settled. [_release] keeps it too: a build that lands
+  /// while the app is away still starts the session, and the resume that
+  /// follows finds it playing and settles no sound of its own. The next
+  /// visit settles it afresh ([_visit]).
   bool? _visitMuted;
 
   /// TV: bumped each time the viewer turns the sound on, for the badge's
@@ -226,8 +232,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// hold the screen on only while a card really plays. A clip plays as
   /// often as the clip-end pref says, then holds (V2-47).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
+    // A TMDB trailer plays in YouTube's player page (V2-63), the rest in
+    // native players.
     create: (uri) =>
         ReelScreen.debugFeedVideo?.call(uri) ??
+        youTubeFeedVideoFor(uri) ??
         PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
     plays: () => ReelController.clipEndPref().plays,
     keepAwake: _awake.setEnabled,
@@ -341,6 +350,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (_perf.liveDecoders == _liveDecoders) _perf.liveDecoders = null;
     _controller?.removeListener(_onChanged);
     _controller?.toast.removeListener(_onToast);
+    _controller?.offline.removeListener(_onOffline);
+    _offlineTimer?.cancel();
     _controller?.clips.phase.removeListener(_onPhase);
     _leanBack.dispose();
     _soundOn.dispose();
@@ -403,6 +414,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       _createFailed = false;
     });
     c.toast.addListener(_onToast);
+    c.offline.addListener(_onOffline);
     // The Reel's art stays within its image-cache budget around the cards
     // the controller keeps (plan §6); [_release] turns the budget off.
     c.artWindow = ReelArt.keep;
@@ -422,17 +434,22 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     if (mounted) unawaited(_start());
   }
 
-  @override
-  void didUpdateWidget(ReelScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.offline == widget.offline || !_shown) return;
-    appLogger.i('[ReelLife] ${widget.offline ? 'offline: suspended' : 'back online'}');
-    if (widget.offline) {
-      _release();
-    } else {
-      // The feed was let go: its sound settles again, as on any visit.
-      unawaited(_visit('online'));
-    }
+  /// Whether the visit on screen started offline (V2-15); null before one.
+  bool? _visitOffline;
+  Timer? _offlineTimer;
+
+  /// The session went offline or came back (V2-15: the app's offline mode,
+  /// or no network at all). Once that has held for
+  /// [ReelScreen.offlineSettle], a visit that started in the other mode
+  /// starts afresh, so every player is let go and each card plays (or shows
+  /// its still) as the new mode says. The tab stays either way.
+  void _onOffline() {
+    _offlineTimer?.cancel();
+    _offlineTimer = Timer(ReelScreen.offlineSettle, () {
+      final offline = _controller?.offline.value;
+      if (offline == null || _visitOffline == null || offline == _visitOffline) return;
+      _restart(offline ? 'offline' : 'back online');
+    });
   }
 
   /// Stops the card, lets go of every decoder (rebuilt on the next start)
@@ -451,7 +468,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// starts again on its deck and card. The stuck card's retry, and a
   /// resume after [ReelScreen.longAway].
   void _restart(String why) {
-    if (!_shown || widget.offline || _intro) return;
+    if (!_shown || _intro) return;
     appLogger.i('[ReelLife] starting afresh ($why)');
     _release();
     unawaited(_visit('restart: $why'));
@@ -527,7 +544,6 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// The visit's sound ([_visitMuted]) is handed to the controller before
   /// its first card plays.
   Future<void> _start() async {
-    if (widget.offline) return;
     // Any new attempt (Retry, the tab shown again, back online, resumed)
     // shows the curtain while it builds.
     if (_createFailed && mounted) setState(() => _createFailed = false);
@@ -539,10 +555,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     }
     // Under the intro the session is ready but waits; a requested deck is
     // kept for when it ends.
-    if (!mounted || !_shown || widget.offline || _intro) return;
-    final visitMuted = _visitMuted;
-    _visitMuted = null;
-    if (visitMuted != null) await c.setMuted(visitMuted, remember: false);
+    if (!mounted || !_shown || _intro) return;
+    _visitOffline = c.offline.value;
+    final muted = _visitMuted;
+    if (muted != null) {
+      _visitMuted = null;
+      appLogger.d('[ReelLife] the visit starts ${muted ? 'muted' : 'with sound'}');
+      await c.setMuted(muted, remember: false);
+    }
     if (!mounted || !_shown) return;
     final deck = _pendingDeck, card = _pendingCard;
     _pendingDeck = null;
@@ -556,7 +576,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   void _remoteStep(Map<String, dynamic> data) {
     final c = _controller;
-    if (c == null || !_shown || widget.offline || _intro) return;
+    if (c == null || !_shown || _intro) return;
     // Someone at the phone: Lean back keeps rolling (V2-47).
     c.noteInput();
     _held.land();
@@ -580,10 +600,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   void _remoteAction(String action) {
     final c = _controller;
-    if (c == null || !_shown || widget.offline || _intro) return;
+    if (c == null || !_shown || _intro) return;
     c.noteInput();
     _leanBack.poke();
-    // Tonight's picks: a poster tapped on the Fold.
+    // Tonight's picks: a poster tapped on the phone.
     if (action.startsWith('pick:')) {
       final i = int.tryParse(action.substring(5));
       if (i != null) c.selectPick(i);
@@ -660,7 +680,6 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// the intro ended; started afresh; or `back` from a page the Reel
   /// opened): its sound is settled before any card plays.
   Future<void> _visit(String why) async {
-    if (widget.offline) return _start();
     if (_isTv) {
       final screenReader = MediaQuery.maybeAccessibleNavigationOf(context) ?? false;
       final saved = SettingsService.instanceOrNull?.read(SettingsService.reelMuted) ?? false;
@@ -678,7 +697,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     }
     // Phone: only from a feed that was let go. A resume that never paused
     // (the shade pulled down) keeps the sound as it is, and the feed's own
-    // clip must not count as other audio. Offline nothing is built (V2-60).
+    // clip must not count as other audio.
     if (_players.current == null) {
       final muted = await _startSound(why);
       if (muted == null) return;
@@ -844,8 +863,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   Future<void> _openSheet() async {
     final c = _controller;
-    // Tonight's picks has no card to act on.
-    if (c == null || _sheetOpen || c.current.kind == ReelSlotKind.decide) return;
+    // Tonight's picks and a deck's intro card have no card to act on.
+    final kind = c?.current.kind;
+    if (c == null || _sheetOpen || kind == ReelSlotKind.decide || kind == ReelSlotKind.intro) return;
     _sheetOpen = true;
     // Fold, while Watch goes to the TV: "Watch here" plays it on the phone.
     final watchHere = !_isTv && _connected(context.read<CompanionRemoteProvider?>());
@@ -910,9 +930,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (_intro) return _introKey(event);
     final c = _controller;
-    if (c == null || widget.offline) {
+    if (c == null) {
       // TV: OK on the failed-open message is its Retry.
-      if (c == null && _createFailed && !widget.offline && event.logicalKey.isSelectKey) {
+      if (_createFailed && event.logicalKey.isSelectKey) {
         if (event is KeyDownEvent) _retry();
         return KeyEventResult.handled;
       }
@@ -942,6 +962,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
             ReelOkTarget.retry => c.retryDeck(),
             ReelOkTarget.watch => _watch(),
             ReelOkTarget.details => _openOwn(c.openDetails),
+            ReelOkTarget.start => c.step(1),
           }),
       onLongPress: () => unawaited(_openSheet()),
     );
@@ -1033,13 +1054,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   @override
   Widget build(BuildContext context) {
     final c = _controller;
-    final Widget body = widget.offline
-        ? ReelMessage(
-            icon: Symbols.cloud_off_rounded,
-            title: t.reel.status.offlineTitle,
-            body: t.reel.status.offlineBody,
-          )
-        : c == null
+    final Widget body = c == null
         ? (_createFailed
               ? _failed()
               : _isTv
@@ -1057,9 +1072,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
               ),
             ],
           );
-    // The first-run intro (V2-55) stands in for the feed; offline says so
-    // first.
-    final content = _intro && !widget.offline ? ReelIntro(tv: _isTv, onStart: _endIntro) : body;
+    // The first-run intro (V2-55) stands in for the feed.
+    final content = _intro ? ReelIntro(tv: _isTv, onStart: _endIntro) : body;
     return Focus(
       focusNode: _focus,
       autofocus: false,
@@ -1135,7 +1149,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       onSheet: () => unawaited(_openSheet()),
       onDecks: () => unawaited(showReelDeckPicker(context, c)),
       onRemote: onTv ? _remoteMode : null,
-      // V2-65: a Fold screen switch is timed to the picture moving again.
+      // V2-65: a foldable screen switch is timed to the picture moving again.
       onResize: () => _feedProbe?.screenChanged(),
       // V2-31: Back in the immersive feed is the feed's, not the shell's.
       onImmersive: (on) => ReelScreen.immersive.value = on,

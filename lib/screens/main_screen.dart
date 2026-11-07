@@ -1081,7 +1081,7 @@ class _MainScreenState extends State<MainScreen>
         groupKey: groupKey is String && groupKey.isNotEmpty ? groupKey : null,
         fromRemote: true,
       );
-      ReelApp.republish?.call();
+      ReelApp.republish();
     };
     receiver.onReelStep = ReelScreen.remoteStep;
     receiver.onReelAction = ReelScreen.remoteAction;
@@ -1404,7 +1404,7 @@ class _MainScreenState extends State<MainScreen>
       NavigationTabId.explore => ExploreScreen(key: _screenKeys[tab]),
       NavigationTabId.watchlist => WatchlistScreen(key: _screenKeys[tab]),
       NavigationTabId.comfort => ComfortScreen(key: _screenKeys[tab]),
-      NavigationTabId.reel => ReelScreen(key: _screenKeys[tab], create: ReelApp.controller, offline: _isOffline),
+      NavigationTabId.reel => ReelScreen(key: _screenKeys[tab], create: ReelApp.controller),
       NavigationTabId.ai => AiScreen(key: _screenKeys[tab]),
       NavigationTabId.history => HistoryScreen(key: _screenKeys[tab]),
       NavigationTabId.libraries => LibrariesScreen(

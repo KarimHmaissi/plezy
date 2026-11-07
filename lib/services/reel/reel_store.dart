@@ -36,8 +36,8 @@ enum ReelAction {
   unplayed,
 }
 
-/// What one daily [ReelStore.sweep] deleted: old pool rows (`pool:` and
-/// `again:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
+/// What one daily [ReelStore.sweep] deleted: old pool rows (`pool:`,
+/// `again:`, `week:`, `person:` and `next:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
 /// rows, and old events.
 typedef ReelSweep = ({int pools, int days, int sources, int metas, int events});
 
@@ -150,7 +150,7 @@ class ReelStore {
   /// fallback when a read fails; the daily [sweep] deletes older ones.
   static const Duration metadataKept = Duration(days: 30);
 
-  /// Day-scoped cache rows (`pool:<day>`, `again:<day>`, `deck:…:<day>`,
+  /// Day-scoped cache rows (`pool:<day>`, `again:<day>`, `next:<day>`, `deck:…:<day>`,
   /// `cursor:…:<day>`) are read for today and the 2 days before at most
   /// (ReelPool.cachedPool); the daily [sweep] deletes older ones, except
   /// `pool:` rows (see [poolsKept]).
@@ -160,6 +160,29 @@ class ReelStore {
   /// labels for the Reel's signals (ReelPool.clusters, V2-36) look back as
   /// far as its 30-day facts. About 11 KB a day.
   static const int poolsKept = 30;
+
+  /// `week:<first day>` rows (New this week, D22) are kept this many days
+  /// after their week began: this week's and last week's.
+  static const int weeksKept = 14;
+
+  /// `person:<day>` rows (the Person deck, D22) are kept this many days:
+  /// the deck's rotation remembers who it featured that long
+  /// (ReelPool.personRest).
+  static const int personsKept = 14;
+
+  /// The card a deck's next cold start opens at once (V2-04, ReelHead):
+  /// one row per deck on this device, swept with the day rows once it hasn't
+  /// been written for [daysKept] days.
+  static String headKey(String deckId) => 'head:$deckId';
+
+  /// Where the cursor was in [deckId] on [day] (V2-14, ReelCursor): written
+  /// on every card change, read when the deck's list next loads. Swept with
+  /// the day rows once it hasn't been written for [daysKept] days.
+  static String cursorKey(String deckId, DateTime day) => 'cursor:$deckId:${dayStamp(day)}';
+
+  /// A deck's list kept for [day] (V2-14): For You's code order, so a
+  /// later load skips the gather. Swept with the day rows.
+  static String deckKey(String deckId, DateTime day) => 'deck:$deckId:${dayStamp(day)}';
 
   /// The cache row holding the day ([dayStamp]) the sweep last ran on.
   static const String sweptKey = 'sweep:day';
@@ -215,6 +238,19 @@ class ReelStore {
         .get();
   }
 
+  /// Whether this device recorded anything in the Reel since [since] (any
+  /// action, [ReelAction.unplayed] included: the Reel was opened). One row
+  /// read at most.
+  Future<bool> usedSince(DateTime since) async {
+    final db = await _database();
+    final row =
+        await (db.select(db.reelEvents)
+              ..where((e) => e.at.isBiggerOrEqualValue(since.millisecondsSinceEpoch))
+              ..limit(1))
+            .getSingleOrNull();
+    return row != null;
+  }
+
   /// Keeps the log small: events older than [keep] are dropped.
   Future<int> prune({Duration keep = const Duration(days: 400)}) async {
     final db = await _database();
@@ -257,6 +293,23 @@ class ReelStore {
     return row == null ? null : DateTime.fromMillisecondsSinceEpoch(row.updatedAt);
   }
 
+  /// Rewrites [key]'s cache row with [transform] of its value, in one
+  /// transaction, keeping its `updatedAt`: a lead-in learned for a clip
+  /// (V2-23) never extends the clip identity's 30-day trust. A missing row,
+  /// or a [transform] that returns null, writes nothing. Returns whether it
+  /// wrote.
+  Future<bool> patchCached(String key, String? Function(String value) transform) async {
+    final db = await _database();
+    return db.transaction(() async {
+      final row = await (db.select(db.reelCache)..where((c) => c.key.equals(key))).getSingleOrNull();
+      if (row == null) return false;
+      final next = transform(row.value);
+      if (next == null || next == row.value) return false;
+      await (db.update(db.reelCache)..where((c) => c.key.equals(key))).write(ReelCacheCompanion(value: Value(next)));
+      return true;
+    });
+  }
+
   /// Drops [key]'s cache row.
   Future<void> uncache(String key) async {
     final db = await _database();
@@ -277,9 +330,12 @@ class ReelStore {
   Future<ReelSweep?>? _sweeping;
 
   /// The daily sweep, at most once per day on this device: `pool:` rows
-  /// older than [poolsKept] days, `again:` rows older than [daysKept] days,
+  /// older than [poolsKept] days, `again:` and `next:` rows older than
+  /// [daysKept] days, `week:` rows whose week began more than [weeksKept]
+  /// days ago, `person:` rows older than [personsKept] days,
   /// `deck:` and `cursor:` rows not written for [daysKept] days, `src:` rows
-  /// past [sourceTtl], `meta:` rows not written for [metadataKept], and old
+  /// past [sourceTtl], `head:` rows not written for [daysKept] days,
+  /// `meta:` rows not written for [metadataKept], and old
   /// events ([prune]). Returns what it deleted, or null when it already ran
   /// today. Calls made while one runs share it.
   Future<ReelSweep?> sweep() => _sweeping ??= _sweep().whenComplete(() => _sweeping = null);
@@ -299,11 +355,18 @@ class ReelStore {
       )..where((c) => c.key.isBiggerOrEqualValue(prefix) & c.key.isSmallerThanValue(oldest))).go();
     }
 
-    final pools = await olderThan('pool:', poolsKept) + await olderThan('again:', daysKept);
+    final pools =
+        await olderThan('pool:', poolsKept) +
+        await olderThan('again:', daysKept) +
+        await olderThan('week:', weeksKept) +
+        await olderThan('person:', personsKept) +
+        await olderThan('next:', daysKept);
     final dayRowsBefore = nowMs - const Duration(days: daysKept).inMilliseconds;
     final days =
         await (db.delete(db.reelCache)..where(
-              (c) => (c.key.like('deck:%') | c.key.like('cursor:%')) & c.updatedAt.isSmallerThanValue(dayRowsBefore),
+              (c) =>
+                  (c.key.like('deck:%') | c.key.like('cursor:%') | c.key.like('head:%')) &
+                  c.updatedAt.isSmallerThanValue(dayRowsBefore),
             ))
             .go();
     final sources = await (db.delete(
