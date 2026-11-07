@@ -37,6 +37,7 @@ import '../../widgets/overlay_sheet.dart';
 import '../../widgets/pressable.dart';
 import '../../widgets/stat_chip.dart';
 import 'reel_card_view.dart';
+import 'reel_deck_intro_view.dart';
 import 'reel_decide_view.dart';
 
 /// The phone feed's theme (V2-24). The feed paints on black whatever the app
@@ -694,6 +695,14 @@ class _ReelFeedViewState extends State<ReelFeedView> {
             icon: const Icon(Symbols.video_library_rounded),
             label: Text(t.reel.card.decks),
           ),
+        );
+      case ReelSlotKind.intro:
+        return ReelDeckIntroView(
+          deckId: _c.deck.id,
+          deckName: _c.deck.name,
+          slot: slot,
+          tv: false,
+          onStart: () => _goTo(i + 1),
         );
       case ReelSlotKind.decide:
         return ReelDecideView(

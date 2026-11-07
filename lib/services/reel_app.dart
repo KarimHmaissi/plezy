@@ -97,6 +97,7 @@ abstract final class ReelApp {
       candidates: () => forYouCandidates(library: library, store: store),
       facts: () => forYouFacts(store: store, pool: pool),
       again: () => anotherGoCandidates(library: library, store: store),
+      arrivals: () => newThisWeekArrivals(library: library, store: store),
       sharedChanges: Customisation.changed,
       clears: ReelPool.clears,
     );
@@ -112,10 +113,10 @@ abstract final class ReelApp {
       ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
 
   /// The decks in the app's own order: For You, Fits tonight, Give it
-  /// another go, Anime openings and Most Watched (with Trakt); the saved
-  /// answers follow ([_answerDecks]). The controller applies the user's
-  /// order and hidden decks ([ReelController.shownDecks]). For You is
-  /// always first.
+  /// another go, New this week, Anime openings and Most Watched (with
+  /// Trakt); the saved answers follow ([_answerDecks]). The controller
+  /// applies the user's order and hidden decks
+  /// ([ReelController.shownDecks]). For You is always first.
   static Future<List<ReelDeck>> _decks(
     BuildContext context, {
     required ReelLibrary library,
@@ -147,6 +148,7 @@ abstract final class ReelApp {
       forYou,
       FitsTonightDeck(forYou: forYou),
       AnotherGoDeck(forYou: forYou, library: library),
+      NewThisWeekDeck(forYou: forYou, library: library),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.

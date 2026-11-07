@@ -54,6 +54,20 @@ abstract class ReelDeck {
   /// before the whole deck is matched. A deck that can't split its list
   /// loads it whole, with nothing to follow.
   Future<ReelDeckParts> loadParts(int head) async => ReelDeckParts(await load());
+
+  /// The deck's intro card (build plan §4, card kind 3): a line worked out
+  /// when the deck last loaded, shown before its first card. Null: the deck
+  /// opens on its first card. Read after [load].
+  ReelDeckIntro? get intro => null;
+}
+
+/// A deck's intro card: one computed line about the deck ("12 films, 4
+/// shows arrived. 3 worth a look.").
+@immutable
+class ReelDeckIntro {
+  const ReelDeckIntro({required this.line});
+
+  final String line;
 }
 
 /// A deck's list as [ReelDeck.loadParts] gives it: the cards to show now,
@@ -147,6 +161,7 @@ class ForYouDeck extends ReelDeck {
     required this.candidates,
     required this.facts,
     this.again,
+    this.arrivals,
     Listenable? sharedChanges,
     Listenable? clears,
   }) {
@@ -164,6 +179,12 @@ class ForYouDeck extends ReelDeck {
   /// The shows they started and left ([anotherGoCandidates]): the same
   /// daily build orders them for [AnotherGoDeck]. Null: no such deck.
   final Future<List<PoolCandidate>> Function()? again;
+
+  /// The week's arrivals ([newThisWeekArrivals]): gathered for a build
+  /// only while the week is due ([ReelPool.weekDue]), so the same daily
+  /// build judges them for [NewThisWeekDeck] once a week. Null: no such
+  /// deck.
+  final Future<NewArrivals> Function()? arrivals;
   Future<void>? _building;
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
   ({String day, Future<List<PoolCandidate>> list})? _again;
@@ -412,7 +433,12 @@ class ForYouDeck extends ReelDeck {
   /// once the TV's shared pool is stale); nothing schedules it.
   Future<void> _buildToday() async {
     try {
-      final built = await pool.build(await _todaysCandidates(), facts: await facts(), again: await todaysAgain());
+      final built = await pool.build(
+        await _todaysCandidates(),
+        facts: await facts(),
+        again: await todaysAgain(),
+        arrivals: await _weekArrivals(),
+      );
       if (built != null) _rebuilt.bump();
     } catch (e) {
       appLogger.w('Reel: For You build failed', error: e);
@@ -421,9 +447,180 @@ class ForYouDeck extends ReelDeck {
     }
   }
 
+  /// The week's arrivals for today's build, only while the week is due; a
+  /// failed gather is null (the week waits for the next build).
+  Future<NewArrivals?> _weekArrivals() async {
+    final gather = arrivals;
+    if (gather == null) return null;
+    try {
+      if (!await pool.weekDue()) return null;
+      return await gather();
+    } catch (e) {
+      appLogger.d('Reel: the week\'s arrivals are unavailable', error: e);
+      return null;
+    }
+  }
+
   /// Tests and the History page: wait for a build in flight.
   Future<void> get building => _building ?? Future.value();
 }
+
+/// New this week (D22, build plan §3): what reached the servers this week,
+/// one card per title across servers, unseen only, as the daily build
+/// judged it: the build's `new_this_week` list in its order
+/// ([ReelPool.cachedWeek]), never raw `addedAt`. The list turns over once a
+/// week ([ReelPool.weekStartsOn]); until the week's build lands the deck
+/// is empty. It opens on an intro card with the week's counts. It follows
+/// For You's day and takes its fresh builds through For You's [rebuilt].
+class NewThisWeekDeck extends ReelDeck {
+  NewThisWeekDeck({required this.forYou, required this.library});
+
+  final ForYouDeck forYou;
+  final ReelLibrary library;
+  ReelDeckIntro? _intro;
+
+  static const String deckId = 'new-this-week';
+
+  @override
+  String get id => deckId;
+  @override
+  String get name => t.reel.deckNames.newThisWeek;
+  @override
+  bool get keepsSeen => false;
+
+  /// The build's order is kept as it is: a short list the build chose.
+  @override
+  bool get raw => true;
+  @override
+  bool get daily => true;
+  @override
+  Listenable get rebuilt => forYou.rebuilt;
+  @override
+  ReelDeckIntro? get intro => _intro;
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    // The first Reel open of the day may land here: it starts today's build
+    // (which judges the week when it is due) without waiting for it.
+    try {
+      await forYou.buildIfDue();
+    } catch (e) {
+      appLogger.d('Reel: build check failed', error: e);
+    }
+    final week = await forYou.pool.cachedWeek();
+    if (week == null) {
+      _intro = null;
+      appLogger.i('[ReelDeck] new-this-week: no list for this week yet');
+      return const [];
+    }
+    final cards = await library.cards(week.entries);
+    _intro = ReelDeckIntro(
+      line: introLine(films: week.films, shows: week.shows, worth: week.chosen),
+    );
+    appLogger.i(
+      '[ReelDeck] new-this-week: week of ${week.week}, ${week.films} films, ${week.shows} shows, '
+      '${week.chosen} chosen, ${cards.length} left',
+    );
+    return cards;
+  }
+
+  /// "12 films, 4 shows arrived. 3 worth a look."
+  static String introLine({required int films, required int shows, required int worth}) {
+    final s = t.reel.newThisWeek;
+    return s.line(
+      films: s.films(n: films),
+      shows: s.shows(n: shows),
+      worth: s.worth(n: worth),
+    );
+  }
+}
+
+/// The week's arrivals for the daily build (D22): titles whose first copy
+/// on any server arrived in the last [PoolCandidate.newWithin] (a title
+/// already on another server, or an upgraded copy, is not new), one per
+/// title across servers. The counts are every such title but Kids-only
+/// ones; the candidates are the unseen ones not resting, newest first, at
+/// most [ReelPool.maxNew]. Index reads only. [added] stands in for the
+/// index (tests).
+Future<NewArrivals> newThisWeekArrivals({
+  required ReelLibrary library,
+  required ReelStore store,
+  DateTime? now,
+  Future<List<({DeckEntry entry, DateTime added})>> Function(DateTime since)? added,
+}) async {
+  final since = (now ?? DateTime.now()).subtract(PoolCandidate.newWithin);
+  final arrived = await (added ?? (since) => _arrivedSince(library, since))(since);
+  final cards = await library.cards([for (final a in arrived) a.entry]);
+  final byRow = {
+    for (final c in cards)
+      for (final copy in c.title.copies) '${copy.serverId}:${copy.ratingKey}': c,
+  };
+  final excluded = await store.excluded();
+  var films = 0, shows = 0;
+  final counted = <String>{};
+  final out = <PoolCandidate>[];
+  for (final a in arrived) {
+    final card = byRow[a.entry.rowId];
+    if (card == null || !counted.add(card.id)) continue;
+    card.title.isShow ? shows++ : films++;
+    if (!card.facts.seen.isUnseen || excluded.contains(card.id) || out.length >= ReelPool.maxNew) continue;
+    out.add(
+      PoolCandidate(
+        entry: DeckEntry(serverId: card.best.serverId, ratingKey: card.best.ratingKey),
+        titleId: card.id,
+        score: 0,
+        added: a.added,
+      ),
+    );
+  }
+  appLogger.i('[ReelDeck] new-this-week: $films films, $shows shows arrived, ${out.length} unseen');
+  return (candidates: out, films: films, shows: shows);
+}
+
+/// Index titles that arrived since [since], newest first, one row per
+/// title (`group_key`): a title with any copy older than [since] is left
+/// out, so a second server's copy or an upgrade doesn't count as new.
+Future<List<({DeckEntry entry, DateTime added})>> _arrivedSince(ReelLibrary library, DateTime since) async {
+  final db = await library.database();
+  final secs = since.millisecondsSinceEpoch ~/ 1000;
+  final rows = await db
+      .customSelect(
+        'SELECT * FROM index_titles WHERE added_at >= ? ORDER BY added_at DESC LIMIT ?',
+        variables: [Variable<int>(secs), Variable<int>(arrivalsRead)],
+        readsFrom: {db.indexTitles},
+      )
+      .get();
+  final titles = [for (final r in rows) db.indexTitles.map(r.data)];
+  final groups = {for (final t in titles) t.groupKey}.toList();
+  final older = <String>{};
+  for (var i = 0; i < groups.length; i += 400) {
+    final chunk = groups.sublist(i, i + 400 > groups.length ? groups.length : i + 400);
+    final hits = await db
+        .customSelect(
+          'SELECT DISTINCT group_key FROM index_titles WHERE added_at < ? '
+          'AND group_key IN (${List.filled(chunk.length, '?').join(',')})',
+          variables: [Variable<int>(secs), for (final k in chunk) Variable<String>(k)],
+          readsFrom: {db.indexTitles},
+        )
+        .get();
+    older.addAll(hits.map((r) => r.read<String>('group_key')));
+  }
+  final out = <({DeckEntry entry, DateTime added})>[];
+  final seen = <String>{};
+  for (final t in titles) {
+    final at = t.addedAt;
+    if (at == null || older.contains(t.groupKey) || !seen.add(t.groupKey)) continue;
+    out.add((
+      entry: DeckEntry(serverId: t.serverId, ratingKey: t.ratingKey),
+      added: DateTime.fromMillisecondsSinceEpoch(at * 1000),
+    ));
+  }
+  return out;
+}
+
+/// At most this many index rows are read for a week's arrivals (copies on
+/// several servers included).
+const int arrivalsRead = 1000;
 
 /// Fits tonight keeps films this long or shorter, in minutes (D8).
 const int fitsTonightFilmMinutes = 110;

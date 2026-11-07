@@ -856,8 +856,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
 
   Future<void> _openSheet() async {
     final c = _controller;
-    // Tonight's picks has no card to act on.
-    if (c == null || _sheetOpen || c.current.kind == ReelSlotKind.decide) return;
+    // Tonight's picks and a deck's intro card have no card to act on.
+    final kind = c?.current.kind;
+    if (c == null || _sheetOpen || kind == ReelSlotKind.decide || kind == ReelSlotKind.intro) return;
     _sheetOpen = true;
     // Fold, while Watch goes to the TV: "Watch here" plays it on the phone.
     final watchHere = !_isTv && _connected(context.read<CompanionRemoteProvider?>());
@@ -954,6 +955,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
             ReelOkTarget.retry => c.retryDeck(),
             ReelOkTarget.watch => _watch(),
             ReelOkTarget.details => _openOwn(c.openDetails),
+            ReelOkTarget.start => c.step(1),
           }),
       onLongPress: () => unawaited(_openSheet()),
     );

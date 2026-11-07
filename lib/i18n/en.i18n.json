@@ -1812,8 +1812,30 @@
       "anotherGo": "Give it another go",
       "animeOpenings": "Anime openings",
       "mostWatched": "Most Watched",
+      "newThisWeek": "New this week",
       "showThisWeek": "#$n show this week",
       "filmThisWeek": "#$n film this week"
+    },
+    "newThisWeek": {
+      "films": {
+        "one": "${n} film",
+        "other": "${n} films"
+      },
+      "shows": {
+        "one": "${n} show",
+        "other": "${n} shows"
+      },
+      "worth": {
+        "zero": "None worth a look yet.",
+        "one": "${n} worth a look.",
+        "other": "${n} worth a look."
+      },
+      "line": "${films}, ${shows} arrived. ${worth}"
+    },
+    "deckIntro": {
+      "start": "Start",
+      "hintTv": "OK or ↓ first card  ·  → next deck",
+      "swipe": "Or swipe up for the first card"
     },
     "homeRow": "From the Reel",
     "settings": {

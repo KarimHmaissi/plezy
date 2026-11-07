@@ -284,4 +284,19 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  testWidgets("a deck's intro card on the TV shows its line in place of the card (D22)", (tester) async {
+    final state = {
+      ..._state(),
+      'deck': 'new-this-week',
+      'deckName': 'New this week',
+      'card': null,
+      'poolEnd': false,
+      'intro': {'line': '4 films, 2 shows arrived. 3 worth a look.'},
+    };
+    await pump(tester, state: state);
+    expect(find.text('4 films, 2 shows arrived. 3 worth a look.'), findsOneWidget);
+    expect(find.text('Nothing on this deck yet.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

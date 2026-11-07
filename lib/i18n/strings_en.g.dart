@@ -4551,6 +4551,8 @@ class Translations$reel$en {
 	late final Translations$reel$status$en status = Translations$reel$status$en.internal(_root);
 	late final Translations$reel$remote$en remote = Translations$reel$remote$en.internal(_root);
 	late final Translations$reel$deckNames$en deckNames = Translations$reel$deckNames$en.internal(_root);
+	late final Translations$reel$newThisWeek$en newThisWeek = Translations$reel$newThisWeek$en.internal(_root);
+	late final Translations$reel$deckIntro$en deckIntro = Translations$reel$deckIntro$en.internal(_root);
 
 	/// en: 'From the Reel'
 	String get homeRow => 'From the Reel';
@@ -8726,11 +8728,63 @@ class Translations$reel$deckNames$en {
 	/// en: 'Most Watched'
 	String get mostWatched => 'Most Watched';
 
+	/// en: 'New this week'
+	String get newThisWeek => 'New this week';
+
 	/// en: '#$n show this week'
 	String showThisWeek({required Object n}) => '#${n} show this week';
 
 	/// en: '#$n film this week'
 	String filmThisWeek({required Object n}) => '#${n} film this week';
+}
+
+// Path: reel.newThisWeek
+class Translations$reel$newThisWeek$en {
+	Translations$reel$newThisWeek$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: '(one) {${n} film} (other) {${n} films}'
+	String films({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} film',
+		other: '${n} films',
+	);
+
+	/// en: '(one) {${n} show} (other) {${n} shows}'
+	String shows({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} show',
+		other: '${n} shows',
+	);
+
+	/// en: '(zero) {None worth a look yet.} (one) {${n} worth a look.} (other) {${n} worth a look.}'
+	String worth({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		zero: 'None worth a look yet.',
+		one: '${n} worth a look.',
+		other: '${n} worth a look.',
+	);
+
+	/// en: '${films}, ${shows} arrived. ${worth}'
+	String line({required Object films, required Object shows, required Object worth}) => '${films}, ${shows} arrived. ${worth}';
+}
+
+// Path: reel.deckIntro
+class Translations$reel$deckIntro$en {
+	Translations$reel$deckIntro$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Start'
+	String get start => 'Start';
+
+	/// en: 'OK or ↓ first card · → next deck'
+	String get hintTv => 'OK or ↓ first card  ·  → next deck';
+
+	/// en: 'Or swipe up for the first card'
+	String get swipe => 'Or swipe up for the first card';
 }
 
 // Path: reel.settings
@@ -11874,8 +11928,16 @@ extension on Translations {
 			'reel.deckNames.anotherGo' => 'Give it another go',
 			'reel.deckNames.animeOpenings' => 'Anime openings',
 			'reel.deckNames.mostWatched' => 'Most Watched',
+			'reel.deckNames.newThisWeek' => 'New this week',
 			'reel.deckNames.showThisWeek' => ({required Object n}) => '#${n} show this week',
 			'reel.deckNames.filmThisWeek' => ({required Object n}) => '#${n} film this week',
+			'reel.newThisWeek.films' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} film', other: '${n} films', ), 
+			'reel.newThisWeek.shows' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} show', other: '${n} shows', ), 
+			'reel.newThisWeek.worth' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, zero: 'None worth a look yet.', one: '${n} worth a look.', other: '${n} worth a look.', ), 
+			'reel.newThisWeek.line' => ({required Object films, required Object shows, required Object worth}) => '${films}, ${shows} arrived. ${worth}',
+			'reel.deckIntro.start' => 'Start',
+			'reel.deckIntro.hintTv' => 'OK or ↓ first card  ·  → next deck',
+			'reel.deckIntro.swipe' => 'Or swipe up for the first card',
 			'reel.homeRow' => 'From the Reel',
 			'reel.settings.title' => 'Reel',
 			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
@@ -12266,6 +12328,8 @@ extension on Translations {
 			'liveTv.recordShow' => 'Record show',
 			'liveTv.recordSettings.startEarly' => 'Start early (seconds)',
 			'liveTv.recordSettings.endLate' => 'End late (seconds)',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.recordSettings.newOnly' => 'Only new episodes',
 			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
 			'liveTv.recordSettings.anyTime' => 'Record at any time',
@@ -12274,8 +12338,6 @@ extension on Translations {
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
 			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
 			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
@@ -12780,6 +12842,8 @@ extension on Translations {
 			'performanceOverlay.playMethod' => 'Play Method',
 			'performanceOverlay.memory' => 'Memory',
 			'performanceOverlay.uiFps' => 'UI FPS',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.fps' => 'FPS',
 			'performanceOverlay.decoderAndroidHw' => 'Android HW',
 			'performanceOverlay.decoderNvidiaHw' => 'NVIDIA HW',
@@ -12788,8 +12852,6 @@ extension on Translations {
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
 			'performanceOverlay.decoderSoftware' => 'Software',
 			'performanceOverlay.decoderHardware' => 'Hardware',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'performanceOverlay.signal' => 'Signal',

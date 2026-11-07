@@ -36,8 +36,8 @@ enum ReelAction {
   unplayed,
 }
 
-/// What one daily [ReelStore.sweep] deleted: old pool rows (`pool:` and
-/// `again:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
+/// What one daily [ReelStore.sweep] deleted: old pool rows (`pool:`,
+/// `again:` and `week:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
 /// rows, and old events.
 typedef ReelSweep = ({int pools, int days, int sources, int metas, int events});
 
@@ -160,6 +160,10 @@ class ReelStore {
   /// labels for the Reel's signals (ReelPool.clusters, V2-36) look back as
   /// far as its 30-day facts. About 11 KB a day.
   static const int poolsKept = 30;
+
+  /// `week:<first day>` rows (New this week, D22) are kept this many days
+  /// after their week began: this week's and last week's.
+  static const int weeksKept = 14;
 
   /// The card a deck's next cold start opens at once (V2-04, ReelHead):
   /// one row per deck on this device, swept with the day rows once it hasn't
@@ -305,6 +309,7 @@ class ReelStore {
 
   /// The daily sweep, at most once per day on this device: `pool:` rows
   /// older than [poolsKept] days, `again:` rows older than [daysKept] days,
+  /// `week:` rows whose week began more than [weeksKept] days ago,
   /// `deck:` and `cursor:` rows not written for [daysKept] days, `src:` rows
   /// past [sourceTtl], `head:` rows not written for [daysKept] days,
   /// `meta:` rows not written for [metadataKept], and old
@@ -327,7 +332,8 @@ class ReelStore {
       )..where((c) => c.key.isBiggerOrEqualValue(prefix) & c.key.isSmallerThanValue(oldest))).go();
     }
 
-    final pools = await olderThan('pool:', poolsKept) + await olderThan('again:', daysKept);
+    final pools =
+        await olderThan('pool:', poolsKept) + await olderThan('again:', daysKept) + await olderThan('week:', weeksKept);
     final dayRowsBefore = nowMs - const Duration(days: daysKept).inMilliseconds;
     final days =
         await (db.delete(db.reelCache)..where(

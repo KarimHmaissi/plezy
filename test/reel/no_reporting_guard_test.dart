@@ -48,6 +48,7 @@ const _benignExits = {
   // A server's client for card art (`tryGetMediaClientWithFallback`): the
   // image helper builds a URL from it and calls nothing on the server.
   'lib/screens/reel/reel_card_view.dart → lib/utils/provider_extensions.dart',
+  'lib/screens/reel/reel_deck_intro_view.dart → lib/utils/provider_extensions.dart',
   'lib/screens/reel/reel_decide_view.dart → lib/utils/provider_extensions.dart',
   'lib/screens/reel/reel_feed_view.dart → lib/utils/provider_extensions.dart',
   'lib/screens/reel/reel_remote_view.dart → lib/utils/provider_extensions.dart',
