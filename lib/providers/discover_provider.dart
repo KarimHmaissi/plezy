@@ -305,7 +305,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// publishes an empty Continue Watching over the launcher's rows.
   List<MediaItem>? _lastSystemShelfItems;
 
-  /// Fork (V2-42): the Reel's fresh Saves, resolved once per Save.
+  /// Fork (V2-42): the Reel's newest Saves, resolved once per Save.
   final ReelShelfSaves _reelShelfSaves;
 
   List<MediaItem> get onDeck => _onDeck;

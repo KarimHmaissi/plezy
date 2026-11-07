@@ -41,7 +41,9 @@ enum ReelAction {
 /// rows, and old events.
 typedef ReelSweep = ({int pools, int days, int sources, int metas, int events});
 
-/// One saved pick, waiting on the TV's Home for 3 days.
+/// One saved pick. It stays saved until it is removed ([ReelStore.removePick]):
+/// the saved list ([ReelStore.savedPicks]) has no expiry and no cap. Only
+/// Tonight's picks ([ReelStore.freshPicks]) look at the last [fresh] days.
 class ReelPick {
   const ReelPick({
     required this.titleId,
@@ -61,6 +63,8 @@ class ReelPick {
   final DateTime at;
   final String? deck;
 
+  /// Tonight's picks: Saves from the last 3 days, at most 3 (the card is
+  /// laid out for three posters). Not a limit on the saved list.
   static const Duration fresh = Duration(days: 3);
   static const int maxShown = 3;
 
@@ -459,14 +463,12 @@ class ReelStore {
     markerKey: picksMigratedKey,
     decode: _decodeOldPicks,
     move: (old) async {
-      final now = _clock();
       // A title removed after it was saved (here, or on the other device and
       // synced here) stays removed: the old copy only brings back a later save.
       final stamps = settings is LocalCustomisationStore
           ? await settings.readSyncStamps()
           : const <String, SyncStamp>{};
       for (final p in old.values) {
-        if (!p.isFresh(now)) continue;
         final gone = stamps[SyncUnits.setting(pickKey(p.titleId))];
         if (gone != null && gone.deleted && gone.stamp >= p.at.millisecondsSinceEpoch) continue;
         final have = _decodePick(await settings.readSetting(pickKey(p.titleId)));
@@ -556,27 +558,25 @@ class ReelStore {
     return byTitle.values.toList();
   }
 
-  /// The picks the Home row shows: fresh ones, newest first, at most 3.
+  /// Every saved pick, newest first: the saved list ("From the Reel" on
+  /// Home, Android TV's Play Next). No expiry and no cap; a Save stays
+  /// until it is removed.
+  Future<List<ReelPick>> savedPicks() async => (await picks())..sort((a, b) => b.at.compareTo(a.at));
+
+  /// Tonight's picks (the decision card): the Saves of the last
+  /// [ReelPick.fresh], newest first, at most [ReelPick.maxShown].
   Future<List<ReelPick>> freshPicks() async {
     final now = _clock();
     final all = (await picks()).where((p) => p.isFresh(now)).toList()..sort((a, b) => b.at.compareTo(a.at));
     return all.take(ReelPick.maxShown).toList();
   }
 
-  /// Saves [pick] (replacing an earlier save of the same title) and prunes
-  /// stale ones. One action, one decision: the watchlist mirror is the
-  /// caller's.
+  /// Saves [pick] (replacing an earlier save of the same title). Every
+  /// other Save is left as it is: nothing is pruned. One action, one
+  /// decision: the watchlist mirror is the caller's.
   Future<void> savePick(ReelPick pick) async {
-    final now = _clock();
     final settings = await _settings();
-    final stale = [
-      for (final p in await picks())
-        if (p.titleId != pick.titleId && !p.isFresh(now)) p.titleId,
-    ];
     await settings.writeSetting(pickKey(pick.titleId), jsonEncode(pick.toJson()));
-    for (final id in stale) {
-      await settings.writeSetting(pickKey(id), null);
-    }
     picksChanged.value++;
   }
 
@@ -585,6 +585,22 @@ class ReelStore {
     await _oldPicks(settings);
     await settings.writeSetting(pickKey(titleId), null);
     picksChanged.value++;
+  }
+
+  /// Removes the Saves of the copy [serverId] / [ratingKey] (the item a
+  /// "From the Reel" card on Home shows). False: none was saved.
+  Future<bool> removeSavedCopy({required String serverId, required String ratingKey}) async {
+    final ids = [
+      for (final p in await picks())
+        if (p.serverId == serverId && p.ratingKey == ratingKey) p.titleId,
+    ];
+    if (ids.isEmpty) return false;
+    final settings = await _settings();
+    for (final id in ids) {
+      await settings.writeSetting(pickKey(id), null);
+    }
+    picksChanged.value++;
+    return true;
   }
 
   // ---- vetoes (synced) ----

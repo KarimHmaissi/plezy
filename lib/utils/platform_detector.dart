@@ -74,6 +74,7 @@ class TvDetectionService {
   @visibleForTesting
   static set debugDetectionGate(Future<void>? value) => _singleton.debugGate = value;
   static bool? _debugAppleTVOverride;
+  static bool? _debugTvOverride;
   static bool? _debugAutomotiveOverride;
   bool _detected = false;
   bool _forceTv = false;
@@ -179,11 +180,11 @@ class TvDetectionService {
   ///
   /// App code goes through the [PlatformDetector] facade ([PlatformDetector.isTV]
   /// and siblings); these raw accessors exist for the facade and tests.
-  static bool isTVSync() => _debugAppleTVOverride ?? _singleton.instance?.isTV ?? false;
+  static bool isTVSync() => _debugAppleTVOverride ?? _debugTvOverride ?? _singleton.instance?.isTV ?? false;
 
   /// Synchronous TV-hardware check: [isTVSync] without the user's force-TV
   /// override (false before initialization).
-  static bool isTVDeviceSync() => _debugAppleTVOverride ?? _singleton.instance?._detected ?? false;
+  static bool isTVDeviceSync() => _debugAppleTVOverride ?? _debugTvOverride ?? _singleton.instance?._detected ?? false;
 
   /// Synchronous Apple TV check (returns false if not initialized or not tvOS).
   static bool isAppleTVSync() => _debugAppleTVOverride ?? (_tvosBuild || _singleton.instance?._isAppleTV == true);
@@ -196,6 +197,14 @@ class TvDetectionService {
     _debugAppleTVOverride = value;
   }
 
+  /// A TV that is not an Apple TV (an Android TV, say): [isTVSync] and
+  /// [isTVDeviceSync] without [isAppleTVSync], so tests can take the
+  /// Android TV key paths (Back on its key up).
+  @visibleForTesting
+  static void debugSetTvOverride(bool? value) {
+    _debugTvOverride = value;
+  }
+
   @visibleForTesting
   static void debugSetAutomotiveOverride(bool? value) {
     _debugAutomotiveOverride = value;
@@ -205,6 +214,7 @@ class TvDetectionService {
   static void debugReset() {
     _singleton.debugReset();
     _debugAppleTVOverride = null;
+    _debugTvOverride = null;
     _debugAutomotiveOverride = null;
   }
 

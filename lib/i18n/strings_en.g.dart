@@ -4559,6 +4559,9 @@ class Translations$reel$en {
 	/// en: 'From the Reel'
 	String get homeRow => 'From the Reel';
 
+	/// en: 'Remove from the Reel'
+	String get homeRowRemove => 'Remove from the Reel';
+
 	/// en: 'You finished ${title}. Sample what's next in the Reel.'
 	String whatsNextHome({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.';
 
@@ -8386,8 +8389,8 @@ class Translations$reel$intro$en {
 	/// en: 'Welcome to the Reel'
 	String get title => 'Welcome to the Reel';
 
-	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.'
-	String get bodyTv => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.';
+	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more. Press Back for the sound button.'
+	String get bodyTv => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more. Press Back for the sound button.';
 
 	/// en: 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.'
 	String get bodyPhone => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.';
@@ -8466,14 +8469,14 @@ class Translations$reel$card$en {
 	/// en: 'Sound on'
 	String get soundOn => 'Sound on';
 
-	/// en: 'Sound off'
-	String get soundOffBadge => 'Sound off';
+	/// en: '≡ or Back'
+	String get soundButtonKeys => '≡ or Back';
 
-	/// en: 'press ≡ for sound'
-	String get soundOffKey => 'press ≡ for sound';
+	/// en: 'OK'
+	String get soundButtonOk => 'OK';
 
-	/// en: 'Sound off. Press the Menu button for sound.'
-	String get soundOffAnnounce => 'Sound off. Press the Menu button for sound.';
+	/// en: 'Sound off. Press the Menu button, or Back then OK, for sound.'
+	String get soundOffAnnounce => 'Sound off. Press the Menu button, or Back then OK, for sound.';
 
 	/// en: 'Sound on'
 	String get soundOnAnnounce => 'Sound on';
@@ -8510,6 +8513,9 @@ class Translations$reel$card$en {
 
 	/// en: 'Saved'
 	String get saved => 'Saved';
+
+	/// en: 'Remove from saved'
+	String get unsave => 'Remove from saved';
 
 	/// en: 'Resume ${episode}'
 	String resume({required Object episode}) => 'Resume ${episode}';
@@ -11924,7 +11930,7 @@ extension on Translations {
 			'navigation.reel' => 'Reel',
 			'navigation.history' => 'History',
 			'reel.intro.title' => 'Welcome to the Reel',
-			'reel.intro.bodyTv' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more.',
+			'reel.intro.bodyTv' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Press ↓ for the next title, → for the next deck and OK to watch. Hold OK to save a title for later, or for more. Press Back for the sound button.',
 			'reel.intro.bodyPhone' => 'Trailers and anime openings from your servers, one title at a time, in decks like channels. Swipe up for the next title and pick a deck at the top. Double-tap to save a title for the TV, hold it for more, and swipe right to just watch.',
 			'reel.intro.start' => 'Start',
 			'reel.card.emptyTitle' => ({required Object deck}) => 'Nothing in ${deck} yet',
@@ -11950,9 +11956,9 @@ extension on Translations {
 			'reel.card.more' => 'More',
 			'reel.card.onTv' => 'On TV',
 			'reel.card.soundOn' => 'Sound on',
-			'reel.card.soundOffBadge' => 'Sound off',
-			'reel.card.soundOffKey' => 'press ≡ for sound',
-			'reel.card.soundOffAnnounce' => 'Sound off. Press the Menu button for sound.',
+			'reel.card.soundButtonKeys' => '≡ or Back',
+			'reel.card.soundButtonOk' => 'OK',
+			'reel.card.soundOffAnnounce' => 'Sound off. Press the Menu button, or Back then OK, for sound.',
 			'reel.card.soundOnAnnounce' => 'Sound on',
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
@@ -11965,6 +11971,7 @@ extension on Translations {
 			'reel.card.failedBodyPhone' => 'Check the connection and try again.',
 			'reel.card.tryAgain' => 'Try again',
 			'reel.card.saved' => 'Saved',
+			'reel.card.unsave' => 'Remove from saved',
 			'reel.card.resume' => ({required Object episode}) => 'Resume ${episode}',
 			'reel.card.episode' => ({required Object n}) => 'E${n}',
 			'reel.card.seasonEpisode' => ({required Object season, required Object n}) => 'S${season} E${n}',
@@ -12052,6 +12059,7 @@ extension on Translations {
 			'reel.deckIntro.hintTv' => 'OK or ↓ first card  ·  → next deck',
 			'reel.deckIntro.swipe' => 'Or swipe up for the first card',
 			'reel.homeRow' => 'From the Reel',
+			'reel.homeRowRemove' => 'Remove from the Reel',
 			'reel.whatsNextHome' => ({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.',
 			'reel.settings.title' => 'Reel',
 			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
@@ -12428,10 +12436,10 @@ extension on Translations {
 			'liveTv.recordingScheduled' => 'Recording scheduled',
 			'liveTv.alreadyScheduled' => 'This program is already scheduled',
 			'liveTv.dvrAdminRequired' => 'DVR settings require an admin account',
-			'liveTv.recordingFailed' => 'Couldn\'t schedule recording',
-			'liveTv.recordingTargetMissing' => 'Couldn\'t determine recording library',
 			_ => null,
 		} ?? switch (path) {
+			'liveTv.recordingFailed' => 'Couldn\'t schedule recording',
+			'liveTv.recordingTargetMissing' => 'Couldn\'t determine recording library',
 			'liveTv.recordNotAvailable' => 'Recording not available for this program',
 			'liveTv.recordingCancelled' => 'Recording canceled',
 			'liveTv.recordingRuleDeleted' => 'Recording rule deleted',
@@ -12942,10 +12950,10 @@ extension on Translations {
 			'performanceOverlay.matrix' => 'Matrix',
 			'performanceOverlay.primaries' => 'Primaries',
 			'performanceOverlay.transfer' => 'Transfer',
-			'performanceOverlay.renderFps' => 'Render FPS',
-			'performanceOverlay.displayFps' => 'Display FPS',
 			_ => null,
 		} ?? switch (path) {
+			'performanceOverlay.renderFps' => 'Render FPS',
+			'performanceOverlay.displayFps' => 'Display FPS',
 			'performanceOverlay.avSync' => 'A/V Sync',
 			'performanceOverlay.dropped' => 'Dropped',
 			'performanceOverlay.dvRpus' => 'DV RPUs',

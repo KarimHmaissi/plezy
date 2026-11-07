@@ -8,7 +8,7 @@ import '../catalog/home_pins.dart';
 import '../customisation/customisation_store.dart';
 import 'reel_store.dart';
 
-/// The "From the Reel" row on the TV's Home: the fresh Saves, and first,
+/// The "From the Reel" row on the TV's Home: every Save, and first,
 /// when they just finished or caught up on a show, one card that opens the
 /// "What's next after" deck (D22, build plan §7, [entryItem]).
 ///
@@ -71,7 +71,7 @@ abstract final class ReelHomeRow {
         appLogger.i('[ReelSave] Home row: seated flag re-checked on this TV');
       }
       if (await settings.readSetting(seatedKey) != null) return false;
-      if ((await reel.freshPicks()).isEmpty && !(await whatsNext?.call() ?? false)) return false;
+      if ((await reel.savedPicks()).isEmpty && !(await whatsNext?.call() ?? false)) return false;
       final added = await pins.insertFirst((id: HomeRowIds.reelPicks, title: title, sources: const <String>[]));
       await settings.writeSetting(seatedKey, '1');
       appLogger.i('[ReelSave] Home row ${added ? 'seated first' : 'already on Home'}');
@@ -83,7 +83,7 @@ abstract final class ReelHomeRow {
   }
 
   /// What the row shows right now (the "What's next after" card's show,
-  /// [whatsNext], then the fresh picks, newest first), as one string: Home
+  /// [whatsNext], then every Save, newest first), as one string: Home
   /// reloads the row when it changes.
   static Future<String> freshKey({ReelStore? reel, Future<String?> Function()? whatsNext}) async {
     String? next;
@@ -92,7 +92,7 @@ abstract final class ReelHomeRow {
     } catch (_) {}
     return [
       if (next != null) 'next:$next',
-      for (final p in await (reel ?? ReelStore.instance).freshPicks()) '${p.titleId}@${p.at.millisecondsSinceEpoch}',
+      for (final p in await (reel ?? ReelStore.instance).savedPicks()) '${p.titleId}@${p.at.millisecondsSinceEpoch}',
     ].join(',');
   }
 
@@ -125,5 +125,19 @@ abstract final class ReelHomeRow {
   static String? entryDeck(MediaItem item) {
     final deck = item.raw?[entryKey];
     return deck is String && deck.isNotEmpty ? deck : null;
+  }
+
+  /// Whether the row's card [item] is a Save the viewer can remove from it
+  /// ("Remove from the Reel"): any card but the "What's next after" one.
+  static bool removable(MediaItem item) => item.serverId != null && entryDeck(item) == null;
+
+  /// Removes the Save the row's card [item] shows. The row (and Play Next)
+  /// reload from [ReelStore.picksChanged]. False: it was not saved.
+  static Future<bool> remove(MediaItem item, {ReelStore? reel}) async {
+    final serverId = item.serverId;
+    if (serverId == null || !removable(item)) return false;
+    final removed = await (reel ?? ReelStore.instance).removeSavedCopy(serverId: serverId, ratingKey: item.id);
+    appLogger.i('[ReelSave] Home row: ${removed ? 'a Save removed' : 'nothing saved to remove'}');
+    return removed;
   }
 }

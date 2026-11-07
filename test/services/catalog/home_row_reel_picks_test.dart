@@ -20,11 +20,22 @@ class _Server implements MediaServerClient {
   final Set<String> failing;
   final asked = <String>[];
 
+  /// Reads under way, and the most there were at once.
+  int _reading = 0;
+  int mostAtOnce = 0;
+
   @override
   Future<MediaItem?> fetchItem(String id) async {
     asked.add(id);
-    if (failing.contains(id)) throw Exception('server error');
-    return MediaItem(id: id, backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Title $id', serverId: server);
+    _reading++;
+    if (_reading > mostAtOnce) mostAtOnce = _reading;
+    try {
+      await Future<void>.delayed(Duration.zero);
+      if (failing.contains(id)) throw Exception('server error');
+      return MediaItem(id: id, backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Title $id', serverId: server);
+    } finally {
+      _reading--;
+    }
   }
 
   @override
@@ -51,7 +62,7 @@ class _ShowServer implements MediaServerClient {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-/// V2-62: Home's "From the Reel" row shows the fresh Saves, newest first,
+/// V2-62: Home's "From the Reel" row shows every Save, newest first,
 /// read from the copy that was saved; a title that can't be read is left
 /// out instead of taking the row down.
 void main() {
@@ -64,6 +75,7 @@ void main() {
     Customisation.debugSetLocalDatabase(db);
     Customisation.debugSetStore(LocalCustomisationStore(db));
     sources = CatalogSourcesProvider();
+    HomeRowResolver.forgetReelPicks();
   });
 
   tearDown(() async {
@@ -79,19 +91,75 @@ void main() {
 
   const row = (id: HomeRowIds.reelPicks, title: 'From the Reel', sources: <String>[]);
 
-  test('fresh Saves, newest first, at most ${ReelPick.maxShown}; stale ones are gone', () async {
+  test('every Save, newest first: no cap of ${ReelPick.maxShown} and no 3-day expiry', () async {
     final a = _Server('s1');
     await save('1', 's1', 'Copper Hill', const Duration(hours: 5));
     await save('2', 's1', 'Harbor Lights', const Duration(minutes: 1));
     await save('3', 's1', 'Lantern Bay', const Duration(hours: 1));
     await save('4', 's1', 'Salt Road', const Duration(hours: 9));
     await save('5', 's1', 'Quiet Orchard', const Duration(days: 4));
+    await save('6', 's1', 'Amber Field', const Duration(days: 60));
 
     final hub = await HomeRowResolver(sources: sources, clientFor: (id) => id == 's1' ? a : null).fetch(row);
 
     expect(hub?.id, 'home:${HomeRowIds.reelPicks}');
-    expect(hub?.items.map((i) => i.id), ['2', '3', '1']);
-    expect(a.asked, isNot(contains('5')), reason: 'a Save older than three days is never read');
+    expect(hub?.items.map((i) => i.id), ['2', '3', '1', '4', '5', '6']);
+  });
+
+  test('a long list is read a few at a time, and keeps its order', () async {
+    final a = _Server('s1');
+    for (var i = 1; i <= 25; i++) {
+      await save('$i', 's1', 'Title $i', Duration(minutes: i));
+    }
+
+    final hub = await HomeRowResolver(sources: sources, clientFor: (id) => id == 's1' ? a : null).fetch(row);
+
+    expect(hub?.items.map((i) => i.id), [for (var i = 1; i <= 25; i++) '$i']);
+    expect(a.mostAtOnce, HomeRowResolver.pickFetchesAtOnce);
+  });
+
+  test('a reload reads only the Saves it has not read: a new Save is one read, a removal none', () async {
+    final a = _Server('s1');
+    for (var i = 1; i <= 12; i++) {
+      await save('$i', 's1', 'Title $i', Duration(minutes: i + 1));
+    }
+    HomeRowResolver resolver() => HomeRowResolver(sources: sources, clientFor: (id) => id == 's1' ? a : null);
+
+    await resolver().fetch(row);
+    expect(a.asked, hasLength(12));
+
+    a.asked.clear();
+    await save('13', 's1', 'Title 13', Duration.zero);
+    final hub = await resolver().fetch(row);
+    expect(a.asked, ['13'], reason: 'the other Saves were read already');
+    expect(hub?.items.map((i) => i.id), ['13', for (var i = 1; i <= 12; i++) '$i']);
+
+    a.asked.clear();
+    await ReelStore.instance.removePick('t5');
+    final after = await resolver().fetch(row);
+    expect(a.asked, isEmpty);
+    expect(after?.items.map((i) => i.id), [
+      '13',
+      for (var i = 1; i <= 12; i++)
+        if (i != 5) '$i',
+    ]);
+
+    // Home's full refresh reads them all again (watched state and all).
+    HomeRowResolver.forgetReelPicks();
+    await resolver().fetch(row);
+    expect(a.asked, hasLength(12));
+  });
+
+  test('a Save its server could not read is asked about again on the next load', () async {
+    final a = _Server('s1', failing: {'2'});
+    await save('1', 's1', 'Harbor Lights', const Duration(minutes: 3));
+    await save('2', 's1', 'Lantern Bay', const Duration(minutes: 2));
+    HomeRowResolver resolver() => HomeRowResolver(sources: sources, clientFor: (id) => id == 's1' ? a : null);
+
+    await resolver().fetch(row);
+    a.asked.clear();
+    await resolver().fetch(row);
+    expect(a.asked, ['2']);
   });
 
   test('a title its server fails on, or on a server not connected, is left out', () async {

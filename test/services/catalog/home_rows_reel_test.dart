@@ -88,6 +88,7 @@ void main() {
       final store = LocalCustomisationStore(db);
       reel = ReelStore(database: () async => db, settings: () async => store, clock: () => now);
       sources = CatalogSourcesProvider();
+      HomeRowResolver.forgetReelPicks();
     });
 
     tearDown(() async {
@@ -123,11 +124,14 @@ void main() {
       expect([for (final i in hub!.items) i.id], ['rk3', 'rk1']);
     });
 
-    test('no fresh picks is an empty row', () async {
+    test('an old Save still shows; nothing saved is an empty row', () async {
       await save('rk1', const Duration(days: 4));
       final resolver = HomeRowResolver(sources: sources, clientFor: (_) => _Server(), reel: reel);
-      final hub = await resolver.fetch((id: HomeRowIds.reelPicks, title: 'From the Reel', sources: const <String>[]));
-      expect(homeRowFetchState(hub), HomeRowLoadState.empty);
+      const row = (id: HomeRowIds.reelPicks, title: 'From the Reel', sources: <String>[]);
+      expect([for (final i in (await resolver.fetch(row))!.items) i.id], ['rk1']);
+
+      await reel.removePick('rk1');
+      expect(homeRowFetchState(await resolver.fetch(row)), HomeRowLoadState.empty);
     });
   });
 }

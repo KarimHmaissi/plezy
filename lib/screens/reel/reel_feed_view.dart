@@ -594,6 +594,16 @@ class _ReelFeedViewState extends State<ReelFeedView> with SingleTickerProviderSt
     unawaited(_c.save(silent: true));
   }
 
+  /// The Save button on a saved card: removes it from the saved list (a
+  /// double-tap only ever saves).
+  void _toggleSave() {
+    final card = _c.current.card;
+    if (card == null) return;
+    if (!_c.isSaved(card.id)) return _save();
+    ForkMotion.selection();
+    unawaited(_c.unsave());
+  }
+
   /// The screen reader's Hide / Show controls action (V2-54).
   void _toggleControls() {
     ForkMotion.selection();
@@ -807,7 +817,7 @@ class _ReelFeedViewState extends State<ReelFeedView> with SingleTickerProviderSt
             onWatch: widget.onWatch,
             saved: _c.isSaved(card.id),
             onDetails: () => unawaited(_c.openDetails()),
-            onSave: _save,
+            onSave: _toggleSave,
             onMore: widget.onSheet,
           ),
         ),
@@ -826,7 +836,7 @@ class _ReelFeedViewState extends State<ReelFeedView> with SingleTickerProviderSt
       container: true,
       customSemanticsActions: onScreen
           ? {
-              CustomSemanticsAction(label: t.reel.card.save): _save,
+              CustomSemanticsAction(label: _c.isSaved(card.id) ? t.reel.card.unsave : t.reel.card.save): _toggleSave,
               CustomSemanticsAction(label: t.reel.card.more): widget.onSheet,
               CustomSemanticsAction(label: _immersive ? t.reel.card.showControls : t.reel.card.hideControls):
                   _toggleControls,
@@ -1740,7 +1750,7 @@ class _Controls extends StatelessWidget {
             }, maxLines: 1),
           );
     final save = IconButton(
-      tooltip: saved ? t.reel.card.saved : t.reel.card.save,
+      tooltip: saved ? t.reel.card.unsave : t.reel.card.save,
       isSelected: saved,
       onPressed: onSave,
       icon: const Icon(Symbols.bookmark_add_rounded),

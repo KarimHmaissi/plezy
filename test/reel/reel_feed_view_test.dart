@@ -1673,9 +1673,9 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
       await tester.pump();
       expect(c.isSaved('t1'), isTrue);
-      expect(find.byTooltip('Saved'), findsOneWidget);
+      expect(find.byTooltip('Remove from saved'), findsOneWidget, reason: 'pressed again, it unsaves');
       final icon = tester.widget<IconButton>(
-        find.ancestor(of: find.byTooltip('Saved'), matching: find.byType(IconButton)),
+        find.ancestor(of: find.byTooltip('Remove from saved'), matching: find.byType(IconButton)),
       );
       expect(icon.isSelected, isTrue);
       expect(c.toast.value, isNull, reason: 'the feed saves silently');
@@ -1693,6 +1693,23 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
       expect(burst, findsNothing);
       expect(await tester.runAsync(saves), 1);
+      expect(c.isSaved('t1'), isTrue, reason: 'a double-tap never unsaves');
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('Save on a saved card removes it from the saved list', (tester) async {
+      await pump(tester);
+      await tester.tap(find.byTooltip('Save'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump(const Duration(seconds: 1));
+      expect(c.isSaved('t1'), isTrue);
+
+      await tester.tap(find.byTooltip('Remove from saved'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      expect(c.isSaved('t1'), isFalse);
+      expect(await tester.runAsync(store.savedPicks), isEmpty);
+      expect(find.byTooltip('Save'), findsOneWidget);
       await tester.pump(const Duration(seconds: 1));
     });
 

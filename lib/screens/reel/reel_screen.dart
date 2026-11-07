@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../../i18n/strings.g.dart';
 import '../../focus/dpad_navigator.dart';
 import '../../focus/dpad_select_long_press_controller.dart';
+import '../../focus/key_event_utils.dart';
 import '../../focus/transport_keys.dart';
 import '../../media/media_item.dart';
 import '../../mixins/refreshable.dart';
@@ -45,7 +46,7 @@ import 'reel_lean_back.dart';
 import 'reel_intro.dart';
 import 'reel_remote_view.dart';
 import 'reel_sheet.dart';
-import 'reel_sound_badge.dart';
+import 'reel_sound_button.dart';
 import 'reel_stuck.dart';
 
 /// Fork: The Reel. A full-screen feed of trailers and anime openings from
@@ -217,9 +218,31 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// visit settles it afresh ([_visit]).
   bool? _visitMuted;
 
-  /// TV: bumped each time the viewer turns the sound on, for the badge's
-  /// "Sound on" ([ReelSoundBadge]).
-  final ValueNotifier<int> _soundOn = ValueNotifier(0);
+  /// TV: the sound button ([ReelSoundButton]) is the Reel's focus. It is
+  /// drawn focused while the Reel's own node keeps the keys: Back on the
+  /// card brings it in, ↑ or Back leaves it ([_soundButtonKey]). Losing
+  /// the Reel's focus (a page over it, the sheet, the rail) drops it.
+  final ValueNotifier<bool> _soundFocus = ValueNotifier(false);
+
+  /// TV: the keys whose press the sound button took, so their repeats and
+  /// key ups stay with it after it lets the focus go.
+  final Set<LogicalKeyboardKey> _soundKeys = {};
+
+  /// TV: whether the Back being pressed went down on the sound button (so
+  /// its key up goes on to the shell instead of bringing the button in).
+  bool _backFromSound = false;
+
+  /// TV: whether the Back being pressed went down on the card, so only its
+  /// own key up brings the sound button in. A key up whose press was seen
+  /// elsewhere (a sheet or page that closed on the press) goes on.
+  bool _backDownOnCard = false;
+
+  /// TV: just shown again (back from a page the Reel opened, the player
+  /// among them): stray Back events from that pop go on to the shell,
+  /// which swallows them ([MainScreen]'s post-pop guard), until the next
+  /// Back key up or two frames. On Android TV the platform pop can come
+  /// before the key events, so they reach the Reel.
+  bool _backHeldAfterShow = false;
 
   /// The first-run intro (V2-55), until it is dismissed on this device.
   /// While it shows, the session is built but not started: nothing plays,
@@ -354,7 +377,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     _offlineTimer?.cancel();
     _controller?.clips.phase.removeListener(_onPhase);
     _leanBack.dispose();
-    _soundOn.dispose();
+    _soundFocus.dispose();
     _controller?.dispose();
     _focus.dispose();
     _longPress.dispose();
@@ -633,14 +656,16 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   }
 
   /// The viewer turns the sound on ([source]: `key` for ≡ on the TV,
-  /// `remote` for On TV mode, `sheet`): kept for the next card (and, with
-  /// "With sound", the next launch), rising from silence (ClipPlayer), and
-  /// the TV's badge says "Sound on".
+  /// `button` for the TV's sound button, `remote` for On TV mode, `sheet`):
+  /// kept for the next card (and, with "With sound", the next launch), and
+  /// rising from silence (ClipPlayer).
   Future<void> _turnSoundOn(ReelController c, String source) async {
     appLogger.i('[ReelSound] sound on (source=$source, level=${ReelVolume.level.value})');
-    _soundOn.value++;
     await c.setMuted(false);
   }
+
+  /// TV: the sound button pressed (OK on it, a tap, a screen reader).
+  Future<void> _toggleSound(ReelController c) => c.clips.muted ? _turnSoundOn(c, 'button') : _mute(c, 'button');
 
   Future<void> _mute(ReelController c, String source) async {
     appLogger.i('[ReelSound] muted (source=$source)');
@@ -664,6 +689,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void onTabShown() {
     ReelScreen._live = this;
     _shown = true;
+    _holdBackAfterShow();
     ReelScreen.showing.value = true;
     _perf.attachFrames();
     // Back from Watch (or another page the Reel opened) is the same visit.
@@ -672,6 +698,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Under the first-run intro nothing has started yet ([_endIntro]).
     if (!_intro) _beginLeanBack();
     unawaited(_visit(back ? 'back' : 'tab'));
+  }
+
+  void _holdBackAfterShow() {
+    _backHeldAfterShow = true;
+    _backDownOnCard = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _backHeldAfterShow = false);
+    });
   }
 
   /// A visit starts ([why]: the tab shown, which an app launch onto the
@@ -739,6 +773,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   @override
   void onTabHidden() {
     _shown = false;
+    _soundFocus.value = false;
     ReelScreen.showing.value = false;
     _perf.detachFrames();
     _leanBack.end();
@@ -879,6 +914,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         await _watch();
       case ReelSheetAction.save:
         await c.save();
+      case ReelSheetAction.unsave:
+        await c.unsave();
       case ReelSheetAction.moreLike:
         // The call takes a while; the snackbar says so and the sheet's focus
         // comes back at once.
@@ -941,6 +978,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Any key is someone there: Lean back's idle stop counts from it (V2-47).
     if (event is KeyDownEvent || event is KeyRepeatEvent) c.noteInput();
     if (_isTv) {
+      final sound = _soundButtonKey(c, event);
+      if (sound != null) return sound;
       final retry = _stuckKey(c, event);
       if (retry != null) return retry;
       // V2-50: the remote's and the CEC bridge's codes, for the device
@@ -1006,15 +1045,71 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
       c.clips.markKey(Stopwatch()..start(), trigger: 'deck');
       unawaited(c.switchDeck(-1));
     } else if (key.isContextMenuKey) {
-      // TV: ≡ on a muted card turns the sound on (the badge says so); with
+      // TV: ≡ on a muted card turns the sound on (the button says so); with
       // the sound on it opens the sheet, as hold OK always does. A held ≡
       // acts once.
       if (event is KeyDownEvent) {
         unawaited(_isTv && c.clips.muted ? _turnSoundOn(c, 'key') : _openSheet());
       }
     } else {
-      // Back and everything else go on to the shell (Back → the rail).
+      // Back and everything else go on to the shell (Back → the rail; on
+      // the TV, Back first goes to the sound button: [_soundButtonKey]).
       return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
+  /// TV: the sound button's keys ([_soundFocus]). Null: the key goes on as
+  /// usual.
+  ///
+  /// - On the card, Back brings the button in (on its key up, as the
+  ///   shell's Back, so the key up can't reach the shell too).
+  /// - On the button, OK turns the sound on or mutes, ↑ goes back to the
+  ///   card, and ↓ ← → stay put (no card or deck moves under it). Back
+  ///   leaves it and goes on to the shell (the rail), as Back on the card
+  ///   did before. ≡, the transport and media keys do what they do on the
+  ///   card.
+  KeyEventResult? _soundButtonKey(ReelController c, KeyEvent event) {
+    final key = event.logicalKey;
+    if (key.isBackKey) {
+      // Stray Back from the pop that showed the Reel again: the shell's.
+      if (_backHeldAfterShow) {
+        if (event is KeyUpEvent) _backHeldAfterShow = false;
+        return KeyEventResult.ignored;
+      }
+      if (event is KeyDownEvent) {
+        _backFromSound = _soundFocus.value;
+        _backDownOnCard = !_soundFocus.value;
+      }
+      if (_backFromSound) {
+        if (event is KeyUpEvent) {
+          _backFromSound = false;
+          _soundFocus.value = false;
+        }
+        return KeyEventResult.ignored;
+      }
+      // A key up (or repeat) whose press the card never saw goes on.
+      if (!_backDownOnCard) return KeyEventResult.ignored;
+      if (event is KeyUpEvent) _backDownOnCard = false;
+      if (event is KeyDownEvent || event is KeyRepeatEvent) _leanBack.poke();
+      return handleBackKeyAction(event, () => _soundFocus.value = true);
+    }
+    // A key the button took: its repeats and key up stay here.
+    if (_soundKeys.contains(key)) {
+      if (event is KeyUpEvent) _soundKeys.remove(key);
+      if (event is! KeyDownEvent) return KeyEventResult.handled;
+      // A fresh press: the last one's key up never came here.
+      _soundKeys.remove(key);
+    }
+    if (!_soundFocus.value || event is! KeyDownEvent) return null;
+    final up = key == LogicalKeyboardKey.arrowUp;
+    if (!key.isSelectKey && !key.isDpadDirection) return null;
+    _soundKeys.add(key);
+    _leanBack.poke();
+    if (key.isSelectKey) {
+      unawaited(_toggleSound(c));
+    } else if (up) {
+      _soundFocus.value = false;
     }
     return KeyEventResult.handled;
   }
@@ -1077,6 +1172,10 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     return Focus(
       focusNode: _focus,
       autofocus: false,
+      // TV: the sound button's drawn focus goes with the Reel's own.
+      onFocusChange: (focused) {
+        if (!focused) _soundFocus.value = false;
+      },
       onKeyEvent: _onKey,
       child: ColoredBox(
         color: Colors.transparent,
@@ -1133,8 +1232,18 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         ),
       ),
       ReelPauseFeedback(controller: c, leanBack: _leanBack),
-      // The sound at a glance: every TV visit starts muted.
-      ReelSoundBadge(controller: c, soundOn: _soundOn),
+      // The sound at a glance, and the button for it: every TV visit
+      // starts muted.
+      ReelSoundButton(
+        controller: c,
+        focused: _soundFocus,
+        leanBack: _leanBack,
+        onToggle: () {
+          c.noteInput();
+          _leanBack.poke();
+          unawaited(_toggleSound(c));
+        },
+      ),
       ReelDeckStrip(controller: c),
     ],
   );

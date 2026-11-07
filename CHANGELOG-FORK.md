@@ -103,6 +103,51 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-07
+
+### Reel Saves are a real list: no cap, no expiry (branch `feature/reel-sound-button-unlimited-saves`)
+- Saving a Reel card no longer drops older Saves. The cause was in the
+  Reel's store: the "From the Reel" Home row and Android TV's Play Next read
+  only the **3 newest Saves from the last 3 days**, and every new Save
+  **deleted any Save older than 3 days**. Now every Save stays, newest
+  first, until you remove it, and a saved card shows as saved however old
+  the Save is.
+- Only Play Next keeps a limit: Android TV refuses a Watch Next sync of
+  more than 20 items, so the newest Saves fill what Continue Watching
+  leaves of those 20. The Home row and the saved list have no limit; the
+  row reads its titles 6 at a time so a long list doesn't flood a server.
+- Removing a Save: **Remove from the Reel** in a "From the Reel" card's
+  menu on Home (TV and phone), Save again on a saved card on the phone,
+  or **Remove from saved** in the TV's hold-OK sheet (below Save, so a
+  quick OK never removes one). The Plex watchlist copy is left as it is.
+- Tonight's picks (the Reel's decision card) still shows the 3 newest
+  Saves from the last 3 days: it is laid out for three posters.
+- Play Next skips a Save it can't read (its title or server gone) and
+  fills that slot with the next older one, looking at most 40 Saves deep.
+  The Home row reads only Saves it hasn't read yet when a Save is added or
+  removed, and reads them all again on Home's full refresh.
+- Saves deleted by the old 3-day pruning are not brought back; they may
+  still be on the Plex watchlist (Save mirrors there).
+
+### A Sound button on the TV's Reel (branch `feature/reel-sound-button-unlimited-saves`)
+- The TV's Reel now has a **Sound on / Mute button** bottom right, inside
+  the overscan margin, where the "Sound off · press ≡" badge was. Every TV
+  visit still starts muted; the button is always there, in the app's own
+  pill and focus ring (as the card's Replay).
+- **Back on the card focuses it**, OK on it turns the sound on or mutes, ↑
+  goes back to the card, and ↓ ← → move nothing while it is focused. Back
+  on the button goes on to the rail as before, so leaving the Reel takes
+  two Backs. The card keeps the focus and OK on launch.
+- ≡ still turns the sound on, and the button follows every way the sound
+  changes (≡, the sheet, On TV mode, a visit that starts muted again). A
+  tap works too, and a screen reader hears it as a button named for what
+  it does ("Sound on" / "Mute"), then the sound as it is.
+- Only a Back pressed on the card brings the button in: the Back that
+  closed the player, a page or a sheet over the Reel goes on as before,
+  so OK on the card still plays after coming back.
+- Muted, it stays through quiet mode; with the sound on it fades with the
+  card's chrome unless it is focused.
+
 ## 2026-11-06
 
 ### A copy that won't open no longer stops playback (branch `fix/plex-direct-play-503`)

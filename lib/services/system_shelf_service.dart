@@ -276,7 +276,8 @@ class SystemShelfService {
 
   /// Sync Continue Watching items for the currently active [profileId].
   ///
-  /// On Android TV, [saves] (the Reel's fresh Saves, read only once the
+  /// On Android TV, [saves] (the Reel's newest Saves, up to
+  /// [SystemShelf.maxItems], see `ReelShelfSaves`; read only once the
   /// launcher shelf is known to be supported) fill the slots Continue
   /// Watching leaves under [SystemShelf.maxItems], as WATCHLIST entries
   /// (D11). A save whose show or film is already in Continue Watching is

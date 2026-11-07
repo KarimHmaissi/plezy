@@ -9,7 +9,6 @@ import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/screens/reel/reel_screen.dart';
-import 'package:plezy/screens/reel/reel_sound_badge.dart';
 import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/library_index/index_database.dart';
@@ -213,7 +212,7 @@ void main() {
   List<double> levels() => [for (final e in engines) ...e.volumes];
 
   group('every TV visit starts muted', () {
-    testWidgets('the app opened on the Reel: muted, nothing audible, and the badge says how to get sound', (
+    testWidgets('the app opened on the Reel: muted, nothing audible, and the sound button says how to get sound', (
       tester,
     ) async {
       await showTv(tester);
@@ -221,8 +220,8 @@ void main() {
       expect(c.clips.muted, isTrue);
       expect(levels(), everyElement(0), reason: 'not one level above silence');
       expect(soundOff, findsOneWidget);
-      expect(find.text(t.reel.card.soundOffBadge), findsOneWidget);
-      expect(find.textContaining(t.reel.card.soundOffKey), findsOneWidget);
+      expect(find.text(t.reel.card.soundOn), findsOneWidget);
+      expect(find.textContaining(t.reel.card.soundButtonKeys), findsOneWidget);
       expect(settings.read(SettingsService.reelMuted), isFalse, reason: "a visit's mute is never saved");
     });
 
@@ -327,7 +326,7 @@ void main() {
       final reel = await showTv(tester);
       expect(c.clips.muted, isFalse);
       expect(soundOff, findsNothing);
-      expect(soundOnBadge, findsNothing, reason: 'nothing to confirm: the viewer turned nothing on');
+      expect(soundOnBadge, findsOneWidget, reason: 'the button offers Mute');
 
       await press(tester, LogicalKeyboardKey.contextMenu);
       await tester.tap(find.text(t.reel.sheet.soundOff));
@@ -475,18 +474,15 @@ void main() {
   });
 
   group('turning the sound on', () {
-    testWidgets('≡ turns it on; the badge says "Sound on", then goes; ≡ then opens the sheet', (tester) async {
+    testWidgets('≡ turns it on; the sound button offers Mute; ≡ then opens the sheet', (tester) async {
       await showTv(tester);
       await press(tester, LogicalKeyboardKey.contextMenu);
       expect(c.clips.muted, isFalse);
       expect(find.text(t.reel.sheet.details), findsNothing, reason: 'the press was the sound key');
       expect(soundOnBadge, findsOneWidget);
-      expect(settings.read(SettingsService.reelMuted), isFalse);
-
-      await tester.pump(ReelSoundBadge.confirmFor + const Duration(milliseconds: 100));
-      await tester.pumpAndSettle();
-      expect(soundOnBadge, findsNothing);
+      expect(find.text(t.reel.card.mute), findsOneWidget);
       expect(soundOff, findsNothing);
+      expect(settings.read(SettingsService.reelMuted), isFalse);
 
       await press(tester, LogicalKeyboardKey.contextMenu);
       expect(find.text(t.reel.sheet.details), findsOneWidget);
@@ -506,7 +502,7 @@ void main() {
       expect(engine.volumes.first, lessThan(ClipPlayer.dipLevel));
     });
 
-    testWidgets('the badge stays through quiet mode while muted', (tester) async {
+    testWidgets('the sound button stays through quiet mode while muted', (tester) async {
       await showTv(tester);
       final engine = engines.last;
       engine.firstFrameCtl.add(null);
@@ -519,7 +515,28 @@ void main() {
       await showTv(tester);
       expect(
         tester.getSemantics(find.descendant(of: soundOff, matching: find.byType(Semantics)).first),
-        matchesSemantics(label: t.reel.card.soundOffAnnounce, isLiveRegion: true),
+        matchesSemantics(
+          label: t.reel.card.soundOn,
+          value: t.reel.card.soundOffAnnounce,
+          isLiveRegion: true,
+          isButton: true,
+          isFocusable: true,
+          hasTapAction: true,
+        ),
+      );
+      // With the sound on, the button says what it does: it mutes.
+      await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
+      await settle(tester);
+      expect(
+        tester.getSemantics(find.descendant(of: soundOnBadge, matching: find.byType(Semantics)).first),
+        matchesSemantics(
+          label: t.reel.card.mute,
+          value: t.reel.card.soundOnAnnounce,
+          isLiveRegion: true,
+          isButton: true,
+          isFocusable: true,
+          hasTapAction: true,
+        ),
       );
       semantics.dispose();
     });
@@ -548,7 +565,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
       await tester.pumpAndSettle();
-      await tester.tap(find.text(t.reel.card.soundOn));
+      // The sheet's entry (the sound button says "Sound on" too, under it).
+      await tester.tap(find.text(t.reel.card.soundOn).last);
       await settle(tester);
       expect(c.clips.muted, isFalse);
     });

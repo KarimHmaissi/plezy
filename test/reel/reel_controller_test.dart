@@ -638,13 +638,11 @@ void main() {
       c.dispose();
     });
 
-    test('a pick already kept (this device or synced) shows as saved; a stale one does not', () async {
-      // The store prunes by the wall clock, so the picks are dated from it.
+    test('a pick already kept (this device or synced) shows as saved, however old', () async {
       final now = DateTime.now().toUtc();
       ReelPick pick(String id, DateTime at) =>
           ReelPick(titleId: id, groupKey: 'g', serverId: 's1', ratingKey: '1', title: 'Harbor Lights', at: at);
-      // Written as the synced list, as a stale pick sits there until the
-      // next save prunes it.
+      // Written as the synced list (the old format, moved on first read).
       final settings = LocalCustomisationStore(db);
       final raw = jsonEncode([
         pick('t2', now.subtract(const Duration(hours: 5))).toJson(),
@@ -656,8 +654,24 @@ void main() {
       await c.start();
       await pumpEventQueue();
       expect(c.isSaved('t2'), isTrue);
-      expect(c.isSaved('t3'), isFalse, reason: 'past the 3 days on Home');
+      expect(c.isSaved('t3'), isTrue, reason: 'a Save stays until it is removed');
       expect(c.isSaved('t1'), isFalse);
+      c.dispose();
+    });
+
+    test('unsave removes the current card from the saved list on both devices', () async {
+      final c = make();
+      await c.start();
+      await c.save(silent: true);
+      expect(c.isSaved('t1'), isTrue);
+      final changed = ReelStore.picksChanged.value;
+      final unsaving = c.unsave();
+      expect(c.isSaved('t1'), isFalse, reason: 'before the write lands');
+      await unsaving;
+      await pumpEventQueue();
+      expect(c.isSaved('t1'), isFalse);
+      expect(await store.savedPicks(), isEmpty);
+      expect(ReelStore.picksChanged.value, greaterThan(changed));
       c.dispose();
     });
 

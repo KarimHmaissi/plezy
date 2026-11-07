@@ -102,7 +102,41 @@ void main() {
     expect(await tv.homeIds(), isNot(contains(HomeRowIds.reelPicks)));
   });
 
-  test('no fresh pick, no row', () async {
+  test("the row's key lists every Save, newest first, old ones too, and changes on a removal", () async {
+    for (var i = 0; i < 5; i++) {
+      await tv.reel.savePick(
+        ReelPick(
+          titleId: 'p$i',
+          groupKey: 'g$i',
+          serverId: 'server-a',
+          ratingKey: 'rk$i',
+          title: 'Harbor Lights',
+          at: now.subtract(Duration(days: i * 3)),
+        ),
+      );
+    }
+    final key = await ReelHomeRow.freshKey(reel: tv.reel);
+    expect([for (final part in key.split(',')) part.split('@').first], ['p0', 'p1', 'p2', 'p3', 'p4']);
+
+    final card = MediaItem(
+      id: 'rk2',
+      backend: MediaBackend.plex,
+      kind: MediaKind.movie,
+      title: 'Harbor Lights',
+      serverId: 'server-a',
+    );
+    expect(ReelHomeRow.removable(card), isTrue);
+    expect(await ReelHomeRow.remove(card, reel: tv.reel), isTrue);
+    expect((await tv.reel.savedPicks()).map((p) => p.titleId), ['p0', 'p1', 'p3', 'p4']);
+    expect(await ReelHomeRow.freshKey(reel: tv.reel), isNot(key));
+    expect(await ReelHomeRow.remove(card, reel: tv.reel), isFalse);
+
+    // The "What's next after" card is not a Save: nothing to remove.
+    final entry = ReelHomeRow.entryItem(card, deck: 'whats-next');
+    expect(ReelHomeRow.removable(entry), isFalse);
+  });
+
+  test('nothing saved, no row', () async {
     expect(await tv.seat(onTv: true), isFalse);
     expect(await tv.homeIds(), isNot(contains(HomeRowIds.reelPicks)));
     expect(await tv.store.readSetting(ReelHomeRow.seatedKey), isNull);

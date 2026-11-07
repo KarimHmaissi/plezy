@@ -52,7 +52,7 @@ abstract final class HomeRowIds {
   /// A saved answer from the AI tab (its snapshot of picks).
   static String ai(String historyId) => 'ai:$historyId';
 
-  /// Fork: titles saved in The Reel, each for 3 days (at most 3). Seated
+  /// Fork: titles saved in The Reel, every one until it is removed. Seated
   /// once at the top of Home by the first Save; empty means hidden.
   static const String reelPicks = 'reel.picks';
 

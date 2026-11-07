@@ -177,4 +177,22 @@ void main() {
     expect(find.text('Save for the TV'), findsOneWidget);
     expect(find.text('More like this'), findsNothing);
   });
+
+  testWidgets('a saved card offers Remove from saved, below Save; an unsaved one does not', (tester) async {
+    final c = (await tester.runAsync(() async => make()))!;
+    addTearDown(c.dispose);
+    await open(tester, c);
+    expect(find.text('Remove from saved'), findsNothing);
+    await tester.tapAt(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 600));
+
+    await tester.runAsync(() => c.save(silent: true));
+    expect(await open(tester, c, pick: 'Remove from saved'), ReelSheetAction.unsave);
+    await open(tester, c);
+    expect(
+      tester.getTopLeft(find.text('Remove from saved')).dy,
+      greaterThan(tester.getTopLeft(find.text('Save for the TV')).dy),
+      reason: 'the focused first entry stays Save, so a quick OK never removes it',
+    );
+  });
 }
