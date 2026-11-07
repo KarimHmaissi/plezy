@@ -23,13 +23,13 @@ enum ReelPerfTrigger {
   /// Phone: a page change in the feed.
   swipe,
 
-  /// TV: a step sent from the Fold's On TV mode.
+  /// TV: a step sent from the phone's On TV mode.
   remote,
 
   /// The Reel opened or came back (no input to measure from).
   open,
 
-  /// Phone: the window changed size under the card on screen (the Fold
+  /// Phone: the window changed size under the card on screen (a foldable
   /// moved between its screens, or turned), timed to the picture moving
   /// again (V2-65).
   fold,

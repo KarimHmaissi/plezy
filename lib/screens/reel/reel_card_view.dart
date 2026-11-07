@@ -27,6 +27,7 @@ import '../../widgets/media_progress_bar.dart';
 import '../../widgets/media_rating_badge.dart';
 import '../../widgets/stat_chip.dart';
 import '../../widgets/tv_spotlight_background.dart';
+import 'reel_deck_intro_view.dart';
 import 'reel_decide_view.dart';
 import 'reel_keys.dart' show reelHintLine;
 import 'reel_lean_back.dart';
@@ -111,10 +112,16 @@ class ReelCardView extends StatelessWidget {
       case ReelSlotKind.loading:
         return tv ? const ReelTvSkeleton() : const ReelCurtain();
       case ReelSlotKind.failed:
+        // Offline (V2-15) a deck that couldn't load says why.
+        final offline = controller.offline.value;
         return ReelMessage(
           icon: Symbols.cloud_off_rounded,
-          title: t.reel.card.failedTitle(deck: controller.deck.name),
-          body: tv ? t.reel.card.failedBodyTv : t.reel.card.failedBodyTap,
+          title: offline ? t.reel.status.offlineTitle : t.reel.card.failedTitle(deck: controller.deck.name),
+          body: offline
+              ? t.reel.status.offlineBody
+              : tv
+              ? t.reel.card.failedBodyTv
+              : t.reel.card.failedBodyTap,
           action: FilledButton.tonalIcon(
             onPressed: () => unawaited(controller.retryDeck()),
             icon: const Icon(Symbols.refresh_rounded),
@@ -137,6 +144,14 @@ class ReelCardView extends StatelessWidget {
         );
       case ReelSlotKind.decide:
         return ReelDecideView(controller: controller, slot: slot, tv: tv, onWatch: onWatch);
+      case ReelSlotKind.intro:
+        return ReelDeckIntroView(
+          deckId: controller.deck.id,
+          deckName: controller.deck.name,
+          slot: slot,
+          tv: tv,
+          onStart: () => unawaited(controller.step(1)),
+        );
       case ReelSlotKind.card:
         break;
     }

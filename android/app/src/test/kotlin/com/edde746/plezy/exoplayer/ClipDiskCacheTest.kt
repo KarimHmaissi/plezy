@@ -2,10 +2,12 @@ package com.edde746.plezy.exoplayer
 
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.ByteArrayDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.ContentMetadata
@@ -20,6 +22,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -112,6 +115,22 @@ class ClipDiskCacheTest {
   }
 
   @Test
+  fun aFailedOrTimedOutConnectionKeepsTheBytesOnDisk() {
+    // V2-15: offline, a clip on disk whose remainder was never cached fails this way.
+    assertFalse(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED))
+    assertFalse(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT))
+    // An error that may have come from the bytes themselves drops them (V2-10).
+    assertTrue(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+    assertTrue(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS))
+    assertTrue(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE))
+    assertTrue(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED))
+    // Decoding and anything else never touch the cache.
+    assertFalse(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_DECODER_INIT_FAILED))
+    assertFalse(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_DECODING_FAILED))
+    assertFalse(ClipCachePolicy.evictsAfter(PlaybackException.ERROR_CODE_UNSPECIFIED))
+  }
+
+  @Test
   fun logIdsNeverCarryTheKey() {
     assertFalse(ClipCachePolicy.logId(key).contains("server-a"))
     assertEquals("none", ClipCachePolicy.logId(null))
@@ -165,6 +184,61 @@ class ClipDiskCacheTest {
     val moved = DataSpec.Builder().setUri(Uri.parse("https://server-a-relay.invalid/library/parts/41/1700000000/file.mp4?X-Plex-Token=zzz")).setKey(key).build()
     assertArrayEquals(bytes, readAll(factory.createDataSource(), moved))
     assertEquals("the network was not asked again", 1, upstream.opens)
+  }
+
+  /** The network while offline: every open fails as a connection that couldn't be made. */
+  private inner class Offline : DataSource.Factory {
+    var opens = 0
+
+    override fun createDataSource(): DataSource {
+      val inner = ByteArrayDataSource(bytes)
+      return object : DataSource by inner {
+        override fun open(dataSpec: DataSpec): Long {
+          opens++
+          throw HttpDataSource.HttpDataSourceException.createForIOException(
+            java.net.UnknownHostException(dataSpec.uri.host),
+            dataSpec,
+            HttpDataSource.HttpDataSourceException.TYPE_OPEN
+          )
+        }
+      }
+    }
+  }
+
+  @Test
+  fun offlineAClipOnDiskPlaysFromItsKeyAtAnAddressThatNeverResolves() {
+    // Cached online, under its key.
+    readAll(ClipCacheDataSourceFactory(cache, Counting()).createDataSource(), DataSpec.Builder().setUri(Uri.parse(plexUri)).setKey(key).build())
+
+    // V2-15: offline Dart opens it at ClipResolver.offlineUri; the bytes come from disk alone.
+    val offline = Offline()
+    val factory = ClipCacheDataSourceFactory(cache, offline)
+    val spec = DataSpec.Builder().setUri(Uri.parse("https://reel-offline.invalid/library/parts/41/1700000000/file.mp4")).setKey(key).build()
+    assertArrayEquals(bytes, readAll(factory.createDataSource(), spec))
+    assertEquals("the network was never asked", 0, offline.opens)
+  }
+
+  @Test
+  fun offlineTheUncachedRestFailsAsAConnectionErrorThatKeepsTheBytes() {
+    // Only the start was cached online (a clip left early, or the card two ahead).
+    val head = 16 * 1024L
+    val online = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(Counting()).setCacheKeyFactory(ClipCacheDataSourceFactory.KEY_FACTORY)
+    CacheWriter(online.createDataSource(), DataSpec.Builder().setUri(Uri.parse(plexUri)).setKey(key).setLength(head).build(), null, null).cache()
+    assertEquals(head, cache.getCachedBytes(key, 0, C.LENGTH_UNSET.toLong()))
+
+    val offline = Offline()
+    val source = ClipCacheDataSourceFactory(cache, offline).createDataSource()
+    val spec = DataSpec.Builder().setUri(Uri.parse("https://reel-offline.invalid/library/parts/41/1700000000/file.mp4")).setKey(key).build()
+    try {
+      readAll(source, spec)
+      fail("the uncached rest can't be read offline")
+    } catch (e: HttpDataSource.HttpDataSourceException) {
+      assertEquals(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, e.reason)
+      assertFalse("so the bytes on disk stay", ClipCachePolicy.evictsAfter(e.reason))
+    } finally {
+      source.close()
+    }
+    assertEquals(head, cache.getCachedBytes(key, 0, C.LENGTH_UNSET.toLong()))
   }
 
   @Test

@@ -9,6 +9,7 @@ import '../../utils/trace_span.dart';
 import '../customisation/customisation_store.dart';
 import '../customisation/mirror_store.dart';
 import '../memory_trim_policy.dart';
+import '../offline_mode_source.dart';
 import '../settings_service.dart';
 import 'clip_player.dart';
 import 'clip_resolver.dart';
@@ -38,6 +39,10 @@ abstract interface class ReelMedia {
   String? imageUrl(String serverId, String? path, {required int width});
 }
 
+/// A card's art and text from the caches alone, with no server read (the
+/// warm start, V2-14, and offline, V2-15). Null when nothing is cached.
+typedef ReelCachedItem = Future<MediaItem?> Function(String serverId, String ratingKey);
+
 /// What the app does when the Reel hands a title over to real playback,
 /// which reports normally. Returns false when it couldn't (e.g. the TV
 /// isn't reachable for Watch on TV).
@@ -66,10 +71,20 @@ typedef ReelHeadCard = Future<ReelCardData?> Function(DeckEntry entry);
 typedef ReelMoreLike = Future<List<ReelCardData>?> Function(ReelCardData seed, {required Set<String> skip});
 
 /// What a slot in a deck is: a title's card, the "Tonight's picks" decision
-/// card (V2-38), the end of the deck, an empty deck, a deck still loading,
-/// or one whose list couldn't be loaded ([failed], V2-27), which is not the
-/// same as a deck with nothing in it.
-enum ReelSlotKind { card, decide, poolEnd, empty, loading, failed }
+/// card (V2-38), the deck's intro card ([ReelDeck.intro], D22), the end of
+/// the deck, an empty deck, a deck still loading, or one whose list
+/// couldn't be loaded ([failed], V2-27), which is not the same as a deck
+/// with nothing in it.
+enum ReelSlotKind { card, decide, intro, poolEnd, empty, loading, failed }
+
+/// One of the first cards an intro card shows: the card, and its metadata
+/// when the Reel already has it (the intro never reads any of its own).
+class ReelIntroPreview {
+  const ReelIntroPreview(this.card, this.item);
+
+  final ReelCardData card;
+  final MediaItem? item;
+}
 
 /// One of Tonight's picks: a fresh Save and its metadata once read (null
 /// until then, or when it couldn't be read).
@@ -102,6 +117,8 @@ class ReelSlot {
     this.itemMissed = false,
     this.picks = const [],
     this.pick = 0,
+    this.intro,
+    this.previews = const [],
   });
 
   const ReelSlot.loading() : this._(ReelSlotKind.loading);
@@ -111,6 +128,16 @@ class ReelSlot {
 
   /// The decision card: [picks] newest first, [pick] the one OK watches.
   const ReelSlot.decide(List<ReelDecidePick> picks, int pick) : this._(ReelSlotKind.decide, picks: picks, pick: pick);
+
+  /// The deck's intro card: its line and its first cards ([previews]).
+  const ReelSlot.intro(ReelDeckIntro intro, List<ReelIntroPreview> previews)
+    : this._(ReelSlotKind.intro, intro: intro, previews: previews);
+
+  /// The intro card's line; null on any other slot.
+  final ReelDeckIntro? intro;
+
+  /// The intro card's first cards, at most [ReelController.introPreviews].
+  final List<ReelIntroPreview> previews;
 
   final ReelSlotKind kind;
 
@@ -279,6 +306,8 @@ class ReelController extends ChangeNotifier {
     this.headCard,
     this.moreDecks,
     this.keepCursor = false,
+    this.offlineMode,
+    this.cachedItem,
     Listenable? deckPrefsChanged,
     ReelClipEnd Function()? clipEnd,
     DateTime Function()? clock,
@@ -295,7 +324,12 @@ class ReelController extends ChangeNotifier {
     resolver.profile?.addListener(_onProfile);
     ReelStore.picksChanged.addListener(_onPicksChanged);
     settingsChanged?.addListener(_onSettingsChanged);
+    // V2-23: the TV's clip core measures each trailer's lead-in; every card
+    // showing that clip takes the start, and its `src:` row keeps it.
+    if (!externalClips) _leadInSub = clips.leadIns.listen(_onLeadIn);
     _wasMetered = _metered;
+    _offline.value = _offlineNow;
+    offlineMode?.addListener(_syncOffline);
     this.deckPrefsChanged.addListener(_onDeckPrefsChanged);
     decks.forEach(_watchDeck);
   }
@@ -368,9 +402,56 @@ class ReelController extends ChangeNotifier {
     if (_disposed) return;
     appLogger.d('Reel: a setting changed; the views take it up now');
     _dropGatedEmbeds();
-    // The TV's clip core takes the normalisation switch at once (V2-19).
+    // The TV's clip core takes the normalisation switch at once (V2-19),
+    // and "Skip trailer intros" (V2-23): its held preloads follow in the core.
     clips.syncNormalization();
+    if (!externalClips) clips.syncLeadInPolicy();
     notifyListeners();
+  }
+
+  StreamSubscription<ClipLeadIn>? _leadInSub;
+
+  /// V2-23: the clip core measured a trailer's lead-in. Every card whose
+  /// clip has that cache key takes the start (its next preload and open
+  /// start there), and the title's `src:` row keeps it. Ignored while the
+  /// setting is off or only measuring (the core logged it).
+  void _onLeadIn(ClipLeadIn leadIn) {
+    if (_disposed) return;
+    if (!clips.cutsLeadIns) {
+      appLogger.d('[ReelLeadIn] answer not kept: skipping is off or only measuring');
+      return;
+    }
+    final titles = <String, (ReelTitle, ResolvedClip)>{};
+    final cardsById = {
+      for (final list in _cards.values)
+        for (final c in list) c.id: c,
+    };
+    var updated = 0;
+    for (final MapEntry(key: id, value: clip) in _clip.entries.toList()) {
+      final source = clip?.source;
+      if (clip == null ||
+          source == null ||
+          source.origin != ClipOrigin.plexExtra ||
+          source.cacheKey != leadIn.cacheKey) {
+        continue;
+      }
+      if (clip.source.startAt == leadIn.start) continue;
+      final next = clip.withSource(clip.source.withStartAt(leadIn.start));
+      _clip[id] = next;
+      updated++;
+      final card = cardsById[id];
+      if (card != null) titles[card.title.groupKey] = (card.title, next);
+    }
+    if (updated == 0) return;
+    appLogger.i('[ReelLeadIn] kept start=${leadIn.start.inMilliseconds}ms reason=${leadIn.reason} cards=$updated');
+    for (final (title, clip) in titles.values) {
+      unawaited(
+        resolver.rememberLeadIn(title, clip, leadIn.start, reason: leadIn.reason).catchError((Object e) {
+          appLogger.d('Reel: keeping a lead-in failed (${e.runtimeType})');
+          return false;
+        }),
+      );
+    }
   }
 
   /// The TMDB rung went off (V2-63: Data saver or Stills only on mobile
@@ -461,6 +542,127 @@ class ReelController extends ChangeNotifier {
   /// takes its own place in the deck's list when that lands. Off: every
   /// load starts on the first card.
   final bool keepCursor;
+
+  /// The app's offline mode (no server it can reach; `OfflineModeProvider`
+  /// in the app). With it, or with no network at all (the playback
+  /// profile's link, from `ConnectivityProbe`), the Reel runs offline
+  /// ([offline], plan V2-15). Null: only the link says.
+  final OfflineModeSource? offlineMode;
+
+  /// Offline (V2-15): a card's art and text from the caches alone, so no
+  /// card waits on a server read that can't answer. Null: [ReelMedia.item]
+  /// as online.
+  final ReelCachedItem? cachedItem;
+
+  /// Whether the Reel runs offline (plan V2-15): the app's offline mode, or
+  /// no network at all. Offline the session builds from what is on this
+  /// device (today's For You snapshot, the index, the cached `src:` rows),
+  /// asks no server, AnimeThemes or TMDB, and writes no miss:
+  /// - the TV plays only Plex clips already in the clip core's disk cache
+  ///   (V2-10), and every other card is a still;
+  /// - the phone feed shows stills: it plays on `video_player_android`,
+  ///   which doesn't read that cache (and only the TV's clip core writes
+  ///   it), so there is nothing on disk for it to play.
+  ///
+  /// When this changes the screen starts the visit afresh, and that start
+  /// drops every clip answer made in the other mode, so each card is looked
+  /// up again under the new one.
+  ValueListenable<bool> get offline => _offline;
+  final ValueNotifier<bool> _offline = ValueNotifier(false);
+
+  bool get _offlineNow => (offlineMode?.isOffline ?? false) || resolver.playback.link == ReelLink.offline;
+
+  /// The offline notice has been shown this offline spell (once, V2-15).
+  bool _offlineSaid = false;
+
+  /// The offline notice ([t.reel.toast]): the TV plays what it has on disk,
+  /// the phone shows stills.
+  static String offlineNotice({required bool tv}) => tv ? t.reel.toast.offlineTv : t.reel.toast.offlinePhone;
+
+  void _syncOffline() {
+    if (_disposed) return;
+    final now = _offlineNow;
+    if (now == _offline.value) return;
+    appLogger.i(
+      '[ReelOffline] ${now ? 'offline' : 'back online'} '
+      '(app=${offlineMode?.isOffline ?? false}, link=${resolver.playback.link.name})',
+    );
+    if (!now) _offlineSaid = false;
+    _offline.value = now;
+    _sayOffline();
+    notifyListeners();
+  }
+
+  /// Whether the clip answers held were made offline.
+  bool _answersOffline = false;
+
+  /// A start in the other mode than the answers held were made in: every
+  /// card's clip answer is looked up again. The ones found online can't
+  /// stream offline, and the stills shown offline may have clips once back
+  /// online. Lookups in flight write nothing when they land. Done at a
+  /// start, never under a card that is playing.
+  void _answersFollowMode() {
+    final now = _offline.value;
+    if (now == _answersOffline) return;
+    _answersOffline = now;
+    appLogger.i('[ReelOffline] ${_clip.length} clip answers from ${now ? 'online' : 'offline'} dropped');
+    _resolving.clear();
+    _resolved.clear();
+    _clip.clear();
+    _unknown.clear();
+    _retried.clear();
+    // Back online, a pick the caches didn't have offline is read again
+    // (offline it read the caches alone, and a pick is otherwise read once).
+    if (!now) {
+      _pickItem.removeWhere((_, item) => item == null);
+      _pickReading.removeWhere((id, _) => !_pickItem.containsKey(id));
+    }
+  }
+
+  /// Offline and playing: says so once per offline spell.
+  void _sayOffline() {
+    if (!_offline.value || _offlineSaid || !_active) return;
+    _offlineSaid = true;
+    _say(offlineNotice(tv: !externalClips));
+  }
+
+  /// One AnimeThemes batch for a deck's anime shows (plan V2-12); never
+  /// offline (V2-15).
+  void _warmAnime(List<ReelCardData> list) {
+    if (_offline.value) return;
+    unawaited(resolver.warm([for (final c in list) c.title]));
+  }
+
+  /// Offline (V2-15): a card's clip from this device alone. The TV asks the
+  /// cached `src:` row and the clip core's disk cache (once the core that
+  /// opens the cache is up); the phone has nothing on disk, so its cards are
+  /// stills. Unknown, never a miss: back online each card is looked up again.
+  Future<ClipLookup> _offlineLookup(ReelCardData c) async {
+    if (externalClips) return const ClipLookup.unknown();
+    try {
+      // Bounded by the core's own call limit.
+      await _warming;
+    } catch (_) {
+      // The warm failed: the open builds the core instead.
+    }
+    // A store read and one disk-cache query, bounded as a store read is.
+    final clip = await resolver
+        .lookupOnDisk(
+          c.title,
+          exclude: _excluded[c.id] ?? const {},
+          onDisk: (hit) => _clipCache.isOnDisk(hit.source.cacheKey),
+        )
+        .timeout(timeouts.store);
+    final lead = clip?.source.startAt;
+    appLogger.d(
+      '[ReelOffline] ${c.id}: ${clip == null ? 'still' : 'on disk'}${lead == null ? '' : ' lead=${lead.inMilliseconds}'}',
+    );
+    return clip == null ? const ClipLookup.unknown() : ClipLookup.found(clip);
+  }
+
+  /// The clip core's warm at the latest start ([_warmCore]), which opens
+  /// the disk cache the offline lookups read.
+  Future<void>? _warming;
 
   /// Fires when the deck prefs change (a picker or the Decks screen on this
   /// device, or the other device's arrangement arriving): the pickers and
@@ -956,29 +1158,97 @@ class ReelController extends ChangeNotifier {
     return list != null && _onDecide.contains(deck.id) && _decideAt(deck.id, list) == index;
   }
 
-  /// The cursor as a page: the card index, counting the decision card when
-  /// it sits at or before the cursor. The phone's PageView index.
+  // ---- The deck's intro card (D22) ----
+
+  /// How many of a deck's first cards the intro card shows.
+  static const int introPreviews = 5;
+
+  /// With Next card (Lean back, V2-47) on the TV, the intro card moves on to
+  /// the first card after this long, while someone is there ([mayRollOn]).
+  static const Duration introHold = Duration(seconds: 6);
+
+  /// Decks whose cursor is on their intro card (its page 0, before card 0).
+  final Set<String> _onIntro = {};
+
+  /// Decks that have shown their intro card or one of their cards this
+  /// session: a deck opens on its intro only the first time it shows.
+  final Set<String> _introShown = {};
+  Timer? _introTimer;
+
+  /// Whether [d] (its list [list]) opens with an intro card: page 0, before
+  /// its first card. Only a deck with cards and an intro has one.
+  bool _hasIntro(ReelDeck d, List<ReelCardData> list) => list.isNotEmpty && d.intro != null;
+
+  bool get _onIntroNow {
+    final list = cards;
+    return list != null && _onIntro.contains(deck.id) && index == 0 && _hasIntro(deck, list);
+  }
+
+  /// The deck on screen shows its intro card first when it has one and
+  /// hasn't shown it or any card yet this session, with its cursor on its
+  /// first card.
+  void _enterIntro() {
+    final list = cards;
+    if (list == null || !_hasIntro(deck, list) || index != 0) return;
+    if (_introShown.contains(deck.id) || _onIntro.contains(deck.id) || _onDecide.contains(deck.id)) return;
+    _onIntro.add(deck.id);
+  }
+
+  /// The cursor of [deckId] leaves its intro (and decision) card: it was
+  /// moved onto a card.
+  void _offInserts(String deckId) {
+    _onDecide.remove(deckId);
+    _onIntro.remove(deckId);
+  }
+
+  /// [deckId]'s list starts again from its top: its intro comes up again.
+  void _restartDeck(String deckId) {
+    _cursor.remove(deckId);
+    _offInserts(deckId);
+    _introShown.remove(deckId);
+  }
+
+  /// Where the window around the card on screen is planned from: the
+  /// first card is the next one while the intro card shows.
+  int get _planAt => _onIntroNow ? -1 : index;
+
+  /// The cursor as a page: the card index, counting the intro card and the
+  /// decision card when it sits at or before the cursor. The phone's
+  /// PageView index.
   int get page {
     final list = cards;
     if (list == null) return 0;
+    if (_onIntroNow) return 0;
+    final intro = _hasIntro(deck, list) ? 1 : 0;
     final at = _decideAt(deck.id, list);
     final i = index;
-    if (at == null || i < at) return i;
-    return _onDecideNow ? at : i + 1;
+    if (at == null || i < at) return i + intro;
+    return (_onDecideNow ? at : i + 1) + intro;
   }
 
-  /// How many pages the deck has: its cards, the decision card when it is
-  /// in this deck, and the end of the deck.
+  /// How many pages the deck has: the intro card when it has one, its
+  /// cards, the decision card when it is in this deck, and the end of the
+  /// deck.
   int get slotCount {
     final list = cards;
     if (list == null || list.isEmpty) return 1;
-    return list.length + 1 + (_decideAt(deck.id, list) == null ? 0 : 1);
+    return list.length + 1 + (_decideAt(deck.id, list) == null ? 0 : 1) + (_hasIntro(deck, list) ? 1 : 0);
   }
 
   /// Moves the cursor to page [p].
   void _seek(int p) {
     final list = cards;
     if (list == null) return;
+    if (_hasIntro(deck, list)) {
+      if (p <= 0) {
+        _cursor[deck.id] = 0;
+        _onDecide.remove(deck.id);
+        _onIntro.add(deck.id);
+        return;
+      }
+      _onIntro.remove(deck.id);
+      p -= 1;
+    }
     final at = _decideAt(deck.id, list);
     if (at != null && p == at) {
       _cursor[deck.id] = at;
@@ -994,12 +1264,20 @@ class ReelController extends ChangeNotifier {
     return ReelSlot.decide(picks, picks.isEmpty ? 0 : _pickAt.clamp(0, picks.length - 1));
   }
 
+  ReelSlot _introSlot(ReelDeckIntro intro, List<ReelCardData> list) =>
+      ReelSlot.intro(intro, [for (final c in list.take(introPreviews)) ReelIntroPreview(c, _item[c.id])]);
+
   /// The slot on page [p] (see [page]).
   ReelSlot slotAt(int p) {
     final list = cards;
     if (list == null) return _failed.contains(deck.id) ? const ReelSlot.failed() : const ReelSlot.loading();
     final coming = _stillComing(deck.id);
     if (list.isEmpty) return coming ? const ReelSlot.loading() : const ReelSlot.empty();
+    final intro = deck.intro;
+    if (intro != null) {
+      if (p <= 0) return _introSlot(intro, list);
+      p -= 1;
+    }
     var i = p;
     final at = _decideAt(deck.id, list);
     if (at != null) {
@@ -1021,7 +1299,7 @@ class ReelController extends ChangeNotifier {
 
   ReelSlot get current => slotAt(page);
 
-  /// The next three slots, for the Fold remote.
+  /// The next three slots, for the phone remote.
   List<ReelSlot> get upNext {
     final p = page;
     return [for (var i = p + 1; i <= p + 3; i++) slotAt(i)];
@@ -1071,6 +1349,11 @@ class ReelController extends ChangeNotifier {
     _setActive(true);
     // TV: the clip core comes up alongside the deck (V2-04).
     _warmCore(no);
+    // Offline (V2-15): said once per offline spell, and the clip answers
+    // follow the mode.
+    _syncOffline();
+    _answersFollowMode();
+    _sayOffline();
     // Opening the Reel (or coming back to it) is someone there.
     noteInput();
     // The picks are synced: the other device may have saved since.
@@ -1097,8 +1380,7 @@ class ReelController extends ChangeNotifier {
     for (final d in decks) {
       if (d.daily && _cards.containsKey(d.id) && _loadedOn[d.id] != today) {
         _cards.remove(d.id);
-        _cursor.remove(d.id);
-        _onDecide.remove(d.id);
+        _restartDeck(d.id);
         _dropPartial(d.id);
       }
     }
@@ -1128,15 +1410,14 @@ class ReelController extends ChangeNotifier {
   void _warmCore(int no) {
     if (!warmClipCore || externalClips || memoryLevel != 0 || !_budget.clips || clips.engine != null) return;
     final at = _clock();
-    unawaited(
-      clips.warm().then((took) {
-        appLogger.i(
-          took == null
-              ? '[ReelStart] #$no warm core=none ${_since(at)}ms'
-              : '[ReelStart] #$no warm core=${took.inMilliseconds}ms',
-        );
-      }),
-    );
+    final warming = _warming = clips.warm().then((took) {
+      appLogger.i(
+        took == null
+            ? '[ReelStart] #$no warm core=none ${_since(at)}ms'
+            : '[ReelStart] #$no warm core=${took.inMilliseconds}ms',
+      );
+    });
+    unawaited(warming);
   }
 
   /// [list] (deck [d]'s), or, when it doesn't have [groupKey]'s card yet and
@@ -1182,7 +1463,7 @@ class ReelController extends ChangeNotifier {
     _provisional.add(d.id);
     _loadedOn[d.id] = _today();
     _cursor[d.id] = 0;
-    _onDecide.remove(d.id);
+    _offInserts(d.id);
     _spans?.note('head', 'replay');
     appLogger.i('[ReelStart] #$no head replay deck=${d.id} ${_since(at)}ms');
     unawaited(_refreshPicks());
@@ -1284,7 +1565,12 @@ class ReelController extends ChangeNotifier {
       _pickReading[p.titleId] ??= () async {
         MediaItem? item;
         try {
-          item = await media.item(p.serverId, p.ratingKey).timeout(timeouts.metadata);
+          final cachedOnly = cachedItem;
+          item =
+              await (_offline.value && cachedOnly != null
+                      ? cachedOnly(p.serverId, p.ratingKey)
+                      : media.item(p.serverId, p.ratingKey))
+                  .timeout(timeouts.metadata);
         } catch (e) {
           appLogger.d('Reel: pick metadata unavailable', error: e);
         }
@@ -1463,7 +1749,7 @@ class ReelController extends ChangeNotifier {
       }
       // One AnimeThemes batch for the deck's anime shows (plan V2-12);
       // the first card waits for it rather than asking on its own.
-      unawaited(resolver.warm([for (final c in loaded) c.title]));
+      _warmAnime(loaded);
       if (rest != null) _followWith(d, rest);
       return _cards[d.id] ?? loaded;
     } catch (e) {
@@ -1525,7 +1811,7 @@ class ReelController extends ChangeNotifier {
       return;
     }
     _cursor[d.id] = at;
-    _onDecide.remove(d.id);
+    _offInserts(d.id);
     _spans?.note('cursor', '$at');
     appLogger.i('[ReelDeck] ${d.id}: carries on at card $at of ${list.length} (kept cursor)');
   }
@@ -1537,7 +1823,13 @@ class ReelController extends ChangeNotifier {
   /// apply ([keepCursor] off, the cursor moved on, or the list doesn't have
   /// the card): the list is appended after the head instead.
   bool _followHead(ReelDeck d, List<ReelCardData> kept, List<ReelCardData> loaded) {
-    if (!keepCursor || kept.length != 1 || (_cursor[d.id] ?? 0) != 0 || _onDecide.contains(d.id)) return false;
+    if (!keepCursor ||
+        kept.length != 1 ||
+        (_cursor[d.id] ?? 0) != 0 ||
+        _onDecide.contains(d.id) ||
+        _onIntro.contains(d.id)) {
+      return false;
+    }
     final head = kept.single;
     final at = loaded.indexWhere((c) => c.id == head.id);
     if (at < 0) return false;
@@ -1626,7 +1918,7 @@ class ReelController extends ChangeNotifier {
         appLogger.i(
           '[ReelDeck] ${d.id}: +$added cards after the first (load ${loadMs}ms, rules ${sw.elapsedMilliseconds - loadMs}ms)',
         );
-        unawaited(resolver.warm([for (final c in more) c.title]));
+        _warmAnime(more);
       } catch (e) {
         appLogger.w('Reel: the rest of deck ${d.id} failed to load', error: e);
         if (_disposed || !identical(_restFor[d.id], self)) return;
@@ -1668,7 +1960,7 @@ class ReelController extends ChangeNotifier {
     }
     notifyListeners();
     if (identical(deck, d) && _active) {
-      if (index >= old.length && !_onDecide.contains(d.id)) {
+      if (index >= old.length && !_onDecide.contains(d.id) && !_onIntro.contains(d.id)) {
         unawaited(_show());
       } else {
         _plan(list, _generation);
@@ -1718,12 +2010,11 @@ class ReelController extends ChangeNotifier {
     _dropPartial(d.id);
     // The new build's anime shows, in one batch (titles already answered
     // are skipped).
-    unawaited(resolver.warm([for (final c in fresh) c.title]));
+    _warmAnime(fresh);
     final old = _cards[d.id] ?? const <ReelCardData>[];
     if (!identical(deck, d)) {
       _cards[d.id] = fresh;
-      _cursor.remove(d.id);
-      _onDecide.remove(d.id);
+      _restartDeck(d.id);
       _anchorDecide(d.id, fresh, orBefore: null);
       appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${fresh.length} cards');
       notifyListeners();
@@ -1848,7 +2139,7 @@ class ReelController extends ChangeNotifier {
   Future<void> openDeck(String id) => openAt(id);
 
   /// Opens deck [id] on the card for [groupKey] (On TV mode: the TV opens
-  /// on the card the Fold was showing). A title that isn't in this device's
+  /// on the card the phone was showing). A title that isn't in this device's
   /// list of the deck, or no [groupKey], leaves the deck on its own cursor.
   Future<void> openAt(String id, [String? groupKey]) async {
     final i = await _deckIndex(id);
@@ -1861,7 +2152,8 @@ class ReelController extends ChangeNotifier {
       if (at == null || at == index || !identical(d, deck)) return;
       // As [step]: the cursor moves first, under the generation counter.
       _cursor[deck.id] = at;
-      _onDecide.remove(deck.id);
+      _offInserts(deck.id);
+      _introShown.add(deck.id);
       final gen = ++_generation;
       await _leaveCard();
       if (gen != _generation) return;
@@ -1904,7 +2196,9 @@ class ReelController extends ChangeNotifier {
     final at = _indexOf(list, groupKey);
     if (at == null || !identical(list, cards)) return;
     _cursor[deck.id] = at;
-    _onDecide.remove(deck.id);
+    _offInserts(deck.id);
+    // Asked for this card (On TV mode, a link): it opens, not the intro.
+    _introShown.add(deck.id);
   }
 
   /// Puts the strip up for the deck now selected. It stays while the deck
@@ -1976,7 +2270,11 @@ class ReelController extends ChangeNotifier {
   Future<void> _resolveClip(ReelCardData c, Future<void> self) async {
     ClipLookup? found;
     try {
-      found = await resolver.lookup(c.title, exclude: _excluded[c.id] ?? const {}).timeout(timeouts.lookup);
+      // Offline (V2-15): only what is on this device; no ladder, so no
+      // server wait or lookup timeout per card.
+      found = _offline.value
+          ? await _offlineLookup(c)
+          : await resolver.lookup(c.title, exclude: _excluded[c.id] ?? const {}).timeout(timeouts.lookup);
     } catch (e) {
       appLogger.d('Reel: card resolve failed', error: e);
     }
@@ -2023,6 +2321,9 @@ class ReelController extends ChangeNotifier {
 
   /// A card's metadata; a resume card's next episode comes with it.
   Future<MediaItem?> _metadata(ReelCardData c) async {
+    // Offline (V2-15): the caches alone (no next episode).
+    final cachedOnly = cachedItem;
+    if (_offline.value && cachedOnly != null) return cachedOnly(c.best.serverId, c.best.ratingKey);
     final withNext = itemWithNext;
     if (!c.resume || withNext == null) return media.item(c.best.serverId, c.best.ratingKey);
     final r = await withNext(c.best.serverId, c.best.ratingKey);
@@ -2034,14 +2335,18 @@ class ReelController extends ChangeNotifier {
     if (_disposed) return;
     final gen = ++_generation;
     _direction = direction < 0 ? -1 : 1;
+    _introTimer?.cancel();
+    _introTimer = null;
     // Every card change has its own watchdog (an AI card skipped over
     // re-arms it for the card after).
     _arm();
+    _enterIntro();
     notifyListeners();
     cardChanged.value++;
     // V2-14: every card change keeps the cursor for the next load.
     _keepCursor();
     final list = cards;
+    if (list != null && _onIntroNow) return _showIntro(list, gen);
     if (list != null && _onDecideNow) return _showDecide(list, gen);
     if (list == null || index >= list.length) {
       // The end, an empty deck or one that failed to load each say so; a
@@ -2067,6 +2372,7 @@ class ReelController extends ChangeNotifier {
       return;
     }
     final c = list[index];
+    _introShown.add(deck.id);
     _toStage(ReelStage.resolve);
     // The card's own clip and art start at once; on the TV the cards around
     // it wait until its clip shows a frame (or turns out to be a still).
@@ -2079,9 +2385,11 @@ class ReelController extends ChangeNotifier {
     // phone holds them back before they come on screen instead
     // ([_holdBackAhead]).
     final skipTo = page + (direction == 0 ? 1 : direction);
+    // Offline (V2-15) a card with nothing on disk is a still, not an AI card:
+    // it is shown, and only Lean back's roll on looks past it.
     if (!externalClips &&
         _clip[c.id] == null &&
-        (skipAi || _sinceAiCard < ReelDecay.aiCardEvery) &&
+        (skipAi || (!_offline.value && _sinceAiCard < ReelDecay.aiCardEvery)) &&
         skipTo >= 0 &&
         skipTo < slotCount) {
       _seek(skipTo);
@@ -2135,6 +2443,34 @@ class ReelController extends ChangeNotifier {
     _syncHold();
     _trimPreloads(gen);
     _settleStrip(gen);
+  }
+
+  /// The deck's intro card is on screen: nothing plays (the TV's clip
+  /// pauses, as at the end of a deck), and the window is planned with the
+  /// first card as the next one (resolved, its text read and, on the TV,
+  /// preloaded), so it opens at once. With Next card on the TV it moves on
+  /// after [introHold].
+  Future<void> _showIntro(List<ReelCardData> list, int gen) async {
+    _cardShown = null;
+    _direction = 1;
+    if (_introShown.add(deck.id)) {
+      appLogger.i('[ReelIntro] ${deck.id}: intro shown, ${list.length} cards after it');
+    }
+    _settle(gen, playing: false);
+    _prefetch.release();
+    _plan(list, gen);
+    if (!externalClips) await clips.pause();
+    if (gen != _generation || !_active) return;
+    _trimPreloads(gen);
+    _settleStrip(gen);
+    if (!externalClips && clipEnd == ReelClipEnd.nextCard) {
+      _introTimer = Timer(introHold, () {
+        _introTimer = null;
+        if (_disposed || gen != _generation || !_active || !_onIntroNow || !mayRollOn) return;
+        appLogger.i('[ReelIntro] ${deck.id}: Next card moves on to the first card');
+        unawaited(step(1, skipAi: true));
+      });
+    }
   }
 
   /// The decision card is on screen: nothing plays (the TV's clip pauses,
@@ -2194,8 +2530,9 @@ class ReelController extends ChangeNotifier {
     final tasks = <ReelPrefetchTask>[];
     final answered = <ReelCardData>[];
     final window = <String>[];
+    final from = _planAt;
     for (final offset in lean ? ReelPrefetcher.leanOffsets : ReelPrefetcher.offsets) {
-      final j = index + offset * _direction;
+      final j = from + offset * _direction;
       if (j < 0 || j >= list.length) continue;
       final c = list[j];
       window.add(c.id);
@@ -2356,7 +2693,7 @@ class ReelController extends ChangeNotifier {
     if (list == null) return null;
     final j = list.indexWhere((x) => x.id == c.id);
     if (j < 0) return null;
-    return switch ((j - index) * _direction) {
+    return switch ((j - _planAt) * _direction) {
       1 => ClipPreloadRank.next,
       -1 when _preloadRanks.contains(ClipPreloadRank.previous) => ClipPreloadRank.previous,
       2 when _preloadRanks.contains(ClipPreloadRank.ahead) => ClipPreloadRank.ahead,
@@ -2405,14 +2742,21 @@ class ReelController extends ChangeNotifier {
     if (_headRank(c) == null || !_mayPreload) return;
     ResolvedClip? clip;
     try {
-      clip = await resolver
-          .lookupWithoutServers(
-            c.title,
-            exclude: _excluded[c.id] ?? const {},
-            // V2-10: a Plex head only once the clip core has its bytes on disk.
-            onDisk: (hit) => _clipCache.isOnDisk(hit.source.cacheKey),
-          )
-          .timeout(timeouts.lookup);
+      // Offline (V2-15): a Plex clip on disk only, AnimeThemes not asked.
+      clip =
+          await (_offline.value
+                  ? resolver.lookupOnDisk(
+                      c.title,
+                      exclude: _excluded[c.id] ?? const {},
+                      onDisk: (hit) => _clipCache.isOnDisk(hit.source.cacheKey),
+                    )
+                  : resolver.lookupWithoutServers(
+                      c.title,
+                      exclude: _excluded[c.id] ?? const {},
+                      // V2-10: a Plex head only once the clip core has its bytes on disk.
+                      onDisk: (hit) => _clipCache.isOnDisk(hit.source.cacheKey),
+                    ))
+              .timeout(timeouts.lookup);
     } catch (e) {
       appLogger.d('Reel: deck head lookup failed (${e.runtimeType})');
     }
@@ -2455,7 +2799,8 @@ class ReelController extends ChangeNotifier {
   /// no room is taken out of this session's list before it comes on screen;
   /// the title waits for another day, as on the TV.
   void _holdBackAhead(ReelCardData c) {
-    if (!externalClips || _disposed || !_active) return;
+    // Offline (V2-15) every card is a still for now, not an AI card.
+    if (!externalClips || _disposed || !_active || _offline.value) return;
     final list = _cards[deck.id];
     if (list == null) return;
     final j = list.indexOf(c);
@@ -2549,6 +2894,7 @@ class ReelController extends ChangeNotifier {
     final failed = _clip[cardId];
     final c = cards?.where((x) => x.id == cardId).firstOrNull;
     if (c == null || failed == null) return;
+    if (_offline.value) return _failedOffline(cardId, shown: shown);
     if (!_retried.add(cardId)) {
       if (externalClips && _resolved.contains(cardId)) {
         _clip[cardId] = null;
@@ -2593,6 +2939,20 @@ class ReelController extends ChangeNotifier {
     _firstClip = false;
     if (gen == _generation && _stage == ReelStage.open) _toStage(ReelStage.frame);
     _syncHold();
+  }
+
+  /// Offline (V2-15), a clip from disk that fails (most likely its bytes on
+  /// disk ran out before its end) leaves the card a still. Its cached answer
+  /// is kept and nothing is looked up again: no server can answer, and back
+  /// online every card is looked up afresh.
+  Future<void> _failedOffline(String cardId, {required bool shown}) async {
+    appLogger.i('[ReelOffline] $cardId: the clip on disk stopped; a still until back online');
+    _clip[cardId] = null;
+    _unknown.add(cardId);
+    notifyListeners();
+    if (!shown) return;
+    _settle(_generation, playing: false);
+    if (!externalClips) await clips.pause();
   }
 
   /// Phone feed: [cardId] is no longer the page under the thumb (V2-02). A
@@ -2700,7 +3060,7 @@ class ReelController extends ChangeNotifier {
     selectPick(s.pick + dir);
   }
 
-  /// The decision card: chooses pick [i] (a tap, or the Fold's On TV mode).
+  /// The decision card: chooses pick [i] (a tap, or the phone's On TV mode).
   void selectPick(int i) {
     final s = current;
     if (s.kind != ReelSlotKind.decide || s.picks.isEmpty) return;
@@ -3055,7 +3415,7 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The playback profile changed (the Fold switched screens, the network
+  /// The playback profile changed (a foldable switched screens, the network
   /// changed, data saver was turned on): every resolved card except the one
   /// on screen picks its file again, so the next card plays at the new
   /// height. The card on screen keeps its file until it is shown again.
@@ -3072,8 +3432,10 @@ class ReelController extends ChangeNotifier {
     }
     appLogger.d('Reel: playback profile now ${resolver.playback}');
     if (changed) notifyListeners();
-    // The profile carries the link: the budget follows it from here.
+    // The profile carries the link: the budget follows it from here, and
+    // so does offline (no network at all, V2-15).
     _onLinkChanged();
+    _syncOffline();
   }
 
   /// The On TV state the TV broadcasts on every card change: what the
@@ -3105,6 +3467,7 @@ class ReelController extends ChangeNotifier {
       'next': [for (final n in upNext) ?card(n)],
       'playing': clips.phase.value == ClipPhase.playing,
       'poolEnd': s.kind == ReelSlotKind.poolEnd,
+      if (s.intro case final intro?) 'intro': {'line': intro.line},
       if (s.kind == ReelSlotKind.decide)
         'decide': {
           'pick': s.pick,
@@ -3143,14 +3506,18 @@ class ReelController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _introTimer?.cancel();
     _setActive(false);
     _generation++;
     clips.phase.removeListener(_onPhase);
     clips.onScreen.removeListener(_onClipOnScreen);
     memoryRestored?.removeListener(_onMemoryRestored);
     resolver.profile?.removeListener(_onProfile);
+    offlineMode?.removeListener(_syncOffline);
     ReelStore.picksChanged.removeListener(_onPicksChanged);
     settingsChanged?.removeListener(_onSettingsChanged);
+    unawaited(_leadInSub?.cancel());
+    _leadInSub = null;
     deckPrefsChanged.removeListener(_onDeckPrefsChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);
@@ -3164,6 +3531,7 @@ class ReelController extends ChangeNotifier {
     _toastTimer?.cancel();
     deckStrip.dispose();
     toast.dispose();
+    _offline.dispose();
     cardChanged.dispose();
     unawaited(clips.release());
     super.dispose();

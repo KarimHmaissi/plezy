@@ -242,6 +242,45 @@ void main() {
     });
   });
 
+  group('Skip trailer intros (V2-23)', () {
+    testWidgets('the TV shows it in the Playing group, on by default; the phone never does', (tester) async {
+      await pump(tester, tv: false);
+      expect(find.text(s.skipIntros), findsNothing, reason: 'the phone feed never cuts a lead-in');
+
+      await pump(tester, tv: true);
+      final tile = find.widgetWithText(SwitchListTile, s.skipIntros);
+      await tester.scrollUntilVisible(tile, 200);
+      expect(find.text(s.skipIntrosDescription), findsOneWidget);
+      expect(tester.widget<SwitchListTile>(tile).value, isTrue);
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(settings.read(SettingsService.reelSkipIntros), isFalse);
+      expect(
+        SettingsService.reelChoicePrefs,
+        contains(SettingsService.reelSkipIntros),
+        reason: 'a playing Reel takes it up',
+      );
+    });
+
+    testWidgets('measure-only sits in the TV developer group only, off', (tester) async {
+      await pump(tester, tv: true);
+      expect(find.text(s.leadInMeasureOnly), findsNothing, reason: 'hidden with the developer group');
+
+      await settings.write(SettingsService.enableDebugLogging, true);
+      await pump(tester, tv: false);
+      expect(find.text(s.leadInMeasureOnly), findsNothing);
+
+      await pump(tester, tv: true);
+      final tile = find.widgetWithText(SwitchListTile, s.leadInMeasureOnly);
+      await tester.scrollUntilVisible(tile, 200);
+      expect(tester.widget<SwitchListTile>(tile).value, isFalse);
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(settings.read(SettingsService.reelLeadInMeasureOnly), isTrue);
+      expect(SettingsService.reelChoicePrefs, contains(SettingsService.reelLeadInMeasureOnly));
+    });
+  });
+
   test('every choice has its own label', () {
     expect(ReelStartSound.values.map(ReelSettingsScreen.startSoundLabel).toSet(), hasLength(3));
     expect(ReelClipEnd.values.map(ReelSettingsScreen.clipEndLabel).toSet(), hasLength(3));

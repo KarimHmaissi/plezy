@@ -101,25 +101,25 @@ void main() {
     for (var i = 0; i < 1200; i++) _movie('m$i', 'Filler $i', rating: 5.0, year: 1990 + i % 30),
     _movie(
       'heat',
-      'Heat',
+      'Hard Pursuit',
       year: 1995,
       rating: 8.3,
       genres: ['Crime', 'Thriller'],
-      imdb: 'tt0113277',
+      imdb: 'tt9000011',
       minutes: 170,
-      summary: 'A group of professional bank robbers start to feel the heat from police.',
-      cast: ['Al Pacino', 'Robert De Niro'],
+      summary: 'A crew of professional bank robbers feel the pressure from police.',
+      cast: ['Ray Mercer', 'Tom Avery'],
     ),
     _movie(
       'ocean',
-      "Ocean's Eleven",
+      'Ocean Run',
       year: 2001,
       rating: 7.7,
       genres: ['Crime', 'Comedy'],
-      imdb: 'tt0240772',
+      imdb: 'tt9000012',
       minutes: 116,
-      summary: 'Danny Ocean gathers a crew to rob three Las Vegas casinos in one heist.',
-      cast: ['George Clooney'],
+      summary: 'A planner gathers a crew to rob three casinos in one heist.',
+      cast: ['Jack Hollis'],
       viewCount: 1,
     ),
   ];
@@ -165,7 +165,7 @@ void main() {
       _FakeSource('srv', {'1': (title: 'Movies', type: 'movie', items: films)}),
     ]);
     final crime = await index.search(const IndexQuery(type: 'movie', genresAll: ['crime'], limit: 5));
-    expect(crime.map((t) => t.title), ['Heat', "Ocean's Eleven"]);
+    expect(crime.map((t) => t.title), ['Hard Pursuit', 'Ocean Run']);
 
     final shortUnwatched90s = await index.search(
       const IndexQuery(
@@ -176,18 +176,18 @@ void main() {
         watch: IndexWatchFilter.unwatched,
       ),
     );
-    expect(shortUnwatched90s.map((t) => t.title), ['Heat']);
+    expect(shortUnwatched90s.map((t) => t.title), ['Hard Pursuit']);
 
     final notComedy = await index.search(const IndexQuery(genresAll: ['Crime'], genresNone: ['Comedy']));
-    expect(notComedy.map((t) => t.title), ['Heat']);
+    expect(notComedy.map((t) => t.title), ['Hard Pursuit']);
   });
 
   test('full-text search finds plot words and cast', () async {
     await index.build([
       _FakeSource('srv', {'1': (title: 'Movies', type: 'movie', items: films)}),
     ]);
-    expect((await index.textSearch('casino heist')).map((t) => t.title), ["Ocean's Eleven"]);
-    expect((await index.textSearch('De Niro')).map((t) => t.title), ['Heat']);
+    expect((await index.textSearch('casino heist')).map((t) => t.title), ['Ocean Run']);
+    expect((await index.textSearch('Tom Avery')).map((t) => t.title), ['Hard Pursuit']);
   });
 
   test('the same film in 4K and on a second server is one result with three copies', () async {
@@ -203,7 +203,7 @@ void main() {
           ],
         ),
       }),
-      _FakeSource('xtra', {
+      _FakeSource('srv-b', {
         '7': (title: 'Movies', type: 'movie', items: [heat]),
       }),
     ]);

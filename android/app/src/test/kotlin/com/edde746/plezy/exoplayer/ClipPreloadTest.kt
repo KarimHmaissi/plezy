@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Looper
 import android.widget.FrameLayout
 import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.analytics.PlayerId
@@ -12,6 +13,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -220,5 +222,163 @@ class ClipPreloadTest {
       shadowOf(Looper.getMainLooper()).idle()
     }
     withClipCore { clip -> assertTrue(clip.field(ExoPlayerCore::class.java, "clipCache") != null) }
+  }
+  // --- V2-23: lead-in skip -------------------------------------------------
+
+  private fun MediaItem.start(): Long = clippingConfiguration.startPositionMs
+
+  private val ExoPlayerCore.player: ExoPlayer get() = field(ExoPlayerCore::class.java, "exoPlayer") as ExoPlayer
+
+  private fun outcome(core: ExoPlayerCore, uri: String, key: String, startMs: Long) = LeadInOutcome(
+    LeadInJob(uri, key, ClipPreloadRank.AHEAD, core, {}, { error("not run") }, {}),
+    decision = LeadInDecision(startMs = startMs, kind = "coloured", lead = "card+black", reason = "ok")
+  )
+
+  @Test
+  fun aPreloadIsClippedOnlyWithAStartThePolicyOnAndMeasureOnlyOff() {
+    withClipCore { core ->
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey, startMs = 6_006L, measure = true)
+      assertEquals("the policy is off until Dart sends it", 0L, core.items[b]!!.start())
+
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      assertEquals("the held preload follows the policy at once", 6_006L, core.items[b]!!.start())
+
+      core.setLeadInPolicy(enabled = true, measureOnly = true)
+      assertEquals("measure-only never clips", 0L, core.items[b]!!.start())
+    }
+  }
+
+  @Test
+  fun anAnimeThemesClipOrAClipWithoutAKeyIsNeverClipped() {
+    withClipCore { core ->
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      core.preloadClip(a, ClipPreloadRank.NEXT, "animeTheme", startMs = 6_006L)
+      assertEquals(0L, core.items[a]!!.start())
+      core.preloadClip(c, ClipPreloadRank.PREVIOUS, "plexExtra", startMs = 6_006L)
+      assertEquals(0L, core.items[c]!!.start())
+    }
+  }
+
+  @Test
+  fun aNewStartRestagesTheHeldPreloadAndAnEqualOneNeverDoes() {
+    withClipCore { core ->
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey)
+      val unclipped = core.items[b]
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey, startMs = 6_006L)
+      assertNotSame(unclipped, core.items[b])
+      assertEquals(6_006L, core.items[b]!!.start())
+      val clipped = core.items[b]
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey, startMs = 6_006L)
+      assertSame(clipped, core.items[b])
+      assertEquals(1, core.manager.sourceCount)
+    }
+  }
+
+  @Test
+  fun aDartResendWithNoStartAfterADetectorAnswerNeverRestages() {
+    withClipCore { core ->
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey, measure = true)
+      core.onLeadInOutcome(outcome(core, b, plexKey, 6_006L))
+      val restaged = core.items[b]
+      assertEquals(6_006L, restaged!!.start())
+      // Dart hadn't seen the event yet: null is "unknown", never "play from 0" (R7).
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey, startMs = null, measure = true)
+      assertSame(restaged, core.items[b])
+      assertEquals(6_006L, core.items[b]!!.start())
+    }
+  }
+
+  @Test
+  fun anOpenRefusesAPreloadBuiltWithAnotherStart() {
+    withClipCore { core ->
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey)
+      assertEquals(0L, core.items[b]!!.start())
+      core.rememberClipLeadIn(b, 6_006L, true, "plexExtra")
+      core.open(uri = b, headers = null, startPositionMs = 0L, autoPlay = false, mediaGeneration = 1)
+      assertEquals("a fresh source with the open's start", 6_006L, core.player.currentMediaItem!!.start())
+    }
+  }
+
+  @Test
+  fun aReloadOfAnOpenKeepsTheStartItWasOpenedWith() {
+    withClipCore { core ->
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      core.rememberClipCacheKey(c, plexKey2)
+      core.rememberClipLeadIn(c, null, true, "plexExtra")
+      core.open(uri = c, headers = null, startPositionMs = 0L, autoPlay = false, mediaGeneration = 1)
+      assertEquals(0L, core.player.currentMediaItem!!.start())
+      // A start learned while it plays only applies to its next open.
+      core.onLeadInOutcome(outcome(core, c, plexKey2, 6_006L))
+      val reload = ExoPlayerCore::class.java.getDeclaredMethod("setCurrentMediaSource", ExoPlayer::class.java, String::class.java, Long::class.javaPrimitiveType)
+      reload.isAccessible = true
+      reload.invoke(core, core.player, c, 1_234L)
+      assertEquals("a recovery reload keeps the unclipped timeline (R6)", 0L, core.player.currentMediaItem!!.start())
+      assertEquals(1_234L, core.player.currentPosition)
+    }
+  }
+
+  private class LeadInEvents : ExoPlayerDelegate {
+    val leadIns = mutableListOf<Map<String, Any>>()
+
+    override fun onFormatUnsupported(
+      mediaGeneration: Int,
+      uri: String,
+      headers: Map<String, String>?,
+      positionMs: Long,
+      playWhenReady: Boolean,
+      errorMessage: String
+    ): Boolean = false
+
+    override fun onPropertyChange(name: String, value: Any?) = Unit
+
+    override fun onEvent(name: String, data: Map<String, Any>?) {
+      if (name == "reel-lead-in" && data != null) leadIns += data
+    }
+  }
+
+  @Test
+  fun anAnswerSaysWhetherItIsForTheClipPlayingUnclipped() {
+    withClipCore { core ->
+      val events = LeadInEvents()
+      core.delegate = events
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey, measure = true)
+      core.rememberClipCacheKey(c, plexKey2)
+      core.rememberClipLeadIn(c, null, true, "plexExtra")
+      core.open(uri = c, headers = null, startPositionMs = 0L, autoPlay = false, mediaGeneration = 1)
+
+      // The clip playing, opened before its start was known: Dart's Replay and loop land on it.
+      core.onLeadInOutcome(outcome(core, c, plexKey2, 6_006L))
+      assertEquals(true, events.leadIns.last()["playingUnclipped"])
+      assertEquals(plexKey2, events.leadIns.last()["cacheKey"])
+
+      // A held clip: its next open is clipped by the core, so Dart must not seek past 0 (the cut).
+      core.onLeadInOutcome(outcome(core, b, plexKey, 4_004L))
+      assertEquals(false, events.leadIns.last()["playingUnclipped"])
+      core.open(uri = b, headers = null, startPositionMs = 0L, autoPlay = false, mediaGeneration = 2)
+      assertEquals("the open after the answer is clipped", 4_004L, core.player.currentMediaItem!!.start())
+      assertTrue("no event carries a URI", events.leadIns.none { e -> e.values.any { it.toString().contains("://") } })
+    }
+  }
+
+  @Test
+  fun aClipOpenPausesTheDetectorUntilAfterItsFirstFrame() {
+    withClipCore { core ->
+      core.open(uri = a, headers = null, startPositionMs = 0L, autoPlay = false, mediaGeneration = 1)
+      assertTrue(LeadInDetector.queue.pauseReasons().contains("open"))
+    }
+    assertTrue("a released core lets the detector go", LeadInDetector.queue.pauseReasons().isEmpty())
+  }
+
+  @Test
+  fun aLeadInsBytesRaiseTheOnDiskBarAndOnlyContiguousBytesCount() {
+    val mib = 1024L * 1024
+    assertTrue(ClipCachePolicy.isOnDisk(4 * mib, -1L))
+    assertFalse("4 MiB past a 1 MiB lead-in is needed", ClipCachePolicy.isOnDisk(4 * mib, -1L, leadBytes = 1 * mib))
+    assertTrue(ClipCachePolicy.isOnDisk(5 * mib, -1L, leadBytes = 1 * mib))
+    assertTrue("a short clip cached whole", ClipCachePolicy.isOnDisk(3 * mib, 3 * mib, leadBytes = 1 * mib))
   }
 }

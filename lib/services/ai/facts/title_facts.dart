@@ -326,7 +326,8 @@ class LedgerSummary {
   }
 
   /// A soft fact for the model, or null when there is nothing to say.
-  /// "shown 3× lately, not played yet" / "passed on in Aug".
+  /// "shown 3× lately, not played yet" / "shown 3× in the Reel lately, not
+  /// played yet" (shown only in the Reel) / "passed on in Aug".
   String? factLine() {
     final at = notForMeAt;
     if (at != null) {
@@ -334,10 +335,30 @@ class LedgerSummary {
       if (age < const Duration(days: 180)) return 'passed on in ${SeenState.monthName(at.month)}';
     }
     if (timesShown == 0) return null;
+    final where = surfaces.length == 1 && surfaces.single == PickSurface.reel ? ' in the Reel' : '';
     return switch (outcome) {
       PickOutcome.took || PickOutcome.kept => null,
-      _ => 'shown $timesShown× lately, not played yet',
+      _ => 'shown $timesShown×$where lately, not played yet',
     };
+  }
+
+  /// This summary once a real watch is known: a watch at [watchedAt] after
+  /// the last showing (or a title now [inProgress]) means it took, so
+  /// nothing says "not played yet" any more. Unchanged otherwise.
+  LedgerSummary seenAt(DateTime? watchedAt, {bool inProgress = false}) {
+    if (outcome == PickOutcome.took || outcome == PickOutcome.kept || timesShown == 0) return this;
+    final last = lastShown;
+    final played = inProgress || (watchedAt != null && last != null && watchedAt.isAfter(last));
+    if (!played) return this;
+    return LedgerSummary(
+      shownWeight: shownWeight,
+      timesShown: timesShown,
+      lastShown: lastShown,
+      surfaces: surfaces,
+      outcome: PickOutcome.took,
+      notForMeAt: notForMeAt,
+      now: now,
+    );
   }
 }
 

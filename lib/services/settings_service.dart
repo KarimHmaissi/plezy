@@ -785,6 +785,19 @@ class SettingsService extends BaseSharedPreferencesService {
   /// Per-device runtime state, so it takes part in neither reset nor export.
   static const reelClipNormalization = BoolPref('reel_clip_normalization');
 
+  /// Fork: "Skip trailer intros" on the TV (plan V2-23): the clip core finds
+  /// where a Plex trailer's picture starts (after its rating card and the
+  /// black before it) and starts it there. On by default; AnimeThemes
+  /// openings are never cut. A playing Reel takes a change up at once.
+  static const reelSkipIntros = BoolPref('reel_skip_intros', defaultValue: true);
+
+  /// Fork: the developer group's "Measure trailer intros only" (plan V2-23):
+  /// the clip core measures and logs each trailer's lead-in but never cuts.
+  /// Counts only while the developer row shows
+  /// (`ReelDeveloper.leadInMeasureOnly`). Per-device runtime state, so it
+  /// takes part in neither reset nor export, like [reelClipNormalization].
+  static const reelLeadInMeasureOnly = BoolPref('reel_lead_in_measure_only');
+
   // Fork: the Reel's per-device prefs (plan V2-46a). The synced Reel prefs
   // (deck order, start deck, sources) live in CustomisationStore instead.
   // Each default is what the Reel does today; an item that builds a new
@@ -853,6 +866,12 @@ class SettingsService extends BaseSharedPreferencesService {
   /// immersive view (V2-31). Per device, like [reelIntroSeen].
   static const reelImmersiveHintSeen = BoolPref('reel_immersive_hint_seen');
 
+  /// The phone feed's picture fills the screen (V2-33): a pinch out crops the
+  /// clip to cover the page, a pinch in fits it again, and the choice is
+  /// kept for the next card and the next visit. Per device (a TV has no
+  /// pinch, and a screen's shape is its own), so reset but not exported.
+  static const reelFill = BoolPref('reel_fill');
+
   /// Show the Reel tab, which takes Explore's slot (D14). Works like
   /// [showExploreTab]. Today: shown.
   static const showReelTab = BoolPref('show_reel_tab', defaultValue: true);
@@ -868,6 +887,9 @@ class SettingsService extends BaseSharedPreferencesService {
     reelCaptions,
     // The listening A/B flips it while a clip plays (V2-19).
     reelClipNormalization,
+    // V2-23: the clip core's lead-in policy follows at once.
+    reelSkipIntros,
+    reelLeadInMeasureOnly,
   ];
   static const enableDiscordRPC = BoolPref('enable_discord_rpc');
   static const enableTraktWatchedSync = BoolPref('enable_trakt_watched_sync', defaultValue: true);
@@ -1713,6 +1735,7 @@ class SettingsService extends BaseSharedPreferencesService {
     reelCellular,
     reelOkAction,
     reelCaptions,
+    reelSkipIntros,
     alwaysKeepSidebarOpen,
     librariesSectionExpanded,
     showUnwatchedCount,
@@ -1826,6 +1849,7 @@ class SettingsService extends BaseSharedPreferencesService {
     reelIntroSeen,
     reelHintSessions,
     reelImmersiveHintSeen,
+    reelFill,
   ];
 
   /// Settings that "Reset All Settings" actually resets.

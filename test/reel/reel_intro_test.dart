@@ -215,7 +215,7 @@ void main() {
       expect(c.active, isTrue);
     });
 
-    testWidgets('an open from the Fold\'s On TV mode lets the Reel start without it', (tester) async {
+    testWidgets('an open from the phone\'s On TV mode lets the Reel start without it', (tester) async {
       await show(tester);
       expect(find.byType(ReelIntro), findsOneWidget);
 

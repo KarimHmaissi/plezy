@@ -126,7 +126,7 @@ void main() {
   test('a dated watch prints its month; a row with no brain falls back to its own counts', () async {
     await add(
       '6',
-      'Heat',
+      'Hard Pursuit',
       year: 1995,
       viewCount: 1,
       lastViewedAt: DateTime.utc(2025, 3, 14).millisecondsSinceEpoch ~/ 1000,

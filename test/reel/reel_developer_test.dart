@@ -55,6 +55,21 @@ void main() {
     });
   });
 
+  group('trailer-intro measure-only switch (V2-23)', () {
+    test('off by default, and a release build counts it only while the developer row shows', () async {
+      expect(SettingsService.reelLeadInMeasureOnly.defaultValue, isFalse);
+      expect(SettingsService.reelSkipIntros.defaultValue, isTrue, reason: 'Skip trailer intros ships on');
+      expect(ReelDeveloper.leadInMeasureOnly(debugBuild: false, settings: settings), isFalse);
+      await settings.write(SettingsService.reelLeadInMeasureOnly, true);
+      expect(ReelDeveloper.leadInMeasureOnly(debugBuild: false, settings: settings), isFalse);
+      expect(ReelDeveloper.leadInMeasureOnly(debugBuild: true, settings: settings), isTrue);
+      await settings.write(SettingsService.enableDebugLogging, true);
+      expect(ReelDeveloper.leadInMeasureOnly(debugBuild: false, settings: settings), isTrue);
+      expect(SettingsService.portablePrefs, isNot(contains(SettingsService.reelLeadInMeasureOnly)));
+      expect(SettingsService.portablePrefs, contains(SettingsService.reelSkipIntros));
+    });
+  });
+
   group('clip loudness switch (V2-19, D9)', () {
     test('off by default, in either build', () {
       expect(ReelDeveloper.normalization(debugBuild: false, settings: settings), isFalse);

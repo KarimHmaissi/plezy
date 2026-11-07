@@ -69,7 +69,7 @@ ContinueWatchingSplit classifyContinueWatching(
 }
 
 /// Compare show titles across sources: case, punctuation and a trailing
-/// "(2009)" year disambiguator are ignored ("Castle (2009)" == "Castle").
+/// "(2009)" year disambiguator are ignored ("Marsh Lane (2009)" == "Marsh Lane").
 String normalizeShowTitle(String? title) {
   if (title == null) return '';
   return title.toLowerCase().replaceAll(RegExp(r'\s*\(\d{4}\)\s*$'), '').replaceAll(RegExp(r'[^a-z0-9]+'), '');

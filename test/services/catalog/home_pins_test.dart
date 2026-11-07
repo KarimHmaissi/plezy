@@ -15,7 +15,7 @@ void main() {
         rows: [
           (id: HomeRowIds.continueWatching, title: 'Continue Watching', sources: <String>[]),
           (id: HomeRowIds.traktLists('chart:boxoffice'), title: 'Box Office', sources: <String>[]),
-          (id: HomeRowIds.plex('Oh, The Horror!'), title: 'Oh, The Horror!', sources: ['srv1|/hubs/items?x=1']),
+          (id: HomeRowIds.plex('Hey, Spooky Picks!'), title: 'Hey, Spooky Picks!', sources: ['srv1|/hubs/items?x=1']),
           (id: HomeRowIds.watchlist('films.Horror'), title: 'Horror Films', sources: <String>[]),
         ],
         curated: false,
@@ -67,7 +67,7 @@ void main() {
 
     test('row titles that differ only in case and punctuation are the same row', () {
       expect(HomeRowIds.plex('Recently Added in *Movies'), HomeRowIds.plex('Recently added in Movies'));
-      expect(HomeRowIds.plex('Oh, The Horror!'), HomeRowIds.plex('oh the horror'));
+      expect(HomeRowIds.plex('Hey, Spooky Picks!'), HomeRowIds.plex('hey spooky picks'));
       expect(HomeRowIds.plex('Movies (4K)'), isNot(HomeRowIds.plex('Movies')));
     });
 
@@ -92,14 +92,14 @@ void main() {
 
     test('same-title rows from several libraries become one row without repeated titles', () {
       final merged = mergePlexHubs([
-        hub('/a', 'Oh, The Horror!', [movie('1', 'Alien', guid: 'g1'), movie('2', 'Scream', guid: 'g2')]),
+        hub('/a', 'Hey, Spooky Picks!', [movie('1', 'Deep Hull', guid: 'g1'), movie('2', 'Night Caller', guid: 'g2')]),
         hub('/b', 'Recently Added in Movies', [movie('3', 'Up', guid: 'g3')]),
-        hub('/c', 'Oh, The Horror!', [movie('9', 'Alien', guid: 'g1'), movie('4', 'Saw', guid: 'g4')]),
-        hub('/d', 'Recently Added in *Movies', [movie('5', 'Heat', guid: 'g5')], server: 's2'),
+        hub('/c', 'Hey, Spooky Picks!', [movie('9', 'Deep Hull', guid: 'g1'), movie('4', 'Puzzle Trap', guid: 'g4')]),
+        hub('/d', 'Recently Added in *Movies', [movie('5', 'Hard Pursuit', guid: 'g5')], server: 's2'),
         hub('/e', 'Empty', []),
       ]);
-      expect([for (final m in merged) m.hub.title], ['Oh, The Horror!', 'Recently Added in Movies']);
-      expect([for (final i in merged.first.hub.items) i.title], ['Alien', 'Scream', 'Saw']);
+      expect([for (final m in merged) m.hub.title], ['Hey, Spooky Picks!', 'Recently Added in Movies']);
+      expect([for (final i in merged.first.hub.items) i.title], ['Deep Hull', 'Night Caller', 'Puzzle Trap']);
       expect(merged.first.sources, ['s1|/a', 's1|/c']);
       expect(merged.last.sources, ['s1|/b', 's2|/d']);
     });

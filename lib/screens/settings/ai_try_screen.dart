@@ -10,6 +10,7 @@ import '../../providers/multi_server_provider.dart';
 import '../../services/ai/ai_agent.dart';
 import '../../services/catalog/trakt_catalog_source.dart';
 import '../../services/library_index/library_index.dart';
+import '../../services/reel/reel_ledger.dart';
 import '../../utils/media_navigation_helper.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
@@ -35,7 +36,7 @@ class _AiTryScreenState extends State<AiTryScreen> {
   void initState() {
     super.initState();
     final trakt = context.read<CatalogSourcesProvider?>()?.connectedSources.whereType<TraktCatalogSource>().firstOrNull;
-    _agent = AiAgent(index: LibraryIndex.instance, trakt: trakt?.client);
+    _agent = AiAgent(index: LibraryIndex.instance, trakt: trakt?.client, ledger: ReelLedger.instance.snapshot);
     unawaited(_run());
   }
 
