@@ -72,6 +72,11 @@ const _benignExits = {
   'lib/services/reel/reel_library.dart → lib/services/ai/facts/title_facts.dart',
   // A month's name for the daily build's "last watched" facts.
   'lib/services/reel/reel_pool.dart → lib/services/ai/facts/seen_state.dart',
+  // The pick ledger (V2-44) builds the facts' LedgerSummary values from the
+  // Reel's own events, and asks whether this device is a phone (which shared
+  // aggregate is its own). Read-only; it calls nothing else there.
+  'lib/services/reel/reel_ledger.dart → lib/services/ai/facts/title_facts.dart',
+  'lib/services/reel/reel_ledger.dart → lib/services/companion_remote/phone_mode.dart',
 };
 
 List<String> _reelFiles() => [
