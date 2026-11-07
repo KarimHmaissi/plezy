@@ -150,7 +150,8 @@ class ReelLedger implements PickLedger {
       final took =
           first != null && (plays[id] ?? const []).any((p) => !p.isBefore(first) && p.difference(first) < tookWithin);
       final passed = passedOn[id];
-      final saidPassed = passed != null && now.difference(passed) < passedOnSaid ? passed : null;
+      // Vetoes are stored in UTC; "passed on in <month>" is the local month.
+      final saidPassed = passed != null && now.difference(passed) < passedOnSaid ? passed.toLocal() : null;
       if (recent.isEmpty && saidPassed == null) continue;
       out[id] = LedgerSummary(
         shownWeight: recent.fold(

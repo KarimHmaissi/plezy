@@ -159,6 +159,7 @@ void main() {
       int? leafCount,
       int? viewedLeafCount,
       DateTime? lastViewedAt,
+      int? viewOffset,
     }) => db
         .into(db.indexTitles)
         .insert(
@@ -174,6 +175,7 @@ void main() {
               'leafCount': ?leafCount,
               'viewedLeafCount': ?viewedLeafCount,
               if (lastViewedAt != null) 'lastViewedAt': lastViewedAt.millisecondsSinceEpoch ~/ 1000,
+              'viewOffset': ?viewOffset,
               'Guid': [
                 {'id': guid},
               ],
@@ -281,6 +283,23 @@ void main() {
       expect(after[copper.id]!.modelLine(), before[copper.id]!.modelLine(), reason: 'no Reel facts, no change');
       expect(after[northern.id]!.ledger!.outcome, PickOutcome.took, reason: 'watched after it was shown');
       expect(after[northern.id]!.modelLine(), before[northern.id]!.modelLine());
+    });
+
+    test('a film stopped partway since it was shown no longer reads "not played yet" (V2-44)', () async {
+      await add('1', library: 'Movies', guid: 'imdb://tt1', title: 'Harbor Lights', viewOffset: 1200000);
+      final ref = await refFor('1');
+      final ledger = _MapLedger({
+        ref.id: LedgerSummary(
+          timesShown: 2,
+          lastShown: _now.subtract(const Duration(days: 4)),
+          surfaces: const {PickSurface.reel},
+          now: _now,
+        ),
+      });
+      final out = await source(ledger: ledger).load([ref]);
+      expect(out[ref.id]!.seen.kind, SeenKind.inProgress);
+      expect(out[ref.id]!.ledger!.outcome, PickOutcome.took, reason: 'as on the Ask title lines');
+      expect(out[ref.id]!.modelLine(), isNot(contains('not played yet')));
     });
 
     test('a ledger that fails leaves the facts as they were', () async {

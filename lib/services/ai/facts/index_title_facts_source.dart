@@ -115,7 +115,10 @@ class IndexTitleFactsSource implements TitleFactsSource {
       }
       var facts = factsOf(ref, rows, profile: p, now: now);
       if (picks[ref.id] case final l?) {
-        facts = facts.copyWith(ledger: l.seenAt(facts.seen.last));
+        // A film now stopped partway was started: as on Ask's title lines
+        // (AiTools), it no longer reads "not played yet".
+        final filmStarted = facts.seen.kind == SeenKind.inProgress && facts.seen.eps == null;
+        facts = facts.copyWith(ledger: l.seenAt(facts.seen.last, inProgress: filmStarted));
       }
       out[ref.id] = facts;
       for (final t in rows) {

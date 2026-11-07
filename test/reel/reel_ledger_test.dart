@@ -115,6 +115,15 @@ void main() {
     expect(await ledger.resting(), {'m:harbor'});
   });
 
+  test('"passed on in <month>" is the local month (vetoes are stored in UTC)', () {
+    final passed = DateTime.utc(2026, 1, 31, 23, 30);
+    final all = ReelLedger.summarise(const [], {'m:harbor': passed}, now: DateTime.utc(2026, 2, 10).toLocal());
+    final s = all['m:harbor']!;
+    expect(s.notForMeAt!.isUtc, isFalse);
+    expect(s.notForMeAt!.isAtSameMomentAs(passed), isTrue);
+    expect(s.factLine(), 'passed on in ${SeenState.monthName(passed.toLocal().month)}');
+  });
+
   test('summaries, shownWithin and promptFacts', () async {
     await recordAt(tv, daysAgo(2), 'm:harbor', ReelAction.sampled);
     await recordAt(tv, daysAgo(12), 'm:copper', ReelAction.sampled);
