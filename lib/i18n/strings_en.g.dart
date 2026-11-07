@@ -4559,6 +4559,9 @@ class Translations$reel$en {
 	/// en: 'From the Reel'
 	String get homeRow => 'From the Reel';
 
+	/// en: 'Remove from the Reel'
+	String get homeRowRemove => 'Remove from the Reel';
+
 	/// en: 'You finished ${title}. Sample what's next in the Reel.'
 	String whatsNextHome({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.';
 
@@ -8511,6 +8514,9 @@ class Translations$reel$card$en {
 	/// en: 'Saved'
 	String get saved => 'Saved';
 
+	/// en: 'Remove from saved'
+	String get unsave => 'Remove from saved';
+
 	/// en: 'Resume ${episode}'
 	String resume({required Object episode}) => 'Resume ${episode}';
 
@@ -11965,6 +11971,7 @@ extension on Translations {
 			'reel.card.failedBodyPhone' => 'Check the connection and try again.',
 			'reel.card.tryAgain' => 'Try again',
 			'reel.card.saved' => 'Saved',
+			'reel.card.unsave' => 'Remove from saved',
 			'reel.card.resume' => ({required Object episode}) => 'Resume ${episode}',
 			'reel.card.episode' => ({required Object n}) => 'E${n}',
 			'reel.card.seasonEpisode' => ({required Object season, required Object n}) => 'S${season} E${n}',
@@ -12052,6 +12059,7 @@ extension on Translations {
 			'reel.deckIntro.hintTv' => 'OK or ↓ first card  ·  → next deck',
 			'reel.deckIntro.swipe' => 'Or swipe up for the first card',
 			'reel.homeRow' => 'From the Reel',
+			'reel.homeRowRemove' => 'Remove from the Reel',
 			'reel.whatsNextHome' => ({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.',
 			'reel.settings.title' => 'Reel',
 			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
@@ -12428,10 +12436,10 @@ extension on Translations {
 			'liveTv.recordingScheduled' => 'Recording scheduled',
 			'liveTv.alreadyScheduled' => 'This program is already scheduled',
 			'liveTv.dvrAdminRequired' => 'DVR settings require an admin account',
-			'liveTv.recordingFailed' => 'Couldn\'t schedule recording',
-			'liveTv.recordingTargetMissing' => 'Couldn\'t determine recording library',
 			_ => null,
 		} ?? switch (path) {
+			'liveTv.recordingFailed' => 'Couldn\'t schedule recording',
+			'liveTv.recordingTargetMissing' => 'Couldn\'t determine recording library',
 			'liveTv.recordNotAvailable' => 'Recording not available for this program',
 			'liveTv.recordingCancelled' => 'Recording canceled',
 			'liveTv.recordingRuleDeleted' => 'Recording rule deleted',
@@ -12942,10 +12950,10 @@ extension on Translations {
 			'performanceOverlay.matrix' => 'Matrix',
 			'performanceOverlay.primaries' => 'Primaries',
 			'performanceOverlay.transfer' => 'Transfer',
-			'performanceOverlay.renderFps' => 'Render FPS',
-			'performanceOverlay.displayFps' => 'Display FPS',
 			_ => null,
 		} ?? switch (path) {
+			'performanceOverlay.renderFps' => 'Render FPS',
+			'performanceOverlay.displayFps' => 'Display FPS',
 			'performanceOverlay.avSync' => 'A/V Sync',
 			'performanceOverlay.dropped' => 'Dropped',
 			'performanceOverlay.dvRpus' => 'DV RPUs',

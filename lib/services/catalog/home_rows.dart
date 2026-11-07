@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
 import '../../i18n/strings.g.dart';
@@ -186,6 +188,25 @@ class HomeRowResolver {
 
   static const int itemLimit = TraktListsCatalogSource.rowItemLimit;
 
+  /// Fork: how many Reel Saves the "From the Reel" row reads at once.
+  static const int pickFetchesAtOnce = 6;
+
+  /// Runs [fetch] over [inputs] with at most [atOnce] running together,
+  /// keeping the inputs' order in the results.
+  static Future<List<R>> _pooled<T, R>(List<T> inputs, int atOnce, Future<R> Function(T input) fetch) async {
+    final results = List<R?>.filled(inputs.length, null);
+    var next = 0;
+    Future<void> worker() async {
+      while (next < inputs.length) {
+        final i = next++;
+        results[i] = await fetch(inputs[i]);
+      }
+    }
+
+    await Future.wait([for (var w = 0; w < math.min(atOnce, inputs.length); w++) worker()]);
+    return results.cast<R>();
+  }
+
   /// Whether Home fetches [id] itself (Continue Watching rows come from Home).
   static bool needsFetch(String id) =>
       id != HomeRowIds.continueWatching && id != HomeRowIds.pickBackUp && id != HomeRowIds.comfortCarryOn;
@@ -255,24 +276,23 @@ class HomeRowResolver {
         // A saved AI answer: its stored picks, no server calls.
         items = (await AiHistory.get(rest))?.items;
       case HomeRowIds.reelPicks:
-        // Fork: the Reel's fresh Saves, newest first, from the copy saved.
-        // Fetched together, each with a time limit, so one slow server
-        // never holds the row back. A "What's next after" card leads when
-        // they just finished a show: the show's one read, the same way.
+        // Fork: every Reel Save, newest first, from the copy saved (no cap:
+        // a Save stays until it is removed). Read [pickFetchesAtOnce] at a
+        // time, each with a time limit, so a long list never floods a
+        // server and one slow server never holds the row back. A "What's
+        // next after" card leads when they just finished a show: the
+        // show's one read, the same way.
         final entry = _whatsNextEntry();
-        final found = await Future.wait([
-          for (final pick in await (reel ?? ReelStore.instance).freshPicks())
-            () async {
-              final client = clientFor(ServerId(pick.serverId));
-              if (client == null) return null;
-              try {
-                return await client.fetchItem(pick.ratingKey).timeout(pickFetchTimeout);
-              } catch (e) {
-                appLogger.d('Home: Reel pick unavailable', error: e);
-                return null;
-              }
-            }(),
-        ]);
+        final found = await _pooled(await (reel ?? ReelStore.instance).savedPicks(), pickFetchesAtOnce, (pick) async {
+          final client = clientFor(ServerId(pick.serverId));
+          if (client == null) return null;
+          try {
+            return await client.fetchItem(pick.ratingKey).timeout(pickFetchTimeout);
+          } catch (e) {
+            appLogger.d('Home: Reel pick unavailable', error: e);
+            return null;
+          }
+        });
         final next = await entry;
         items = [
           ?next,

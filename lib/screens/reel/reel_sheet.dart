@@ -12,6 +12,7 @@ export '../settings/reel_decks_screen.dart' show reelDeckIcon;
 enum ReelSheetAction {
   watchHere,
   save,
+  unsave,
   moreLike,
   watch,
   details,
@@ -69,6 +70,10 @@ Future<ReelSheetAction?> showReelSheet(
       if (c.current.clip != null)
         AppMenuItem(value: 'spoiled', icon: Symbols.visibility_off_rounded, label: t.reel.sheet.spoiledMe),
       AppMenuItem(value: 'seenIt', icon: Symbols.check_rounded, label: t.reel.sheet.seenIt),
+      // A saved card can leave the saved list (away from the focused first
+      // entry, so a quick OK never removes it).
+      if (card != null && c.isSaved(card.id))
+        AppMenuItem(value: 'unsave', icon: Symbols.bookmark_remove_rounded, label: t.reel.card.unsave),
       // The phone has its own mute button at the top.
       if (isTv)
         AppMenuItem(

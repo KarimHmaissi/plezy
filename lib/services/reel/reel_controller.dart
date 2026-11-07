@@ -3088,7 +3088,7 @@ class ReelController extends ChangeNotifier {
     }
   }
 
-  /// The titles saved and still waiting on the TV's Home (fresh picks),
+  /// The titles saved (every pick, however old),
   /// so the phone's Save shows as saved (V2-29).
   final Set<String> _saved = {};
 
@@ -3096,8 +3096,8 @@ class ReelController extends ChangeNotifier {
   /// put back a list without it.
   int _savedReads = 0;
 
-  /// Whether the card [cardId] is saved: a fresh pick, from this device or
-  /// synced from the other one.
+  /// Whether the card [cardId] is saved: a pick, from this device or synced
+  /// from the other one, however long ago (a Save stays until removed).
   bool isSaved(String cardId) => _saved.contains(cardId);
 
   void _onPicksChanged() => unawaited(_loadSaved());
@@ -3112,11 +3112,7 @@ class ReelController extends ChangeNotifier {
       return;
     }
     if (_disposed || read != _savedReads) return;
-    final now = _clock();
-    final saved = {
-      for (final p in picks)
-        if (p.isFresh(now)) p.titleId,
-    };
+    final saved = {for (final p in picks) p.titleId};
     if (setEquals(saved, _saved)) return;
     _saved
       ..clear()
@@ -3124,8 +3120,8 @@ class ReelController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// One Save: waits on the TV's Home for 3 days and goes to the Plex
-  /// watchlist so it's never lost. The card shows as saved at once, and
+  /// One Save: joins the saved list ("From the Reel" on the TV's Home) until
+  /// it is removed, and goes to the Plex watchlist so it's never lost. The card shows as saved at once, and
   /// goes back if the pick couldn't be kept. [silent] leaves out the
   /// confirmation (the phone feed's filled Save and burst say it, and a
   /// toast would float over its buttons); a failure is always said.
@@ -3154,6 +3150,28 @@ class ReelController extends ChangeNotifier {
       });
     } finally {
       if (!kept && added && _saved.remove(c.id)) notifyListeners();
+    }
+  }
+
+  /// Unsaves the current card: it leaves the saved list (Home's "From the
+  /// Reel", Play Next) on both devices. The Plex watchlist is left as it is
+  /// (the viewer may have added the title there themselves). The card shows
+  /// as unsaved at once, and goes back if the pick couldn't be removed.
+  Future<void> unsave() async {
+    final c = current.card;
+    if (c == null) return;
+    _savedReads++;
+    final removed = _saved.remove(c.id);
+    if (removed) notifyListeners();
+    var done = false;
+    try {
+      await _act('unsave', () async {
+        await store.removePick(c.id);
+        done = true;
+        await _refreshPicks();
+      });
+    } finally {
+      if (!done && removed && _saved.add(c.id)) notifyListeners();
     }
   }
 

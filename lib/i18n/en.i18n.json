@@ -1733,6 +1733,7 @@
       "failedBodyPhone": "Check the connection and try again.",
       "tryAgain": "Try again",
       "saved": "Saved",
+      "unsave": "Remove from saved",
       "resume": "Resume ${episode}",
       "episode": "E${n}",
       "seasonEpisode": "S${season} E${n}",
@@ -1858,6 +1859,7 @@
       "swipe": "Or swipe up for the first card"
     },
     "homeRow": "From the Reel",
+    "homeRowRemove": "Remove from the Reel",
     "whatsNextHome": "You finished ${title}. Sample what's next in the Reel.",
     "settings": {
       "title": "Reel",

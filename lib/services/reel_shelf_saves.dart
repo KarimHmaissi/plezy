@@ -8,9 +8,11 @@ import 'catalog/home_rows.dart';
 import 'system_shelf_service.dart';
 import 'reel/reel_store.dart';
 
-/// The Reel's fresh Saves as [ShelfSave]s for Android TV's Play Next row
-/// (V2-42, D11): the same titles, in the same order, as the "From the Reel"
-/// Home row.
+/// The Reel's Saves as [ShelfSave]s for Android TV's Play Next row (V2-42,
+/// D11): the same titles, in the same order, as the "From the Reel" Home
+/// row, up to what the row can take. Android TV refuses a Watch Next sync of
+/// more than [SystemShelf.maxItems] items, so only the newest that many are
+/// read here; the saved list itself (and the Home row) keeps every Save.
 ///
 /// A launcher sync runs on every Continue Watching change, so each resolved
 /// Save is kept until the Save itself changes: a server is asked about a
@@ -25,7 +27,7 @@ class ReelShelfSaves {
   ReelShelfSaves({
     Future<List<ReelPick>> Function()? picks,
     this.fetchTimeout = HomeRowResolver.defaultPickFetchTimeout,
-  }) : _picks = picks ?? ReelStore.instance.freshPicks;
+  }) : _picks = picks ?? ReelStore.instance.savedPicks;
 
   final Future<List<ReelPick>> Function() _picks;
 
@@ -36,10 +38,11 @@ class ReelShelfSaves {
 
   static String _key(ReelPick pick) => '${pick.titleId}@${pick.at.millisecondsSinceEpoch}';
 
-  /// The fresh Saves (newest first, at most [ReelPick.maxShown]) that
-  /// [clientFor] can resolve.
+  /// The newest Saves (newest first, at most [SystemShelf.maxItems]: the
+  /// most Play Next can show after Continue Watching) that [clientFor] can
+  /// resolve.
   Future<List<ShelfSave>> load(MediaServerClient? Function(ServerId serverId) clientFor) async {
-    final picks = await _picks();
+    final picks = (await _picks()).take(SystemShelf.maxItems).toList();
     final current = {for (final pick in picks) _key(pick)};
     _resolved.removeWhere((key, _) => !current.contains(key));
     var fetched = 0;
@@ -65,7 +68,7 @@ class ReelShelfSaves {
     ]);
     final saves = [...found.nonNulls];
     appLogger.i(
-      '[ReelShelf] saves for Play Next: ${saves.length} of ${picks.length} fresh ($fetched read from a server)',
+      '[ReelShelf] saves for Play Next: ${saves.length} of ${picks.length} newest ($fetched read from a server)',
     );
     return saves;
   }

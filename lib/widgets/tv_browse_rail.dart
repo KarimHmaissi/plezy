@@ -428,6 +428,10 @@ class TvBrowseRail extends StatefulWidget {
   /// every card in [hub].
   final List<MediaMenuExtraEntry> Function(MediaHub hub)? rowMenuEntriesForHub;
 
+  /// Fork: entries built for each card in [hub] (e.g. the Reel row's
+  /// "Remove from the Reel"), or null for none.
+  final List<MediaMenuExtraEntry> Function(MediaItem item)? Function(MediaHub hub)? itemMenuEntriesForHub;
+
   const TvBrowseRail({
     super.key,
     required this.hubs,
@@ -463,6 +467,7 @@ class TvBrowseRail extends StatefulWidget {
     this.expandedTop,
     this.onExpandedChanged,
     this.rowMenuEntriesForHub,
+    this.itemMenuEntriesForHub,
   });
 
   @override
@@ -1557,7 +1562,10 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
         final item = _itemAtSlot(hub, itemIndex);
         final isLeading = _isLeadingSlot(hub, itemIndex);
         final isTrailing = _isTrailingSlot(hub, itemIndex);
-        final actionable = item != null || isLeading || (isTrailing &&
+        final actionable =
+            item != null ||
+            isLeading ||
+            (isTrailing &&
                 trailing != TvRailTrailing.loading &&
                 trailing != TvRailTrailing.findingMore &&
                 trailing != TvRailTrailing.noMore);
@@ -1726,7 +1734,13 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
             rightOverflow: rightOverflow,
             verticalOverflow: metrics.focusExtra,
           ),
-          child: RowMenuEntries(entries: widget.rowMenuEntriesForHub?.call(hub) ?? const [], child: rail),
+          child: RowMenuEntries(
+            entries: widget.rowMenuEntriesForHub?.call(hub) ?? const [],
+            child: switch (widget.itemMenuEntriesForHub?.call(hub)) {
+              final build? => ItemMenuEntries(build: build, child: rail),
+              null => rail,
+            },
+          ),
         ),
       ),
     );

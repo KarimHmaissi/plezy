@@ -38,15 +38,46 @@ void main() {
     expect(await store.cached('src:missing'), isNull);
   });
 
-  test('picks wait 3 days, newest first, at most 3', () async {
+  test('the saved list keeps every Save, newest first, with no cap and no expiry', () async {
+    await store.savePick(pick('old', now.subtract(const Duration(days: 30))));
+    await store.savePick(pick('a', now.subtract(const Duration(days: 4))));
+    await store.savePick(pick('b', now.subtract(const Duration(hours: 5))));
+    await store.savePick(pick('c', now.subtract(const Duration(hours: 3))));
+    await store.savePick(pick('d', now.subtract(const Duration(hours: 2))));
+    await store.savePick(pick('e', now.subtract(const Duration(hours: 1))));
+    expect((await store.savedPicks()).map((p) => p.titleId), ['e', 'd', 'c', 'b', 'a', 'old']);
+
+    // Weeks later, more Saves prune nothing.
+    now = now.add(const Duration(days: 40));
+    for (var i = 0; i < 20; i++) {
+      await store.savePick(pick('n$i', now.subtract(Duration(minutes: 20 - i))));
+    }
+    final saved = (await store.savedPicks()).map((p) => p.titleId).toList();
+    expect(saved, hasLength(26));
+    expect(saved.take(2), ['n19', 'n18']);
+    expect(saved.skip(20), ['e', 'd', 'c', 'b', 'a', 'old']);
+  });
+
+  test("Tonight's picks: the Saves of the last 3 days, newest first, at most 3", () async {
     await store.savePick(pick('a', now.subtract(const Duration(days: 4))));
     await store.savePick(pick('b', now.subtract(const Duration(hours: 5))));
     await store.savePick(pick('c', now.subtract(const Duration(hours: 3))));
     await store.savePick(pick('d', now.subtract(const Duration(hours: 2))));
     await store.savePick(pick('e', now.subtract(const Duration(hours: 1))));
     expect((await store.freshPicks()).map((p) => p.titleId), ['e', 'd', 'c']);
-    // Saving prunes stale picks.
-    expect((await store.picks()).map((p) => p.titleId), isNot(contains('a')));
+    expect((await store.picks()).map((p) => p.titleId), contains('a'), reason: 'an old Save is kept');
+  });
+
+  test('a Save is removed by title, or by the copy a Home card shows', () async {
+    await store.savePick(pick('a', now.subtract(const Duration(days: 9))));
+    await store.savePick(pick('b', now.subtract(const Duration(hours: 1))));
+    final changed = ReelStore.picksChanged.value;
+    expect(await store.removeSavedCopy(serverId: 's', ratingKey: 'rka'), isTrue);
+    expect((await store.savedPicks()).map((p) => p.titleId), ['b']);
+    expect(ReelStore.picksChanged.value, greaterThan(changed));
+    expect(await store.removeSavedCopy(serverId: 's', ratingKey: 'rka'), isFalse);
+    await store.removePick('b');
+    expect(await store.savedPicks(), isEmpty);
   });
 
   test('saving the same title again replaces it', () async {
@@ -352,7 +383,7 @@ void main() {
       expect(await store.spoiledAssets('x'), {'plex:1'});
 
       expect(await settings.readSetting(ReelStore.pickKey('a')), isNotNull);
-      expect(await settings.readSetting(ReelStore.pickKey('old')), isNull, reason: 'stale picks are not moved');
+      expect(await settings.readSetting(ReelStore.pickKey('old')), isNotNull, reason: 'an old Save is moved too');
       expect(await settings.readSetting(ReelStore.vetoKey('x')), isNotNull);
       expect(await settings.readSetting(ReelStore.picksMigratedKey), isNotNull);
       expect(await settings.readSetting(ReelStore.vetoesMigratedKey), isNotNull);

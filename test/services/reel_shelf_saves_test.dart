@@ -6,6 +6,7 @@ import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/media/media_server_client.dart';
 import 'package:plezy/services/reel_shelf_saves.dart';
+import 'package:plezy/services/system_shelf_service.dart' show SystemShelf;
 import 'package:plezy/services/reel/reel_store.dart';
 
 import '../test_helpers/media_items.dart';
@@ -59,6 +60,17 @@ void main() {
     final third = await saves.load(clientFor);
     expect(third.map((s) => (s.item.id, s.savedAt)), [('rk1', later)]);
     expect(client.reads, ['rk1', 'rk2', 'rk1']);
+  });
+
+  test('more Saves than Play Next can take: only the newest ${SystemShelf.maxItems} are read', () async {
+    final client = _Client();
+    final picks = [for (var i = 0; i < 30; i++) pick('rk$i', at: savedAt.subtract(Duration(minutes: i)))];
+    final saves = ReelShelfSaves(picks: () async => picks);
+    MediaServerClient? clientFor(ServerId id) => id.value == 'server-a' ? client : null;
+
+    final loaded = await saves.load(clientFor);
+    expect(loaded.map((s) => s.item.id), [for (var i = 0; i < SystemShelf.maxItems; i++) 'rk$i']);
+    expect(client.reads, hasLength(SystemShelf.maxItems));
   });
 
   test('an unreachable, failing, slow or missing Save is left out and asked about again', () async {

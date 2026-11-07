@@ -893,6 +893,8 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         await _watch();
       case ReelSheetAction.save:
         await c.save();
+      case ReelSheetAction.unsave:
+        await c.unsave();
       case ReelSheetAction.moreLike:
         // The call takes a while; the snackbar says so and the sheet's focus
         // comes back at once.

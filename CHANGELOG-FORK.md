@@ -105,6 +105,26 @@ Details of each are in the dated entries below.
 
 ## 2026-11-07
 
+### Reel Saves are a real list: no cap, no expiry (branch `feature/reel-sound-button-unlimited-saves`)
+- Saving a Reel card no longer drops older Saves. The cause was in the
+  Reel's store: the "From the Reel" Home row and Android TV's Play Next read
+  only the **3 newest Saves from the last 3 days**, and every new Save
+  **deleted any Save older than 3 days**. Now every Save stays, newest
+  first, until you remove it, and a saved card shows as saved however old
+  the Save is.
+- Only Play Next keeps a limit: Android TV refuses a Watch Next sync of
+  more than 20 items, so the newest Saves fill what Continue Watching
+  leaves of those 20. The Home row and the saved list have no limit; the
+  row reads its titles 6 at a time so a long list doesn't flood a server.
+- Removing a Save: **Remove from the Reel** in a "From the Reel" card's
+  menu on Home (TV and phone), Save again on a saved card on the phone,
+  or **Remove from saved** in the TV's hold-OK sheet (below Save, so a
+  quick OK never removes one). The Plex watchlist copy is left as it is.
+- Tonight's picks (the Reel's decision card) still shows the 3 newest
+  Saves from the last 3 days: it is laid out for three posters.
+- Saves deleted by the old 3-day pruning are not brought back; they are
+  may still be on the Plex watchlist (Save mirrors there).
+
 ### A Sound button on the TV's Reel (branch `feature/reel-sound-button-unlimited-saves`)
 - The TV's Reel now has a **Sound on / Mute button** bottom right, inside
   the overscan margin, where the "Sound off · press ≡" badge was. Every TV

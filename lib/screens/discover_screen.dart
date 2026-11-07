@@ -35,7 +35,7 @@ import '../widgets/app_menu.dart';
 import '../widgets/clickable_cursor.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/home_row_actions.dart';
-import '../widgets/media_context_menu.dart' show MediaMenuExtraEntry, RowMenuEntries;
+import '../widgets/media_context_menu.dart' show ItemMenuEntries, MediaMenuExtraEntry, RowMenuEntries;
 import '../widgets/profile_switching_overlay.dart';
 import 'profile/profile_switch_screen.dart';
 import 'profile/profile_teardown.dart';
@@ -354,7 +354,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     unawaited(_loadRows(refreshIds: {rowId}));
   }
 
-  /// Fork: a Reel Save or removal here. The row hides when no pick is fresh.
+  /// Fork: a Reel Save or removal here. The row hides when nothing is saved.
   void _onReelPicksChanged() => _reloadReelRow();
 
   void _reloadReelRow() {
@@ -362,12 +362,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     unawaited(_loadRows(refreshIds: {HomeRowIds.reelPicks}));
   }
 
-  /// The fresh picks the Reel row was last loaded with (see
+  /// The Saves the Reel row was last loaded with (see
   /// [ReelHomeRow.freshKey]).
   String? _reelRowKey;
 
-  /// Fork: reload the Reel row when its fresh picks differ from what it
-  /// shows: picks synced from the other device, or a pick gone stale.
+  /// Fork: reload the Reel row when its Saves differ from what it shows:
+  /// picks saved or removed on the other device, or a "What's next" card.
   Future<void> _recheckReelRow() async {
     if (!mounted || !_homePins.contains(HomeRowIds.reelPicks)) return;
     final String key;
@@ -483,7 +483,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             }
             if (state == HomeRowLoadState.empty) {
               // An answer, not a failure: no retry. Asked for again (the
-              // Reel row with no fresh pick left), it hides.
+              // Reel row with no Save left), it hides.
               if (refreshIds.contains(row.id) && _fetchedRows.containsKey(row.id)) {
                 setState(() => _fetchedRows = {..._fetchedRows}..remove(row.id));
               }
@@ -536,6 +536,26 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         ),
     ];
   }
+
+  /// Fork: "Remove from the Reel" on each saved title in the Reel's Home
+  /// row (not on its "What's next after" card). The row reloads from the
+  /// store's change ([_onReelPicksChanged]), and Play Next with it.
+  List<MediaMenuExtraEntry> Function(MediaItem item)? _itemMenuEntriesFor(MediaHub hub) {
+    if (_rowForHubId[hub.id]?.id != HomeRowIds.reelPicks) return null;
+    return (item) => [
+      if (ReelHomeRow.removable(item))
+        MediaMenuExtraEntry(
+          icon: Symbols.bookmark_remove_rounded,
+          label: t.reel.homeRowRemove,
+          onSelected: () => unawaited(ReelHomeRow.remove(item)),
+        ),
+    ];
+  }
+
+  Widget _withItemMenuEntries(MediaHub hub, Widget child) => switch (_itemMenuEntriesFor(hub)) {
+    final build? => ItemMenuEntries(build: build, child: child),
+    null => child,
+  };
 
   /// Comfort's Carry on watching, when added to Home.
   MediaHub? _comfortCarryOnHub() {
@@ -1064,7 +1084,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void onTabShown() {
     _isTabVisible = true;
     _discover.refreshIfStale();
-    // Picks older than 3 days leave the Reel row.
+    // Saves or removals synced from the other device reach the Reel row.
     unawaited(_recheckReelRow());
     final comfortLoadedAt = _comfortTitlesLoadedAt;
     if (comfortLoadedAt == null || DateTime.now().difference(comfortLoadedAt) > _comfortTitlesStaleAfter) {
@@ -1486,29 +1506,32 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                   SliverToBoxAdapter(
                     child: RowMenuEntries(
                       entries: _rowMenuEntriesFor(hub),
-                      child: HubSection(
-                        key: _homeHubKeys.putIfAbsent(hub.id, GlobalKey<HubSectionState>.new),
-                        hub: hub,
-                        focusMemory: _hubFocusMemory,
-                        icon: hubIconFor(hub),
-                        showServerName: showServerNameOnHubs || hubsSpanMultipleServers,
-                        onRefresh: _discover.updateItem,
-                        isInContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching',
-                        onRemoveFromContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching'
-                            ? _discover.refreshContinueWatching
-                            : null,
-                        loadMoreItems: hub.id == 'continue_watching' ? _discover.loadAllContinueWatching : null,
-                        // Fork: the Reel row's "What's next after" card opens
-                        // its deck; the row's other cards open as ever.
-                        onItemTap: hub.items.any((item) => ReelHomeRow.entryDeck(item) != null)
-                            ? (item) {
-                                if (_openReelEntry(item)) return;
-                                unawaited(navigateToMediaItem(context, item, onRefresh: _discover.updateItem));
-                              }
-                            : null,
-                        onVerticalNavigation: (isUp) => _handleVerticalNavigation(i, isUp),
-                        onNavigateUp: i == 0 ? _focusTopBoundary : null,
-                        onNavigateToSidebar: _navigateToSidebar,
+                      child: _withItemMenuEntries(
+                        hub,
+                        HubSection(
+                          key: _homeHubKeys.putIfAbsent(hub.id, GlobalKey<HubSectionState>.new),
+                          hub: hub,
+                          focusMemory: _hubFocusMemory,
+                          icon: hubIconFor(hub),
+                          showServerName: showServerNameOnHubs || hubsSpanMultipleServers,
+                          onRefresh: _discover.updateItem,
+                          isInContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching',
+                          onRemoveFromContinueWatching: hub.id.endsWith('continue') || hub.id == 'continue_watching'
+                              ? _discover.refreshContinueWatching
+                              : null,
+                          loadMoreItems: hub.id == 'continue_watching' ? _discover.loadAllContinueWatching : null,
+                          // Fork: the Reel row's "What's next after" card opens
+                          // its deck; the row's other cards open as ever.
+                          onItemTap: hub.items.any((item) => ReelHomeRow.entryDeck(item) != null)
+                              ? (item) {
+                                  if (_openReelEntry(item)) return;
+                                  unawaited(navigateToMediaItem(context, item, onRefresh: _discover.updateItem));
+                                }
+                              : null,
+                          onVerticalNavigation: (isUp) => _handleVerticalNavigation(i, isUp),
+                          onNavigateUp: i == 0 ? _focusTopBoundary : null,
+                          onNavigateToSidebar: _navigateToSidebar,
+                        ),
                       ),
                     ),
                   ),
@@ -1606,6 +1629,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       expandedTop: TvSpotlightScaffold.condensedRailTopFor(MediaQuery.sizeOf(context)),
       onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
       rowMenuEntriesForHub: _rowMenuEntriesFor,
+      itemMenuEntriesForHub: _itemMenuEntriesFor,
       showTimeLeftForHub: (hub) => hub.id == 'comfort_carryon_continue',
       onActivateItem: (hub, item) => _openReelEntry(item),
     );
