@@ -61,6 +61,13 @@ void main() {
       expect(DeepLink.tryParse('PLEZY://OPEN'), isA<OpenLink>());
     });
 
+    test('fork: reads a Reel link with and without a deck', () {
+      expect((DeepLink.tryParse('plezy://reel')! as ReelLink).deck, isNull);
+      expect((DeepLink.tryParse('plezy://reel?deck=')! as ReelLink).deck, isNull);
+      expect((DeepLink.tryParse('plezy://reel?deck=anime-openings')! as ReelLink).deck, 'anime-openings');
+      expect((DeepLink.tryParse('plezy://reel?deck=ai%3Aabc&profile=Kids')! as ReelLink).profile, 'Kids');
+    });
+
     test('keeps an external player return link whole', () {
       const url = 'plezy://external-player/success/s1?position=12.5&duration=1420.016';
       final link = DeepLink.tryParse(url) as ExternalPlayerReturnLink;
@@ -110,6 +117,9 @@ void main() {
           mode: PlayMode.shuffle,
         ),
         LiveLink(channel: 'KNTV & co', serverId: ServerId('abc'), startPosition: LiveTvStartPosition.live),
+        const ReelLink(),
+        const ReelLink(deck: 'ai:42', profile: 'Kids'),
+        const ReelLink(probe: 'coverage'),
       ];
       for (final link in links) {
         final reparsed = DeepLink.tryParse(link.toUri().toString());

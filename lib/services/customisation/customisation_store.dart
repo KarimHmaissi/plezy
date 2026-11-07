@@ -21,6 +21,10 @@ abstract interface class CustomisationStore {
   Future<String?> readSetting(String key);
   Future<void> writeSetting(String key, String? value);
 
+  /// Every setting whose key starts with [prefix], by key (for data kept as
+  /// one setting per entry, such as the Reel's `reel.pick.<titleId>`).
+  Future<Map<String, String>> readSettingsWithPrefix(String prefix);
+
   /// Everything, as one export document (see [CustomisationExport]).
   Future<Map<String, Object?>> exportAll();
 
@@ -94,6 +98,21 @@ class LocalCustomisationStore implements CustomisationStore {
 
   @override
   Future<void> writeSetting(String key, String? value) => _writeSetting(key, value);
+
+  @override
+  Future<Map<String, String>> readSettingsWithPrefix(String prefix) async {
+    if (prefix.isEmpty) return {for (final s in await _db.select(_db.forkSettings).get()) s.key: s.value};
+    // A key range, so the primary key index is used: [prefix, prefix with its
+    // last character bumped by one).
+    final end = prefix.substring(0, prefix.length - 1) + String.fromCharCode(prefix.codeUnitAt(prefix.length - 1) + 1);
+    final rows = await (_db.select(
+      _db.forkSettings,
+    )..where((s) => s.key.isBiggerOrEqualValue(prefix) & s.key.isSmallerThanValue(end))).get();
+    return {
+      for (final s in rows)
+        if (s.key.startsWith(prefix)) s.key: s.value,
+    };
+  }
 
   Future<void> _writeSetting(String key, String? value, {int? stamp}) async {
     Customisation.localWrites.value++;
@@ -320,11 +339,17 @@ abstract final class SyncUnits {
       unit.startsWith(_settingPrefix) ? unit.substring(_settingPrefix.length) : null;
 
   /// Settings that belong to this device only: Home's own bookkeeping (part of
-  /// [home]), the AI answer order (rebuilt from the answers after a sync),
-  /// this device's AI spend, one-off migrations and caches of Trakt data.
+  /// [home]), whether the Reel's Home row was seated here (only the TV seats
+  /// it, `ReelHomeRow`), which old Reel picks and vetoes this device has moved
+  /// to per-title keys (`ReelStore`), the AI answer order (rebuilt from the
+  /// answers after a sync), this device's AI spend, one-off migrations and
+  /// caches of Trakt data.
   static bool syncsSetting(String key) =>
       key != 'home.curated' &&
       key != 'home.revision' &&
+      key != 'reel.homeRowSeated' &&
+      key != 'reel.homeRowRechecked' &&
+      !key.startsWith('reel.migrated.') &&
       key != 'ai.history.index' &&
       !key.startsWith('ai.spend.') &&
       key != 'comfort.pausedMigrated' &&
@@ -385,8 +410,18 @@ abstract final class CustomisationExport {
 abstract final class Customisation {
   static Future<CustomisationStore>? _store;
 
+  static Future<ForkDatabase>? _database;
+
+  /// This device's own fork database (one connection for the whole app),
+  /// also when [store] mirrors a TV. The Reel keeps its per-device events
+  /// and caches here.
+  static Future<ForkDatabase> get localDatabase => _database ??= ForkDatabase.open();
+
+  /// Tests: use [db] as this device's database.
+  static void debugSetLocalDatabase(ForkDatabase? db) => _database = db == null ? null : Future.value(db);
+
   static Future<CustomisationStore> get store =>
-      _store ??= ForkDatabase.open().then<CustomisationStore>(LocalCustomisationStore.new);
+      _store ??= localDatabase.then<CustomisationStore>(LocalCustomisationStore.new);
 
   /// Tests: use [store] instead of the on-disk database.
   static void debugSetStore(CustomisationStore? store) => _store = store == null ? null : Future.value(store);

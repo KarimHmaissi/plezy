@@ -24,6 +24,7 @@ import '../media/media_person.dart';
 import '../media/media_playlist.dart';
 import '../media/ids.dart';
 import '../media/media_server_client.dart';
+import 'reel/clip_filter.dart';
 import '../media/playback_report_metadata.dart';
 import '../media/server_capabilities.dart';
 import '../media/library_change_event.dart';
@@ -1770,8 +1771,8 @@ class PlexClient
 
   /// The Continue Watching hub hides anything older than the server's
   /// OnDeckWindow (about 16 weeks), but `/library/onDeck` still lists those
-  /// in-progress items — on a live account, a dozen half-watched films last
-  /// touched months ago. Append the [onDeck] ones the hub left out (same
+  /// in-progress items, such as half-watched films last touched
+  /// months ago. Append the [onDeck] ones the hub left out (same
   /// item, or an episode of a show the hub already has, is skipped) so Home's
   /// "Pick back up" row can show them.
   void _addOlderOnDeckItems(List<PlexMetadataDto> result, List<PlexMetadataDto> onDeck) {
@@ -1905,6 +1906,64 @@ class PlexClient
         ) ??
         [];
   }
+
+  /// Fork (Reel): a title's extras as the server lists them, every `Media`
+  /// attribute kept: the rows [fetchExtraClips] reads, and what the
+  /// measure-day extras-shape probe counts (plan V2-20). One request, no
+  /// cache fallback. A 401 or 5xx throws: a failed read, not "no extras".
+  Future<List<Object?>> fetchExtraRows(String ratingKey, {Duration timeout = const Duration(seconds: 30)}) async {
+    final response = await _http.get('/library/metadata/$ratingKey/extras', timeout: timeout);
+    // A 401 or 5xx is a failed read, not "no extras": the Reel must not
+    // cache it as a miss.
+    throwIfHttpError(response);
+    final rows = _getMediaContainer(response)?['Metadata'];
+    return rows is List ? rows : const [];
+  }
+
+  /// Fork (Reel): a title's extras as lean clip rows for the Reel's ladder.
+  /// One request, no cache fallback (a stale part key is useless), and a
+  /// caller-chosen [timeout] because some servers' extras calls hang.
+  Future<List<PlexExtraClip>> fetchExtraClips(
+    String ratingKey, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final rows = await fetchExtraRows(ratingKey, timeout: timeout);
+    return [
+      for (var i = 0; i < rows.length; i++)
+        if (rows[i] is Map<String, dynamic>) ?PlexExtraClip.fromJson(rows[i] as Map<String, dynamic>, i),
+    ];
+  }
+
+  /// Fork (Reel): a card's art and text in one lean read (plan V2-03): no
+  /// `checkFiles`, no `includeStreams`, no chapters or markers, and no cache
+  /// write. The shared `/library/metadata/{id}` row is left alone, so the
+  /// file-info and play paths never find a thin row there. Returns the item
+  /// JSON (with its library section), or null when the server has no such
+  /// item; any other failed read throws.
+  Future<Map<String, dynamic>?> fetchReelMetadataJson(
+    String ratingKey, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final response = await _http.get('/library/metadata/$ratingKey', timeout: timeout);
+    if (response.statusCode == 404) return null;
+    throwIfHttpError(response);
+    final json = _getFirstMetadataJson(response);
+    if (json == null) return null;
+    final container = _getMediaContainer(response);
+    final sectionId = _librarySectionIdFromJson(json) ?? _librarySectionIdFromJson(container);
+    final sectionTitle = _librarySectionTitleFromJson(json) ?? _librarySectionTitleFromJson(container);
+    return {
+      ...json,
+      if (sectionId != null && json['librarySectionID'] == null) 'librarySectionID': sectionId,
+      if (sectionTitle != null && json['librarySectionTitle'] == null) 'librarySectionTitle': sectionTitle,
+    };
+  }
+
+  /// Fork (Reel): the direct-play URL of a clip part. The token rides in
+  /// the URL so the clip core sends no headers at all (its headers are
+  /// shared with AnimeThemes requests). IVA parts redirect to the CDN, which
+  /// never sees the token.
+  String clipUrl(String partKey) => '${config.baseUrl}$partKey'.withPlexToken(config.token);
 
   String getThumbnailUrl(String? thumbPath) {
     if (thumbPath == null || thumbPath.isEmpty) return '';

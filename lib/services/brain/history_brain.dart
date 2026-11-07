@@ -144,6 +144,20 @@ class HistoryBrain {
   }();
   Future<BrainWorker?>? _worker;
 
+  /// Fork: something heavy is in front (the Reel). Indexing rests while it
+  /// is true.
+  final ValueNotifier<bool> yielding = ValueNotifier(false);
+
+  /// Fork: rest the indexer and release the worker's ONNX session while
+  /// [on]; it reopens on the next embed. Never spawns a worker.
+  Future<void> yieldTo(bool on) async {
+    yielding.value = on;
+    if (!on) return;
+    final w = await _worker;
+    final released = await w?.unload() ?? false;
+    appLogger.d('Brain: ${released ? 'released' : 'kept'} the ONNX session for the Reel');
+  }
+
   Future<OnnxEmbedder> _openEmbedder() async {
     try {
       final dir = Directory(p.join((await _folder()).path, 'models', 'bge-small-en-v1.5'));
@@ -357,13 +371,15 @@ class HistoryBrain {
       } else if (worker != null) {
         // Embedding runs in the brain's isolate; playback pauses it there.
         worker.reload();
-        void onPlayback() => worker.pause(LocalMediaSession.active.value);
+        void onPlayback() => worker.pause(LocalMediaSession.active.value || yielding.value);
         LocalMediaSession.active.addListener(onPlayback);
+        yielding.addListener(onPlayback);
         onPlayback();
         try {
           result = await worker.index(batchSize: 8, duty: 0.5);
         } finally {
           LocalMediaSession.active.removeListener(onPlayback);
+          yielding.removeListener(onPlayback);
         }
         store.reload();
       } else {
@@ -374,7 +390,7 @@ class HistoryBrain {
           // Half the time resting (more when the device is busy): background
           // work, never a pinned CPU or loud fans.
           duty: 0.5,
-          shouldPause: () => LocalMediaSession.active.value,
+          shouldPause: () => LocalMediaSession.active.value || yielding.value,
         ).run();
       }
       final counts = store.counts(TransformerEmbedderIds.bgeSmall);

@@ -302,6 +302,43 @@ class PlexDiscoverClient {
     return firstFlexibleMap(_mediaContainer(data)['Metadata']);
   }
 
+  /// Fork (The Reel, measure day): the catalogue's extras for a title, read
+  /// only. Null when Discover has no such endpoint for it (404).
+  Future<List<Map<String, dynamic>>?> getExtras(String ratingKey) async {
+    final data = await _request(
+      'GET',
+      '/library/metadata/${Uri.encodeComponent(ratingKey)}/extras',
+      allowNotFound: true,
+    );
+    if (data == null) return null;
+    return flexibleMapList(_mediaContainer(data)['Metadata']);
+  }
+
+  /// Fork (measure day): where a catalogue extra's part key leads. Follows
+  /// up to four redirects by hand with a one-byte range read and returns
+  /// each hop as `status host content-type`, never a path, query or token.
+  Future<List<String>> traceExtraPart(String partKey) async {
+    var uri = Uri.parse(partKey).hasScheme ? Uri.parse(partKey) : _baseUri.resolve(partKey);
+    final hops = <String>[];
+    for (var i = 0; i < 5; i++) {
+      final request = http.Request('GET', uri)
+        ..followRedirects = false
+        ..headers.addAll({
+          'Range': 'bytes=0-0',
+          'X-Plex-Client-Identifier': session.clientIdentifier,
+          'X-Plex-Product': 'Plezy',
+          if (uri.host.endsWith('plex.tv')) 'X-Plex-Token': session.accessToken,
+        });
+      final response = await _http.send(request).timeout(requestTimeout);
+      await response.stream.drain<void>();
+      hops.add('${response.statusCode} ${uri.host} ${response.headers['content-type'] ?? '-'}');
+      final location = response.headers['location'];
+      if (response.statusCode < 300 || response.statusCode >= 400 || location == null) break;
+      uri = uri.resolve(location);
+    }
+    return hops;
+  }
+
   Future<List<Map<String, dynamic>>> getRelated(String ratingKey) async {
     final data = await _request(
       'GET',

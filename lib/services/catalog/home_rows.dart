@@ -7,8 +7,12 @@ import '../../media/media_item.dart';
 import '../../media/media_server_client.dart';
 import '../../models/catalog/catalog_item.dart';
 import '../../providers/catalog_sources_provider.dart';
+import '../../utils/app_logger.dart';
 import '../ai/ai_history.dart';
 import '../comfort/comfort_shows_controller.dart';
+import '../reel/reel_decks.dart' show WhatsNextDeck;
+import '../reel/reel_home_row.dart';
+import '../reel/reel_store.dart';
 import 'catalog_source.dart';
 import 'home_pins.dart';
 import 'trakt_catalog_source.dart';
@@ -24,8 +28,8 @@ typedef MergedPlexHub = ({String rowId, MediaHub hub, List<String> sources});
 /// Key that identifies one title across servers and libraries.
 String _itemKey(MediaItem item) => item.guid ?? '${item.kind.name}|${item.title}|${item.year}';
 
-/// Merge rows with the same title ("Oh, The Horror!" from five movie
-/// libraries, two "Halloween Movies" collections) into one row, in first
+/// Merge rows with the same title ("Spooky Picks" from several movie
+/// libraries, two "Seasonal Scares" collections) into one row, in first
 /// appearance order. Items repeated across the parts appear once.
 List<MergedPlexHub> mergePlexHubs(Iterable<MediaHub> hubs) {
   final order = <String>[];
@@ -115,6 +119,39 @@ Future<List<WatchlistShelf>> loadWatchlistShelves(CatalogSource source, {int min
 /// How an added row last loaded on Home, for Manage Home.
 enum HomeRowLoadState { loading, loaded, empty, unavailable }
 
+/// How a fetched row stands: [HomeRowLoadState.unavailable] when its source
+/// gave nothing back (it may still be connecting), [HomeRowLoadState.empty]
+/// when it answered with no items, else [HomeRowLoadState.loaded].
+HomeRowLoadState homeRowFetchState(MediaHub? hub) => hub == null
+    ? HomeRowLoadState.unavailable
+    : hub.items.isEmpty
+    ? HomeRowLoadState.empty
+    : HomeRowLoadState.loaded;
+
+/// When Home fetches its added rows again after a pass left some
+/// unavailable: after 10 s, 20 s, 30 s and 40 s, then not until something
+/// else reloads them. An empty row is an answer, not a failure: it neither
+/// retries nor holds back the reset once every row has loaded.
+class HomeRowRetries {
+  static const int max = 4;
+
+  int _count = 0;
+  int get count => _count;
+
+  void reset() => _count = 0;
+
+  /// The wait before the next pass, or null for none, after a pass that
+  /// ended in [outcomes].
+  Duration? after(Iterable<HomeRowLoadState> outcomes) {
+    if (!outcomes.contains(HomeRowLoadState.unavailable)) {
+      _count = 0;
+      return null;
+    }
+    if (_count >= max) return null;
+    return Duration(seconds: 10 * ++_count);
+  }
+}
+
 /// Load state of each added row that Home fetches itself, by row id.
 final ValueNotifier<Map<String, HomeRowLoadState>> homeRowLoadStates = ValueNotifier(const {});
 
@@ -123,10 +160,29 @@ final ValueNotifier<Map<String, HomeRowLoadState>> homeRowLoadStates = ValueNoti
 /// Comfort shows, and Plex rows Home's own hubs don't include (library rows,
 /// collections).
 class HomeRowResolver {
-  HomeRowResolver({required this.sources, required this.clientFor});
+  HomeRowResolver({
+    required this.sources,
+    required this.clientFor,
+    this.reel,
+    this.whatsNext,
+    this.pickFetchTimeout = defaultPickFetchTimeout,
+  });
 
   final CatalogSourcesProvider sources;
   final MediaServerClient? Function(ServerId serverId) clientFor;
+
+  /// The Reel's picks; [ReelStore.instance] when null.
+  final ReelStore? reel;
+
+  /// Fork: the server copy of the show they just finished, when the Reel
+  /// row leads with its "What's next after" card (D22,
+  /// [ReelHomeRow.entryItem]); null or answering null: no card.
+  final Future<({String serverId, String ratingKey})?> Function()? whatsNext;
+
+  /// How long one Reel pick's server may take before the row goes on
+  /// without it.
+  static const Duration defaultPickFetchTimeout = Duration(seconds: 8);
+  final Duration pickFetchTimeout;
 
   static const int itemLimit = TraktListsCatalogSource.rowItemLimit;
 
@@ -198,6 +254,35 @@ class HomeRowResolver {
       case 'ai':
         // A saved AI answer: its stored picks, no server calls.
         items = (await AiHistory.get(rest))?.items;
+      case HomeRowIds.reelPicks:
+        // Fork: the Reel's fresh Saves, newest first, from the copy saved.
+        // Fetched together, each with a time limit, so one slow server
+        // never holds the row back. A "What's next after" card leads when
+        // they just finished a show: the show's one read, the same way.
+        final entry = _whatsNextEntry();
+        final found = await Future.wait([
+          for (final pick in await (reel ?? ReelStore.instance).freshPicks())
+            () async {
+              final client = clientFor(ServerId(pick.serverId));
+              if (client == null) return null;
+              try {
+                return await client.fetchItem(pick.ratingKey).timeout(pickFetchTimeout);
+              } catch (e) {
+                appLogger.d('Home: Reel pick unavailable', error: e);
+                return null;
+              }
+            }(),
+        ]);
+        final next = await entry;
+        items = [
+          ?next,
+          for (final item in found.nonNulls)
+            if (next == null || item.id != next.id || item.serverId != next.serverId) item,
+        ];
+        appLogger.i(
+          '[ReelSave] Home row: ${items.length - (next == null ? 0 : 1)} saved titles found, '
+          "what's-next card ${next == null ? 'none' : 'shown'}",
+        );
       default:
         return null;
     }
@@ -210,6 +295,24 @@ class HomeRowResolver {
       items: items,
       size: items.length,
     );
+  }
+
+  /// The Reel row's "What's next after" card, or null (no show finished
+  /// lately, its server not connected, or its read failed or was slow).
+  Future<MediaItem?> _whatsNextEntry() async {
+    final find = whatsNext;
+    if (find == null) return null;
+    try {
+      final show = await find();
+      if (show == null) return null;
+      final client = clientFor(ServerId(show.serverId));
+      if (client == null) return null;
+      final item = await client.fetchItem(show.ratingKey).timeout(pickFetchTimeout);
+      return item == null ? null : ReelHomeRow.entryItem(item, deck: WhatsNextDeck.deckId);
+    } catch (e) {
+      appLogger.d("Home: Reel what's-next card unavailable", error: e);
+      return null;
+    }
   }
 
   /// One provider hub by id. Some providers (Plex Discover) can only fetch

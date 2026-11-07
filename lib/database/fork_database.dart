@@ -75,7 +75,42 @@ class SyncStamps extends Table {
   Set<Column> get primaryKey => {unit};
 }
 
-@DriftDatabase(tables: [HomeRows, ComfortPausedShows, ShortlistItems, ForkSettings, SyncStamps])
+/// The Reel's signals, kept on this device only (never synced: an
+/// append-only log written on two devices would lose one side's events in a
+/// whole-unit sync). The AI build reads both devices' counts as facts.
+@DataClassName('ReelEventRecord')
+class ReelEvents extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  /// Brain title id (`m:imdb:tt…`).
+  TextColumn get titleId => text()();
+
+  /// `sampled`, `quickSkip`, `toEnd`, `replay`, `unmute`, `watch`,
+  /// `watchOnTv`, `save`, `notForMe`, `spoiled`.
+  TextColumn get action => text()();
+  TextColumn get deck => text().withDefault(const Constant(''))();
+
+  /// Milliseconds since the epoch.
+  IntColumn get at => integer()();
+  IntColumn get seconds => integer().nullable()();
+}
+
+/// The Reel's local caches: clip asset identities per title for 30 days
+/// (`src:<groupKey>`, never a resolved CDN URL), and the day's pool
+/// (`pool:<yyyy-mm-dd>`). Safe to delete.
+@DataClassName('ReelCacheRecord')
+class ReelCache extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  /// Milliseconds since the epoch.
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
+@DriftDatabase(tables: [HomeRows, ComfortPausedShows, ShortlistItems, ForkSettings, SyncStamps, ReelEvents, ReelCache])
 class ForkDatabase extends _$ForkDatabase {
   ForkDatabase(super.executor);
 
@@ -85,7 +120,7 @@ class ForkDatabase extends _$ForkDatabase {
   static const String fileName = 'plezy_fork.db';
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -107,6 +142,10 @@ class ForkDatabase extends _$ForkDatabase {
             "INSERT INTO sync_stamps (unit, stamp, deleted) SELECT '$unit', 1, 0 WHERE EXISTS (SELECT 1 FROM $table)",
           );
         }
+      }
+      if (from < 3) {
+        await m.createTable(reelEvents);
+        await m.createTable(reelCache);
       }
     },
   );

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import 'reel/reel_screen.dart';
 import '../widgets/phone_nav_drawer.dart';
 import '../focus/focusable_action_bar.dart';
 import '../focus/hub_vertical_navigation.dart';
@@ -120,7 +121,7 @@ class _PendingAsk {
 
   final String request;
 
-  /// What the chip shows ("more like Severance" rather than the prompt).
+  /// What the chip shows ("more like Harbor Lights" rather than the prompt).
   final String label;
   final String? replaceId;
   final List<({String request, AiAnswer answer})> previous;
@@ -818,6 +819,14 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 onSelected: () => showAppSnackBar(context, t.aiTab.homeFull),
               )
             : e,
+      // Fork: the answer's picks as a Reel deck (Android, unless the Reel is
+      // turned off).
+      if (ReelScreen.enabled)
+        MediaMenuExtraEntry(
+          icon: Symbols.movie_rounded,
+          label: t.aiTab.reelIt,
+          onSelected: () => ReelScreen.open(context, deck: 'ai:${entry.id}'),
+        ),
       MediaMenuExtraEntry(
         icon: Symbols.playlist_add_rounded,
         label: t.aiTab.findMore,

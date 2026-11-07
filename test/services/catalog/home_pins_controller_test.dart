@@ -61,6 +61,18 @@ void main() {
     expect(restarted.curated, isFalse);
   });
 
+  test('fork: the Reel row is seated at the top once', () async {
+    final pins = controller();
+    await pins.ensureLoaded();
+    expect(await pins.insertFirst(_row(HomeRowIds.reelPicks)), isTrue);
+    expect(await pins.insertFirst(_row(HomeRowIds.reelPicks)), isFalse);
+    expect(_ids(pins.layout), [HomeRowIds.reelPicks, 'cw', 'pb']);
+
+    final restarted = controller();
+    await restarted.ensureLoaded();
+    expect(_ids(restarted.layout).first, HomeRowIds.reelPicks);
+  });
+
   test('first run brings rows over from the earlier local copy', () async {
     resetSharedPreferencesForTest(
       initialAsync: {

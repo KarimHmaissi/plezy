@@ -60,7 +60,7 @@ class ForkSpacing {
     widesAcross: 1.7,
   );
 
-  /// Unfolded Fold / tablet.
+  /// Unfolded foldable / tablet.
   static const tablet = ForkSpacing(
     edgeInset: 28,
     rowGap: 32,

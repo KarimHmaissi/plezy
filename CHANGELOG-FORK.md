@@ -2,12 +2,12 @@
 
 Features and changes in [KarimHmaissi/plezy](https://github.com/KarimHmaissi/plezy)
 on top of upstream [edde746/plezy](https://github.com/edde746/plezy). The target
-is the NVIDIA Shield (Android TV); development happens on a Windows PC in TV
+is the NVIDIA Shield (Android TV); development happens on a desktop build in TV
 mode. Newest first. Each entry lists its commit(s) on `dev`.
 
 ## Done so far
 
-- [x] Shield remote works on the Windows PC
+- [x] Shield remote works on the desktop build
 - [x] Libraries at the bottom of the side nav
 - [x] Netflix-style multi-row home, calmer backdrop
 - [x] Watchlist page with genre rows (6+ titles per genre)
@@ -48,7 +48,7 @@ mode. Newest first. Each entry lists its commit(s) on `dev`.
       and Tonight, no TV or Mac needed (mirroring the TV is a switch)
 - [x] Google Cast from the phone to any Chromecast, Cast TV or the Shield,
       no Plezy needed on the receiver
-- [x] DLNA casting from the phone to smart TVs without Cast (the LG C1)
+- [x] DLNA casting from the phone to smart TVs without Cast
 - [x] Media notification on the phone for what the TV is playing
 - [x] Mac: surround sent to the receiver as Dolby Digital
 - [x] Watch history brain: a local index of what you've watched and own,
@@ -103,6 +103,74 @@ Details of each are in the dated entries below.
 - **Trakt sign-in on auth.trakt.tv** — required by Trakt before 2027-02-01;
   consider registering our own Trakt app instead of upstream's.
 
+## 2026-11-06
+
+### The Reel v1: a feed of trailers and anime openings (Android)
+- New **Reel** tab (Android only): one title per card, trailers from the
+  servers' own extras and first openings from AnimeThemes. No episode
+  footage and no recaps of any kind. On the Shield it sits under Home in the
+  rail; on phones it takes Explore's bottom-bar slot (Explore moves to the
+  drawer).
+- Decks, like channels: **For You** (one daily Sonnet build over the taste
+  pool, code order meanwhile, which keeps to titles the public rates 6+;
+  the build itself is told to leave poorly rated titles out), **Anime openings**, **Most Watched** (the
+  Trakt charts, raw; offered only while Trakt is connected), and every saved AI answer (**Reel it** on the answer's
+  menu, on the AI tab or on Home).
+- TV: Up/Down next or previous card, Left/Right another deck, OK = Watch,
+  long OK or ≡ (or a gamepad's X) = Save / Not for me / Spoiled me / Seen it
+  and the deck list, in the app's own menu sheet. The TV card is Home's
+  spotlight (logo, ratings line, summary) over the playing clip, with the
+  app's chips, buttons and snackbars: no look of its own.
+  Phone: a feed you thumb through, the TikTok way. Each card plays in its
+  own page (the clip is drawn into the page by `video_player`, so it slides
+  with your thumb), and the cards around it are already open and parked on
+  their first frame, so a swipe brings a live picture in with no flash.
+  Swipe right hides everything to just watch, swipe left brings it back.
+  **Watch** and **Details** (the title's own page) are the two primary
+  buttons; Save and More sit beside them; tap pauses, double-tap Saves. The
+  deck is picked from its own button at the top.
+- **Save** is one action: the title waits in a new Home row, "From the
+  Reel" (seated once at the top, 3 days, at most 3), and goes to the Plex
+  watchlist.
+- **On TV mode** (Fold): the phone drives the Shield's Reel (current card and
+  the next three, swipe the card to step, Watch / Save / Not for me / Pause) and
+  plays nothing. Five new companion commands, appended so older peers ignore
+  them.
+- Clips play on one ExoPlayer core in clip mode (`DefaultPreloadManager`,
+  the next card's first 3 s preloaded, PCM, no tunnelling or frame-rate
+  switching). They never report anything: no timeline, scrobble, tracker,
+  history or now-playing updates. `test/reel/no_reporting_guard_test.dart`
+  keeps it that way.
+- `plezy://reel[?deck=<id>]` opens the Reel (adb testing now, Arc later).
+- Memory: while the Reel plays the brain's indexer rests and its ONNX session
+  is released; memory pressure first drops the preload, then shows stills.
+  Each new visit starts with clips again.
+- `plezy://reel?probe=coverage|watchstate` (debug): the measure-day probes
+  (clip coverage across 50 shows, and a card's Plex watch state) write
+  counts to the log, never titles or addresses.
+- Fork database schema 3: `ReelEvents` and `ReelCache`. Picks and vetoes are
+  synced settings (`reel.picks`, `reel.vetoes`).
+
+### Straight Facts: honest per-title facts and one trustworthy seen state (recommender v2 §3)
+- New `lib/services/ai/facts/`: the frozen interfaces the Reel and the
+  recommender read. `TitleFacts` (scores with their real source, certificate,
+  Kids-library facts over every copy, length, seen state), `TitleFactsSource`,
+  `TitleMediaSource` / `TitleVideo` (clips and trailers, per title), and the
+  `PickLedger` types the ledger will fill in later.
+- `SeenState` merges the library row with the history brain into one honest
+  state: "watched Oct 2026", "logged as seen (Trakt)", "marked watched
+  (Plex)", "38/62 eps, watching", "1/59 eps, sampled". A title Trakt logged
+  is never called unseen, and "Seen" badges come only from real or logged
+  watches.
+- The brain now keeps where undated plays were logged (`bulkVia`: Trakt
+  import or Plex count with no date). Existing profiles pick it up on the
+  next brain update; until then they read "logged as seen". No re-embedding.
+- Cards built on it never call a score IMDb unless it came from IMDb: an
+  index score whose source isn't known shows as a bare `★`.
+- `IndexTitleFactsSource` builds facts from the index and the brain in one
+  query per batch, with no Plex requests. Nothing uses it yet (the Reel
+  does next).
+
 ## 2026-11-05
 
 ### Watch Next row on the Shield's home works again (A1)
@@ -138,7 +206,7 @@ Details of each are in the dated entries below.
   of emptying it, so the artwork you come back to is still there. Going
   behind the launcher halves the image and Skia caches once; after about
   30 minutes in the background both drop to their minimum, giving memory
-  back to whatever the family is watching. Coming back restores the
+  back to whatever is playing. Coming back restores the
   device's normal sizes (`MemoryTrimPolicy`).
 - The memory watchdog halves the cache first and only clears cached
   (off-screen) images if memory is still high on its next check. It no
@@ -256,7 +324,7 @@ Details of each are in the dated entries below.
 
 ### Better Tonight and Suggested picks (Sonnet chooses)
 - Tonight's pick and library card were chosen by similarity alone, which
-  can match on surface words (Girlfriends for someone who loved Friends).
+  can match on surface words (a similar name rather than a similar feel).
   Now the brain finds up to 15 candidates for each card and **Sonnet
   chooses** the one that truly fits by genre, tone, story and audience,
   then writes the lines. Titles shown in the last 5 days still wait their
@@ -298,7 +366,7 @@ Details of each are in the dated entries below.
   running their own AI.
 
 ### Smoothness: no more jumping while things load
-- Measured on the Galaxy Fold (120 Hz) with a profile build: scrolling
+- Measured on a 120 Hz phone with a profile build: scrolling
   Home, the AI tab and grids holds 120 fps, with frames at 1 to 2 ms of the
   8.3 ms budget. The stutter came from debug builds, so test builds on
   phones are now profile builds (`flutter build apk --profile`; release
@@ -352,7 +420,7 @@ Details of each are in the dated entries below.
   lists** for a fresh set now; each list's picks are topped up every 12
   hours for free (watched titles drop out, new arrivals that fit come in).
 - Lists keep kids' and animated titles out unless they're meant for them
-  (a "Sci-fi epics like Dune" list was filling with animated films): the
+  (a "Sci-fi epics" list was filling with animated films): the
   prompt asks for it, and a list "like" a live-action title never takes
   animation. Titles to keep out now apply to theme searches too, and a
   list's page says why it suits you once instead of twice.
@@ -388,9 +456,9 @@ Details of each are in the dated entries below.
 
 ### DLNA casting from the phone
 - **TVs without Google Cast show up in the same Cast list**, marked DLNA:
-  most smart TVs (LG webOS like the living-room C1, Samsung, Sony,
-  Philips) are DLNA media renderers. Found with SSDP; speakers and HEOS
-  are left out (no video in their sink list).
+  most smart TVs (LG webOS, Samsung, Sony,
+  Philips) are DLNA media renderers. Found with SSDP; speakers and AV
+  receivers are left out (no video in their sink list).
 - **The TV gets the original file** when it takes the container (from its
   own sink list) and the codecs (H.264/HEVC, AAC/AC-3/E-AC-3/FLAC): full
   4K, HDR and Dolby audio, seekable. Otherwise Plex streams a Matroska
@@ -849,7 +917,7 @@ Details of each are in the dated entries below.
   says so and reconnects.
 
 ### Mac: surround as Dolby Digital (branch `feature/ai-helper`)
-- **Why.** On the MacBook's HDMI port, 8-channel PCM reached the receiver
+- **Why.** On a Mac's HDMI port, 8-channel PCM reached an AV receiver
   with its channels rotated by a whole slot or more (centre on a front
   speaker, two channels on one surround), and the offset changed whenever
   the HDMI link re-synced. No speaker layout on the Mac can fix that.
@@ -989,7 +1057,7 @@ Details of each are in the dated entries below.
   monthly spend line now shows how much of it went on auto-refresh. Debug
   builds also have "Auto-refresh Home AI rows now", which skips the 12-hour
   wait for testing.
-- **Not yet tried on the TV** (Karim had to leave): it compiles, `flutter
+- **Not yet tried on the TV**: it compiles, `flutter
   analyze` is clean and the AI tests pass. Still to do: run one forced
   refresh from Settings to check it end to end and measure what a Haiku
   refresh costs (expected about $0.001–0.002).
@@ -998,11 +1066,11 @@ Details of each are in the dated entries below.
 - **Hold OK on any film or show** (Home, Explore, Watchlist, libraries, AI
   rows…) and pick **More like this**. Episodes and seasons use their show.
 - It jumps to the AI tab and runs in the background ("Looking for: more like
-  Heroes"). The AI gets the title, type, year and Plex guid, so it knows the
+  Harbor Lights"). The AI gets the title, type, year and Plex guid, so it knows the
   exact title.
 - The new row lands at the top with 15–20 similar titles (never the title
-  itself), under a short name the AI writes, e.g. "Superpowered ensembles
-  like Heroes".
+  itself), under a short name the AI writes, e.g. "Quiet coastal dramas
+  like Harbor Lights".
 - It's saved like any answer, so Add to Home, Refresh picks and Delete all
   work. The AI now names every row; your own typed requests still show your
   words.
@@ -1055,13 +1123,13 @@ Details of each are in the dated entries below.
 ### AI tab (branch `feature/ai-helper`) — `3829b262a`
 - **New AI item in the side nav** (after Comfort). On opening, Haiku 5.5
   says hello and makes **Tonight** picks from your history and what you're
-  partway through (e.g. "You're one episode from finishing Solo Leveling").
+  partway through (e.g. "You're one episode from finishing Harbor Lights").
   They're reused for 4 hours; ↻ makes new ones.
 - **Ask** opens a box for any request. Sonnet 5.5 answers with a row of
   normal playable cards, newest row at the top and focused. The line at the
   top of the screen shows the focused pick's reason.
 - **Follow up** keeps the conversation: "only films, nothing too long" after
-  "something like Severance" narrows to films. **New conversation** clears it.
+  "something like Harbor Lights" narrows to films. **New conversation** clears it.
 - Without a key the tab explains where to add one (Settings ▸ AI).
 - Eval fixes:
   - A perfect 10.0 audience rating (usually a handful of votes on a new
@@ -1089,8 +1157,8 @@ Details of each are in the dated entries below.
 - **Spend tracking** from each response's token usage, shown in Settings ▸ AI
   (no cap).
 - **Settings ▸ AI ▸ Try a request:** runs one request and lists the picks
-  with reasons; select one to open it. First real request, "random marvel
-  film": 3 unwatched Marvel films, 11.5 s, $0.017.
+  with reasons; select one to open it. A first request took
+  11.5 s and cost $0.017.
 - **Eval harness** (debug builds): runs `notes/ai-eval-prompts.txt` on
   Sonnet and Haiku and writes a markdown report (picks, all on servers?,
   tool calls, time, tokens, cost) to `notes/`.
@@ -1105,9 +1173,8 @@ Details of each are in the dated entries below.
 - Built gently in the background 30 s after Plezy starts: one request every
   1.5 s, 500 titles per page, resuming where it stopped if interrupted. It
   then refreshes every 6 hours with "added/updated since" checks.
-- First build on the PC: 166 requests in about 5.5 minutes. 51,894 movie
-  entries and 23,099 shows (exactly the probe's counts), which are 30,663
-  unique films and 15,466 unique shows. About 90 MB. Searches take 1–20 ms.
+- The first build of a large library takes a few minutes. Searches take
+  1–20 ms.
 - **Settings ▸ AI**: the Anthropic API key, pasted in or sent from another
   device. **Receive key from another device** opens a one-time page on the
   home network (LAN address and a 6-digit code shown on the TV); it saves the
@@ -1124,8 +1191,8 @@ Details of each are in the dated entries below.
   added to Home name their source ("Horror Films · Trakt") and keep working
   whichever source the page shows.
 - **Comfort ▸ Carry on watching** (top row, hidden when empty): comfort-show
-  episodes you're part-way through, newest first, e.g. "Friends · S2 E6 ·
-  17 min left · The One with the Baby on the Bus" with a progress bar.
+  episodes you're part-way through, newest first, e.g. "Harbor Lights · S2 E6 ·
+  17 min left · The Ferry Back" with a progress bar.
   Selecting one resumes where you stopped. Comes from Plex's resume points
   (the same data as Continue Watching, which leaves comfort shows out);
   under 3 minutes in or 90%+ watched are left out. Can be added to Home.
@@ -1189,7 +1256,7 @@ Details of each are in the dated entries below.
   no mouse, so it never happened there.
 
 ### Home builder — `9b965fbc8`
-Replaces the first "Pin to Home" version below, after Karim's feedback.
+Replaces the first "Pin to Home" version below, after feedback.
 - **Home shows only the rows you add, in your order.** Existing pins carried
   over: Continue Watching, Pick back up, then the pinned rows. Server rows are
   no longer shown automatically. In **Manage Home**, turning off **Only show
@@ -1201,11 +1268,9 @@ Replaces the first "Pin to Home" version below, after Karim's feedback.
   Adding something already on Home says so.
 - **No duplicate rows.** Rows with the same title, ignoring case and
   punctuation, merge into one, with each title appearing once (by Plex guid).
-  Why Karim's Home had duplicates: PRM2-Xtra makes a curated "Oh, The
-  Horror!" row in each of its five movie libraries; PRM2-Main has two
-  collections called "Halloween Movies"; and there was one "Recently Added
-  in …" row per library on each server (13 rows, 11 after merging *Movies
-  with Movies and so on).
+  Duplicates come from a server making the same curated row in each of
+  its movie libraries, collections that share a name, and one "Recently
+  Added in …" row per library on each server.
 - **Manage Home** (the builder):
   - Rows on Home in order; select one to Move up / Move down / Move to top /
     Remove.
@@ -1253,8 +1318,8 @@ Replaces the first "Pin to Home" version below, after Karim's feedback.
   a list show as their show.
 - **Discover lists** (toolbar icon): trending and popular public Trakt lists;
   open one to browse it and press **Like list** right from the TV.
-- Trakt smart lists / saved filters: the API answers on the free account but
-  returned none for this account, so they aren't shown yet.
+- Trakt smart lists / saved filters: the API answers but returned none in
+  testing, so they aren't shown yet.
 
 ### Smarter Continue Watching — `7bae2cf`
 - Home's Continue Watching splits in two: **Continue Watching** (touched in
@@ -1270,7 +1335,7 @@ Replaces the first "Pin to Home" version below, after Karim's feedback.
   (`continue_watching_stale_days`, default 30).
 - Plex's Continue Watching hub hides anything older than the server's On Deck
   window (~16 weeks), so Plezy also reads each server's `/library/onDeck` and
-  adds what the hub left out (on Karim's servers: a dozen half-watched films).
+  adds what the hub left out.
   Anything last touched more than a year ago is hidden
   (`continue_watching_max_age_days`, default 365). — `aab28d0`
 

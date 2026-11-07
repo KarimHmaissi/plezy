@@ -7,6 +7,7 @@ import '../../utils/app_logger.dart';
 import '../brain/history_brain.dart';
 import '../brain/history_profiles.dart';
 import '../library_index/library_index.dart';
+import '../reel/reel_ledger.dart';
 import '../trackers/trakt/trakt_client.dart';
 import 'ai_agent.dart';
 import 'ai_history.dart';
@@ -31,7 +32,9 @@ Future<({AiAnswer answer, AiHistoryEntry? entry})> buildAiRow({
   Set<String> excludeKeys = const {},
   void Function(AiProgress progress)? onProgress,
 }) async {
-  final agent = AiAgent(index: LibraryIndex.instance, trakt: trakt, model: model);
+  // The Reel's pick ledger (V2-44): what the Reel showed reaches the ask as
+  // facts on its title lines.
+  final agent = AiAgent(index: LibraryIndex.instance, trakt: trakt, model: model, ledger: ReelLedger.instance.snapshot);
   try {
     final answer = await agent.ask(sentRequest ?? request, previous: previous, onProgress: onProgress);
     if (answer.error != null) return (answer: answer, entry: null);
