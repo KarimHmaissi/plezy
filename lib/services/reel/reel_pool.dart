@@ -576,10 +576,10 @@ class ReelPool {
 
   /// "Rebuild today's For You": today's build is dropped, so the next build
   /// reads the facts (their note among them) as they are now. This device's
-  /// own pool and "Give it another go" order for today go. A shared pool for
-  /// today stays as the stopgap but is marked cleared: the TV drops its own
-  /// copy of today and builds again, and a phone waits for that build
-  /// rather than spending a call of its own. Until the new build lands,
+  /// own pool, "Give it another go" and "What's next after" orders for today
+  /// go. A shared pool for today stays as the stopgap but is marked
+  /// cleared: the TV drops its own copy of today and builds again, and a
+  /// phone waits for that build rather than spending a call of its own. Until the new build lands,
   /// For You reads the newest earlier pool's remainder. Today's Person deck
   /// row stays: its person was chosen for the day, and an order the build
   /// already gave is kept. Returns whether this device does the rebuild
@@ -729,7 +729,7 @@ class ReelPool {
     for (final (i, c) in nextList.indexed) {
       final card = byRow[c.entry.rowId];
       if (card == null) continue;
-      final id = 'n${i + 1}';
+      final id = 'w${i + 1}';
       nextOf[id] = card;
       nextLines.add(nextLine(id, card));
     }
@@ -977,7 +977,7 @@ class ReelPool {
     ].join(' · ');
   }
 
-  /// Keeps the call's `whats_next` order (known `n` ids only, each once)
+  /// Keeps the call's `whats_next` order (known `w` ids only, each once)
   /// as today's [nextKey], with the finished show [seedId] it is for;
   /// nothing is kept when it gave none.
   Future<void> _keepNext(Object? ids, Map<String, ReelCardData> nextOf, String seedId, DateTime now) async {
@@ -1172,9 +1172,9 @@ Choose $count candidates and put them in the order you think they would most enj
 - cluster: a 1-3 word label for the kind of title ("space sci-fi", "buddy action", "cosy anime"), the same label for titles of the same kind.
 - hook: optional, at most ${ReelPremise.hookWords} words: what the title is about, for someone deciding whether to watch it. Write it only from that candidate's own "premise:" text, never from memory, and leave it out when the candidate has none. It is shown on screen, so it must not spoil: only the opening setup, never a twist, a death, an ending or who did it. No ratings or praise words.
 - another_go: optional, only when there is an "Another go" list. Those are shows they started and left: "sampled" (an episode or two, long ago) or "paused" (not watched for two to six months). Give the ids (g1, g2, …) of the ones worth another go today, in the order you would offer them, and leave out any their history says they gave up on for good. They are a separate deck: never put a g id in cards.
-- new_this_week: optional, only when there is a "New this week" list. Those are titles that reached their servers this week and they have not seen. Give the ids (n1, n2, …) of the few worth a look this week, best first, by the same bar as the cards: a short weekly shortlist, never padding; an empty array when none is. They are a separate deck: never put an n id in cards or another_go.
-- person: optional, only when there is a "Person" list. Those are titles on their servers with one person whose work they have watched a lot, and they have not seen them. Give the ids (p1, p2, …) in the order you would offer them, best first, leaving out any not worth their evening by the same bar as the cards. They are a separate deck: never put a p id in cards, another_go or new_this_week.
-- whats_next: optional, only when there is a "What's next" list. They just finished or caught up on the show named in its heading; the list is unseen titles like it. Give the ids (n1, n2, …) of the ones worth watching next, in the order you would offer them, leaving out any that aren't worth their evening. They are a separate deck: never put an n id in cards or another_go.''';
+- new_this_week: optional, only when there is a "New this week" list. Those are titles that reached their servers this week and they have not seen. Give the ids (n1, n2, …) of the few worth a look this week, best first, by the same bar as the cards: a short weekly shortlist, never padding; an empty array when none is. They are a separate deck: never put an n id in cards, another_go, person or whats_next.
+- person: optional, only when there is a "Person" list. Those are titles on their servers with one person whose work they have watched a lot, and they have not seen them. Give the ids (p1, p2, …) in the order you would offer them, best first, leaving out any not worth their evening by the same bar as the cards. They are a separate deck: never put a p id in cards, another_go, new_this_week or whats_next.
+- whats_next: optional, only when there is a "What's next" list. They just finished or caught up on the show named in its heading; the list is unseen titles like it. Give the ids (w1, w2, …) of the ones worth watching next, in the order you would offer them, leaving out any that aren't worth their evening. They are a separate deck: never put a w id in cards, another_go, new_this_week or person.''';
 
   static const Map<String, Object?> _tool = {
     'name': 'reel_pool',
@@ -1216,7 +1216,7 @@ Choose $count candidates and put them in the order you think they would most enj
         },
         'whats_next': {
           'type': 'array',
-          'description': 'Ids from the "What\'s next" list (e.g. n2), in the order to offer them; optional',
+          'description': 'Ids from the "What\'s next" list (e.g. w2), in the order to offer them; optional',
           'items': {'type': 'string'},
         },
       },

@@ -321,7 +321,7 @@ void main() {
                 {'id': 'c1', 'cluster': 'harbor drama'},
               ],
               // Unknown ids, a For You id and a repeat are ignored.
-              'whats_next': ['n3', 'n9', 'c1', 'n1', 'n3'],
+              'whats_next': ['w3', 'w9', 'c1', 'w1', 'w3'],
             };
           },
         ),
@@ -350,7 +350,7 @@ void main() {
       expect(head, greaterThan(lines.indexOf('Candidates:')));
       expect(lines[head], contains('they just finished Title harbor'));
       expect(lines[head], contains('10/10 eps, finished'));
-      expect(lines.firstWhere((l) => l.startsWith('n2:')), startsWith('n2: Title dune · film'));
+      expect(lines.firstWhere((l) => l.startsWith('w2:')), startsWith('w2: Title dune · film'));
       expect(system, contains('whats_next: optional'));
       final schema = tool!['input_schema'] as Map;
       expect((schema['properties'] as Map).containsKey('whats_next'), isTrue);
@@ -414,7 +414,7 @@ void main() {
           'cards': [
             {'id': 'c1', 'cluster': 'harbor drama'},
           ],
-          'whats_next': ['n2', 'n1'],
+          'whats_next': ['w2', 'w1'],
         },
       ).build(
         [_candidate('fresh')],
@@ -436,13 +436,61 @@ void main() {
       expect((await phone.cachedNext('harbor'))?.map((e) => e.ratingKey), ['quay'], reason: 'gone through today');
     });
 
+    test('one build with New this week and What\'s next keeps their ids apart', () async {
+      String? user;
+      Map<String, Object?>? tool;
+      String? system;
+      await pool(
+        model: (s, u, t) async {
+          system = s;
+          user = u;
+          tool = t;
+          return {
+            'cards': [
+              {'id': 'c1', 'cluster': 'harbor drama'},
+            ],
+            'new_this_week': ['n1'],
+            'whats_next': ['w2', 'w1'],
+          };
+        },
+      ).build(
+        [_candidate('fresh')],
+        facts: '',
+        arrivals: (
+          candidates: [
+            PoolCandidate(
+              entry: const DeckEntry(serverId: 's1', ratingKey: 'lantern'),
+              titleId: 'lantern',
+              score: 0,
+              added: now.subtract(const Duration(days: 1)),
+            ),
+          ],
+          films: 1,
+          shows: 0,
+        ),
+        next: (seed: seed, candidates: [_candidate('quay'), _candidate('dune')]),
+      );
+      final ids = [
+        for (final l in user!.split('\n'))
+          if (RegExp(r'^([a-z]\d+):').firstMatch(l) case final m?) m.group(1)!,
+      ];
+      expect(ids, ['c1', 'n1', 'w1', 'w2']);
+      expect(ids.toSet().length, ids.length, reason: 'no id names two titles');
+      expect(system, contains('whats_next: optional'));
+      expect(system, contains('(w1, w2, …)'));
+      final props = (tool!['input_schema'] as Map)['properties'] as Map;
+      expect((props['whats_next'] as Map)['description'], contains('e.g. w2'));
+      expect((await pool().cachedWeek())?.entries.map((e) => e.ratingKey), ['lantern']);
+      expect((await pool().cachedNext('harbor'))?.map((e) => e.ratingKey), ['dune', 'quay']);
+    });
+
     test("Rebuild today's For You drops today's order too", () async {
       await pool(
         model: (_, _, _) async => {
           'cards': [
             {'id': 'c1', 'cluster': 'harbor drama'},
           ],
-          'whats_next': ['n1'],
+          'whats_next': ['w1'],
         },
       ).build([_candidate('fresh')], facts: '', next: (seed: seed, candidates: [_candidate('quay')]));
       expect(await store.cached(ReelPool.nextKey(now)), isNotNull);
