@@ -6,6 +6,7 @@ import 'package:plezy/models/audio_channel_limit.dart';
 import 'package:plezy/models/audio_quality_preset.dart';
 import 'package:plezy/models/transcode_quality_preset.dart';
 import 'package:plezy/services/base_shared_preferences_service.dart';
+import 'package:plezy/services/settings_export_service.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/trackers/tracker_constants.dart';
 import 'package:plezy/utils/platform_detector.dart';
@@ -129,17 +130,45 @@ void main() {
   });
 
   group('SettingsService Reel prefs', () {
-    test('default to what the Reel does today', () async {
+    test('default to what the Reel does today, with Data saver on mobile data (V2-53)', () async {
       final settings = await SettingsService.getInstance();
 
       expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.muted);
       expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
-      expect(settings.read(SettingsService.reelCellular), ReelCellular.normal);
+      expect(settings.read(SettingsService.reelCellular), ReelCellular.dataSaver);
       expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
       expect(settings.read(SettingsService.reelMuted), isFalse);
       expect(settings.read(SettingsService.reelCaptions), isFalse);
       expect(settings.read(SettingsService.reelIntroSeen), isFalse);
+      expect(settings.read(SettingsService.reelHintSessions), 0);
+      expect(settings.read(SettingsService.reelImmersiveHintSeen), isFalse);
+      expect(settings.read(SettingsService.reelFill), isFalse);
       expect(settings.read(SettingsService.showReelTab), isTrue);
+    });
+
+    test('the TV\'s sound pref is its own and starts muted: a "With sound" under the phone\'s key (an older '
+        'build\'s TV page, a phone\'s settings file) is not the TV\'s', () async {
+      TvDetectionService.debugSetAppleTVOverride(true);
+      final settings = await SettingsService.getInstance();
+      await settings.write(SettingsService.reelStartSound, ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.muted);
+      expect(
+        settings.prefs.containsKey(SettingsService.reelTvStartSound.key),
+        isFalse,
+        reason: 'its default is not stored',
+      );
+
+      // A phone's settings file carries the phone's choice only.
+      final phone = SettingsExportService.buildExportMap(settings.prefs).toString();
+      expect(phone, contains(SettingsService.reelStartSound.key));
+      expect(phone, isNot(contains(SettingsService.reelTvStartSound.key)));
+
+      // A choice made on the TV's page is the TV's, and an export carries it.
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(SettingsExportService.buildExportMap(settings.prefs).toString(), contains('reel_tv_start_sound'));
     });
 
     test('persist by enum name across a restart', () async {
@@ -178,33 +207,42 @@ void main() {
       final settings = await SettingsService.getInstance();
 
       await settings.write(SettingsService.reelStartSound, ReelStartSound.mutedIfOtherAudio);
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
       await settings.write(SettingsService.reelClipEnd, ReelClipEnd.loop);
-      await settings.write(SettingsService.reelCellular, ReelCellular.dataSaver);
+      await settings.write(SettingsService.reelCellular, ReelCellular.stillsOnly);
       await settings.write(SettingsService.reelOkAction, ReelOkAction.details);
       await settings.write(SettingsService.reelMuted, true);
       await settings.write(SettingsService.reelCaptions, true);
       await settings.write(SettingsService.reelIntroSeen, true);
+      await settings.write(SettingsService.reelHintSessions, 4);
+      await settings.write(SettingsService.reelImmersiveHintSeen, true);
+      await settings.write(SettingsService.reelFill, true);
       await settings.write(SettingsService.showReelTab, false);
 
       await settings.resetAllSettings();
 
       expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.muted);
       expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
-      expect(settings.read(SettingsService.reelCellular), ReelCellular.normal);
+      expect(settings.read(SettingsService.reelCellular), ReelCellular.dataSaver);
       expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
       expect(settings.read(SettingsService.reelMuted), isFalse);
       expect(settings.read(SettingsService.reelCaptions), isFalse);
       expect(settings.read(SettingsService.reelIntroSeen), isFalse);
+      expect(settings.read(SettingsService.reelHintSessions), 0);
+      expect(settings.read(SettingsService.reelImmersiveHintSeen), isFalse);
+      expect(settings.read(SettingsService.reelFill), isFalse);
       expect(settings.read(SettingsService.showReelTab), isTrue);
     });
 
-    test('choices are exported; mute and the intro flag stay on the device', () {
+    test('choices are exported; mute and the one-time flags stay on the device', () {
       final portable = SettingsService.portablePrefs.toSet();
 
       expect(
         portable,
         containsAll(<Pref<Object?>>[
           SettingsService.reelStartSound,
+          SettingsService.reelTvStartSound,
           SettingsService.reelClipEnd,
           SettingsService.reelCellular,
           SettingsService.reelOkAction,
@@ -214,6 +252,16 @@ void main() {
       );
       expect(portable, isNot(contains(SettingsService.reelMuted)));
       expect(portable, isNot(contains(SettingsService.reelIntroSeen)));
+      expect(portable, isNot(contains(SettingsService.reelHintSessions)));
+      expect(portable, isNot(contains(SettingsService.reelImmersiveHintSeen)));
+      expect(portable, isNot(contains(SettingsService.reelFill)));
+    });
+
+    test('the clip loudness switch is off and stays on the device (V2-19, D9)', () async {
+      final settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.reelClipNormalization), isFalse);
+      expect(SettingsService.portablePrefs, isNot(contains(SettingsService.reelClipNormalization)));
     });
   });
 

@@ -10,6 +10,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../utils/app_logger.dart';
 import 'feed_players.dart';
+import 'reel_art.dart';
 
 /// What started a card change, for the `[ReelPerf]` line's first field.
 enum ReelPerfTrigger {
@@ -22,11 +23,16 @@ enum ReelPerfTrigger {
   /// Phone: a page change in the feed.
   swipe,
 
-  /// TV: a step sent from the Fold's On TV mode.
+  /// TV: a step sent from the phone's On TV mode.
   remote,
 
   /// The Reel opened or came back (no input to measure from).
   open,
+
+  /// Phone: the window changed size under the card on screen (a foldable
+  /// moved between its screens, or turned), timed to the picture moving
+  /// again (V2-65).
+  fold,
 }
 
 /// One card change, from its trigger to the first frame on screen. The
@@ -35,6 +41,11 @@ enum ReelPerfTrigger {
 /// open call returns, [decoderMs] until the native decoder reported ready
 /// (TV, only when the player's debug log is forwarded), and [renderMs] the
 /// rest, to the first frame. Counts and timings only: no titles, no URLs.
+///
+/// A change that ended without a first frame carries its [end]: the clip
+/// failed (`failed:open`, `failed:start`, `failed:play`), the viewer moved
+/// on first (`left`), or the card had no clip to play (`noclip`). Its
+/// [totalMs] then runs to that end, and it is left out of the medians.
 @immutable
 class ReelPerfSample {
   const ReelPerfSample({
@@ -52,6 +63,7 @@ class ReelPerfSample {
     this.rssMb,
     this.imageMb,
     this.decoders,
+    this.end,
     required this.at,
   });
 
@@ -75,6 +87,9 @@ class ReelPerfSample {
   final int? rssMb;
   final double? imageMb;
   final int? decoders;
+
+  /// How a change with no first frame ended; null for one that showed it.
+  final String? end;
   final DateTime at;
 
   /// The logcat line: `[ReelPerf] key=182ms resolve=12 open=40 …`.
@@ -90,6 +105,7 @@ class ReelPerfSample {
     add('render', renderMs);
     add('preload', preloaded == null ? null : (preloaded! ? 'hit' : 'miss'));
     add('origin', origin);
+    add('end', end);
     b.write(' frames=$frames over=$framesOver worst=${worstFrameMs.toStringAsFixed(1)}ms');
     add('decoders', decoders);
     add('rss', rssMb == null ? null : '${rssMb}MB');
@@ -107,6 +123,7 @@ class ReelPerfSample {
     'render': ?renderMs,
     'preload': ?preloaded,
     'origin': ?origin,
+    'end': ?end,
     'frames': frames,
     'over': framesOver,
     'worst': double.parse(worstFrameMs.toStringAsFixed(1)),
@@ -199,6 +216,9 @@ class ReelPerf extends ChangeNotifier {
   int Function()? liveDecoders;
 
   _Pending? _pending;
+
+  /// Counts [begin]s, so a caller can end only the change it began.
+  int _changes = 0;
   final List<ReelPerfSample> _samples = [];
 
   List<ReelPerfSample> get samples => List.unmodifiable(_samples);
@@ -207,10 +227,23 @@ class ReelPerf extends ChangeNotifier {
   // ---- card changes ----
 
   /// A key press, swipe or deck change: the clock starts. An unfinished
-  /// change is dropped (the viewer moved on before its first frame).
-  void begin(ReelPerfTrigger trigger) {
-    if (!_recording) return;
+  /// change is dropped (the viewer moved on before its first frame) unless
+  /// its caller ends it first ([markEnded]). Returns the change's number,
+  /// or null when not recording.
+  int? begin(ReelPerfTrigger trigger) {
+    if (!_recording) return null;
     _pending = _Pending(trigger, _now());
+    return ++_changes;
+  }
+
+  /// The change numbered [change] ([begin]) ended with no first frame: it
+  /// is recorded with how it ended ([ReelPerfSample.end]). Nothing happens
+  /// if another change has begun since, or this one already ended.
+  void markEnded(String end, {required int? change}) {
+    final p = _pending;
+    if (!_recording || p == null || change == null || change != _changes) return;
+    _pending = null;
+    _record(p, _now() - p.t0, end: end);
   }
 
   _Pending? _live({bool start = false}) {
@@ -263,18 +296,23 @@ class ReelPerf extends ChangeNotifier {
     final p = _live();
     if (p == null) return;
     _pending = null;
-    final end = _now() - p.t0;
+    _record(p, _now() - p.t0);
+  }
+
+  /// Records [p], which ran for [elapsed]: to its first frame, or to how it
+  /// [end]ed without one (no render split then).
+  void _record(_Pending p, Duration elapsed, {String? end}) {
     int? ms(Duration? d) => d?.inMilliseconds;
     int? span(Duration? to, Duration? from) => to == null ? null : (to - (from ?? Duration.zero)).inMilliseconds;
     final opened = p.opened, decoder = p.decoder;
     final sample = ReelPerfSample(
       trigger: p.trigger,
-      totalMs: end.inMilliseconds,
+      totalMs: elapsed.inMilliseconds,
       origin: p.origin,
       resolveMs: ms(p.resolved),
       openMs: span(opened, p.resolved),
       decoderMs: decoder == null ? null : span(decoder, opened ?? p.resolved),
-      renderMs: span(end, decoder ?? opened ?? p.resolved),
+      renderMs: end != null ? null : span(elapsed, decoder ?? opened ?? p.resolved),
       preloaded: p.preloaded,
       frames: p.frames,
       framesOver: p.over,
@@ -282,6 +320,7 @@ class ReelPerf extends ChangeNotifier {
       rssMb: rssMb(),
       imageMb: imageMb(),
       decoders: liveDecoders?.call(),
+      end: end,
       at: _clock(),
     );
     _samples.add(sample);
@@ -294,11 +333,12 @@ class ReelPerf extends ChangeNotifier {
   // ---- medians ----
 
   /// The median of [pick] over the samples of [trigger] (all but opens when
-  /// null), or null with none.
+  /// null), or null with none. Changes that ended with no first frame are
+  /// left out.
   int? p50(int? Function(ReelPerfSample s) pick, {ReelPerfTrigger? trigger}) {
     final xs = <int>[
       for (final s in _samples)
-        if (trigger == null ? s.trigger != ReelPerfTrigger.open : s.trigger == trigger) ?pick(s),
+        if (s.end == null && (trigger == null ? s.trigger != ReelPerfTrigger.open : s.trigger == trigger)) ?pick(s),
     ]..sort();
     if (xs.isEmpty) return null;
     return xs[(xs.length - 1) ~/ 2];
@@ -308,7 +348,7 @@ class ReelPerf extends ChangeNotifier {
   ({int hits, int of})? get preloadHits {
     var hits = 0, of = 0;
     for (final s in _samples) {
-      if (s.trigger == ReelPerfTrigger.open || s.preloaded == null) continue;
+      if (s.trigger == ReelPerfTrigger.open || s.preloaded == null || s.end != null) continue;
       of++;
       if (s.preloaded!) hits++;
     }
@@ -425,6 +465,17 @@ class ReelPerf extends ChangeNotifier {
     }
   }
 
+  /// The Reel's own art in the image cache against its budget (plan §6),
+  /// e.g. `9.6/12.0 MB`.
+  static String? reelArtMb() {
+    try {
+      String mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
+      return '${mb(ReelArt.heldBytes)}/${mb(ReelArt.budgetBytes())} MB';
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ---- ring ----
 
   int? _seq;
@@ -462,6 +513,13 @@ class ReelPerf extends ChangeNotifier {
 /// first-frame event, so the first frame here is the first position tick
 /// past where the card's player stood (polled every 100 ms by the plugin):
 /// the figure can run up to 100 ms long.
+///
+/// Every change of the card on screen writes one line, either way through
+/// the feed: at its first frame, or, with no first frame, when its clip
+/// fails (`end=failed:<stage>`), when the next change begins first
+/// (`end=left`, or `end=noclip` for a card that never had a clip to play),
+/// or when the feed moves onto a page with no card. Letting everything go
+/// (another tab, Watch) drops an unfinished change, as before.
 class ReelFeedProbe {
   ReelFeedProbe(this.players, this.perf, {this.deckId, this.origin}) {
     players.addListener(_onPlayers);
@@ -485,37 +543,86 @@ class ReelFeedProbe {
   FeedVideo? _video;
   Duration _from = Duration.zero;
 
+  /// The change this probe began and hasn't ended ([ReelPerf.begin]).
+  int? _change;
+
   void _onPlayers() {
     final cur = players.current;
     if (cur != _card) {
       _detach();
       _card = cur;
       if (cur == null) {
-        // Released (tab hidden, Watch): the next card is an open again.
-        _seen = false;
-        perf.cancel();
+        if (players.letGo) {
+          // Released (tab hidden, Watch): the next card is an open again.
+          _seen = false;
+          _change = null;
+          perf.cancel();
+        } else {
+          // A page with no card (Tonight's picks, the deck's end): the card
+          // left is recorded as left.
+          _end();
+        }
         return;
       }
+      _end();
       final deck = deckId?.call();
       final trigger = !_seen ? ReelPerfTrigger.open : (deck != _deck ? ReelPerfTrigger.deck : ReelPerfTrigger.swipe);
       _seen = true;
       _deck = deck;
       _resolved = false;
       _done = false;
-      perf.begin(trigger);
+      _change = perf.begin(trigger);
     }
-    if (cur == null) return;
+    if (cur == null || _done) return;
+    if (players.failure(cur) case final stage?) {
+      _finish('failed:${stage.name}');
+      return;
+    }
     if (!_resolved && players.held.contains(cur)) {
       _resolved = true;
       perf.markResolved(preloaded: players.videoFor(cur) != null, origin: origin?.call());
     }
     final v = players.videoFor(cur);
-    if (v != null && _video == null && !_done) {
-      perf.markOpened();
-      _video = v;
-      _from = v.position;
-      v.addListener(_onVideo);
-    }
+    if (v != null && _video == null) _attach(v);
+  }
+
+  /// The change still waiting for its first frame ends here: the viewer
+  /// moved on from a card with a clip, or from one that never had one.
+  void _end() {
+    if (_done || _change == null) return;
+    _finish(_resolved ? 'left' : 'noclip');
+  }
+
+  void _finish(String end) {
+    _done = true;
+    _detach();
+    perf.markEnded(end, change: _change);
+    _change = null;
+  }
+
+  /// The window changed size (V2-65): the card on screen is the same, so
+  /// this is timed from the change to its picture moving again, the "same
+  /// card, picture back" figure. An unfinished swipe is replaced: mid-swipe
+  /// the card under the thumb is the one timed.
+  void screenChanged() {
+    final cur = players.current;
+    if (cur == null) return;
+    _detach();
+    _card = cur;
+    _done = false;
+    _resolved = true;
+    _change = perf.begin(ReelPerfTrigger.fold);
+    final v = players.videoFor(cur);
+    perf.markResolved(preloaded: v != null, origin: origin?.call());
+    // Not open yet: [_onPlayers] takes it when it has a picture.
+    if (v != null) _attach(v);
+  }
+
+  void _attach(FeedVideo v) {
+    perf.markOpened();
+    _video = v;
+    _from = v.position;
+    v.addListener(_onVideo);
   }
 
   void _onVideo() {
@@ -523,6 +630,7 @@ class ReelFeedProbe {
     if (v == null) return;
     if (v.playing && v.position > Duration.zero && v.position != _from) {
       _done = true;
+      _change = null;
       _detach();
       perf.markFirstFrame();
     }

@@ -131,6 +131,7 @@ class ReelPerfChips extends StatelessWidget {
       chip(
         Symbols.image_rounded,
         'images ${img == null ? '–' : '${img.toStringAsFixed(1)} MB'} · '
+        'Reel ${ReelPerf.reelArtMb() ?? '–'} · '
         'budget ×${DevicePerformance.displayBudgetFactor().toStringAsFixed(2)}',
       ),
       chip(

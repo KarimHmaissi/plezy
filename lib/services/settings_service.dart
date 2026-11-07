@@ -107,10 +107,12 @@ enum ContinueWatchingAction { play, details }
 
 enum EpisodeAction { play, details }
 
-/// Fork: how a Reel card's sound starts (plan D5). [sound] plays it; once
-/// V2-22 lands it takes audio focus, so music pauses. [mutedIfOtherAudio]
-/// starts muted while other audio is playing.
-enum ReelStartSound { sound, mutedIfOtherAudio }
+/// Fork: how a Reel card's sound starts (plan D5). [sound] plays it and, on
+/// the phone, takes audio focus, so music pauses (V2-22). [mutedIfOtherAudio]
+/// starts muted while other audio is playing and mixes with it. [muted]
+/// starts every visit muted, whatever was chosen last time: the TV's
+/// default, so the Reel never comes up loud.
+enum ReelStartSound { sound, mutedIfOtherAudio, muted }
 
 /// Fork: what a Reel clip does when it ends (plan D6, V2-47).
 enum ReelClipEnd {
@@ -129,7 +131,8 @@ enum ReelCellular {
   /// Play clips as on Wi-Fi.
   normal,
 
-  /// Smaller clips and fewer preloads; a fast swipe may show a still.
+  /// Smaller clips and fewer preloads; a fast swipe may show a still. The
+  /// default.
   dataSaver,
 
   /// No clips on mobile data, only the card's art.
@@ -768,38 +771,72 @@ class SettingsService extends BaseSharedPreferencesService {
   static const showPerformanceOverlay = BoolPref('show_performance_overlay');
   static const autoHidePerformanceOverlay = BoolPref('auto_hide_performance_overlay', defaultValue: true);
 
-  /// Fork: the Reel's debug overlay and `[ReelPerf]` ring (plan V2-07). Off by
-  /// default; switched from the hidden developer setting (V2-62). Per-device
+  /// Fork: the Reel's hidden developer setting (plan V2-62): the debug
+  /// overlay, its `[ReelPerf]` ring (V2-07) and the measure-day links. Off by
+  /// default; counts only while its row shows (`ReelDeveloper`). Per-device
   /// runtime state, so it takes part in neither reset nor export.
   static const reelDebugOverlay = BoolPref('reel_debug_overlay');
+
+  /// Fork: loudness normalisation on the TV's clip core (plan V2-19, D9),
+  /// next to [reelDebugOverlay] in the hidden developer group. Off by
+  /// default until a listening A/B on the soundbar: the platform effect's
+  /// +15 dB make-up gain is tuned for dialogue and may pump on songs. Counts
+  /// only while the developer row shows (`ReelDeveloper.normalization`).
+  /// Per-device runtime state, so it takes part in neither reset nor export.
+  static const reelClipNormalization = BoolPref('reel_clip_normalization');
+
+  /// Fork: "Skip trailer intros" on the TV (plan V2-23): the clip core finds
+  /// where a Plex trailer's picture starts (after its rating card and the
+  /// black before it) and starts it there. On by default; AnimeThemes
+  /// openings are never cut. A playing Reel takes a change up at once.
+  static const reelSkipIntros = BoolPref('reel_skip_intros', defaultValue: true);
+
+  /// Fork: the developer group's "Measure trailer intros only" (plan V2-23):
+  /// the clip core measures and logs each trailer's lead-in but never cuts.
+  /// Counts only while the developer row shows
+  /// (`ReelDeveloper.leadInMeasureOnly`). Per-device runtime state, so it
+  /// takes part in neither reset nor export, like [reelClipNormalization].
+  static const reelLeadInMeasureOnly = BoolPref('reel_lead_in_measure_only');
 
   // Fork: the Reel's per-device prefs (plan V2-46a). The synced Reel prefs
   // (deck order, start deck, sources) live in CustomisationStore instead.
   // Each default is what the Reel does today; an item that builds a new
   // behaviour moves its default to the approved one when it lands (V2-53:
-  // Data saver). Nothing reads these until the Reel's lanes wire them up, and
-  // the settings page (V2-46) shows them.
+  // Data saver). The settings page (V2-46) shows them; each lane wires up
+  // its own reader.
 
-  /// How a card's sound starts (D5). Today: with sound.
+  /// How a phone visit's sound starts (D5). Today: with sound.
   static const reelStartSound = EnumPref<ReelStartSound>(
     'reel_start_sound',
     values: ReelStartSound.values,
     defaultValue: ReelStartSound.sound,
   );
 
-  /// What a clip does when it ends (D6). Today the TV plays twice then holds,
-  /// the approved default for both devices; the phone loops until V2-47.
+  /// How a TV visit's sound starts: muted, unless "With sound" is chosen on
+  /// the TV's Reel settings page. A key of its own, so the "With sound" an
+  /// older build stored on the TV (its default then, a tap away) or a
+  /// phone's choice brought in by a settings import never starts the TV
+  /// loud: only a choice made on this page does.
+  static const reelTvStartSound = EnumPref<ReelStartSound>(
+    'reel_tv_start_sound',
+    values: ReelStartSound.values,
+    defaultValue: ReelStartSound.muted,
+  );
+
+  /// What a clip does when it ends (D6, V2-47): twice then hold on both
+  /// devices; Loop and Next card (Lean back on the TV) as options.
   static const reelClipEnd = EnumPref<ReelClipEnd>(
     'reel_clip_end',
     values: ReelClipEnd.values,
     defaultValue: ReelClipEnd.twiceThenHold,
   );
 
-  /// The Reel on mobile data (V2-53). Today: [ReelCellular.normal].
+  /// The Reel on mobile data (V2-53): Data saver unless changed. Only a
+  /// cellular-only link reads it (`ReelDataBudget`).
   static const reelCellular = EnumPref<ReelCellular>(
     'reel_cellular',
     values: ReelCellular.values,
-    defaultValue: ReelCellular.normal,
+    defaultValue: ReelCellular.dataSaver,
   );
 
   /// What OK does on a TV card (D12). Today: Watch.
@@ -820,9 +857,40 @@ class SettingsService extends BaseSharedPreferencesService {
   /// not exported, as it belongs to this device.
   static const reelIntroSeen = BoolPref('reel_intro_seen');
 
+  /// How many times the Reel has come up on this TV, counted up to one past
+  /// the sessions that always show the key hints (V2-28). Reset shows them
+  /// again; not exported.
+  static const reelHintSessions = IntPref('reel_hint_sessions');
+
+  /// Set once the phone feed has shown its one-time hint for leaving the
+  /// immersive view (V2-31). Per device, like [reelIntroSeen].
+  static const reelImmersiveHintSeen = BoolPref('reel_immersive_hint_seen');
+
+  /// The phone feed's picture fills the screen (V2-33): a pinch out crops the
+  /// clip to cover the page, a pinch in fits it again, and the choice is
+  /// kept for the next card and the next visit. Per device (a TV has no
+  /// pinch, and a screen's shape is its own), so reset but not exported.
+  static const reelFill = BoolPref('reel_fill');
+
   /// Show the Reel tab, which takes Explore's slot (D14). Works like
   /// [showExploreTab]. Today: shown.
   static const showReelTab = BoolPref('show_reel_tab', defaultValue: true);
+
+  /// The Reel's choices on its settings page (V2-46) that a playing Reel
+  /// takes up without a restart: its controller listens to this group.
+  static const List<Pref<Object?>> reelChoicePrefs = [
+    reelStartSound,
+    reelTvStartSound,
+    reelClipEnd,
+    reelCellular,
+    reelOkAction,
+    reelCaptions,
+    // The listening A/B flips it while a clip plays (V2-19).
+    reelClipNormalization,
+    // V2-23: the clip core's lead-in policy follows at once.
+    reelSkipIntros,
+    reelLeadInMeasureOnly,
+  ];
   static const enableDiscordRPC = BoolPref('enable_discord_rpc');
   static const enableTraktWatchedSync = BoolPref('enable_trakt_watched_sync', defaultValue: true);
 
@@ -1662,10 +1730,12 @@ class SettingsService extends BaseSharedPreferencesService {
     showExploreTab,
     showReelTab,
     reelStartSound,
+    reelTvStartSound,
     reelClipEnd,
     reelCellular,
     reelOkAction,
     reelCaptions,
+    reelSkipIntros,
     alwaysKeepSidebarOpen,
     librariesSectionExpanded,
     showUnwatchedCount,
@@ -1777,6 +1847,9 @@ class SettingsService extends BaseSharedPreferencesService {
     audioOutputDevice,
     reelMuted,
     reelIntroSeen,
+    reelHintSessions,
+    reelImmersiveHintSeen,
+    reelFill,
   ];
 
   /// Settings that "Reset All Settings" actually resets.

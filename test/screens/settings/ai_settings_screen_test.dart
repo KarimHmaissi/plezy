@@ -57,6 +57,13 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets("For You's own words and today's rebuild are no longer on the AI page", (tester) async {
+    await pumpScreen(tester);
+    expect(find.text("Rebuild today's For You"), findsNothing, reason: "they moved to the Reel's settings (V2-46)");
+    expect(find.text('Tell For You in your own words'), findsNothing);
+    await unmount(tester);
+  });
+
   testWidgets('with a TMDB key: masked, replace, test and remove', (tester) async {
     await tester.runAsync(() => TmdbKeyStore.write(_fakeApiKey));
     await pumpScreen(tester);

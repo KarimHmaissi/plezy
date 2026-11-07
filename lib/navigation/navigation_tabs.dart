@@ -136,7 +136,9 @@ String _getSettingsLabel() => t.common.settings;
 /// All navigation tabs in display order
 const allNavigationTabs = [
   NavigationTab(id: NavigationTabId.discover, onlineOnly: true, icon: Symbols.home_rounded, getLabel: _getHomeLabel),
-  NavigationTab(id: NavigationTabId.reel, onlineOnly: true, icon: Symbols.movie_rounded, getLabel: _getReelLabel),
+  // Fork: the Reel keeps its tab offline and says so itself (V2-60); a tab
+  // removed under it would drop the session mid-card.
+  NavigationTab(id: NavigationTabId.reel, onlineOnly: false, icon: Symbols.movie_rounded, getLabel: _getReelLabel),
   NavigationTab(
     id: NavigationTabId.libraries,
     onlineOnly: true,

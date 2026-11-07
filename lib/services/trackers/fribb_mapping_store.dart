@@ -123,6 +123,10 @@ class FribbMappingStore extends EtagCachedRemoteStore<FribbIndex> implements Fri
 
   @override
   Future<FribbMappingRow?> lookupByMal(int malId) async => (await ensureLoaded()).byMal[malId];
+
+  /// Whether the mapping could be loaded (an empty index means it couldn't
+  /// be read or downloaded, so a lookup's empty answer says nothing).
+  Future<bool> available() async => !(await ensureLoaded()).isEmpty;
 }
 
 FribbIndex _readAndParse(String path) {

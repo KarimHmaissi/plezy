@@ -34,8 +34,8 @@ void main() {
     );
 
     test('seasons and episodes become their show once, in first position; movies pass through', () {
-      final clone = media(1, 'The Clone Wars');
-      final mando = media(2, 'The Mandalorian');
+      final clone = media(1, 'Galactic Skirmish');
+      final mando = media(2, 'Bounty Rider');
       final result = TraktListsCatalogSource.showsForSeasonsAndEpisodes([
         TraktCatalogEntry(type: 'movie', movie: media(10, 'Episode I')),
         TraktCatalogEntry(type: 'season', show: clone),
@@ -47,7 +47,7 @@ void main() {
 
       expect(
         [for (final e in result) '${e.type}:${e.media?.title}'],
-        ['movie:Episode I', 'show:The Clone Wars', 'movie:Episode II', 'show:The Mandalorian'],
+        ['movie:Episode I', 'show:Galactic Skirmish', 'movie:Episode II', 'show:Bounty Rider'],
       );
     });
   });

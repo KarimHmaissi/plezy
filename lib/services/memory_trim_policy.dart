@@ -27,7 +27,7 @@ enum WatchdogTrim { none, halved, cleared }
 ///   clears it too. Nothing here ever calls [ImageCache.clearLiveImages], which
 ///   would blank artwork still on screen;
 /// * after [backgroundStepDownAfter] in the background both caches drop to
-///   their floors, handing the memory to whatever the family is watching.
+///   their floors, handing the memory to whatever is playing.
 ///
 /// Budgets come back to the device tier's sizes ([DevicePerformance]) on
 /// resume, and in the foreground [restoreCooldown] after the last trim once
@@ -135,6 +135,17 @@ class MemoryTrimPolicy {
     if (after >= before) return;
     cache.maximumSizeBytes = after;
     appLogger.i('$_tag $reason: image cache budget ${before >> 20}MB -> ${after >> 20}MB');
+  }
+
+  /// [bytes] of the image cache that one surface keeps for itself (the
+  /// Reel's art, plan §6), scaled by how far a trim has the cache below its
+  /// tier now: the share halves with every halving and comes back with the
+  /// restore, so it never outlives the trim's cause either.
+  int scaledShare(int bytes) {
+    final tier = _imageCacheTierBytes();
+    final now = _imageCache().maximumSizeBytes;
+    if (tier <= 0 || now >= tier) return bytes;
+    return (bytes * now) ~/ tier;
   }
 
   /// One RSS watchdog sample.

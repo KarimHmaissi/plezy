@@ -77,6 +77,12 @@ class MirrorCustomisationStore implements CustomisationStore {
   Future<String?> readSetting(String key) async => _settings[key] as String?;
 
   @override
+  Future<Map<String, String>> readSettingsWithPrefix(String prefix) async => {
+    for (final MapEntry(:key, :value) in _settings.entries)
+      if (key.startsWith(prefix) && value is String) key: value,
+  };
+
+  @override
   Future<void> writeSetting(String key, String? value) async {
     _write({'op': 'setting', 'key': key, 'value': value});
     final settings = {..._settings};

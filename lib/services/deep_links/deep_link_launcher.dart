@@ -22,6 +22,7 @@ import '../../utils/video_player_navigation.dart';
 import '../catalog/plex_catalog_source.dart';
 import '../data_aggregation_service.dart';
 import '../media_list_playback_launcher.dart';
+import '../reel/reel_developer.dart';
 import '../reel_probe.dart';
 import 'deep_link.dart';
 
@@ -35,13 +36,22 @@ Future<void> launchDeepLink(BuildContext context, DeepLink link, {required bool 
   switch (link) {
     case OpenLink() || ExternalPlayerReturnLink():
       return;
-    case ReelLink(:final probe) when probe == 'coverage':
-      await ReelProbe.run(context);
-    case ReelLink(:final probe) when probe == 'watchstate':
-      await ReelProbe.watchState(context);
-    case ReelLink(:final deck):
-      // Fork: the shell owns the Reel tab.
-      ReelScreen.open(context, deck: deck);
+    case ReelLink(:final probe, :final deck):
+      // Fork: a measure-day probe runs only in a debug build or with the
+      // Reel's hidden developer setting on (V2-62); otherwise the link,
+      // which any web page can fire, just opens the Reel.
+      switch (ReelDeveloper.probe(probe)) {
+        case ReelProbeKind.coverage:
+          await ReelProbe.run(context);
+        case ReelProbeKind.watchstate:
+          await ReelProbe.watchState(context);
+        case ReelProbeKind.extrasShape:
+          await ReelProbe.extrasShape(context);
+        case null:
+          if (probe != null) appLogger.i('[ReelProbe] developer tools off; opening the Reel');
+          // The shell owns the Reel tab.
+          ReelScreen.open(context, deck: deck);
+      }
     case PlayLink():
       await _launchPlayLink(context, link, isOffline: isOffline);
     case LiveLink():
