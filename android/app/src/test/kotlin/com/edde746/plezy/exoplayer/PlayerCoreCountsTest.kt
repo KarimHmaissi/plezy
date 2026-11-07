@@ -49,9 +49,17 @@ class PlayerCoreCountsTest {
 
     assertEquals(2, PlayerCoreCounts.codecsOnReleasedCores)
     assertEquals(
-      "cores created=2 released=1 live=1 codecs=5 codecsOnReleasedCores=2",
+      "cores created=2 released=1 live=1 codecs=5 codecsOnReleasedCores=2 detectorCodecs=0",
       PlayerCoreCounts.summary()
     )
+  }
+
+  @Test
+  fun theSummaryCountsTheLeadInDetectorsCodecsApart() {
+    PlayerCoreCounts.onDetectorCodecCreated()
+    PlayerCoreCounts.onDetectorCodecCreated()
+    assertEquals(2, PlayerCoreCounts.detectorCodecsCreated)
+    assertEquals("cores created=0 released=0 live=0 codecs=0 codecsOnReleasedCores=0 detectorCodecs=2", PlayerCoreCounts.summary())
   }
 
   @Test

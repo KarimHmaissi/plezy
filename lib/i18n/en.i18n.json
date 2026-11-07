@@ -1902,7 +1902,11 @@
       "developerTools": "Reel debug tools",
       "developerToolsDescription": "Timings overlay and measuring links. Shown while debug logging is on",
       "clipNormalization": "Even out clip loudness",
-      "clipNormalizationDescription": "For a listening test. Evens out loud and quiet clips, and may pump on songs"
+      "clipNormalizationDescription": "For a listening test. Evens out loud and quiet clips, and may pump on songs",
+      "skipIntros": "Skip trailer intros",
+      "skipIntrosDescription": "Start trailers after the rating card and the dark frames before the picture",
+      "leadInMeasureOnly": "Measure trailer intros only",
+      "leadInMeasureOnlyDescription": "Logs where each trailer's picture starts without skipping anything"
     },
     "decks": {
       "title": "Decks",

@@ -26,6 +26,18 @@ void main() {
   ReelPick pick(String id, DateTime at) =>
       ReelPick(titleId: id, groupKey: 'g$id', serverId: 's', ratingKey: 'rk$id', title: 'Title $id', at: at);
 
+  test('V2-23: patchCached rewrites a row and keeps its age; a missing row is left alone', () async {
+    await store.cache('src:g1', '{"v":3}');
+    final at = await store.cachedAt('src:g1');
+    now = now.add(const Duration(days: 20));
+    expect(await store.patchCached('src:g1', (v) => v.replaceFirst('}', ',"li":6006}')), isTrue);
+    expect(await store.cached('src:g1'), '{"v":3,"li":6006}');
+    expect(await store.cachedAt('src:g1'), at);
+    expect(await store.patchCached('src:g1', (_) => null), isFalse);
+    expect(await store.patchCached('src:missing', (_) => '{}'), isFalse);
+    expect(await store.cached('src:missing'), isNull);
+  });
+
   test('picks wait 3 days, newest first, at most 3', () async {
     await store.savePick(pick('a', now.subtract(const Duration(days: 4))));
     await store.savePick(pick('b', now.subtract(const Duration(hours: 5))));

@@ -8976,6 +8976,18 @@ class Translations$reel$settings$en {
 
 	/// en: 'For a listening test. Evens out loud and quiet clips, and may pump on songs'
 	String get clipNormalizationDescription => 'For a listening test. Evens out loud and quiet clips, and may pump on songs';
+
+	/// en: 'Skip trailer intros'
+	String get skipIntros => 'Skip trailer intros';
+
+	/// en: 'Start trailers after the rating card and the dark frames before the picture'
+	String get skipIntrosDescription => 'Start trailers after the rating card and the dark frames before the picture';
+
+	/// en: 'Measure trailer intros only'
+	String get leadInMeasureOnly => 'Measure trailer intros only';
+
+	/// en: 'Logs where each trailer's picture starts without skipping anything'
+	String get leadInMeasureOnlyDescription => 'Logs where each trailer\'s picture starts without skipping anything';
 }
 
 // Path: reel.decks
@@ -12047,6 +12059,10 @@ extension on Translations {
 			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
 			'reel.settings.clipNormalization' => 'Even out clip loudness',
 			'reel.settings.clipNormalizationDescription' => 'For a listening test. Evens out loud and quiet clips, and may pump on songs',
+			'reel.settings.skipIntros' => 'Skip trailer intros',
+			'reel.settings.skipIntrosDescription' => 'Start trailers after the rating card and the dark frames before the picture',
+			'reel.settings.leadInMeasureOnly' => 'Measure trailer intros only',
+			'reel.settings.leadInMeasureOnlyDescription' => 'Logs where each trailer\'s picture starts without skipping anything',
 			'reel.decks.title' => 'Decks',
 			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
 			'reel.decks.startOn' => 'Start on',
@@ -12377,12 +12393,12 @@ extension on Translations {
 			'liveTv.dvrAdminRequired' => 'DVR settings require an admin account',
 			'liveTv.recordingFailed' => 'Couldn\'t schedule recording',
 			'liveTv.recordingTargetMissing' => 'Couldn\'t determine recording library',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.recordNotAvailable' => 'Recording not available for this program',
 			'liveTv.recordingCancelled' => 'Recording canceled',
 			'liveTv.recordingRuleDeleted' => 'Recording rule deleted',
 			'liveTv.processRecordingRules' => 'Re-evaluate rules',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.recordingInProgress' => 'Recording now',
 			'liveTv.recordingsCount' => ({required Object count}) => '${count} scheduled',
 			'liveTv.editRule' => 'Edit rule',
@@ -12891,12 +12907,12 @@ extension on Translations {
 			'performanceOverlay.transfer' => 'Transfer',
 			'performanceOverlay.renderFps' => 'Render FPS',
 			'performanceOverlay.displayFps' => 'Display FPS',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.avSync' => 'A/V Sync',
 			'performanceOverlay.dropped' => 'Dropped',
 			'performanceOverlay.dvRpus' => 'DV RPUs',
 			'performanceOverlay.dvRpuAverage' => 'DV RPU Avg',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.dvSampleAverage' => 'DV Sample Avg',
 			'performanceOverlay.maxLuma' => 'Max Luma',
 			'performanceOverlay.minLuma' => 'Min Luma',

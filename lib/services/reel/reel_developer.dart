@@ -57,6 +57,15 @@ abstract final class ReelDeveloper {
     return visible(debugBuild: debugBuild, settings: s);
   }
 
+  /// Whether the TV's clip core only measures trailer lead-ins (V2-23): off
+  /// unless the developer group's switch is on, and like the tools it counts
+  /// only while its row could show.
+  static bool leadInMeasureOnly({bool debugBuild = kDebugMode, SettingsService? settings}) {
+    final s = settings ?? SettingsService.instanceOrNull;
+    if (s == null || !s.read(SettingsService.reelLeadInMeasureOnly)) return false;
+    return visible(debugBuild: debugBuild, settings: s);
+  }
+
   /// The probe a link named [name] may run, or null when the link should
   /// just open the Reel: no probe, an unknown one, or the tools are off in
   /// a release build.

@@ -324,6 +324,9 @@ class ReelController extends ChangeNotifier {
     resolver.profile?.addListener(_onProfile);
     ReelStore.picksChanged.addListener(_onPicksChanged);
     settingsChanged?.addListener(_onSettingsChanged);
+    // V2-23: the TV's clip core measures each trailer's lead-in; every card
+    // showing that clip takes the start, and its `src:` row keeps it.
+    if (!externalClips) _leadInSub = clips.leadIns.listen(_onLeadIn);
     _wasMetered = _metered;
     _offline.value = _offlineNow;
     offlineMode?.addListener(_syncOffline);
@@ -399,9 +402,56 @@ class ReelController extends ChangeNotifier {
     if (_disposed) return;
     appLogger.d('Reel: a setting changed; the views take it up now');
     _dropGatedEmbeds();
-    // The TV's clip core takes the normalisation switch at once (V2-19).
+    // The TV's clip core takes the normalisation switch at once (V2-19),
+    // and "Skip trailer intros" (V2-23): its held preloads follow in the core.
     clips.syncNormalization();
+    if (!externalClips) clips.syncLeadInPolicy();
     notifyListeners();
+  }
+
+  StreamSubscription<ClipLeadIn>? _leadInSub;
+
+  /// V2-23: the clip core measured a trailer's lead-in. Every card whose
+  /// clip has that cache key takes the start (its next preload and open
+  /// start there), and the title's `src:` row keeps it. Ignored while the
+  /// setting is off or only measuring (the core logged it).
+  void _onLeadIn(ClipLeadIn leadIn) {
+    if (_disposed) return;
+    if (!clips.cutsLeadIns) {
+      appLogger.d('[ReelLeadIn] answer not kept: skipping is off or only measuring');
+      return;
+    }
+    final titles = <String, (ReelTitle, ResolvedClip)>{};
+    final cardsById = {
+      for (final list in _cards.values)
+        for (final c in list) c.id: c,
+    };
+    var updated = 0;
+    for (final MapEntry(key: id, value: clip) in _clip.entries.toList()) {
+      final source = clip?.source;
+      if (clip == null ||
+          source == null ||
+          source.origin != ClipOrigin.plexExtra ||
+          source.cacheKey != leadIn.cacheKey) {
+        continue;
+      }
+      if (clip.source.startAt == leadIn.start) continue;
+      final next = clip.withSource(clip.source.withStartAt(leadIn.start));
+      _clip[id] = next;
+      updated++;
+      final card = cardsById[id];
+      if (card != null) titles[card.title.groupKey] = (card.title, next);
+    }
+    if (updated == 0) return;
+    appLogger.i('[ReelLeadIn] kept start=${leadIn.start.inMilliseconds}ms reason=${leadIn.reason} cards=$updated');
+    for (final (title, clip) in titles.values) {
+      unawaited(
+        resolver.rememberLeadIn(title, clip, leadIn.start, reason: leadIn.reason).catchError((Object e) {
+          appLogger.d('Reel: keeping a lead-in failed (${e.runtimeType})');
+          return false;
+        }),
+      );
+    }
   }
 
   /// The TMDB rung went off (V2-63: Data saver or Stills only on mobile
@@ -3463,6 +3513,8 @@ class ReelController extends ChangeNotifier {
     offlineMode?.removeListener(_syncOffline);
     ReelStore.picksChanged.removeListener(_onPicksChanged);
     settingsChanged?.removeListener(_onSettingsChanged);
+    unawaited(_leadInSub?.cancel());
+    _leadInSub = null;
     deckPrefsChanged.removeListener(_onDeckPrefsChanged);
     for (final MapEntry(key: d, value: l) in _rebuiltListeners.entries) {
       d.rebuilt?.removeListener(l);

@@ -293,6 +293,23 @@ class ReelStore {
     return row == null ? null : DateTime.fromMillisecondsSinceEpoch(row.updatedAt);
   }
 
+  /// Rewrites [key]'s cache row with [transform] of its value, in one
+  /// transaction, keeping its `updatedAt`: a lead-in learned for a clip
+  /// (V2-23) never extends the clip identity's 30-day trust. A missing row,
+  /// or a [transform] that returns null, writes nothing. Returns whether it
+  /// wrote.
+  Future<bool> patchCached(String key, String? Function(String value) transform) async {
+    final db = await _database();
+    return db.transaction(() async {
+      final row = await (db.select(db.reelCache)..where((c) => c.key.equals(key))).getSingleOrNull();
+      if (row == null) return false;
+      final next = transform(row.value);
+      if (next == null || next == row.value) return false;
+      await (db.update(db.reelCache)..where((c) => c.key.equals(key))).write(ReelCacheCompanion(value: Value(next)));
+      return true;
+    });
+  }
+
   /// Drops [key]'s cache row.
   Future<void> uncache(String key) async {
     final db = await _database();

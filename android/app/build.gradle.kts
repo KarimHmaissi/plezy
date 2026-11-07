@@ -501,6 +501,10 @@ dependencies {
   implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
   implementation("androidx.media3:media3-ui:$media3Version")
   implementation("androidx.media3:media3-common:$media3Version")
+  // Reel V2-23: MediaExtractorCompat for the lead-in detector, which reads a trailer's first
+  // seconds through the clip cache. Its 1.11.0 POM depends only on media3-exoplayer and
+  // androidx.annotation (39 KB aar).
+  implementation("androidx.media3:media3-inspector:$media3Version")
 
   // Cronet for HTTP/2 multiplexing + better connection management
   implementation("androidx.media3:media3-datasource-cronet:$media3Version")
