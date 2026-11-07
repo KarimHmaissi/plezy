@@ -1019,6 +1019,7 @@ class SettingsService extends BaseSharedPreferencesService {
     'video_player_navigation_enabled',
     defaultValueProvider: PlatformDetector.isTV,
   );
+
   /// Fork: the TV is the home hub, so it hosts the companion remote out of the
   /// box (like desktops) and phones on the same Plex account find it.
   static bool _companionRemoteServerDefault() => PlatformDetector.isDesktopOS() || PlatformDetector.isTV();
@@ -1098,6 +1099,16 @@ class SettingsService extends BaseSharedPreferencesService {
   /// to pick the last-played sibling in the Continue Watching dedup (#1492).
   static final localLastPlayedAt = JsonPref<Map<String, int>>(
     'local_last_played_at',
+    defaultValue: const {},
+    encode: json.encode,
+    decode: (raw) => (raw as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int)),
+  );
+
+  /// Fork: files that failed to open recently (copy key → epoch ms of the
+  /// failure). Written by BrokenCopies, which skips entries older than its
+  /// TTL; device-local, like [localLastPlayedAt].
+  static final brokenCopies = JsonPref<Map<String, int>>(
+    'broken_copies',
     defaultValue: const {},
     encode: json.encode,
     decode: (raw) => (raw as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int)),
@@ -1665,6 +1676,7 @@ class SettingsService extends BaseSharedPreferencesService {
     customDownloadPathType,
     mediaVersionPreferences,
     localLastPlayedAt,
+    brokenCopies,
     customDownloadPath,
     mpvConfigText,
     mpvPresets,

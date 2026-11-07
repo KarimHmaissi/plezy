@@ -46,6 +46,9 @@ class TrackControlsState {
   final VoidCallback? onToggleFullscreen;
   final VoidCallback? onToggleAlwaysOnTop;
   final Function(int)? onSwitchVersion;
+
+  /// Fork: opens the copy picker; see [PlexVideoControls.onChooseCopy].
+  final VoidCallback? onChooseCopy;
   final ValueChanged<TranscodeQualityPreset>? onSwitchQualityPreset;
   final Future<void> Function(int)? onSwitchAudioStreamId;
   final Future<void> Function(PlaybackSourceSubtitleChoice)? onSwitchSubtitle;
@@ -114,6 +117,7 @@ class TrackControlsState {
     this.onToggleFullscreen,
     this.onToggleAlwaysOnTop,
     this.onSwitchVersion,
+    this.onChooseCopy,
     this.onSwitchQualityPreset,
     this.onSwitchAudioStreamId,
     this.onSwitchSubtitle,

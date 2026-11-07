@@ -7,6 +7,7 @@ import '../media/ids.dart';
 import '../media/media_item.dart';
 import '../media/media_item_merge.dart';
 import '../providers/multi_server_provider.dart';
+import '../services/broken_copies.dart';
 import '../services/catalog/catalog_library_matcher.dart';
 import 'app_logger.dart';
 import 'media_navigation_helper.dart';
@@ -35,12 +36,16 @@ Future<MediaItem?> _bestLibraryCopy(BuildContext context, CatalogItem item) asyn
   try {
     final multi = context.read<MultiServerProvider>();
     final result = await context.read<CatalogLibraryMatcher>().match(item).timeout(const Duration(seconds: 3));
+    await BrokenCopies.instance.ensureLoaded();
     return bestLibraryCopy(
       result.items,
       isAvailable: (copy) {
         final id = serverIdOrNull(copy.serverId);
         return id != null && multi.isServerOnline(id);
       },
+      // A copy whose every file failed to play recently gives way to one
+      // that works.
+      isBroken: BrokenCopies.instance.isCopyBroken,
     );
   } catch (e) {
     appLogger.d('Catalog: best-copy lookup failed', error: e);
