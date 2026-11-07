@@ -7,6 +7,7 @@ import '../../mpv/player/platform/player_android.dart';
 import '../../mpv/player/player.dart';
 import '../../screens/video_player/wakelock_controller.dart';
 import '../../utils/app_logger.dart';
+import '../settings_service.dart';
 import 'reel_developer.dart';
 import 'reel_perf.dart';
 import 'reel_volume.dart';
@@ -18,7 +19,14 @@ import 'reel_volume.dart';
 enum ClipOrigin { plexExtra, animeTheme, youtube }
 
 class ClipSource {
-  const ClipSource({required this.uri, required this.origin, this.length, this.preloadable = true, this.cacheKey});
+  const ClipSource({
+    required this.uri,
+    required this.origin,
+    this.length,
+    this.preloadable = true,
+    this.cacheKey,
+    this.startAt,
+  });
 
   final String uri;
   final ClipOrigin origin;
@@ -34,11 +42,50 @@ class ClipSource {
   /// guest server); it streams only when its card is on screen.
   final bool preloadable;
 
+  /// Where the clip's picture starts after its lead-in (a rating card and
+  /// the black before the trailer, V2-23), as the TV's clip core measured
+  /// it: null when not measured yet, [Duration.zero] when measured with no
+  /// lead-in. Plex extras only; AnimeThemes openings are never cut.
+  final Duration? startAt;
+
+  /// This clip with [startAt] set (identity, the URI, is unchanged).
+  ClipSource withStartAt(Duration? startAt) => ClipSource(
+    uri: uri,
+    origin: origin,
+    length: length,
+    preloadable: preloadable,
+    cacheKey: cacheKey,
+    startAt: startAt,
+  );
+
+  /// Equal by URI only: a card's identity never changes when its start is
+  /// learned.
   @override
   bool operator ==(Object other) => other is ClipSource && other.uri == uri;
 
   @override
   int get hashCode => uri.hashCode;
+}
+
+/// A clip's lead-in as the TV's clip core measured it (V2-23): [start] is
+/// where its picture starts ([Duration.zero]: none), for the clip whose disk
+/// cache key is [cacheKey] (never its URL). [reason] says why a start is 0
+/// (`content`, `cap`, `hdr`, `clip`, ...).
+@immutable
+class ClipLeadIn {
+  const ClipLeadIn({
+    required this.cacheKey,
+    required this.start,
+    this.kind = 'none',
+    this.version = 0,
+    this.reason = 'ok',
+  });
+
+  final String cacheKey;
+  final Duration start;
+  final String kind;
+  final int version;
+  final String reason;
 }
 
 /// What a preloaded clip is to the card on screen (plan V2-09). The TV's
@@ -71,13 +118,33 @@ abstract interface class ClipEngine {
   Future<void> warm();
 
   /// Opens [uri]; [cacheKey] (a Plex clip's, V2-10) has the core read and
-  /// write its bytes through the disk cache.
-  Future<void> open(String uri, {String? cacheKey});
+  /// write its bytes through the disk cache. V2-23: [startAt] is the clip's
+  /// learned start (null: unknown) and [measure] lets the core measure it.
+  Future<void> open(String uri, {String? cacheKey, Duration? startAt, bool measure = false, ClipOrigin? origin});
 
   /// Buffers [uri]'s first seconds as [rank], in place of what that rank
   /// held (V2-09); with [cacheKey], the card two ahead and a deck head go to
-  /// disk instead of memory (V2-10).
-  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin, String? cacheKey});
+  /// disk instead of memory (V2-10). V2-23: [startAt] and [measure] as for
+  /// [open].
+  Future<void> preload(
+    String uri, {
+    ClipPreloadRank rank = ClipPreloadRank.next,
+    ClipOrigin? origin,
+    String? cacheKey,
+    Duration? startAt,
+    bool measure = false,
+  });
+
+  /// V2-23: "Skip trailer intros" ([enabled]) and the developer's
+  /// [measureOnly] switch.
+  Future<void> setLeadInPolicy({required bool enabled, required bool measureOnly});
+
+  /// V2-23: an exact seek (not to the keyframe before), for a start learned
+  /// after the clip opened.
+  Future<void> seekExact(Duration position);
+
+  /// V2-23: each lead-in the core measured.
+  Stream<ClipLeadIn> get leadIns;
 
   /// Drops [rank]'s preload, or every one when null.
   Future<void> clearPreloads({ClipPreloadRank? rank});
@@ -146,8 +213,9 @@ class ExoClipEngine implements ClipEngine {
   Future<void> warm() => _p.warmClip();
 
   @override
-  Future<void> open(String uri, {String? cacheKey}) {
+  Future<void> open(String uri, {String? cacheKey, Duration? startAt, bool measure = false, ClipOrigin? origin}) {
     if (cacheKey != null) _p.rememberClipCacheKey(uri, cacheKey);
+    _p.rememberClipStart(uri, startMs: startAt?.inMilliseconds, measure: measure, origin: origin?.name);
     return _p.open(Media(uri), play: true);
   }
 
@@ -157,7 +225,34 @@ class ExoClipEngine implements ClipEngine {
     ClipPreloadRank rank = ClipPreloadRank.next,
     ClipOrigin? origin,
     String? cacheKey,
-  }) => _p.preloadClip(uri, rank: rank.name, origin: origin?.name, cacheKey: cacheKey);
+    Duration? startAt,
+    bool measure = false,
+  }) => _p.preloadClip(
+    uri,
+    rank: rank.name,
+    origin: origin?.name,
+    cacheKey: cacheKey,
+    startMs: startAt?.inMilliseconds,
+    measure: measure,
+  );
+
+  @override
+  Future<void> setLeadInPolicy({required bool enabled, required bool measureOnly}) =>
+      _p.setLeadInPolicy(enabled: enabled, measureOnly: measureOnly);
+
+  @override
+  Future<void> seekExact(Duration position) => _p.seekClipExact(position);
+
+  @override
+  Stream<ClipLeadIn> get leadIns => _p.leadIns.map(
+    (e) => ClipLeadIn(
+      cacheKey: e.cacheKey,
+      start: Duration(milliseconds: e.startMs),
+      kind: e.kind,
+      version: e.version,
+      reason: e.reason,
+    ),
+  );
 
   @override
   Future<void> clearPreloads({ClipPreloadRank? rank}) => _p.clearPreloads(rank: rank?.name);
@@ -273,10 +368,16 @@ class ClipPlayer {
   /// [normalize] says whether the core should normalise loudness; it
   /// defaults to the hidden developer switch ([ReelDeveloper.normalization],
   /// off by default, D9).
+  ///
+  /// [skipIntros] is "Skip trailer intros" (V2-23, `reel_skip_intros`, on by
+  /// default) and [leadInMeasureOnly] the developer's measure-only switch;
+  /// both are asked whenever a core is built and on [syncLeadInPolicy].
   ClipPlayer({
     ClipEngine Function()? engine,
     int? Function()? plays,
     bool Function()? normalize,
+    bool Function()? skipIntros,
+    bool Function()? leadInMeasureOnly,
     ReelPerf? perf,
     WakelockController? wakelock,
     this._muted = false,
@@ -285,6 +386,8 @@ class ClipPlayer {
   }) : _create = engine ?? ExoClipEngine.new,
        _plays = plays ?? _twice,
        _normalize = normalize ?? _developerNormalization,
+       _skipIntros = skipIntros ?? _skipIntrosPref,
+       _measureOnly = leadInMeasureOnly ?? _developerMeasureOnly,
        _perf = perf ?? ReelPerf.instance,
        _wakelock = wakelock ?? (engine == null ? WakelockController() : null) {
     phase.addListener(_syncWakelock);
@@ -318,6 +421,12 @@ class ClipPlayer {
   static int? _twice() => 2;
 
   static bool _developerNormalization() => ReelDeveloper.normalization();
+
+  static bool _skipIntrosPref() =>
+      SettingsService.instanceOrNull?.read(SettingsService.reelSkipIntros) ??
+      SettingsService.reelSkipIntros.defaultValue;
+
+  static bool _developerMeasureOnly() => ReelDeveloper.leadInMeasureOnly();
 
   /// The longest a clip's open may take. The core's open returns once the
   /// clip is handed to the player (buffering comes after), so an open still
@@ -360,6 +469,28 @@ class ClipPlayer {
 
   /// What this session's core was last told: a fresh core starts off.
   bool _normalized = false;
+
+  /// V2-23: "Skip trailer intros" and the developer's measure-only switch.
+  final bool Function() _skipIntros;
+  final bool Function() _measureOnly;
+
+  /// The lead-in policy this session's core was last told (null: a fresh
+  /// core, told as it is built).
+  ({bool enabled, bool measureOnly})? _leadInSent;
+
+  /// Every lead-in a core measured (the controller keeps them, V2-23).
+  final StreamController<ClipLeadIn> _leadIns = StreamController.broadcast();
+
+  /// The clip playing was opened at its learned start (clipped): Replay and
+  /// the loop go to 0, which is that start.
+  bool _openClipped = false;
+
+  /// A start learned for the clip playing after it opened unclipped: Replay
+  /// and the loop seek exactly to it.
+  Duration? _learnedStart;
+
+  /// What the clip playing's `[ReelTTFF]` line says of its lead-in.
+  String _openLead = '0';
 
   /// Keeps the screen on while a clip opens or plays (null in tests).
   final WakelockController? _wakelock;
@@ -415,6 +546,10 @@ class ClipPlayer {
   /// played or cleared.
   final Map<ClipPreloadRank, String> _preloaded = {};
 
+  /// The start each rank's clip was sent with (V2-23): a learned start sends
+  /// the same clip again.
+  final Map<ClipPreloadRank, Duration?> _preloadedStart = {};
+
   final ValueNotifier<ClipPhase> phase = ValueNotifier(ClipPhase.idle);
 
   /// The clip whose picture is on screen: null from the top of [play] until
@@ -454,7 +589,10 @@ class ClipPlayer {
     final normalize = _normalize();
     appLogger.i('[ReelSound] clip core normalization=${normalize ? 'on' : 'off'}');
     if (normalize) _applyNormalization(e, true);
+    _leadInSent = null;
+    syncLeadInPolicy();
     _subs
+      ..add(e.leadIns.listen(_onLeadIn))
       ..add(e.completed.listen((done) => done ? _onCompleted() : null))
       ..add(e.firstFrame.listen((_) => _onFirstFrame()))
       ..add(
@@ -527,11 +665,15 @@ class ClipPlayer {
   Future<void> play(ClipSource source, {bool first = false}) async {
     final e = _ensure();
     syncNormalization();
+    syncLeadInPolicy();
     final open = ++_opens;
     // The core takes the clip out of its rank as it opens it; the other
     // ranks keep theirs.
     final rank = _preloaded.entries.where((e) => e.value == source.uri).firstOrNull?.key;
-    if (rank != null) _preloaded.remove(rank);
+    if (rank != null) {
+      _preloaded.remove(rank);
+      _preloadedStart.remove(rank);
+    }
     _openPreloaded = rank != null;
     _openRank = rank;
     _perf.markResolved(preloaded: _openPreloaded, origin: source.origin.name);
@@ -547,7 +689,20 @@ class ClipPlayer {
     _cancelExternalPause();
     // Asked for before the open starts the sound (the audio-focus guide).
     _takeFocus();
-    _length = source.length ?? Duration.zero;
+    // V2-23: a clipped open's timeline starts at the cut, so its length is
+    // the clip's less the lead-in (R12).
+    final start = clipStart(source);
+    _openClipped = start > Duration.zero;
+    _learnedStart = null;
+    _openLead = !mayMeasure(source)
+        ? '0'
+        : source.startAt == null
+        ? '?'
+        : _clipping
+        ? '${start.inMilliseconds}'
+        : 'off';
+    final length = source.length;
+    _length = length == null ? Duration.zero : (length - start < Duration.zero ? Duration.zero : length - start);
     progress.value = ClipProgress.zero;
     onScreen.value = null;
     phase.value = ClipPhase.loading;
@@ -559,7 +714,15 @@ class ClipPlayer {
       unawaited(_fadeTo(0, outgoingFade));
     }
     try {
-      await e.open(source.uri, cacheKey: source.cacheKey).timeout(openLimit);
+      await e
+          .open(
+            source.uri,
+            cacheKey: source.cacheKey,
+            startAt: _leadInEligible(source) ? source.startAt : null,
+            measure: mayMeasure(source),
+            origin: source.origin,
+          )
+          .timeout(openLimit);
     } on TimeoutException {
       if (open != _opens || !identical(_engine, e)) return;
       appLogger.w('Reel: clip open timed out after ${openLimit.inMilliseconds}ms; the clip core is let go');
@@ -594,17 +757,35 @@ class ClipPlayer {
     if (source == null || !source.preloadable) return clearPreload(rank);
     // The card two ahead is a disk preload of a Plex clip only (V2-10, D1).
     if (rank == ClipPreloadRank.ahead && source.cacheKey == null) return clearPreload(rank);
-    if (_preloaded[rank] == source.uri) return;
+    // V2-23: the same clip with a newly learned start is sent again.
+    final startAt = _leadInEligible(source) ? source.startAt : null;
+    if (_preloaded[rank] == source.uri && _preloadedStart[rank] == startAt) return;
     final e = _ensure();
     // A clip held at another rank moves to this one (the core does the same).
-    _preloaded.removeWhere((_, uri) => uri == source.uri);
+    final moved = _preloaded.entries.where((x) => x.value == source.uri).map((x) => x.key).toList();
+    for (final r in moved) {
+      _preloaded.remove(r);
+      _preloadedStart.remove(r);
+    }
     _preloaded[rank] = source.uri;
-    await _bounded(e.preload(source.uri, rank: rank, origin: source.origin, cacheKey: source.cacheKey), 'preload');
+    _preloadedStart[rank] = startAt;
+    await _bounded(
+      e.preload(
+        source.uri,
+        rank: rank,
+        origin: source.origin,
+        cacheKey: source.cacheKey,
+        startAt: startAt,
+        measure: mayMeasure(source),
+      ),
+      'preload',
+    );
   }
 
   /// Empties [rank]'s preload; nothing to do when it holds nothing.
   Future<void> clearPreload(ClipPreloadRank rank) async {
     final e = _engine;
+    _preloadedStart.remove(rank);
     if (_preloaded.remove(rank) == null || e == null) return;
     await _bounded(e.clearPreloads(rank: rank), 'clearPreloads');
   }
@@ -612,7 +793,82 @@ class ClipPlayer {
   /// Memory pressure: drop every preload without building a core.
   Future<void> dropPreload() async {
     _preloaded.clear();
+    _preloadedStart.clear();
     await _bounded(_engine?.clearPreloads(), 'clearPreloads');
+  }
+
+  // --- V2-23: lead-in skip --------------------------------------------------
+
+  /// Every lead-in the TV's clip core measured, keyed by cache key.
+  Stream<ClipLeadIn> get leadIns => _leadIns.stream;
+
+  /// Whether "Skip trailer intros" cuts clips now (on, and not measure-only).
+  bool get _clipping => _skipIntros() && !_measureOnly();
+
+  /// Whether learned lead-ins are kept and used now (V2-23).
+  bool get cutsLeadIns => _clipping;
+
+  /// Whether the core measures clips now (the setting or measure-only on).
+  bool get measuring => _skipIntros() || _measureOnly();
+
+  /// Whether lead-ins apply to [source] at all: a Plex extra with a cache
+  /// key. AnimeThemes openings are never cut (their encoders cut them to the
+  /// song) and YouTube trailers never reach the clip core.
+  static bool _leadInEligible(ClipSource source) => source.origin == ClipOrigin.plexExtra && source.cacheKey != null;
+
+  /// Whether the core may measure [source] now.
+  bool mayMeasure(ClipSource source) => measuring && _leadInEligible(source);
+
+  /// Where [source] opens now: its learned start when cutting, else zero.
+  Duration clipStart(ClipSource source) {
+    final start = source.startAt;
+    if (start == null || !_clipping || !_leadInEligible(source)) return Duration.zero;
+    return start;
+  }
+
+  /// Tells the core the lead-in policy when it changed (the settings page,
+  /// V2-23); a fresh core is told as it is built. Held preloads follow in
+  /// the core; the clip playing keeps its start until it opens again.
+  void syncLeadInPolicy() {
+    final e = _engine;
+    if (e == null) return;
+    final policy = (enabled: _skipIntros(), measureOnly: _measureOnly());
+    if (policy == _leadInSent) return;
+    _leadInSent = policy;
+    appLogger.i('[ReelLeadIn] policy skip=${policy.enabled} measureOnly=${policy.measureOnly}');
+    unawaited(
+      _bounded(
+        e.setLeadInPolicy(enabled: policy.enabled, measureOnly: policy.measureOnly),
+        'setLeadInPolicy',
+      ).catchError((Object err) => appLogger.w('Reel: setting the lead-in policy failed', error: err)),
+    );
+  }
+
+  /// Where Replay and the loop restart: 0 for a clipped open (0 is its
+  /// cut), the start learned since an unclipped open, else 0.
+  Duration get _restartAt {
+    if (_openClipped || !_clipping) return Duration.zero;
+    return _learnedStart ?? Duration.zero;
+  }
+
+  @visibleForTesting
+  Duration get restartAt => _restartAt;
+
+  Future<void> _seekToStart(ClipEngine e) {
+    final at = _restartAt;
+    return at > Duration.zero ? e.seekExact(at) : e.seek(Duration.zero);
+  }
+
+  void _onLeadIn(ClipLeadIn leadIn) {
+    final current = _current;
+    if (current != null &&
+        !_openClipped &&
+        current.cacheKey == leadIn.cacheKey &&
+        leadIn.start > Duration.zero &&
+        _leadInEligible(current)) {
+      _learnedStart = leadIn.start;
+    }
+    if (!_leadIns.isClosed) _leadIns.add(leadIn);
   }
 
   Future<void> pause() async {
@@ -646,18 +902,20 @@ class ClipPlayer {
     _wantPlaying = true;
     _pausedExternally = false;
     _takeFocus();
-    await _bounded(e.seek(Duration.zero), 'seek');
+    await _bounded(_seekToStart(e), 'seek');
     await _bounded(e.play(), 'play');
     if (onScreen.value != null) progress.value = ClipProgress(Duration.zero, _length);
     phase.value = ClipPhase.playing;
   }
 
-  /// FF / RW: ±10 s within the clip.
+  /// FF / RW: ±10 s within the clip, never back into a skipped lead-in.
   Future<void> seekBy(Duration delta) async {
     final e = _engine;
     if (e == null) return;
     final to = e.position + delta;
-    await _bounded(e.seek(to < Duration.zero ? Duration.zero : to), 'seek');
+    final floor = _restartAt;
+    // A learned start on an unclipped open is landed on exactly, as Replay does.
+    await _bounded(to < floor ? _seekToStart(e) : e.seek(to < Duration.zero ? Duration.zero : to), 'seek');
   }
 
   /// Mute goes to silence at once; unmute rises from silence over
@@ -721,6 +979,10 @@ class ClipPlayer {
     _engine = null;
     _current = null;
     _preloaded.clear();
+    _preloadedStart.clear();
+    _leadInSent = null;
+    _openClipped = false;
+    _learnedStart = null;
     _key = null;
     _openKey = null;
     _ttff = null;
@@ -771,6 +1033,8 @@ class ClipPlayer {
     _engineBuffering = false;
     _engine = null;
     _preloaded.clear();
+    _preloadedStart.clear();
+    _leadInSent = null;
     _openKey = null;
     _ttff = null;
     _level = 0;
@@ -797,7 +1061,7 @@ class ClipPlayer {
       appLogger.i(
         '[ReelTTFF] key=$keyMs open=${sw.elapsedMilliseconds}ms preloaded=$_openPreloaded'
         ' rank=${_openRank?.name ?? 'none'}'
-        '${key == null ? '' : ' trigger=${key.trigger}'} origin=${_current?.origin.name}',
+        '${key == null ? '' : ' trigger=${key.trigger}'} origin=${_current?.origin.name} lead=$_openLead',
       );
       _ttff = null;
       _openKey = null;
@@ -837,7 +1101,7 @@ class ClipPlayer {
     _played++;
     final plays = _plays();
     if (plays == null || _played < plays) {
-      unawaited(e.seek(Duration.zero).then((_) => e.play()));
+      unawaited(_seekToStart(e).then((_) => e.play()));
     } else {
       // Hold on the last frame; Replay is focused by the view, and Lean
       // back moves on from here (ReelController).

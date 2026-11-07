@@ -8869,6 +8869,18 @@ class Translations$reel$settings$en {
 
 	/// en: 'For a listening test. Evens out loud and quiet clips, and may pump on songs'
 	String get clipNormalizationDescription => 'For a listening test. Evens out loud and quiet clips, and may pump on songs';
+
+	/// en: 'Skip trailer intros'
+	String get skipIntros => 'Skip trailer intros';
+
+	/// en: 'Start trailers after the rating card and the dark frames before the picture'
+	String get skipIntrosDescription => 'Start trailers after the rating card and the dark frames before the picture';
+
+	/// en: 'Measure trailer intros only'
+	String get leadInMeasureOnly => 'Measure trailer intros only';
+
+	/// en: 'Logs where each trailer's picture starts without skipping anything'
+	String get leadInMeasureOnlyDescription => 'Logs where each trailer\'s picture starts without skipping anything';
 }
 
 // Path: reel.decks
@@ -11920,6 +11932,10 @@ extension on Translations {
 			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
 			'reel.settings.clipNormalization' => 'Even out clip loudness',
 			'reel.settings.clipNormalizationDescription' => 'For a listening test. Evens out loud and quiet clips, and may pump on songs',
+			'reel.settings.skipIntros' => 'Skip trailer intros',
+			'reel.settings.skipIntrosDescription' => 'Start trailers after the rating card and the dark frames before the picture',
+			'reel.settings.leadInMeasureOnly' => 'Measure trailer intros only',
+			'reel.settings.leadInMeasureOnlyDescription' => 'Logs where each trailer\'s picture starts without skipping anything',
 			'reel.decks.title' => 'Decks',
 			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
 			'reel.decks.startOn' => 'Start on',
@@ -12270,12 +12286,12 @@ extension on Translations {
 			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
 			'liveTv.recordSettings.anyTime' => 'Record at any time',
 			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.recordSettings.keepUpTo' => 'Episodes to keep',
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
 			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
 			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
@@ -12784,12 +12800,12 @@ extension on Translations {
 			'performanceOverlay.decoderAndroidHw' => 'Android HW',
 			'performanceOverlay.decoderNvidiaHw' => 'NVIDIA HW',
 			'performanceOverlay.decoderQualcommHw' => 'Qualcomm HW',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.decoderMediatekHw' => 'MediaTek HW',
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
 			'performanceOverlay.decoderSoftware' => 'Software',
 			'performanceOverlay.decoderHardware' => 'Hardware',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'performanceOverlay.signal' => 'Signal',

@@ -215,6 +215,17 @@ class ResolvedClip {
   /// The picked file's height, when the source says it.
   final int? height;
 
+  /// This clip playing [source] instead (the same clip, a start learned).
+  ResolvedClip withSource(ClipSource source) => ResolvedClip(
+    source: source,
+    assetId: assetId,
+    kind: kind,
+    number: number,
+    serverId: serverId,
+    height: height,
+    candidates: candidates,
+  );
+
   /// Every file of this clip, the picked one included; empty for a Plex
   /// trailer, which has the one file. [ClipResolver.repick] chooses again
   /// from these when the playback profile changes.
@@ -778,6 +789,7 @@ class ClipResolver {
           j['pk'] as String,
           j['a'] as String,
           _kindOf(j, (ClipKind.trailer, null)).$1,
+          startAt: leadInOf(j),
         ),
         'yt' when ReelYouTube.videoId.hasMatch(j['yk'] as String) && j['a'] == 'yt:${j['yk']}' => _youTube(
           j['yk'] as String,
@@ -835,7 +847,56 @@ class ClipResolver {
     );
   }
 
-  ResolvedClip? _plex(String serverId, String partKey, String asset, ClipKind kind) {
+  /// The `lv` a `src:` row's lead-in must carry to be used (V2-23): the
+  /// clip core's `LeadInPolicy.VERSION`. A row from another version reads as
+  /// "not measured yet" and the clip is measured again.
+  static const int leadInVersion = 1;
+
+  /// The longest lead-in a row may hold (the core never cuts more).
+  static const int leadInMaxMs = 15000;
+
+  /// The shortest cut the core makes; a smaller non-zero `li` is not one.
+  static const int leadInMinMs = 500;
+
+  /// A Plex row's lead-in (V2-23): `li` ms where the picture starts (0: none)
+  /// measured by `lv` [leadInVersion]. Anything else, an older row with no
+  /// `li` included, is null: not measured yet.
+  static Duration? leadInOf(Map<String, dynamic> j) {
+    final li = j['li'];
+    if (j['lv'] != leadInVersion || li is! int) return null;
+    if (li == 0) return Duration.zero;
+    if (li < leadInMinMs || li > leadInMaxMs) return null;
+    return Duration(milliseconds: li);
+  }
+
+  /// Keeps [start] as the lead-in of [t]'s cached Plex clip (V2-23), only on
+  /// the row of the clip measured: its asset and its cache key must match
+  /// [clip]'s, so a stale cut never lands on a different file. The row keeps
+  /// its `updatedAt` ([ReelStore.patchCached]). [reason] (a short code such
+  /// as `hdr` or `clip`) is kept for a 0. Returns whether it wrote.
+  Future<bool> rememberLeadIn(ReelTitle t, ResolvedClip clip, Duration start, {String? reason}) {
+    final key = clip.source.cacheKey;
+    if (clip.source.origin != ClipOrigin.plexExtra || key == null) return Future.value(false);
+    final ms = start.inMilliseconds;
+    if (ms != 0 && (ms < leadInMinMs || ms > leadInMaxMs)) return Future.value(false);
+    return store.patchCached('src:${t.groupKey}', (raw) {
+      final j = _entry(raw);
+      if (j == null || j['k'] != 'plex' || j['a'] != clip.assetId) return null;
+      final sv = j['sv'];
+      final pk = j['pk'];
+      if (sv is! String || pk is! String || ReelClipCache.keyFor(sv, pk) != key) return null;
+      final next = Map<String, dynamic>.of(j)
+        ..['li'] = ms
+        ..['lv'] = leadInVersion
+        ..remove('lr');
+      if (ms == 0 && reason != null && reason != 'ok') {
+        next['lr'] = reason.length > 12 ? reason.substring(0, 12) : reason;
+      }
+      return jsonEncode(next);
+    });
+  }
+
+  ResolvedClip? _plex(String serverId, String partKey, String asset, ClipKind kind, {Duration? startAt}) {
     final url = servers.clipUrl(serverId, partKey);
     if (url == null) return null;
     return ResolvedClip(
@@ -844,6 +905,7 @@ class ClipResolver {
         origin: ClipOrigin.plexExtra,
         preloadable: !_slowServers.contains(serverId),
         cacheKey: ReelClipCache.keyFor(serverId, partKey),
+        startAt: startAt,
       ),
       assetId: asset,
       kind: kind,

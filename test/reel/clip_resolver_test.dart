@@ -1272,4 +1272,87 @@ void main() {
       expect(atCalls, isEmpty);
     });
   });
+  group('a trailer\'s lead-in rides on its src: row (V2-23)', () {
+    Future<Map<String, dynamic>> row() async =>
+        jsonDecode((await store.cached('src:imdb:tt1'))!) as Map<String, dynamic>;
+
+    Future<void> writeRow(Map<String, dynamic> extra) async {
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      await resolver.resolve(film());
+      final j = await row()
+        ..remove('li')
+        ..remove('lv')
+        ..remove('lr');
+      await store.cache('src:imdb:tt1', jsonEncode({...j, ...extra}));
+    }
+
+    test('a row with li and lv gives the clip its start; 0 is measured with no lead-in', () async {
+      await writeRow({'li': 6006, 'lv': ClipResolver.leadInVersion});
+      expect((await make().resolve(film()))?.source.startAt, const Duration(milliseconds: 6006));
+      await writeRow({'li': 0, 'lv': ClipResolver.leadInVersion});
+      expect((await make().resolve(film()))?.source.startAt, Duration.zero);
+    });
+
+    test('an out-of-range li, another lv or the wrong type reads as not measured', () async {
+      for (final extra in [
+        {'li': 16000, 'lv': ClipResolver.leadInVersion},
+        {'li': 200, 'lv': ClipResolver.leadInVersion},
+        {'li': 6006, 'lv': ClipResolver.leadInVersion + 1},
+        {'li': '6006', 'lv': ClipResolver.leadInVersion},
+        {'li': 6006},
+      ]) {
+        await writeRow(extra);
+        expect((await make().resolve(film()))?.source.startAt, isNull, reason: '$extra');
+      }
+    });
+
+    test('an older row with no li still resolves from the cache, in the same format', () async {
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      await resolver.resolve(film());
+      expect((await row()).containsKey('li'), isFalse);
+      expect((await row())['v'], ClipResolver.sourceFormat);
+      servers.calls.clear();
+      final again = await make().resolve(film());
+      expect(again?.source.startAt, isNull);
+      expect(servers.calls, isEmpty, reason: 'no re-resolve for an older row');
+    });
+
+    test('rememberLeadIn writes only on the measured clip\'s row and keeps its age', () async {
+      var now = DateTime(2026, 1, 10);
+      final settings = LocalCustomisationStore(db);
+      store = ReelStore(database: () async => db, settings: () async => settings, clock: () => now);
+      resolver = make();
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      final clip = (await resolver.resolve(film()))!;
+      final writtenAt = await store.cachedAt('src:imdb:tt1');
+
+      now = now.add(const Duration(days: 29));
+      expect(await resolver.rememberLeadIn(film(), clip, const Duration(milliseconds: 6006)), isTrue);
+      expect((await row())['li'], 6006);
+      expect((await row())['lv'], ClipResolver.leadInVersion);
+      expect(await store.cachedAt('src:imdb:tt1'), writtenAt, reason: 'the 30-day identity TTL is never extended');
+      now = now.add(const Duration(days: 2));
+      expect(await store.cached('src:imdb:tt1', ttl: ReelStore.sourceTtl), isNull, reason: 'it still expires on time');
+
+      // Another file under the same title: never written.
+      now = DateTime(2026, 1, 10);
+      await store.cache('src:imdb:tt1', jsonEncode({...await row(), 'a': 'plex:79'}));
+      expect(await resolver.rememberLeadIn(film(), clip, const Duration(milliseconds: 4000)), isFalse);
+      expect((await row())['li'], 6006);
+    });
+
+    test('a 0 keeps its reason; an AnimeThemes clip is never written', () async {
+      servers.extrasByKey['a:1'] = [_x('78', 'Official Trailer')];
+      final clip = (await resolver.resolve(film()))!;
+      await resolver.rememberLeadIn(film(), clip, Duration.zero, reason: 'hdr');
+      expect((await row())['li'], 0);
+      expect((await row())['lr'], 'hdr');
+      final theme = ResolvedClip(
+        source: const ClipSource(uri: 'https://v.example/op.webm', origin: ClipOrigin.animeTheme),
+        assetId: 'at:9',
+        kind: ClipKind.opening,
+      );
+      expect(await resolver.rememberLeadIn(film(), theme, const Duration(milliseconds: 6006)), isFalse);
+    });
+  });
 }

@@ -22,7 +22,14 @@ class FakeClipEngine implements ClipEngine {
   final durationCtl = StreamController<Duration>.broadcast(sync: true);
   final playingCtl = StreamController<bool>.broadcast(sync: true);
   final bufferingCtl = StreamController<bool>.broadcast(sync: true);
+  final leadInCtl = StreamController<ClipLeadIn>.broadcast(sync: true);
   final volumes = <double>[];
+
+  /// V2-23: the start and the measure flag each open and preload was sent,
+  /// by `open <uri>` / `preload <uri>`, and every lead-in policy sent.
+  final startAts = <String, Duration?>{};
+  final measures = <String, bool>{};
+  final leadInPolicies = <({bool enabled, bool measureOnly})>[];
 
   /// What [requestAudioFocus] answers.
   bool grantFocus = true;
@@ -56,9 +63,11 @@ class FakeClipEngine implements ClipEngine {
   }
 
   @override
-  Future<void> open(String uri, {String? cacheKey}) async {
+  Future<void> open(String uri, {String? cacheKey, Duration? startAt, bool measure = false, ClipOrigin? origin}) async {
     calls.add('open $uri');
     cacheKeys['open $uri'] = cacheKey;
+    startAts['open $uri'] = startAt;
+    measures['open $uri'] = measure;
     await openGate?.future;
   }
 
@@ -69,8 +78,12 @@ class FakeClipEngine implements ClipEngine {
     ClipPreloadRank rank = ClipPreloadRank.next,
     ClipOrigin? origin,
     String? cacheKey,
+    Duration? startAt,
+    bool measure = false,
   }) async {
     cacheKeys['preload $uri'] = cacheKey;
+    startAts['preload $uri'] = startAt;
+    measures['preload $uri'] = measure;
     calls.add(rank == ClipPreloadRank.next ? 'preload $uri' : 'preload $uri as ${rank.name}');
   }
 
@@ -89,6 +102,16 @@ class FakeClipEngine implements ClipEngine {
 
   @override
   Future<void> seek(Duration position) async => calls.add('seek ${position.inSeconds}');
+
+  @override
+  Future<void> seekExact(Duration position) async => calls.add('seekExact ${position.inMilliseconds}');
+
+  @override
+  Future<void> setLeadInPolicy({required bool enabled, required bool measureOnly}) async =>
+      leadInPolicies.add((enabled: enabled, measureOnly: measureOnly));
+
+  @override
+  Stream<ClipLeadIn> get leadIns => leadInCtl.stream;
 
   @override
   Future<void> setVolume(double volume) async => volumes.add(volume);
@@ -149,7 +172,7 @@ class FakeClipEngine implements ClipEngine {
 /// A core that throws on its open (it couldn't start, or refused the clip).
 class _RefusingEngine extends FakeClipEngine {
   @override
-  Future<void> open(String uri, {String? cacheKey}) async {
+  Future<void> open(String uri, {String? cacheKey, Duration? startAt, bool measure = false, ClipOrigin? origin}) async {
     calls.add('open $uri');
     throw PlatformException(code: 'open', message: 'the core could not open the clip');
   }
@@ -191,6 +214,7 @@ void main() {
     await engine.durationCtl.close();
     await engine.playingCtl.close();
     await engine.bufferingCtl.close();
+    await engine.leadInCtl.close();
   });
 
   setUp(() {
@@ -362,12 +386,14 @@ void main() {
       expect(
         lines.first,
         matches(
-          RegExp(r'^\[ReelTTFF\] key=\d+ms open=\d+ms preloaded=true rank=previous trigger=step origin=animeTheme$'),
+          RegExp(
+            r'^\[ReelTTFF\] key=\d+ms open=\d+ms preloaded=true rank=previous trigger=step origin=animeTheme lead=0$',
+          ),
         ),
       );
       expect(
         lines.last,
-        matches(RegExp(r'^\[ReelTTFF\] key=none open=\d+ms preloaded=false rank=none origin=plexExtra$')),
+        matches(RegExp(r'^\[ReelTTFF\] key=none open=\d+ms preloaded=false rank=none origin=plexExtra lead=0$')),
       );
     });
 
@@ -1222,6 +1248,126 @@ void main() {
         expect(clips.level, 0);
         expect(engine.volumes.last, 0);
       });
+    });
+  });
+  group('V2-23: lead-in skip', () {
+    const key = 'plex:server-a:/library/parts/41/1700000000/file.mp4';
+    const measured = ClipSource(
+      uri: 'https://server-a.example/library/parts/41/1700000000/file.mp4',
+      origin: ClipOrigin.plexExtra,
+      cacheKey: key,
+      length: Duration(seconds: 120),
+      startAt: Duration(milliseconds: 6006),
+    );
+    final unmeasured = measured.withStartAt(null);
+    const opening = ClipSource(
+      uri: 'https://v.example/harbor-lights-op1.webm',
+      origin: ClipOrigin.animeTheme,
+      startAt: Duration(milliseconds: 6006),
+    );
+
+    test('a measured Plex trailer opens and preloads at its start, and may be measured', () async {
+      await clips.preload(unmeasured);
+      expect(engine.startAts['preload ${measured.uri}'], isNull, reason: 'unknown, never "from 0"');
+      expect(engine.measures['preload ${measured.uri}'], isTrue);
+      await clips.play(measured);
+      expect(engine.startAts['open ${measured.uri}'], const Duration(milliseconds: 6006));
+      expect(engine.measures['open ${measured.uri}'], isTrue);
+    });
+
+    test('an AnimeThemes opening is never cut nor measured', () async {
+      await clips.preload(opening);
+      await clips.play(opening);
+      expect(engine.startAts['preload ${opening.uri}'], isNull);
+      expect(engine.measures['preload ${opening.uri}'], isFalse);
+      expect(engine.startAts['open ${opening.uri}'], isNull);
+      expect(engine.measures['open ${opening.uri}'], isFalse);
+    });
+
+    test('a preload is sent again when only its start changed', () async {
+      await clips.preload(unmeasured);
+      await clips.preload(unmeasured);
+      expect(engine.calls.where((c) => c == 'preload ${measured.uri}'), hasLength(1));
+      await clips.preload(measured);
+      expect(engine.calls.where((c) => c == 'preload ${measured.uri}'), hasLength(2));
+      expect(engine.startAts['preload ${measured.uri}'], const Duration(milliseconds: 6006));
+    });
+
+    test('Replay and the loop go to 0 after a clipped open: 0 is the cut', () async {
+      await clips.play(measured);
+      engine.firstFrameCtl.add(null);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      await clips.replay();
+      expect(engine.calls.where((c) => c.startsWith('seek')), ['seek 0', 'seek 0']);
+      expect(clips.restartAt, Duration.zero);
+    });
+
+    test('a start learned after an unclipped open: Replay and the loop seek exactly to it', () async {
+      await clips.play(unmeasured);
+      engine.firstFrameCtl.add(null);
+      final heard = <ClipLeadIn>[];
+      clips.leadIns.listen(heard.add);
+      engine.leadInCtl.add(const ClipLeadIn(cacheKey: key, start: Duration(milliseconds: 6006)));
+      await Future<void>.delayed(Duration.zero);
+      expect(heard.single.start, const Duration(milliseconds: 6006));
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      await clips.replay();
+      expect(engine.calls.where((c) => c.startsWith('seek')), ['seekExact 6006', 'seekExact 6006']);
+      // RW never goes back into the lead-in.
+      engine.position = const Duration(seconds: 8);
+      await clips.seekBy(const Duration(seconds: -10));
+      expect(engine.calls.last, 'seekExact 6006');
+    });
+
+    test('a clipped open counts its length from the cut', () async {
+      await clips.play(measured);
+      engine.firstFrameCtl.add(null);
+      expect(clips.progress.value.length, const Duration(milliseconds: 120000 - 6006));
+    });
+
+    test('with Skip trailer intros off nothing is cut, and the core is told', () async {
+      clips = ClipPlayer(engine: () => engine, skipIntros: () => false);
+      await clips.play(measured);
+      engine.firstFrameCtl.add(null);
+      expect(engine.leadInPolicies.single, (enabled: false, measureOnly: false));
+      expect(engine.measures['open ${measured.uri}'], isFalse);
+      expect(clips.progress.value.length, const Duration(seconds: 120));
+      expect(clips.cutsLeadIns, isFalse);
+    });
+
+    test('measure-only measures but never cuts', () async {
+      clips = ClipPlayer(engine: () => engine, leadInMeasureOnly: () => true);
+      await clips.play(measured);
+      engine.firstFrameCtl.add(null);
+      expect(engine.leadInPolicies.single, (enabled: true, measureOnly: true));
+      expect(engine.measures['open ${measured.uri}'], isTrue);
+      expect(clips.progress.value.length, const Duration(seconds: 120));
+      expect(clips.cutsLeadIns, isFalse);
+    });
+
+    test('a policy change reaches the core once', () async {
+      var on = true;
+      clips = ClipPlayer(engine: () => engine, skipIntros: () => on);
+      await clips.play(measured);
+      clips.syncLeadInPolicy();
+      on = false;
+      clips.syncLeadInPolicy();
+      clips.syncLeadInPolicy();
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.leadInPolicies, [(enabled: true, measureOnly: false), (enabled: false, measureOnly: false)]);
+    });
+
+    test('[ReelTTFF] says the lead-in it opened with', () async {
+      MemoryLogOutput.clearLogs();
+      await clips.play(measured);
+      engine.firstFrameCtl.add(null);
+      await clips.play(unmeasured);
+      engine.firstFrameCtl.add(null);
+      final lines = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).toList();
+      expect(lines[1], endsWith('lead=6006'));
+      expect(lines[0], endsWith('lead=?'));
     });
   });
 }

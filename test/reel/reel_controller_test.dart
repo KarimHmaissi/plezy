@@ -403,6 +403,8 @@ void main() {
     bool Function()? metered,
     Listenable? linkChanged,
     bool Function()? normalize,
+    bool Function()? skipIntros,
+    bool Function()? leadInMeasureOnly,
     ReelClipCache? clipCache,
   }) => ReelController(
     decks:
@@ -421,6 +423,8 @@ void main() {
     clips: ClipPlayer(
       plays: plays,
       normalize: normalize,
+      skipIntros: skipIntros,
+      leadInMeasureOnly: leadInMeasureOnly,
       engine: () {
         engines++;
         return engine = FakeClipEngine();
@@ -3527,6 +3531,128 @@ void main() {
         expect(c.clips.preloaded, {ClipPreloadRank.deckNext: opening});
         c.dispose();
       });
+    });
+  });
+  group('V2-23: a trailer\'s lead-in', () {
+    String clip(String id) => 'https://s1.example/services/iva/assets/$id/video.mp4';
+    String key(String id) => 'plex:s1:/services/iva/assets/$id/video.mp4';
+    const opening = 'https://v.animethemes.moe/Harbor-Lights-OP1.webm';
+
+    Future<void> frame() async {
+      engine.firstFrameCtl.add(null);
+      await pumpEventQueue();
+    }
+
+    Future<Map<String, dynamic>> row(String id) async =>
+        jsonDecode((await store.cached('src:g$id'))!) as Map<String, dynamic>;
+
+    test('reaches every card with that clip, opens there, and is kept on the src: row', () async {
+      final c = make();
+      await c.start();
+      await frame();
+      expect(engine.measures['preload ${clip('2')}'], isTrue, reason: 'a Plex trailer may be measured');
+      engine.leadInCtl.add(ClipLeadIn(cacheKey: key('2'), start: const Duration(milliseconds: 6006)));
+      await pumpEventQueue();
+      expect((await row('2'))['li'], 6006);
+      expect((await row('2'))['lv'], ClipResolver.leadInVersion);
+      await c.step(1);
+      expect(engine.startAts['open ${clip('2')}'], const Duration(milliseconds: 6006));
+      c.dispose();
+    });
+
+    test('a learned start survives the core going away: the next open is clipped (Watch → Back)', () async {
+      final c = make();
+      await c.start();
+      await frame();
+      engine.leadInCtl.add(ClipLeadIn(cacheKey: key('1'), start: const Duration(milliseconds: 4004)));
+      await pumpEventQueue();
+      await c.suspend();
+      final before = engines;
+      await c.start();
+      await pumpEventQueue();
+      expect(engines, before + 1, reason: 'a fresh core');
+      expect(engine.startAts['open ${clip('1')}'], const Duration(milliseconds: 4004));
+      c.dispose();
+    });
+
+    test('is not kept while Skip trailer intros is off or only measuring', () async {
+      for (final (skip, measureOnly) in [(false, false), (true, true)]) {
+        final c = make(skipIntros: () => skip, leadInMeasureOnly: () => measureOnly);
+        await c.start();
+        await frame();
+        engine.leadInCtl.add(ClipLeadIn(cacheKey: key('2'), start: const Duration(milliseconds: 6006)));
+        await pumpEventQueue();
+        expect((await row('2')).containsKey('li'), isFalse, reason: 'skip=$skip measureOnly=$measureOnly');
+        await c.step(1);
+        expect(engine.startAts['open ${clip('2')}'], isNull);
+        c.dispose();
+      }
+    });
+
+    test('an AnimeThemes opening is never sent to be measured', () async {
+      ReelCardData animeCard(String id) {
+        final c = _card(id);
+        return ReelCardData(
+          title: ReelTitle(
+            titleId: 't$id',
+            groupKey: 'g$id',
+            title: 'Harbor Lights',
+            isShow: true,
+            anime: true,
+            tvdbId: 1,
+            copies: [ReelCopy(serverId: 's1', ratingKey: id)],
+          ),
+          facts: c.facts,
+          best: c.best,
+        );
+      }
+
+      final c = make(
+        decks: [
+          _Deck('a', [_card('1'), animeCard('2'), _card('3')]),
+        ],
+        aniList: (t) async => t.tvdbId == 1 ? 101 : null,
+        animeThemes: (ids) async => {
+          101: {
+            'animethemes': [
+              {
+                'type': 'OP',
+                'sequence': 1,
+                'animethemeentries': [
+                  {
+                    'episodes': '1-12',
+                    'videos': [
+                      {'id': 9, 'link': opening, 'nc': true, 'resolution': 1080, 'overlap': 'NONE'},
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      );
+      await c.start();
+      await frame();
+      expect(engine.measures['preload $opening'], isFalse);
+      expect(engine.measures['preload ${clip('3')}'], isTrue);
+      await c.step(1);
+      expect(engine.measures['open $opening'], isFalse);
+      expect(engine.startAts['open $opening'], isNull);
+      c.dispose();
+    });
+
+    test('a settings change sends the policy to the core', () async {
+      var skip = true;
+      final changed = ValueNotifier(0);
+      final c = make(skipIntros: () => skip, settingsChanged: changed);
+      await c.start();
+      await frame();
+      expect(engine.leadInPolicies, [(enabled: true, measureOnly: false)]);
+      skip = false;
+      changed.value++;
+      await pumpEventQueue();
+      expect(engine.leadInPolicies.last, (enabled: false, measureOnly: false));
+      c.dispose();
     });
   });
 }
