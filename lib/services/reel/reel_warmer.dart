@@ -5,14 +5,11 @@ import 'package:flutter/foundation.dart';
 import '../../media/media_item.dart';
 import '../../utils/app_logger.dart';
 import 'clip_resolver.dart';
-import 'reel_controller.dart' show ReelArtPrecache, ReelTimeouts;
+import 'reel_controller.dart' show ReelArtPrecache, ReelCachedItem, ReelTimeouts;
 import 'reel_cursor.dart';
 import 'reel_decks.dart';
 import 'reel_library.dart';
 import 'reel_store.dart';
-
-/// A card's item from the caches alone (no server read), or null.
-typedef ReelCachedItem = Future<MediaItem?> Function(String serverId, String ratingKey);
 
 /// The warm start before the Reel opens (plan V2-14, D3 and D15), on the TV.
 ///

@@ -86,7 +86,7 @@ class ExoPlayerInitializationCleanupTest {
     try {
       assertTrue(core.initialize(clipMode = true))
       assertEquals(
-        "cores created=1 released=0 live=1 codecs=0 codecsOnReleasedCores=0",
+        "cores created=1 released=0 live=1 codecs=0 codecsOnReleasedCores=0 detectorCodecs=0",
         PlayerCoreCounts.summary()
       )
 
@@ -101,7 +101,7 @@ class ExoPlayerInitializationCleanupTest {
 
       assertEquals(2, PlayerCoreCounts.codecsOnReleasedCores)
       assertEquals(
-        "cores created=1 released=1 live=0 codecs=2 codecsOnReleasedCores=2",
+        "cores created=1 released=1 live=0 codecs=2 codecsOnReleasedCores=2 detectorCodecs=0",
         PlayerCoreCounts.summary()
       )
     } finally {

@@ -355,6 +355,39 @@ void main() {
       expect(fired, 1, reason: 'no second build once today is cached');
     });
 
+    test("offline For You builds from today's kept order and never starts the build (V2-15)", () async {
+      var calls = 0;
+      var offline = true;
+      final deck = ForYouDeck(
+        pool: pool(
+          model: (_, _, _) async {
+            calls++;
+            return {
+              'cards': [
+                {'id': 'c2', 'cluster': 'a'},
+              ],
+            };
+          },
+        ),
+        library: _Library(),
+        candidates: () async => [_candidate('p'), _candidate('q')],
+        facts: () async => '',
+        offline: () => offline,
+      );
+      expect((await deck.load()).map((c) => c.id), ['p', 'q'], reason: 'code order from the local gather');
+      await deck.building;
+      // Today's order is kept: the next offline load reads it, still no build.
+      expect((await deck.load()).map((c) => c.id), ['p', 'q']);
+      await deck.buildIfDue();
+      await deck.building;
+      expect(calls, 0, reason: 'no model call offline');
+
+      offline = false;
+      await deck.load();
+      await deck.building;
+      expect(calls, 1, reason: 'back online the build starts when it is due');
+    });
+
     test("Fits tonight keeps today's For You order to short films and short episodes, each chip its length", () async {
       final library = _Library(
         lengths: {

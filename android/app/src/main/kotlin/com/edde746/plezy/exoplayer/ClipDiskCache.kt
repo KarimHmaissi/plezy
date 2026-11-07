@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.annotation.VisibleForTesting
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
@@ -99,12 +100,36 @@ internal object ClipCachePolicy {
   /**
    * Whether a clip is on disk: [cachedFromStart] contiguous bytes cached from its first byte,
    * against its [contentLength] when known (-1 / [C.LENGTH_UNSET] otherwise).
+   *
+   * V2-23 (R8): a clip whose lead-in is skipped starts [leadBytes] into the file, so its bar is
+   * the lead-in plus [ON_DISK_MIN_BYTES], still contiguous from 0 (the detector reads from byte 0
+   * through the cut). Total bytes never count: scattered bytes could leave the cut range missing,
+   * and a clipped deck head's pre-cache would then read Plex (D15).
    */
-  fun isOnDisk(cachedFromStart: Long, contentLength: Long): Boolean {
+  fun isOnDisk(cachedFromStart: Long, contentLength: Long, leadBytes: Long = 0L): Boolean {
     if (cachedFromStart <= 0) return false
     if (contentLength > 0 && cachedFromStart >= contentLength) return true
-    return cachedFromStart >= ON_DISK_MIN_BYTES
+    return cachedFromStart >= leadBytes.coerceAtLeast(0L) + ON_DISK_MIN_BYTES
   }
+
+  /**
+   * Whether a clip's bytes on disk are dropped after a playback error with [errorCode] (a
+   * `PlaybackException` code). An IO or parsing error may have come from the cached bytes (a file
+   * replaced on the server, a short write), so they go. A connection that failed or timed out
+   * says nothing about them: offline (plan V2-15) a clip on disk whose remainder was never cached
+   * fails that way when it reaches the gap, and its bytes must stay for the next offline visit.
+   * DefaultHttpDataSource and CronetDataSource both report a failed open as
+   * [PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED] and a timed-out one as
+   * [PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT] (media3 1.11.0, javap).
+   */
+  fun evictsAfter(errorCode: Int): Boolean {
+    if (!isIoOrParsing(errorCode)) return false
+    return errorCode != PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED &&
+      errorCode != PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+  }
+
+  /** Whether [errorCode] is an IO (2xxx) or parsing (3xxx) `PlaybackException` code. */
+  fun isIoOrParsing(errorCode: Int): Boolean = errorCode in PlaybackException.ERROR_CODE_IO_UNSPECIFIED until PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
 
   /** A short tag for a key in log lines: the logs never carry a server id. */
   fun logId(key: String?): String = if (key == null) "none" else "%08x".format(key.hashCode())
@@ -188,6 +213,25 @@ internal object ClipDiskCache {
     return before
   }
 
+  /**
+   * V2-23: each measured clip's lead-in length in bytes (this process only), for the on-disk bar
+   * ([ClipCachePolicy.isOnDisk]).
+   */
+  private val leadBytes = object : LinkedHashMap<String, Long>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > LEAD_BYTES_KEPT
+  }
+
+  private const val LEAD_BYTES_KEPT = 256
+
+  /** V2-23: [key]'s lead-in ends [bytes] into its file (null: no lead-in known). */
+  @Synchronized
+  fun rememberLeadBytes(key: String, bytes: Long?) {
+    if (bytes == null || bytes <= 0L) leadBytes.remove(key) else leadBytes[key] = bytes
+  }
+
+  @Synchronized
+  fun leadBytes(key: String): Long = leadBytes[key] ?: 0L
+
   /** Which of [keys] are on disk ([ClipCachePolicy.isOnDisk]); none before a core opened the cache. */
   @Synchronized
   fun onDisk(keys: List<String>): List<String> {
@@ -196,7 +240,8 @@ internal object ClipDiskCache {
       ClipCachePolicy.isCacheable(key) &&
         ClipCachePolicy.isOnDisk(
           open.getCachedLength(key, 0, C.LENGTH_UNSET.toLong()),
-          ContentMetadata.getContentLength(open.getContentMetadata(key))
+          ContentMetadata.getContentLength(open.getContentMetadata(key)),
+          leadBytes[key] ?: 0L
         )
     }
   }
@@ -217,6 +262,7 @@ internal object ClipDiskCache {
     databaseProvider = null
     capBytes = 0L
     failed = false
+    leadBytes.clear()
   }
 
   private fun folderBytes(dir: File): Long = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -341,5 +387,52 @@ internal class RequestUriDataSource(private val upstream: DataSource) : DataSour
 
   class Factory(private val upstream: DataSource.Factory) : DataSource.Factory {
     override fun createDataSource(): DataSource = RequestUriDataSource(upstream.createDataSource())
+  }
+}
+
+/**
+ * V2-23: every request [upstream] opens carries [key] as its `DataSpec.key`. The detector's
+ * extractor (media3-inspector 1.11.0 `MediaExtractorCompatInternal.buildDataSpec`) sets only the
+ * URI, the position and flags, never a key, so without this every detector read would miss the
+ * clip cache ([ClipCacheRoutingDataSource] caches keyed requests only) and go to Plex. Each read
+ * also checks [cancelled] (so a cancel lands at the next read, R11) and counts into [bytesRead],
+ * and [position] is how far into the file the open request has read.
+ */
+@OptIn(UnstableApi::class)
+internal class KeyedDataSourceFactory(
+  private val upstream: DataSource.Factory,
+  private val key: String,
+  private val cancelled: () -> Boolean = { false },
+  private val bytesRead: java.util.concurrent.atomic.AtomicLong? = null
+) : DataSource.Factory {
+  /** The read position of the request open most recently, in bytes from the file's start. */
+  val position = java.util.concurrent.atomic.AtomicLong()
+
+  override fun createDataSource(): DataSource = KeyedDataSource(upstream.createDataSource())
+
+  private inner class KeyedDataSource(private val source: DataSource) : DataSource {
+    override fun addTransferListener(transferListener: TransferListener) = source.addTransferListener(transferListener)
+
+    override fun open(dataSpec: DataSpec): Long {
+      if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+      position.set(dataSpec.position)
+      return source.open(dataSpec.buildUpon().setKey(key).build())
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+      if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+      val n = source.read(buffer, offset, length)
+      if (n > 0) {
+        position.addAndGet(n.toLong())
+        bytesRead?.addAndGet(n.toLong())
+      }
+      return n
+    }
+
+    override fun getUri(): Uri? = source.uri
+
+    override fun getResponseHeaders(): Map<String, List<String>> = source.responseHeaders
+
+    override fun close() = source.close()
   }
 }

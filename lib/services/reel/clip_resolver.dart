@@ -215,6 +215,17 @@ class ResolvedClip {
   /// The picked file's height, when the source says it.
   final int? height;
 
+  /// This clip playing [source] instead (the same clip, a start learned).
+  ResolvedClip withSource(ClipSource source) => ResolvedClip(
+    source: source,
+    assetId: assetId,
+    kind: kind,
+    number: number,
+    serverId: serverId,
+    height: height,
+    candidates: candidates,
+  );
+
   /// Every file of this clip, the picked one included; empty for a Plex
   /// trailer, which has the one file. [ClipResolver.repick] chooses again
   /// from these when the playback profile changes.
@@ -478,6 +489,54 @@ class ClipResolver {
     if (exclude.isEmpty) await store.cache(key, jsonEncode(_openingRow(clip, candidates)));
     return clip;
   }
+
+  /// Offline (plan V2-15): [t]'s clip from this device alone, or null for a
+  /// still. Reads the cached `src:` row and nothing else: never a server,
+  /// AnimeThemes or TMDB, never a wait for a server, and it writes nothing
+  /// (no miss, no new row). Only a Plex clip whose bytes [onDisk] says are
+  /// already on disk plays (the TV clip core's disk cache, V2-10, D1); an
+  /// opening (AnimeThemes stays in memory), a YouTube trailer or a cached
+  /// miss has none. While its server isn't connected the clip opens at
+  /// [offlineUri]: the core reads it from disk by its cache key, and no
+  /// address or token is needed for that. The row's lead-in (V2-23) comes
+  /// with it, as it does online: the core keeps learned starts by address,
+  /// so the offline address would otherwise open on the rating card.
+  ///
+  /// [exclude] as for [lookup].
+  Future<ResolvedClip?> lookupOnDisk(
+    ReelTitle t, {
+    Set<String> exclude = const {},
+    required Future<bool> Function(ResolvedClip clip) onDisk,
+  }) async {
+    final banned = {...await store.spoiledAssets(t.titleId), ...exclude};
+    final cached = await store.cached('src:${t.groupKey}', ttl: ReelStore.sourceTtl);
+    final entry = cached == null ? null : _entry(cached);
+    if (entry == null || entry['miss'] == true || entry['k'] != 'plex') return null;
+    final assets = _assets(entry);
+    if (assets.isEmpty || assets.any(banned.contains)) return null;
+    final ResolvedClip? hit;
+    try {
+      hit = _plex(
+        entry['sv'] as String,
+        entry['pk'] as String,
+        entry['a'] as String,
+        _kindOf(entry, (ClipKind.trailer, null)).$1,
+        offline: true,
+        startAt: leadInOf(entry),
+      );
+    } catch (_) {
+      return null;
+    }
+    if (hit == null || hit.source.cacheKey == null) return null;
+    return await onDisk(hit) ? hit : null;
+  }
+
+  /// Where a clip on disk opens while its server isn't connected (V2-15): a
+  /// host that never resolves (RFC 2606 `.invalid`), with the part path the
+  /// clip's cache key names. The clip core reads its bytes from disk by that
+  /// key; a span that was never cached fails at once as a network error,
+  /// which neither waits nor drops the bytes already there.
+  static String offlineUri(String partKey) => 'https://reel-offline.invalid$partKey';
 
   /// A definitive miss in the current [sourceFormat] from the servers and
   /// AnimeThemes, with TMDB not asked.
@@ -778,6 +837,7 @@ class ClipResolver {
           j['pk'] as String,
           j['a'] as String,
           _kindOf(j, (ClipKind.trailer, null)).$1,
+          startAt: leadInOf(j),
         ),
         'yt' when ReelYouTube.videoId.hasMatch(j['yk'] as String) && j['a'] == 'yt:${j['yk']}' => _youTube(
           j['yk'] as String,
@@ -835,8 +895,66 @@ class ClipResolver {
     );
   }
 
-  ResolvedClip? _plex(String serverId, String partKey, String asset, ClipKind kind) {
-    final url = servers.clipUrl(serverId, partKey);
+  /// The `lv` a `src:` row's lead-in must carry to be used (V2-23): the
+  /// clip core's `LeadInPolicy.VERSION`. A row from another version reads as
+  /// "not measured yet" and the clip is measured again.
+  static const int leadInVersion = 1;
+
+  /// The longest lead-in a row may hold (the core never cuts more).
+  static const int leadInMaxMs = 15000;
+
+  /// The shortest cut the core makes; a smaller non-zero `li` is not one.
+  static const int leadInMinMs = 500;
+
+  /// A Plex row's lead-in (V2-23): `li` ms where the picture starts (0: none)
+  /// measured by `lv` [leadInVersion]. Anything else, an older row with no
+  /// `li` included, is null: not measured yet.
+  static Duration? leadInOf(Map<String, dynamic> j) {
+    final li = j['li'];
+    if (j['lv'] != leadInVersion || li is! int) return null;
+    if (li == 0) return Duration.zero;
+    if (li < leadInMinMs || li > leadInMaxMs) return null;
+    return Duration(milliseconds: li);
+  }
+
+  /// Keeps [start] as the lead-in of [t]'s cached Plex clip (V2-23), only on
+  /// the row of the clip measured: its asset and its cache key must match
+  /// [clip]'s, so a stale cut never lands on a different file. The row keeps
+  /// its `updatedAt` ([ReelStore.patchCached]). [reason] (a short code such
+  /// as `hdr` or `clip`) is kept for a 0. Returns whether it wrote.
+  Future<bool> rememberLeadIn(ReelTitle t, ResolvedClip clip, Duration start, {String? reason}) {
+    final key = clip.source.cacheKey;
+    if (clip.source.origin != ClipOrigin.plexExtra || key == null) return Future.value(false);
+    final ms = start.inMilliseconds;
+    if (ms != 0 && (ms < leadInMinMs || ms > leadInMaxMs)) return Future.value(false);
+    return store.patchCached('src:${t.groupKey}', (raw) {
+      final j = _entry(raw);
+      if (j == null || j['k'] != 'plex' || j['a'] != clip.assetId) return null;
+      final sv = j['sv'];
+      final pk = j['pk'];
+      if (sv is! String || pk is! String || ReelClipCache.keyFor(sv, pk) != key) return null;
+      final next = Map<String, dynamic>.of(j)
+        ..['li'] = ms
+        ..['lv'] = leadInVersion
+        ..remove('lr');
+      if (ms == 0 && reason != null && reason != 'ok') {
+        next['lr'] = reason.length > 12 ? reason.substring(0, 12) : reason;
+      }
+      return jsonEncode(next);
+    });
+  }
+
+  /// [offline] (V2-15): a server that isn't connected opens the clip at
+  /// [offlineUri], from disk only. [startAt] (V2-23): the row's lead-in.
+  ResolvedClip? _plex(
+    String serverId,
+    String partKey,
+    String asset,
+    ClipKind kind, {
+    bool offline = false,
+    Duration? startAt,
+  }) {
+    final url = servers.clipUrl(serverId, partKey) ?? (offline ? offlineUri(partKey) : null);
     if (url == null) return null;
     return ResolvedClip(
       source: ClipSource(
@@ -844,6 +962,7 @@ class ClipResolver {
         origin: ClipOrigin.plexExtra,
         preloadable: !_slowServers.contains(serverId),
         cacheKey: ReelClipCache.keyFor(serverId, partKey),
+        startAt: startAt,
       ),
       assetId: asset,
       kind: kind,

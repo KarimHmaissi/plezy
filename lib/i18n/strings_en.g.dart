@@ -3314,8 +3314,8 @@ class Translations$aiTab$en {
 	/// en: 'Follow up'
 	String get followUpTitle => 'Follow up';
 
-	/// en: 'e.g. a short funny film, or something like Severance'
-	String get askHint => 'e.g. a short funny film, or something like Severance';
+	/// en: 'e.g. a short funny film, or a twisty sci-fi series'
+	String get askHint => 'e.g. a short funny film, or a twisty sci-fi series';
 
 	/// en: 'Looking for: ${request}'
 	String thinking({required Object request}) => 'Looking for: ${request}';
@@ -4551,9 +4551,15 @@ class Translations$reel$en {
 	late final Translations$reel$status$en status = Translations$reel$status$en.internal(_root);
 	late final Translations$reel$remote$en remote = Translations$reel$remote$en.internal(_root);
 	late final Translations$reel$deckNames$en deckNames = Translations$reel$deckNames$en.internal(_root);
+	late final Translations$reel$newThisWeek$en newThisWeek = Translations$reel$newThisWeek$en.internal(_root);
+	late final Translations$reel$person$en person = Translations$reel$person$en.internal(_root);
+	late final Translations$reel$deckIntro$en deckIntro = Translations$reel$deckIntro$en.internal(_root);
 
 	/// en: 'From the Reel'
 	String get homeRow => 'From the Reel';
+
+	/// en: 'You finished ${title}. Sample what's next in the Reel.'
+	String whatsNextHome({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.';
 
 	late final Translations$reel$settings$en settings = Translations$reel$settings$en.internal(_root);
 	late final Translations$reel$decks$en decks = Translations$reel$decks$en.internal(_root);
@@ -7326,8 +7332,8 @@ class Translations$aiComposer$en {
 	/// en: 'Where next?'
 	String get followUpHeadline => 'Where next?';
 
-	/// en: 'Action anime like Attack on Titan'
-	String get example1 => 'Action anime like Attack on Titan';
+	/// en: 'Action anime with giant battles'
+	String get example1 => 'Action anime with giant battles';
 
 	/// en: 'Something cosy for a Sunday afternoon'
 	String get example2 => 'Something cosy for a Sunday afternoon';
@@ -8444,6 +8450,12 @@ class Translations$reel$card$en {
 	/// en: 'Show controls'
 	String get showControls => 'Show controls';
 
+	/// en: 'Fill the screen'
+	String get fillScreen => 'Fill the screen';
+
+	/// en: 'Fit to the screen'
+	String get fitScreen => 'Fit to the screen';
+
 	/// en: 'Couldn't load ${deck}'
 	String failedTitle({required Object deck}) => 'Couldn\'t load ${deck}';
 
@@ -8554,6 +8566,12 @@ class Translations$reel$toast$en {
 
 	/// en: 'Couldn't save: not connected to the TV'
 	String get notConnected => 'Couldn\'t save: not connected to the TV';
+
+	/// en: 'You're offline. Clips saved on this TV still play; other cards show their pictures.'
+	String get offlineTv => 'You\'re offline. Clips saved on this TV still play; other cards show their pictures.';
+
+	/// en: 'You're offline. The Reel shows pictures until you're back online.'
+	String get offlinePhone => 'You\'re offline. The Reel shows pictures until you\'re back online.';
 }
 
 // Path: reel.moreLike
@@ -8615,8 +8633,8 @@ class Translations$reel$status$en {
 	/// en: 'You're offline'
 	String get offlineTitle => 'You\'re offline';
 
-	/// en: 'The Reel plays from your servers. It picks up again once you are back online.'
-	String get offlineBody => 'The Reel plays from your servers. It picks up again once you are back online.';
+	/// en: 'This deck needs your servers. Try again once you're back online.'
+	String get offlineBody => 'This deck needs your servers. Try again once you\'re back online.';
 
 	/// en: 'The Reel didn't open'
 	String get openFailedTitle => 'The Reel didn\'t open';
@@ -8726,11 +8744,100 @@ class Translations$reel$deckNames$en {
 	/// en: 'Most Watched'
 	String get mostWatched => 'Most Watched';
 
+	/// en: 'New this week'
+	String get newThisWeek => 'New this week';
+
+	/// en: 'A person you love'
+	String get person => 'A person you love';
+
+	/// en: 'Directed by ${name}'
+	String directedBy({required Object name}) => 'Directed by ${name}';
+
+	/// en: 'Starring ${name}'
+	String starring({required Object name}) => 'Starring ${name}';
+
 	/// en: '#$n show this week'
 	String showThisWeek({required Object n}) => '#${n} show this week';
 
 	/// en: '#$n film this week'
 	String filmThisWeek({required Object n}) => '#${n} film this week';
+
+	/// en: 'What's next after ${title}'
+	String whatsNext({required Object title}) => 'What\'s next after ${title}';
+}
+
+// Path: reel.newThisWeek
+class Translations$reel$newThisWeek$en {
+	Translations$reel$newThisWeek$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: '(one) {${n} film} (other) {${n} films}'
+	String films({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} film',
+		other: '${n} films',
+	);
+
+	/// en: '(one) {${n} show} (other) {${n} shows}'
+	String shows({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} show',
+		other: '${n} shows',
+	);
+
+	/// en: '(zero) {None worth a look yet.} (one) {${n} worth a look.} (other) {${n} worth a look.}'
+	String worth({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		zero: 'None worth a look yet.',
+		one: '${n} worth a look.',
+		other: '${n} worth a look.',
+	);
+
+	/// en: '${films}, ${shows} arrived. ${worth}'
+	String line({required Object films, required Object shows, required Object worth}) => '${films}, ${shows} arrived. ${worth}';
+}
+
+// Path: reel.person
+class Translations$reel$person$en {
+	Translations$reel$person$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: '(one) {You've watched ${n} title with them.} (other) {You've watched ${n} titles with them.}'
+	String watched({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: 'You\'ve watched ${n} title with them.',
+		other: 'You\'ve watched ${n} titles with them.',
+	);
+
+	/// en: '(zero) {None you haven't seen.} (one) {${n} you haven't seen.} (other) {${n} you haven't seen.}'
+	String unseen({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		zero: 'None you haven\'t seen.',
+		one: '${n} you haven\'t seen.',
+		other: '${n} you haven\'t seen.',
+	);
+
+	/// en: '${watched} ${unseen}'
+	String line({required Object watched, required Object unseen}) => '${watched} ${unseen}';
+}
+
+// Path: reel.deckIntro
+class Translations$reel$deckIntro$en {
+	Translations$reel$deckIntro$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'Start'
+	String get start => 'Start';
+
+	/// en: 'OK or ↓ first card · → next deck'
+	String get hintTv => 'OK or ↓ first card  ·  → next deck';
+
+	/// en: 'Or swipe up for the first card'
+	String get swipe => 'Or swipe up for the first card';
 }
 
 // Path: reel.settings
@@ -8869,6 +8976,18 @@ class Translations$reel$settings$en {
 
 	/// en: 'For a listening test. Evens out loud and quiet clips, and may pump on songs'
 	String get clipNormalizationDescription => 'For a listening test. Evens out loud and quiet clips, and may pump on songs';
+
+	/// en: 'Skip trailer intros'
+	String get skipIntros => 'Skip trailer intros';
+
+	/// en: 'Start trailers after the rating card and the dark frames before the picture'
+	String get skipIntrosDescription => 'Start trailers after the rating card and the dark frames before the picture';
+
+	/// en: 'Measure trailer intros only'
+	String get leadInMeasureOnly => 'Measure trailer intros only';
+
+	/// en: 'Logs where each trailer's picture starts without skipping anything'
+	String get leadInMeasureOnlyDescription => 'Logs where each trailer\'s picture starts without skipping anything';
 }
 
 // Path: reel.decks
@@ -11330,7 +11449,7 @@ extension on Translations {
 			'aiTab.followUp' => 'Follow up',
 			'aiTab.askTitle' => 'What do you feel like watching?',
 			'aiTab.followUpTitle' => 'Follow up',
-			'aiTab.askHint' => 'e.g. a short funny film, or something like Severance',
+			'aiTab.askHint' => 'e.g. a short funny film, or a twisty sci-fi series',
 			'aiTab.thinking' => ({required Object request}) => 'Looking for: ${request}',
 			'aiTab.preparingTonight' => 'Picking a few things for tonight…',
 			'aiTab.newConversation' => 'New conversation',
@@ -11801,6 +11920,8 @@ extension on Translations {
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
 			'reel.card.showControls' => 'Show controls',
+			'reel.card.fillScreen' => 'Fill the screen',
+			'reel.card.fitScreen' => 'Fit to the screen',
 			'reel.card.failedTitle' => ({required Object deck}) => 'Couldn\'t load ${deck}',
 			'reel.card.failedBodyTv' => 'Press OK to try again, or → for the next deck.',
 			'reel.card.failedBodyTap' => 'Tap to try again.',
@@ -11832,6 +11953,8 @@ extension on Translations {
 			'reel.toast.savedOnTv' => 'On the TV tonight',
 			'reel.toast.savedForLater' => 'Saved, on the TV next time you connect',
 			'reel.toast.notConnected' => 'Couldn\'t save: not connected to the TV',
+			'reel.toast.offlineTv' => 'You\'re offline. Clips saved on this TV still play; other cards show their pictures.',
+			'reel.toast.offlinePhone' => 'You\'re offline. The Reel shows pictures until you\'re back online.',
 			'reel.moreLike.finding' => 'Finding more like this…',
 			'reel.moreLike.upNext' => 'More like this, up next',
 			'reel.moreLike.none' => 'Couldn\'t find more like this right now',
@@ -11843,7 +11966,7 @@ extension on Translations {
 			'reel.decide.hintTv' => '← → choose  ·  OK watch  ·  ↓ keep going',
 			'reel.decide.keepGoing' => 'Swipe up to keep going.',
 			'reel.status.offlineTitle' => 'You\'re offline',
-			'reel.status.offlineBody' => 'The Reel plays from your servers. It picks up again once you are back online.',
+			'reel.status.offlineBody' => 'This deck needs your servers. Try again once you\'re back online.',
 			'reel.status.openFailedTitle' => 'The Reel didn\'t open',
 			'reel.status.openFailedBodyTv' => 'Press OK to try again.',
 			'reel.status.openFailedBodyPhone' => 'Something went wrong getting it ready.',
@@ -11874,9 +11997,25 @@ extension on Translations {
 			'reel.deckNames.anotherGo' => 'Give it another go',
 			'reel.deckNames.animeOpenings' => 'Anime openings',
 			'reel.deckNames.mostWatched' => 'Most Watched',
+			'reel.deckNames.newThisWeek' => 'New this week',
+			'reel.deckNames.person' => 'A person you love',
+			'reel.deckNames.directedBy' => ({required Object name}) => 'Directed by ${name}',
+			'reel.deckNames.starring' => ({required Object name}) => 'Starring ${name}',
 			'reel.deckNames.showThisWeek' => ({required Object n}) => '#${n} show this week',
 			'reel.deckNames.filmThisWeek' => ({required Object n}) => '#${n} film this week',
+			'reel.deckNames.whatsNext' => ({required Object title}) => 'What\'s next after ${title}',
+			'reel.newThisWeek.films' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} film', other: '${n} films', ), 
+			'reel.newThisWeek.shows' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} show', other: '${n} shows', ), 
+			'reel.newThisWeek.worth' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, zero: 'None worth a look yet.', one: '${n} worth a look.', other: '${n} worth a look.', ), 
+			'reel.newThisWeek.line' => ({required Object films, required Object shows, required Object worth}) => '${films}, ${shows} arrived. ${worth}',
+			'reel.person.watched' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'You\'ve watched ${n} title with them.', other: 'You\'ve watched ${n} titles with them.', ), 
+			'reel.person.unseen' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, zero: 'None you haven\'t seen.', one: '${n} you haven\'t seen.', other: '${n} you haven\'t seen.', ), 
+			'reel.person.line' => ({required Object watched, required Object unseen}) => '${watched} ${unseen}',
+			'reel.deckIntro.start' => 'Start',
+			'reel.deckIntro.hintTv' => 'OK or ↓ first card  ·  → next deck',
+			'reel.deckIntro.swipe' => 'Or swipe up for the first card',
 			'reel.homeRow' => 'From the Reel',
+			'reel.whatsNextHome' => ({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.',
 			'reel.settings.title' => 'Reel',
 			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
 			'reel.settings.sheetEntry' => 'Reel settings',
@@ -11920,6 +12059,10 @@ extension on Translations {
 			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
 			'reel.settings.clipNormalization' => 'Even out clip loudness',
 			'reel.settings.clipNormalizationDescription' => 'For a listening test. Evens out loud and quiet clips, and may pump on songs',
+			'reel.settings.skipIntros' => 'Skip trailer intros',
+			'reel.settings.skipIntrosDescription' => 'Start trailers after the rating card and the dark frames before the picture',
+			'reel.settings.leadInMeasureOnly' => 'Measure trailer intros only',
+			'reel.settings.leadInMeasureOnlyDescription' => 'Logs where each trailer\'s picture starts without skipping anything',
 			'reel.decks.title' => 'Decks',
 			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
 			'reel.decks.startOn' => 'Start on',
@@ -12250,6 +12393,8 @@ extension on Translations {
 			'liveTv.dvrAdminRequired' => 'DVR settings require an admin account',
 			'liveTv.recordingFailed' => 'Couldn\'t schedule recording',
 			'liveTv.recordingTargetMissing' => 'Couldn\'t determine recording library',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.recordNotAvailable' => 'Recording not available for this program',
 			'liveTv.recordingCancelled' => 'Recording canceled',
 			'liveTv.recordingRuleDeleted' => 'Recording rule deleted',
@@ -12274,8 +12419,6 @@ extension on Translations {
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
 			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
 			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
@@ -12764,6 +12907,8 @@ extension on Translations {
 			'performanceOverlay.transfer' => 'Transfer',
 			'performanceOverlay.renderFps' => 'Render FPS',
 			'performanceOverlay.displayFps' => 'Display FPS',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.avSync' => 'A/V Sync',
 			'performanceOverlay.dropped' => 'Dropped',
 			'performanceOverlay.dvRpus' => 'DV RPUs',
@@ -12788,8 +12933,6 @@ extension on Translations {
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
 			'performanceOverlay.decoderSoftware' => 'Software',
 			'performanceOverlay.decoderHardware' => 'Hardware',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'performanceOverlay.signal' => 'Signal',
@@ -13099,7 +13242,7 @@ extension on Translations {
 			'aiComposer.eyebrow' => 'ASK YOUR LIBRARY',
 			'aiComposer.headline' => 'What are we watching?',
 			'aiComposer.followUpHeadline' => 'Where next?',
-			'aiComposer.example1' => 'Action anime like Attack on Titan',
+			'aiComposer.example1' => 'Action anime with giant battles',
 			'aiComposer.example2' => 'Something cosy for a Sunday afternoon',
 			'aiComposer.example3' => '80s action, easy to watch',
 			'aiComposer.example4' => 'Surprise me with a Marvel film',

@@ -24,7 +24,9 @@ import 'settings_utils.dart';
 /// screen ([ReelDecksScreen]). For You's note and today's rebuild (V2-51,
 /// synced) sit in their own group ([ReelForYouTiles]). The hidden developer
 /// setting (V2-62) shows last, only in a debug build or while debug logging
-/// is on; on the TV it also holds the clip loudness switch (V2-19). The TV
+/// is on; on the TV it also holds the clip loudness switch (V2-19) and the
+/// trailer-intro measure-only switch (V2-23). The TV's Playing group has
+/// "Skip trailer intros" (V2-23, on by default). The TV
 /// has a Clear Reel cache row for its clip core's disk cache (V2-10); the
 /// phone's feed plays on its own players and never writes that cache.
 class ReelSettingsScreen extends StatelessWidget {
@@ -64,6 +66,15 @@ class ReelSettingsScreen extends StatelessWidget {
               title: s.captions,
               subtitle: s.captionsDescription,
             ),
+            // The TV's clip core only (V2-23): the phone feed plays on its
+            // own players and never cuts a lead-in.
+            if (isTv)
+              SettingSwitchTile(
+                pref: SettingsService.reelSkipIntros,
+                icon: Symbols.fast_forward_rounded,
+                title: s.skipIntros,
+                subtitle: s.skipIntrosDescription,
+              ),
           ],
         ),
         SettingsGroup(
@@ -114,6 +125,14 @@ class ReelSettingsScreen extends StatelessWidget {
                   icon: Symbols.graphic_eq_rounded,
                   title: s.clipNormalization,
                   subtitle: s.clipNormalizationDescription,
+                ),
+              // V2-23: the morning measurement runs with this on.
+              if (isTv)
+                SettingSwitchTile(
+                  pref: SettingsService.reelLeadInMeasureOnly,
+                  icon: Symbols.straighten_rounded,
+                  title: s.leadInMeasureOnly,
+                  subtitle: s.leadInMeasureOnlyDescription,
                 ),
             ],
           ),

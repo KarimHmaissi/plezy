@@ -1,8 +1,8 @@
 /// Fork (Reel, plan V2-16): one place for the per-device playback rules. A
 /// profile is a plain value built from the device (TV or not), the screen's
 /// size and pixel ratio, its orientation, the network link and the data
-/// saver pref. The app rebuilds it when the screen's metrics change (the
-/// Fold switching screens) and the resolver applies it when a card plays,
+/// saver pref. The app rebuilds it when the screen's metrics change (a
+/// foldable switching screens) and the resolver applies it when a card plays,
 /// so the clip's file is picked at play time, never baked into the cache.
 /// Pure, so the rules are unit-tested.
 library;
@@ -16,11 +16,11 @@ enum ReelScreen {
   /// A TV: up to 1080, SDR only, the highest bitrate at that height.
   tv,
 
-  /// A small screen held upright (the Fold's cover screen, a phone): up to
+  /// A small screen held upright (a foldable's cover screen, a phone): up to
   /// 720, fill allowed.
   compactPortrait,
 
-  /// A large screen, or any screen turned sideways (the Fold's inner
+  /// A large screen, or any screen turned sideways (a foldable's inner
   /// screen): 1080 on Wi-Fi, 720 on mobile data.
   large,
 }

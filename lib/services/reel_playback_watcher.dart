@@ -21,7 +21,7 @@ ReelLink reelLinkOf(List<ConnectivityResult> results) {
 }
 
 /// Fork (Reel, plan V2-16): the device's current [ReelPlaybackProfile],
-/// rebuilt when the screen's metrics change (the Fold switching screens or
+/// rebuilt when the screen's metrics change (a foldable switching screens or
 /// turning), when the network changes, and when the Reel's mobile-data or
 /// captions pref does. Lives outside `lib/services/reel/` because it reads the app's
 /// platform, connectivity and settings services.

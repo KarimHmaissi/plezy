@@ -31,7 +31,7 @@ import 'package:provider/provider.dart';
 import '../test_helpers/prefs.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
 
-/// The Fold's link to a TV, switched by the test; records what it sends.
+/// The phone's link to a TV, switched by the test; records what it sends.
 class _Remote extends CompanionRemoteProvider {
   bool connected = false;
   final sent = <(RemoteCommandType, Map<String, dynamic>?)>[];
@@ -177,7 +177,7 @@ ReelCardData _card(String id, String title) => ReelCardData(
   ),
 );
 
-/// V2-48 on the Fold: On TV mode and "Watch here" follow the connection,
+/// V2-48 on the phone: On TV mode and "Watch here" follow the connection,
 /// and On TV mode opens the TV on the card the phone is on.
 void main() {
   late ForkDatabase db;
@@ -307,7 +307,7 @@ void main() {
     expect(watched, [false]);
   });
 
-  testWidgets('host: an open from the Fold lands on its card, or on the deck\'s cursor without one', (tester) async {
+  testWidgets('host: an open from the phone lands on its card, or on the deck\'s cursor without one', (tester) async {
     final (_, state) = await show(tester);
     unawaited(state.openDeck('b', groupKey: 'g5'));
     await settle(tester);

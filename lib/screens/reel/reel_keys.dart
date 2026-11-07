@@ -41,14 +41,16 @@ const Duration reelSeekStep = Duration(seconds: 10);
 int _sign(MediaSeekDirection d) => d == MediaSeekDirection.forward ? 1 : -1;
 
 /// What a short OK press does on the card showing.
-enum ReelOkTarget { replay, nextDeck, retry, watch, details }
+enum ReelOkTarget { replay, nextDeck, retry, watch, details, start }
 
 /// A held clip replays, the pool end moves on a deck and a failed deck
 /// loads again. Tonight's picks (V2-38) always watches the chosen pick: it
-/// is a decision card, and its Details live on the pick. Otherwise OK
+/// is a decision card, and its Details live on the pick. A deck's intro
+/// card (D22) starts the deck: OK goes to its first card. Otherwise OK
 /// follows the viewer's choice (D12): Watch, the default, or Details.
 ReelOkTarget reelOkTarget({required ClipPhase phase, required ReelSlotKind kind, required ReelOkAction okAction}) {
   if (kind == ReelSlotKind.decide) return ReelOkTarget.watch;
+  if (kind == ReelSlotKind.intro) return ReelOkTarget.start;
   if (phase == ClipPhase.held) return ReelOkTarget.replay;
   if (kind == ReelSlotKind.poolEnd) return ReelOkTarget.nextDeck;
   if (kind == ReelSlotKind.failed) return ReelOkTarget.retry;

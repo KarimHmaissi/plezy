@@ -361,7 +361,7 @@ abstract final class AiBriefing {
   /// server a year or more), best first, titles shown lately left out
   /// ([rotate]). The
   /// model chooses among them: similarity alone matches on surface words
-  /// ("Girlfriends" for someone who loved "Friends").
+  /// (a similar name rather than a similar feel).
   static Future<({List<_Candidate> pick, List<_Candidate> gem})> _candidates(
     List<({TitleProfile profile, double score, List<String> like})> pool,
     DateTime now,
@@ -437,7 +437,7 @@ abstract final class AiBriefing {
 
   static const String _prompt = '''
 You choose and introduce up to three cards at the top of a TV app tonight.
-- pick: choose the one candidate (p1, p2, ...) they would most enjoy tonight. library: choose the one candidate (g1, g2, ...) from their own library most worth finally watching. Judge by genre, tone, story and audience against their taste, and favour the better rated (the ratings are in the facts): a lower-rated title only when it clearly fits them better. The candidates are only similar by a rough measure that can match on surface words ("Girlfriends" is nothing like "Friends", a kids' cartoon is nothing like a grown-up drama), so ignore any candidate that doesn't genuinely fit.
+- pick: choose the one candidate (p1, p2, ...) they would most enjoy tonight. library: choose the one candidate (g1, g2, ...) from their own library most worth finally watching. Judge by genre, tone, story and audience against their taste, and favour the better rated (the ratings are in the facts): a lower-rated title only when it clearly fits them better. The candidates are only similar by a rough measure that can match on surface words (two titles that share a word can be nothing alike, a kids' cartoon is nothing like a grown-up drama), so ignore any candidate that doesn't genuinely fit.
 - Then one line per card, at most 14 words, plain text, no markdown, no emoji. The card already shows its title: never name it in its line.
 - newEpisode: nudge them back to the show (where they are, what's waiting). pick: why it suits their taste tonight. library: why this one they own is worth finally watching.
 - Be specific: name what it shares with titles they love, from the facts given. Never invent facts.

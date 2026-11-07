@@ -16,6 +16,7 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../providers/offline_mode_provider.dart';
 import '../screens/media_detail_screen.dart';
 import '../screens/reel/reel_card_view.dart';
 import '../screens/reel/reel_screen.dart' show ReelScreen;
@@ -40,6 +41,7 @@ import 'device_performance.dart';
 import 'library_index/library_index.dart';
 import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
+import 'offline_mode_source.dart';
 import 'playback_coordinator.dart';
 import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
@@ -50,6 +52,7 @@ import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
 import 'reel/reel_art.dart';
 import 'reel/reel_metadata.dart';
+import 'reel/reel_person.dart';
 import 'reel/reel_playback_profile.dart' hide ReelScreen;
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
@@ -74,7 +77,7 @@ abstract final class ReelApp {
     final shared = _shared(ReelStore.instance);
     final base = await _decks(context, library: shared.library, forYou: shared.forYou);
     return [
-      for (final d in [...base, ...await _answerDecks(shared.library)]) (id: d.id, name: d.name),
+      for (final d in [...base, ...await _laterDecks(shared.library, shared.forYou)]) (id: d.id, name: d.name),
     ];
   }
 
@@ -97,11 +100,25 @@ abstract final class ReelApp {
       candidates: () => forYouCandidates(library: library, store: store),
       facts: () => forYouFacts(store: store, pool: pool),
       again: () => anotherGoCandidates(library: library, store: store),
+      offline: offlineNow,
+      arrivals: () => newThisWeekArrivals(library: library, store: store),
+      person: () => personPick(library: library, store: store, pool: pool),
+      next: () => whatsNextList(library: library, store: store),
       sharedChanges: Customisation.changed,
       clears: ReelPool.clears,
     );
     return _sharedFor = (library: library, pool: pool, forYou: forYou);
   }
+
+  /// The app's offline mode (no server it can reach), taken from the Reel's
+  /// latest session or warm start.
+  static OfflineModeSource? _offlineMode;
+
+  /// Whether the Reel runs offline now (plan V2-15): the app's offline mode,
+  /// or no network at all (the playback profile's link). For You's build and
+  /// the session read the same two sources.
+  static bool offlineNow() =>
+      (_offlineMode?.isOffline ?? false) || ReelPlaybackWatcher.instance.value.link == ReelLink.offline;
 
   static ReelLibrary _library() =>
       ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app());
@@ -112,10 +129,10 @@ abstract final class ReelApp {
       ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
 
   /// The decks in the app's own order: For You, Fits tonight, Give it
-  /// another go, Anime openings and Most Watched (with Trakt); the saved
-  /// answers follow ([_answerDecks]). The controller applies the user's
-  /// order and hidden decks ([ReelController.shownDecks]). For You is
-  /// always first.
+  /// another go, New this week, the Person deck, Anime openings and Most
+  /// Watched (with Trakt); the saved answers follow ([_answerDecks]). The controller
+  /// applies the user's order and hidden decks
+  /// ([ReelController.shownDecks]). For You is always first.
   static Future<List<ReelDeck>> _decks(
     BuildContext context, {
     required ReelLibrary library,
@@ -147,6 +164,8 @@ abstract final class ReelApp {
       forYou,
       FitsTonightDeck(forYou: forYou),
       AnotherGoDeck(forYou: forYou, library: library),
+      NewThisWeekDeck(forYou: forYou, library: library),
+      PersonDeck(forYou: forYou, library: library),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.
@@ -165,12 +184,81 @@ abstract final class ReelApp {
     for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
   ];
 
+  /// The decks the Reel adds once its first card has shown (V2-04): What's
+  /// next after (when they just finished a show), then the saved answers.
+  static Future<List<ReelDeck>> _laterDecks(ReelLibrary library, ForYouDeck forYou) async => [
+    ?await _whatsNextDeck(library, forYou),
+    ...await _answerDecks(library),
+  ];
+
+  /// What's next after (the show they just finished, D22), or null when
+  /// they finished none lately ([whatsNextSeed]).
+  static Future<WhatsNextDeck?> _whatsNextDeck(ReelLibrary library, ForYouDeck forYou) async {
+    final ReelCardData seed;
+    try {
+      final found = await _finishedShow(library);
+      if (found == null) return null;
+      seed = found;
+    } catch (e) {
+      appLogger.d("Reel: what's-next seed unavailable", error: e);
+      return null;
+    }
+    return WhatsNextDeck(
+      seed: seed,
+      forYou: forYou,
+      library: library,
+      candidates: () => moreLikeCandidates(seed, library: library, store: forYou.pool.store),
+    );
+  }
+
+  /// [whatsNextSeed], read again only once the brain has synced since or
+  /// the day has changed: Home asks on every return, and the Reel on each
+  /// open.
+  static ({String key, Future<ReelCardData?> seed})? _seedMemo;
+
+  static Future<ReelCardData?> _finishedShow(ReelLibrary library) {
+    final now = DateTime.now();
+    final key = '${ReelStore.dayStamp(now)}|${HistoryBrain.instance.status.value.lastSync?.millisecondsSinceEpoch}';
+    final have = _seedMemo;
+    if (have != null && have.key == key) return have.seed;
+    final seed = whatsNextSeed(library: library, now: now);
+    _seedMemo = (key: key, seed: seed);
+    // A failed read isn't kept.
+    unawaited(
+      seed.then<void>(
+        (_) {},
+        onError: (Object _) {
+          if (identical(_seedMemo?.seed, seed)) _seedMemo = null;
+        },
+      ),
+    );
+    return seed;
+  }
+
+  /// Home's "From the Reel" row (D22, build plan §7): the server copy of the
+  /// show they finished within [whatsNextHomeFor], for its "What's next
+  /// after" card; null with none, or with the Reel turned off.
+  static Future<({String serverId, String ratingKey})?> whatsNextForHome() async {
+    if (!ReelScreen.enabled) return null;
+    final ReelCardData? seed;
+    try {
+      seed = await _finishedShow(_shared(ReelStore.instance).library);
+    } catch (e) {
+      appLogger.d("Home: what's-next seed unavailable", error: e);
+      return null;
+    }
+    final last = seed?.facts.seen.last;
+    if (seed == null || last == null || DateTime.now().difference(last) >= whatsNextHomeFor) return null;
+    return (serverId: seed.best.serverId, ratingKey: seed.best.ratingKey);
+  }
+
   static Future<ReelController> controller(BuildContext context) async {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
     final remote = context.read<CompanionRemoteProvider?>();
     final servers = multi.serverManager;
     final store = ReelStore.instance;
+    final offlineMode = _offlineMode = context.read<OfflineModeProvider?>();
     // A Reel session is starting: the warm start's steps still to come are
     // dropped (V2-14).
     _warmer?.yieldNow();
@@ -187,6 +275,11 @@ abstract final class ReelApp {
     );
     final media = _AppReelMedia(servers, store);
     final decks = await _decks(context, library: library, forYou: forYou);
+    // The Person deck names today's person before its first load, without
+    // holding up the open.
+    for (final d in decks.whereType<PersonDeck>()) {
+      unawaited(d.peek());
+    }
 
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;
@@ -248,10 +341,14 @@ abstract final class ReelApp {
       // index only), and the saved answers join after the first card.
       warmClipCore: PlatformDetector.isTV(),
       headCard: PlatformDetector.isTV() ? (entry) async => (await library.cards([entry])).firstOrNull : null,
-      moreDecks: () => _answerDecks(library),
+      moreDecks: () => _laterDecks(library, forYou),
       // Each deck carries on where it was left today, on both devices
       // (V2-14).
       keepCursor: true,
+      // Offline (V2-15): the app's offline mode, with the profile's link;
+      // the cards' art and text then come from the caches alone.
+      offlineMode: offlineMode,
+      cachedItem: media.cachedItem,
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
       // While the Reel plays, the brain's indexer rests and its ONNX session
@@ -297,6 +394,7 @@ abstract final class ReelApp {
         skip: skip,
       ),
       deckFor: (id) async {
+        if (id == WhatsNextDeck.deckId) return _whatsNextDeck(library, forYou);
         if (!id.startsWith('ai:')) return null;
         final entry = await AiHistory.get(id.substring(3));
         return entry == null || entry.items.isEmpty ? null : AiAnswerDeck(entry: entry, library: library);
@@ -341,6 +439,7 @@ abstract final class ReelApp {
   static void warmBeforeOpen(BuildContext context) {
     if (!PlatformDetector.isTV() || !ReelScreen.enabled) return;
     _warmContext = context;
+    _offlineMode ??= context.read<OfflineModeProvider?>();
     if (_warmer != null) return;
     final servers = context.read<MultiServerProvider>().serverManager;
     final store = ReelStore.instance;

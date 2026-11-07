@@ -32,6 +32,7 @@ internal object PlayerCoreCounts {
   private val released = AtomicInteger()
   private val codecs = AtomicInteger()
   private val codecsOnReleased = AtomicInteger()
+  private val detectorCodecs = AtomicInteger()
 
   /** A new core: returns its serial number. */
   fun onCreated(): Int = created.incrementAndGet()
@@ -40,6 +41,16 @@ internal object PlayerCoreCounts {
   fun onCodecCreated() {
     codecs.incrementAndGet()
   }
+
+  /**
+   * V2-23: a software decoder the lead-in detector made. It lives on the detector's own thread,
+   * which never quits, so it never adds a dead-thread handler; device check S2 reads the count.
+   */
+  fun onDetectorCodecCreated() {
+    detectorCodecs.incrementAndGet()
+  }
+
+  val detectorCodecsCreated: Int get() = detectorCodecs.get()
 
   /** A core released, having made [coreCodecs] codecs over its life. */
   fun onReleased(coreCodecs: Int) {
@@ -53,7 +64,7 @@ internal object PlayerCoreCounts {
     val made = created.get()
     val gone = released.get()
     return "cores created=$made released=$gone live=${made - gone} " +
-      "codecs=${codecs.get()} codecsOnReleasedCores=${codecsOnReleased.get()}"
+      "codecs=${codecs.get()} codecsOnReleasedCores=${codecsOnReleased.get()} detectorCodecs=${detectorCodecs.get()}"
   }
 
   internal fun resetForTest() {
@@ -61,6 +72,7 @@ internal object PlayerCoreCounts {
     released.set(0)
     codecs.set(0)
     codecsOnReleased.set(0)
+    detectorCodecs.set(0)
   }
 }
 

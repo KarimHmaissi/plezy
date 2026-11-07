@@ -19,7 +19,7 @@ import '../../widgets/companion_remote/remote_button.dart';
 import '../../widgets/optimized_media_image.dart';
 import '../../widgets/stat_chip.dart';
 
-/// Fork: the Fold's On TV mode. The TV's Reel plays; the phone shows its
+/// Fork: the phone's On TV mode. The TV's Reel plays; the phone shows its
 /// card and the next three and sends `reelStep` / `reelAction`. The phone
 /// plays nothing. A full remote (V2-49): previous and next, play and pause,
 /// the TV's Reel volume, and a More menu with the TV sheet's card actions.
@@ -142,6 +142,8 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
     final card = (state['card'] as Map?)?.cast<String, dynamic>();
     // Tonight's picks (V2-38) on the TV: its posters, tap one to choose it.
     final decide = (state['decide'] as Map?)?.cast<String, dynamic>();
+    // A deck's intro card (D22) on the TV: its line.
+    final intro = (state['intro'] as Map?)?['line'];
     final next = [
       for (final n in (state['next'] as List? ?? const []).whereType<Map>()) n.cast<String, dynamic>(),
     ].take(3).toList();
@@ -179,7 +181,7 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
               // The swipes live on the picture: the list itself scrolls on
-              // a short screen (the Fold's cover), so it can't own them.
+              // a short screen (a foldable's cover), so it can't own them.
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onVerticalDragEnd: (d) {
@@ -206,10 +208,11 @@ class _ReelRemoteViewState extends State<ReelRemoteView> {
                   child: decide != null
                       ? _DecideCard(key: const ValueKey('decide'), decide: decide, onPick: (i) => _act('pick:$i'))
                       : _NowCard(
-                          key: ValueKey(card?['id'] ?? state['poolEnd']),
+                          key: ValueKey(card?['id'] ?? (intro is String ? 'intro' : state['poolEnd'])),
                           card: card,
                           playing: playing,
                           poolEnd: state['poolEnd'] == true,
+                          intro: intro is String ? intro : null,
                         ),
                 ),
               ),
@@ -337,11 +340,14 @@ class _ButtonRow extends StatelessWidget {
 }
 
 class _NowCard extends StatelessWidget {
-  const _NowCard({super.key, required this.card, required this.playing, required this.poolEnd});
+  const _NowCard({super.key, required this.card, required this.playing, required this.poolEnd, this.intro});
 
   final Map<String, dynamic>? card;
   final bool playing;
   final bool poolEnd;
+
+  /// The TV shows the deck's intro card: its line.
+  final String? intro;
 
   @override
   Widget build(BuildContext context) {
@@ -353,9 +359,15 @@ class _NowCard extends StatelessWidget {
         child: Card(
           margin: EdgeInsets.zero,
           child: Center(
-            child: Text(
-              poolEnd ? t.reel.remote.deckEnd : t.reel.remote.deckEmpty,
-              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                intro ?? (poolEnd ? t.reel.remote.deckEnd : t.reel.remote.deckEmpty),
+                textAlign: TextAlign.center,
+                style: intro != null
+                    ? theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)
+                    : theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
             ),
           ),
         ),

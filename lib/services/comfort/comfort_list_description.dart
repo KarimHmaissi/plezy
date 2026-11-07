@@ -2,7 +2,7 @@
 /// random-episode pool) in its own description, so the state follows the user
 /// across devices with a single list and no VIP-only list-item notes:
 ///
-///     Paused in Plezy: Stargate SG-1, Lost [plezy:paused=trakt:1234,trakt:5678]
+///     Paused in Plezy: Star Relay, Island Hours [plezy:paused=trakt:1234,trakt:5678]
 ///
 /// The bracketed marker is what the app reads; the names are for humans
 /// looking at the list on trakt.tv. Any other description text is preserved.
