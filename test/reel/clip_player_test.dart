@@ -1308,7 +1308,9 @@ void main() {
       engine.firstFrameCtl.add(null);
       final heard = <ClipLeadIn>[];
       clips.leadIns.listen(heard.add);
-      engine.leadInCtl.add(const ClipLeadIn(cacheKey: key, start: Duration(milliseconds: 6006)));
+      engine.leadInCtl.add(
+        const ClipLeadIn(cacheKey: key, start: Duration(milliseconds: 6006), playingUnclipped: true),
+      );
       await Future<void>.delayed(Duration.zero);
       expect(heard.single.start, const Duration(milliseconds: 6006));
       engine.completedCtl.add(true);
@@ -1319,6 +1321,20 @@ void main() {
       engine.position = const Duration(seconds: 8);
       await clips.seekBy(const Duration(seconds: -10));
       expect(engine.calls.last, 'seekExact 6006');
+    });
+
+    test('an answer that raced ahead of the open (the core opened it clipped) never moves Replay', () async {
+      // Dart sent the open before it heard the answer, so it opened with no
+      // start; the core had the answer first and clipped the open (R7).
+      await clips.play(unmeasured);
+      engine.firstFrameCtl.add(null);
+      engine.leadInCtl.add(const ClipLeadIn(cacheKey: key, start: Duration(milliseconds: 6006)));
+      await Future<void>.delayed(Duration.zero);
+      expect(clips.restartAt, Duration.zero);
+      engine.completedCtl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      await clips.replay();
+      expect(engine.calls.where((c) => c.startsWith('seek')), ['seek 0', 'seek 0']);
     });
 
     test('a clipped open counts its length from the cut', () async {

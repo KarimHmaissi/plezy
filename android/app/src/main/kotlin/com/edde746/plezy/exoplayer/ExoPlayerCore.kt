@@ -4854,6 +4854,10 @@ class ExoPlayerCore(private val activity: Activity) :
     val uri = job.uri
     val start = outcome.startMs
     ClipDiskCache.rememberLeadBytes(job.key, outcome.leadBytes)
+    // Whether the answer is for the clip playing, opened unclipped: only then do Dart's Replay, loop
+    // and RW land on the start. An open that came in before this answer is already clipped (it read
+    // clipStarts), and a seek to the start there would skip that much real picture.
+    val playingUnclipped = uri == currentMediaUri && openStartMs == 0L
     if (leadInClip && uri !in clipStartRefused) {
       clipStarts[uri] = start
       val rank = preloadSlots.entries.firstOrNull { it.value == uri }?.key
@@ -4870,13 +4874,20 @@ class ExoPlayerCore(private val activity: Activity) :
         }
       }
     }
-    emitLeadIn(job.key, start, outcome.decision?.kind ?: "none", outcome.skipReason ?: outcome.decision?.reason ?: "ok")
+    emitLeadIn(job.key, start, outcome.decision?.kind ?: "none", outcome.skipReason ?: outcome.decision?.reason ?: "ok", playingUnclipped)
   }
 
-  private fun emitLeadIn(key: String, startMs: Long, kind: String, reason: String) {
+  private fun emitLeadIn(key: String, startMs: Long, kind: String, reason: String, playingUnclipped: Boolean = false) {
     delegate?.onEvent(
       "reel-lead-in",
-      mapOf("cacheKey" to key, "startMs" to startMs, "kind" to kind, "ver" to LeadInPolicy.VERSION, "reason" to reason)
+      mapOf(
+        "cacheKey" to key,
+        "startMs" to startMs,
+        "kind" to kind,
+        "ver" to LeadInPolicy.VERSION,
+        "reason" to reason,
+        "playingUnclipped" to playingUnclipped
+      )
     )
   }
 

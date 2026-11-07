@@ -103,4 +103,61 @@ void main() {
     }, clipMode: false);
     expect((calls.firstWhere((c) => c.method == 'open').arguments as Map).containsKey('cacheKey'), isFalse);
   });
+
+  // V2-23: a clip's lead-in crosses the channel with its preload and its
+  // open; the core's answer comes back keyed by the cache key, never the URL.
+  group('lead-in', () {
+    test('a preload and an open carry the start and the measure flag; unknown sends no start', () async {
+      final calls = await _allCalls((p) async {
+        await p.setLeadInPolicy(enabled: true, measureOnly: false);
+        await p.preloadClip(plex, rank: 'next', origin: 'plexExtra', cacheKey: key, startMs: 6006, measure: true);
+        await p.preloadClip('https://clips.example/b.webm', origin: 'animeTheme', measure: false);
+        p.rememberClipStart(plex, startMs: 6006, measure: true, origin: 'plexExtra');
+        await p.open(const Media(plex));
+        p.rememberClipStart(plex, measure: true, origin: 'plexExtra');
+        await p.open(const Media(plex));
+      });
+      expect(calls.firstWhere((c) => c.method == 'setLeadInPolicy').arguments, {'enabled': true, 'measureOnly': false});
+      final preloads = calls.where((c) => c.method == 'preloadClip').map((c) => c.arguments as Map).toList();
+      expect(preloads[0]['startMs'], 6006);
+      expect(preloads[0]['measure'], isTrue);
+      expect(preloads[1].containsKey('startMs'), isFalse);
+      expect(preloads[1]['measure'], isFalse);
+      final opens = calls.where((c) => c.method == 'open').map((c) => c.arguments as Map).toList();
+      expect(opens[0]['clipStartMs'], 6006);
+      expect(opens[0]['measureLeadIn'], isTrue);
+      expect(opens[0]['origin'], 'plexExtra');
+      expect(opens[1].containsKey('clipStartMs'), isFalse, reason: 'unknown is never "from 0"');
+    });
+
+    test("the core's answer reaches leadIns with whether it was for the clip playing unclipped", () async {
+      await _allCalls((p) async {
+        final heard = <ReelLeadInEvent>[];
+        final sub = p.leadIns.listen(heard.add);
+        p.handlePlayerEvent('reel-lead-in', {
+          'cacheKey': key,
+          'startMs': 6006,
+          'kind': 'coloured',
+          'ver': 1,
+          'reason': 'ok',
+          'playingUnclipped': true,
+        });
+        p.handlePlayerEvent('reel-lead-in', {'cacheKey': key, 'startMs': 4004});
+        p.handlePlayerEvent('reel-lead-in', {'startMs': 4004});
+        await pumpEventQueue();
+        await sub.cancel();
+        expect(heard, hasLength(2), reason: 'an answer with no cache key is dropped');
+        expect(heard[0], (
+          cacheKey: key,
+          startMs: 6006,
+          kind: 'coloured',
+          version: 1,
+          reason: 'ok',
+          playingUnclipped: true,
+        ));
+        expect(heard[1].playingUnclipped, isFalse);
+        expect(heard[1].reason, 'ok');
+      });
+    });
+  });
 }

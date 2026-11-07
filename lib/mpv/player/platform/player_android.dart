@@ -11,8 +11,16 @@ import '../player_base.dart';
 
 /// A clip's lead-in as the clip core measured it (Reel V2-23): where its
 /// picture starts ([startMs], 0 for none), keyed by the clip's token-free
-/// disk cache key, never its URL.
-typedef ReelLeadInEvent = ({String cacheKey, int startMs, String kind, int version, String reason});
+/// disk cache key, never its URL. [playingUnclipped]: the core was playing
+/// that clip, opened before its start was known, when the answer came.
+typedef ReelLeadInEvent = ({
+  String cacheKey,
+  int startMs,
+  String kind,
+  int version,
+  String reason,
+  bool playingUnclipped,
+});
 
 /// Android implementation using ExoPlayer with ASS subtitle support via libass-android.
 class PlayerAndroid extends PlayerBase {
@@ -119,6 +127,7 @@ class PlayerAndroid extends PlayerBase {
           kind: data?['kind'] is String ? data!['kind'] as String : 'none',
           version: data?['ver'] is int ? data!['ver'] as int : 0,
           reason: data?['reason'] is String ? data!['reason'] as String : 'ok',
+          playingUnclipped: data?['playingUnclipped'] == true,
         ));
       }
       return;

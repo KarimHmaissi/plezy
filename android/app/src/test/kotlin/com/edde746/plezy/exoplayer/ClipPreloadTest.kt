@@ -320,6 +320,50 @@ class ClipPreloadTest {
     }
   }
 
+  private class LeadInEvents : ExoPlayerDelegate {
+    val leadIns = mutableListOf<Map<String, Any>>()
+
+    override fun onFormatUnsupported(
+      mediaGeneration: Int,
+      uri: String,
+      headers: Map<String, String>?,
+      positionMs: Long,
+      playWhenReady: Boolean,
+      errorMessage: String
+    ): Boolean = false
+
+    override fun onPropertyChange(name: String, value: Any?) = Unit
+
+    override fun onEvent(name: String, data: Map<String, Any>?) {
+      if (name == "reel-lead-in" && data != null) leadIns += data
+    }
+  }
+
+  @Test
+  fun anAnswerSaysWhetherItIsForTheClipPlayingUnclipped() {
+    withClipCore { core ->
+      val events = LeadInEvents()
+      core.delegate = events
+      core.setLeadInPolicy(enabled = true, measureOnly = false)
+      core.preloadClip(b, ClipPreloadRank.NEXT, "plexExtra", plexKey, measure = true)
+      core.rememberClipCacheKey(c, plexKey2)
+      core.rememberClipLeadIn(c, null, true, "plexExtra")
+      core.open(uri = c, headers = null, startPositionMs = 0L, autoPlay = false, mediaGeneration = 1)
+
+      // The clip playing, opened before its start was known: Dart's Replay and loop land on it.
+      core.onLeadInOutcome(outcome(core, c, plexKey2, 6_006L))
+      assertEquals(true, events.leadIns.last()["playingUnclipped"])
+      assertEquals(plexKey2, events.leadIns.last()["cacheKey"])
+
+      // A held clip: its next open is clipped by the core, so Dart must not seek past 0 (the cut).
+      core.onLeadInOutcome(outcome(core, b, plexKey, 4_004L))
+      assertEquals(false, events.leadIns.last()["playingUnclipped"])
+      core.open(uri = b, headers = null, startPositionMs = 0L, autoPlay = false, mediaGeneration = 2)
+      assertEquals("the open after the answer is clipped", 4_004L, core.player.currentMediaItem!!.start())
+      assertTrue("no event carries a URI", events.leadIns.none { e -> e.values.any { it.toString().contains("://") } })
+    }
+  }
+
   @Test
   fun aClipOpenPausesTheDetectorUntilAfterItsFirstFrame() {
     withClipCore { core ->

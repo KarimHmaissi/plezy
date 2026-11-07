@@ -70,7 +70,10 @@ class ClipSource {
 /// A clip's lead-in as the TV's clip core measured it (V2-23): [start] is
 /// where its picture starts ([Duration.zero]: none), for the clip whose disk
 /// cache key is [cacheKey] (never its URL). [reason] says why a start is 0
-/// (`content`, `cap`, `hdr`, `clip`, ...).
+/// (`content`, `cap`, `hdr`, `clip`, ...). [playingUnclipped]: the core was
+/// playing that clip, opened before its start was known, when it learned
+/// it; only then do Replay, the loop and RW seek to [start]. An open the
+/// core took after the answer is already clipped (its 0 is the cut).
 @immutable
 class ClipLeadIn {
   const ClipLeadIn({
@@ -79,6 +82,7 @@ class ClipLeadIn {
     this.kind = 'none',
     this.version = 0,
     this.reason = 'ok',
+    this.playingUnclipped = false,
   });
 
   final String cacheKey;
@@ -86,6 +90,7 @@ class ClipLeadIn {
   final String kind;
   final int version;
   final String reason;
+  final bool playingUnclipped;
 }
 
 /// What a preloaded clip is to the card on screen (plan V2-09). The TV's
@@ -251,6 +256,7 @@ class ExoClipEngine implements ClipEngine {
       kind: e.kind,
       version: e.version,
       reason: e.reason,
+      playingUnclipped: e.playingUnclipped,
     ),
   );
 
@@ -861,8 +867,12 @@ class ClipPlayer {
 
   void _onLeadIn(ClipLeadIn leadIn) {
     final current = _current;
+    // Only an answer the core applied to this open, which it opened
+    // unclipped: one that raced ahead of the open made it clipped already,
+    // and a seek to the start would then skip that much real picture.
     if (current != null &&
         !_openClipped &&
+        leadIn.playingUnclipped &&
         current.cacheKey == leadIn.cacheKey &&
         leadIn.start > Duration.zero &&
         _leadInEligible(current)) {
