@@ -241,12 +241,30 @@ internal object LeadInPolicy {
     }
     var cardQuietPct: Int? = null
 
+    // A run with a coloured card and dark or light card frames too (an opening title on black
+    // after the rating card, or the card dimming): where those frames begin when they are loud or
+    // unmeasured (R4), and where the card before them ends.
+    var strictFromUs: Long? = null
+    var strictAfterCardUs: Long? = null
+
     // Rule 5: card rules by kind.
     if (cardStartUs != null && cardEndUs != null) {
       val cardLen = cardEndUs - cardStartUs
       if (CardKind.COLOURED in kinds) {
         if (cardStartUs > COLOURED_CARD_START_US || cardLen < COLOURED_CARD_MIN_US) {
           return LeadInDecision.none("card-rule", logClasses(), kind = kind)
+        }
+        // R4 holds for them as for a dark card on its own: cut only when quiet, else the cut
+        // stops where they begin (a text opening plays over music or a voice).
+        val strict = cardIdx.filter { raw[it].second != CardKind.COLOURED }
+        if (strict.isNotEmpty()) {
+          val quietShare = input.audio?.quietShare(strict.map { frames[it].timeUs to frames[it].timeUs + span(it) })
+          cardQuietPct = quietShare?.let { (it * 100).toInt() }
+          if (quietShare == null || quietShare < CARD_QUIET_SHARE) {
+            val from = frames[strict.first()].timeUs
+            strictFromUs = from
+            strictAfterCardUs = cardIdx.filter { frames[it].timeUs < from }.maxOfOrNull { min(frames[it].timeUs + span(it), from) }
+          }
         }
       } else {
         if (cardStartUs > STRICT_CARD_START_US || cardLen < STRICT_CARD_MIN_US || cardLen > STRICT_CARD_MAX_US) {
@@ -268,6 +286,12 @@ internal object LeadInPolicy {
 
     var cutUs: Long = leadEndUs
     var reason = if (partial) "partial" else "ok"
+    strictFromUs?.let {
+      if (it < cutUs) {
+        cutUs = it
+        reason = if (input.audio == null) "audio-none" else "audio-loud"
+      }
+    }
 
     // Rule 3b: never past a window that changed and wasn't scored.
     val rise = windows(samples)
@@ -288,8 +312,10 @@ internal object LeadInPolicy {
       }
     }
 
-    // Rule 11: the audio guard.
-    val endCardUs = cardEndUs ?: 0L
+    // Rule 11: the audio guard, from the end of the card the cut follows: the last card, or, when
+    // the cut stopped at a loud or unmeasured title, the coloured card before it (none: from 0).
+    val cardBeforeCutUs = if (strictFromUs != null) strictAfterCardUs else cardEndUs
+    val endCardUs = cardBeforeCutUs ?: 0L
     val audio = input.audio
     var audioOnsetMs: Long? = null
     if (audio != null) {
@@ -301,9 +327,9 @@ internal object LeadInPolicy {
           reason = "audio"
         }
       }
-    } else if (cardEndUs != null) {
-      if (cardEndUs < cutUs) {
-        cutUs = cardEndUs
+    } else if (cardBeforeCutUs != null) {
+      if (cardBeforeCutUs < cutUs) {
+        cutUs = cardBeforeCutUs
         reason = "audio-none"
       }
     } else {
@@ -575,6 +601,20 @@ internal class AudioLevels(val dbfs: DoubleArray) {
       if ((dbfs.getOrNull(w) ?: -120.0) <= LeadInPolicy.AUDIBLE_DBFS) quiet++
     }
     return if (total == 0) 1.0 else quiet.toDouble() / total
+  }
+
+  /**
+   * The share of the windows [spans] (each from, to in µs) cover that are below
+   * [LeadInPolicy.AUDIBLE_DBFS]; windows past what was read count as quiet, as in [quietShare].
+   */
+  fun quietShare(spans: List<Pair<Long, Long>>): Double {
+    val windows = HashSet<Int>()
+    for ((from, to) in spans) {
+      if (to <= from) continue
+      for (w in window(from)..window(to - 1)) windows += w
+    }
+    if (windows.isEmpty()) return 1.0
+    return windows.count { (dbfs.getOrNull(it) ?: -120.0) <= LeadInPolicy.AUDIBLE_DBFS }.toDouble() / windows.size
   }
 
   /**

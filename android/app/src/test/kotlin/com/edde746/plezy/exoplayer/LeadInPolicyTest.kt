@@ -418,6 +418,41 @@ class LeadInPolicyTest {
     assertEquals(5_200L, d.audioOnsetMs)
   }
 
+  // R4 in a run that holds a coloured card and a dark one: an opening title on black after the
+  // rating card is a dark card, and it must be quiet to be cut, as on its own.
+
+  @Test
+  fun aTitleOnBlackWithAVoiceAfterAColouredCardIsKept() {
+    val d = LeadInPolicy.decide(clip(Seg.GREEN to 4_000_000L, Seg.DARK to 4_000_000L, Seg.CONTENT to 20_000_000L, audio = quietThenLoud(4_500_000L)))
+    assertTrue("cut ${d.startMs} keeps the title and its voice from 4.5 s", d.startMs <= 4_500L)
+    assertTrue("cut ${d.startMs} still skips the rating card", d.startMs >= 3_900L)
+    assertEquals("audio-loud", d.reason)
+    assertTrue("quiet ${d.cardQuietPct}% under the bar", (d.cardQuietPct ?: 100) < 80)
+  }
+
+  @Test
+  fun aVoiceInTheBlackBeforeALoudTitleIsKept() {
+    // Rating card 0-4 s, black 4-5 s with a voice from 4.5 s, then the title on black.
+    val d = LeadInPolicy.decide(
+      clip(Seg.GREEN to 4_000_000L, Seg.BLACK to 1_000_000L, Seg.DARK to 3_000_000L, Seg.CONTENT to 20_000_000L, audio = quietThenLoud(4_500_000L))
+    )
+    assertTrue("cut ${d.startMs} keeps the voice from 4.5 s", d.startMs <= 4_500L)
+  }
+
+  @Test
+  fun withNoAudioADarkCardAfterAColouredCardIsKept() {
+    val d = LeadInPolicy.decide(clip(Seg.GREEN to 4_000_000L, Seg.DARK to 4_000_000L, Seg.CONTENT to 20_000_000L, audio = null))
+    assertTrue("cut ${d.startMs} at the coloured card's end", d.startMs in 3_900L..4_100L)
+  }
+
+  @Test
+  fun aQuietDarkCardAfterAColouredCardIsCutWithIt() {
+    val d = LeadInPolicy.decide(clip(Seg.GREEN to 4_000_000L, Seg.DARK to 4_000_000L, Seg.CONTENT to 20_000_000L, audio = quietThenLoud(8_000_000L)))
+    assertEquals("the first content frame, a keyframe at 8.008 s", keyMs(192 * frameUs), d.startMs)
+    assertEquals("ok", d.reason)
+    assertTrue("the dark card's quiet share ${d.cardQuietPct}% is logged", (d.cardQuietPct ?: 0) >= 80)
+  }
+
   @Test
   fun withNoAudioACardKeepsItsBlackGap() {
     val d = LeadInPolicy.decide(clip(Seg.GREEN to 4_000_000L, Seg.BLACK to 2_000_000L, Seg.CONTENT to 20_000_000L, audio = null))
