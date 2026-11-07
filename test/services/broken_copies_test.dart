@@ -29,7 +29,7 @@ void main() {
   final fourK = copySourceKey(film, film.mediaVersions![0]);
   final hd = copySourceKey(film, film.mediaVersions![1]);
 
-  test('a failure is remembered for the run, and on disk for 24 hours', () async {
+  test('a failure is remembered for 24 hours, across a restart', () async {
     await store.markBroken(fourK);
     expect(store.isBroken(fourK), isTrue);
     expect(store.isBroken(hd), isFalse);
@@ -47,10 +47,27 @@ void main() {
     expect(store.isBroken(fourK), isFalse);
   });
 
-  test('within the run a failure holds even past the stored window', () async {
+  // A TV app can run for days without a restart: the run is no bound.
+  test('a failure expires after 24 hours without a restart too', () async {
     await store.markBroken(fourK);
-    now = now.add(const Duration(hours: 30));
+    now = now.add(const Duration(hours: 23));
     expect(store.isBroken(fourK), isTrue);
+    now = now.add(const Duration(hours: 2));
+    expect(store.isBroken(fourK), isFalse);
+    expect(store.isCopyBroken(film), isFalse);
+  });
+
+  test('a failure counts before the stored ones are read, and survives the read', () async {
+    // An earlier failure of the 1080p, stored by a previous run.
+    final settings = await SettingsService.getInstance();
+    await settings.write(SettingsService.brokenCopies, {hd: now.millisecondsSinceEpoch});
+    store.restartForTesting();
+
+    final marking = store.markBroken(fourK);
+    expect(store.isBroken(fourK), isTrue, reason: 'at once, before the read finishes');
+    await marking;
+    expect(store.isBroken(fourK), isTrue);
+    expect(store.isBroken(hd), isTrue);
   });
 
   test('a copy that plays is forgotten at once, on disk too', () async {

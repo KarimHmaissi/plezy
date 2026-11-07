@@ -124,9 +124,10 @@ Details of each are in the dated entries below.
   after the film has started playing.
 - Each try logs one `[CopyFallback]` line (reason, quality and server
   number; no names, addresses or tokens).
-- **Copies that failed are remembered** (`BrokenCopies`): for the rest of
-  the app run, and on this device for 24 hours, keyed by server, item and
-  version id only. Play's default (`bestVersionIndex`), Explore and AI
+- **Copies that failed are remembered** (`BrokenCopies`) for 24 hours, on
+  this device and in memory alike (the Shield keeps Plezy running for
+  days, so the app run is no bound), keyed by server, item and version id
+  only. Play's default (`bestVersionIndex`), Explore and AI
   picks (`bestLibraryCopy`) pass over them while another copy is left, and
   when Play's default lands on one anyway the player opens the best other
   copy straight away ("That copy didn't play recently — opening the 4K

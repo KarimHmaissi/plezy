@@ -10,21 +10,23 @@ import 'settings_service.dart';
 /// fallback go to one that works.
 ///
 /// Keyed by [copySourceKey] (server, item id, version id; no token, address
-/// or name). A failure is remembered for the rest of the app run, and on this
-/// device for [ttl] after it ([SettingsService.brokenCopies]). A file that
-/// later plays is forgotten at once.
+/// or name). A failure is remembered for [ttl] after it, on this device
+/// ([SettingsService.brokenCopies]) and in memory alike: a TV app can run
+/// for days, so the app run is no bound. A file that later plays is
+/// forgotten at once.
 class BrokenCopies {
   BrokenCopies._();
 
   static final BrokenCopies instance = BrokenCopies._();
 
-  /// How long a failure outlives the app run that saw it.
+  /// How long a failure is remembered.
   static const Duration ttl = Duration(hours: 24);
 
   /// Most failures kept on disk; the oldest go first.
   static const int maxEntries = 200;
 
-  final Set<String> _thisRun = {};
+  /// Copy key → when it failed (epoch ms): this run's failures and, once
+  /// [ensureLoaded] has run, the stored ones.
   Map<String, int> _stored = {};
   bool _loaded = false;
   DateTime Function() _now = DateTime.now;
@@ -56,8 +58,8 @@ class BrokenCopies {
 
   bool _fresh(int? failedAtMs) => failedAtMs != null && _now().millisecondsSinceEpoch - failedAtMs < ttl.inMilliseconds;
 
-  /// Whether the file under [key] failed in this run or within [ttl].
-  bool isBroken(String key) => _thisRun.contains(key) || _fresh(_stored[key]);
+  /// Whether the file under [key] failed within [ttl].
+  bool isBroken(String key) => _fresh(_stored[key]);
 
   /// Whether [version] of [copy] failed recently.
   bool isVersionBroken(MediaItem copy, MediaVersion? version) => isBroken(copySourceKey(copy, version));
@@ -70,21 +72,24 @@ class BrokenCopies {
     return versions.every((version) => isVersionBroken(copy, version));
   }
 
-  /// Remember that the file under [key] failed to open.
+  /// Remember that the file under [key] failed to open. It counts at once;
+  /// the stored failures read meanwhile do not overwrite it.
   Future<void> markBroken(String key) async {
-    _thisRun.add(key);
-    await ensureLoaded();
     _stored[key] = _now().millisecondsSinceEpoch;
+    await ensureLoaded();
     await _write();
   }
 
-  /// The file under [key] played: forget any failure of it.
+  /// The file under [key] played: forget any failure of it, in memory at
+  /// once and, once the stored failures are read, on disk.
   Future<void> clear(String key) async {
-    final wasInRun = _thisRun.remove(key);
+    final wasKnown = _stored.remove(key) != null;
     await ensureLoaded();
     final wasStored = _stored.remove(key) != null;
-    if (wasStored) await _write();
-    if (wasInRun || wasStored) appLogger.i('[CopyFallback] a copy that failed before has played; forgotten');
+    if (wasKnown || wasStored) {
+      await _write();
+      appLogger.i('[CopyFallback] a copy that failed before has played; forgotten');
+    }
   }
 
   Future<void> _write() async {
@@ -101,17 +106,15 @@ class BrokenCopies {
 
   @visibleForTesting
   void resetForTesting({DateTime Function()? now}) {
-    _thisRun.clear();
     _stored = {};
     _loaded = false;
     _now = now ?? DateTime.now;
   }
 
-  /// Forget this run's failures, as an app restart does, keeping the stored
-  /// ones.
+  /// Forget what is in memory, as an app restart does, keeping the stored
+  /// failures.
   @visibleForTesting
   void restartForTesting() {
-    _thisRun.clear();
     _stored = {};
     _loaded = false;
   }
