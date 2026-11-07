@@ -1725,6 +1725,8 @@
       "mute": "Mute",
       "hideControls": "Hide controls",
       "showControls": "Show controls",
+      "fillScreen": "Fill the screen",
+      "fitScreen": "Fit to the screen",
       "failedTitle": "Couldn't load ${deck}",
       "failedBodyTv": "Press OK to try again, or → for the next deck.",
       "failedBodyTap": "Tap to try again.",

@@ -853,6 +853,12 @@ class SettingsService extends BaseSharedPreferencesService {
   /// immersive view (V2-31). Per device, like [reelIntroSeen].
   static const reelImmersiveHintSeen = BoolPref('reel_immersive_hint_seen');
 
+  /// The phone feed's picture fills the screen (V2-33): a pinch out crops the
+  /// clip to cover the page, a pinch in fits it again, and the choice is
+  /// kept for the next card and the next visit. Per device (a TV has no
+  /// pinch, and a screen's shape is its own), so reset but not exported.
+  static const reelFill = BoolPref('reel_fill');
+
   /// Show the Reel tab, which takes Explore's slot (D14). Works like
   /// [showExploreTab]. Today: shown.
   static const showReelTab = BoolPref('show_reel_tab', defaultValue: true);
@@ -1826,6 +1832,7 @@ class SettingsService extends BaseSharedPreferencesService {
     reelIntroSeen,
     reelHintSessions,
     reelImmersiveHintSeen,
+    reelFill,
   ];
 
   /// Settings that "Reset All Settings" actually resets.

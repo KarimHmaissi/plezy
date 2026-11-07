@@ -8444,6 +8444,12 @@ class Translations$reel$card$en {
 	/// en: 'Show controls'
 	String get showControls => 'Show controls';
 
+	/// en: 'Fill the screen'
+	String get fillScreen => 'Fill the screen';
+
+	/// en: 'Fit to the screen'
+	String get fitScreen => 'Fit to the screen';
+
 	/// en: 'Couldn't load ${deck}'
 	String failedTitle({required Object deck}) => 'Couldn\'t load ${deck}';
 
@@ -11801,6 +11807,8 @@ extension on Translations {
 			'reel.card.mute' => 'Mute',
 			'reel.card.hideControls' => 'Hide controls',
 			'reel.card.showControls' => 'Show controls',
+			'reel.card.fillScreen' => 'Fill the screen',
+			'reel.card.fitScreen' => 'Fit to the screen',
 			'reel.card.failedTitle' => ({required Object deck}) => 'Couldn\'t load ${deck}',
 			'reel.card.failedBodyTv' => 'Press OK to try again, or → for the next deck.',
 			'reel.card.failedBodyTap' => 'Tap to try again.',
@@ -12272,10 +12280,10 @@ extension on Translations {
 			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
 			'liveTv.recordSettings.keepUpTo' => 'Episodes to keep',
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
-			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
-			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
 			_ => null,
 		} ?? switch (path) {
+			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
+			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
@@ -12786,10 +12794,10 @@ extension on Translations {
 			'performanceOverlay.decoderQualcommHw' => 'Qualcomm HW',
 			'performanceOverlay.decoderMediatekHw' => 'MediaTek HW',
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
-			'performanceOverlay.decoderSoftware' => 'Software',
-			'performanceOverlay.decoderHardware' => 'Hardware',
 			_ => null,
 		} ?? switch (path) {
+			'performanceOverlay.decoderSoftware' => 'Software',
+			'performanceOverlay.decoderHardware' => 'Hardware',
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'performanceOverlay.signal' => 'Signal',
