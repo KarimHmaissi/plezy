@@ -121,7 +121,8 @@ class _Pill extends StatelessWidget {
   final String label;
   final String? hint;
 
-  /// What a screen reader says, as a live region (the glyph ≡ reads badly).
+  /// The sound as it is, which a screen reader says after the action, as a
+  /// live region (the glyph ≡ reads badly).
   final String announce;
   final bool focused;
   final VoidCallback onTap;
@@ -143,7 +144,10 @@ class _Pill extends StatelessWidget {
       liveRegion: true,
       button: true,
       focused: focused,
-      label: announce,
+      // What it does ("Sound on" / "Mute"), then the sound as it is now and
+      // the keys for it.
+      label: label,
+      value: announce,
       onTap: onTap,
       child: ExcludeSemantics(
         child: GestureDetector(

@@ -232,6 +232,18 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// its key up goes on to the shell instead of bringing the button in).
   bool _backFromSound = false;
 
+  /// TV: whether the Back being pressed went down on the card, so only its
+  /// own key up brings the sound button in. A key up whose press was seen
+  /// elsewhere (a sheet or page that closed on the press) goes on.
+  bool _backDownOnCard = false;
+
+  /// TV: just shown again (back from a page the Reel opened, the player
+  /// among them): stray Back events from that pop go on to the shell,
+  /// which swallows them ([MainScreen]'s post-pop guard), until the next
+  /// Back key up or two frames. On Android TV the platform pop can come
+  /// before the key events, so they reach the Reel.
+  bool _backHeldAfterShow = false;
+
   /// The first-run intro (V2-55), until it is dismissed on this device.
   /// While it shows, the session is built but not started: nothing plays,
   /// nothing is recorded, and no card slot is taken.
@@ -677,6 +689,7 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   void onTabShown() {
     ReelScreen._live = this;
     _shown = true;
+    _holdBackAfterShow();
     ReelScreen.showing.value = true;
     _perf.attachFrames();
     // Back from Watch (or another page the Reel opened) is the same visit.
@@ -685,6 +698,14 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Under the first-run intro nothing has started yet ([_endIntro]).
     if (!_intro) _beginLeanBack();
     unawaited(_visit(back ? 'back' : 'tab'));
+  }
+
+  void _holdBackAfterShow() {
+    _backHeldAfterShow = true;
+    _backDownOnCard = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _backHeldAfterShow = false);
+    });
   }
 
   /// A visit starts ([why]: the tab shown, which an app launch onto the
@@ -1051,7 +1072,15 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   KeyEventResult? _soundButtonKey(ReelController c, KeyEvent event) {
     final key = event.logicalKey;
     if (key.isBackKey) {
-      if (event is KeyDownEvent) _backFromSound = _soundFocus.value;
+      // Stray Back from the pop that showed the Reel again: the shell's.
+      if (_backHeldAfterShow) {
+        if (event is KeyUpEvent) _backHeldAfterShow = false;
+        return KeyEventResult.ignored;
+      }
+      if (event is KeyDownEvent) {
+        _backFromSound = _soundFocus.value;
+        _backDownOnCard = !_soundFocus.value;
+      }
       if (_backFromSound) {
         if (event is KeyUpEvent) {
           _backFromSound = false;
@@ -1059,6 +1088,9 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
         }
         return KeyEventResult.ignored;
       }
+      // A key up (or repeat) whose press the card never saw goes on.
+      if (!_backDownOnCard) return KeyEventResult.ignored;
+      if (event is KeyUpEvent) _backDownOnCard = false;
       if (event is KeyDownEvent || event is KeyRepeatEvent) _leanBack.poke();
       return handleBackKeyAction(event, () => _soundFocus.value = true);
     }

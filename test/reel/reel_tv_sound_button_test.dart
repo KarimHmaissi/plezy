@@ -163,6 +163,7 @@ void main() {
 
   tearDown(() async {
     TvDetectionService.debugSetAppleTVOverride(null);
+    TvDetectionService.debugSetTvOverride(null);
     ReelScreen.requestedDeck.value = null;
     await db.close();
   });
@@ -271,78 +272,140 @@ void main() {
     });
   });
 
-  group('with the d-pad', () {
-    testWidgets('Back on the card focuses it; OK turns the sound on, OK again mutes', (tester) async {
-      await showTv(tester);
-      expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isTrue, reason: 'the Reel takes this Back');
-      await settle(tester);
-      expect(ring, findsOneWidget);
-      expect((c.deck.id, title()), ('a', 'Harbor Lights'));
-      expect(find.descendant(of: soundOff, matching: find.text('  ·  ${t.reel.card.soundButtonOk}')), findsOneWidget);
+  // Apple TV runs Back on its key down; an Android TV (a Shield) on its
+  // key up ([handleBackKeyAction]). Both take the same d-pad paths.
+  for (final appleTv in [true, false]) {
+    group('with the d-pad (${appleTv ? 'Apple TV' : 'Android TV'})', () {
+      setUp(() {
+        if (appleTv) return;
+        TvDetectionService.debugSetAppleTVOverride(null);
+        TvDetectionService.debugSetTvOverride(true);
+      });
 
-      await ok(tester);
-      expect(c.clips.muted, isFalse);
-      expect(settings.read(SettingsService.reelMuted), isFalse);
-      expect(soundOnBadge, findsOneWidget);
-      expect(find.text(t.reel.card.mute), findsOneWidget);
-      expect(ring, findsOneWidget, reason: 'the button keeps the focus');
-      expect(watched, isEmpty, reason: 'OK on the button is not Watch');
-      expect(find.text(t.reel.sheet.details), findsNothing);
-
-      await ok(tester);
-      expect(c.clips.muted, isTrue);
-      expect(settings.read(SettingsService.reelMuted), isTrue);
-      expect(soundOff, findsOneWidget);
-    });
-
-    testWidgets('on the button ↓ ← → move nothing; ↑ goes back to the card on the same title', (tester) async {
-      await showTv(tester);
-      await press(tester, LogicalKeyboardKey.escape);
-      expect(ring, findsOneWidget);
-
-      for (final k in [LogicalKeyboardKey.arrowDown, LogicalKeyboardKey.arrowLeft, LogicalKeyboardKey.arrowRight]) {
-        expect(await tester.sendKeyEvent(k), isTrue);
+      testWidgets('Back on the card focuses it; OK turns the sound on, OK again mutes', (tester) async {
+        await showTv(tester);
+        expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isTrue, reason: 'the Reel takes this Back');
         await settle(tester);
-        expect((c.deck.id, title()), ('a', 'Harbor Lights'), reason: '$k moved nothing');
         expect(ring, findsOneWidget);
+        expect((c.deck.id, title()), ('a', 'Harbor Lights'));
+        expect(find.descendant(of: soundOff, matching: find.text('  ·  ${t.reel.card.soundButtonOk}')), findsOneWidget);
+
+        await ok(tester);
+        expect(c.clips.muted, isFalse);
+        expect(settings.read(SettingsService.reelMuted), isFalse);
+        expect(soundOnBadge, findsOneWidget);
+        expect(find.text(t.reel.card.mute), findsOneWidget);
+        expect(ring, findsOneWidget, reason: 'the button keeps the focus');
+        expect(watched, isEmpty, reason: 'OK on the button is not Watch');
+        expect(find.text(t.reel.sheet.details), findsNothing);
+
+        await ok(tester);
+        expect(c.clips.muted, isTrue);
+        expect(settings.read(SettingsService.reelMuted), isTrue);
+        expect(soundOff, findsOneWidget);
+      });
+
+      testWidgets('on the button ↓ ← → move nothing; ↑ goes back to the card on the same title', (tester) async {
+        await showTv(tester);
+        await press(tester, LogicalKeyboardKey.escape);
+        expect(ring, findsOneWidget);
+
+        for (final k in [LogicalKeyboardKey.arrowDown, LogicalKeyboardKey.arrowLeft, LogicalKeyboardKey.arrowRight]) {
+          expect(await tester.sendKeyEvent(k), isTrue);
+          await settle(tester);
+          expect((c.deck.id, title()), ('a', 'Harbor Lights'), reason: '$k moved nothing');
+          expect(ring, findsOneWidget);
+        }
+
+        await press(tester, LogicalKeyboardKey.arrowUp);
+        expect(ring, findsNothing);
+        expect((c.deck.id, title()), ('a', 'Harbor Lights'));
+
+        // The card has the keys again.
+        await press(tester, LogicalKeyboardKey.arrowDown);
+        expect(title(), 'Lantern Bay');
+      });
+
+      testWidgets('Back on the button goes on to the shell and lets the focus go', (tester) async {
+        await showTv(tester);
+        await press(tester, LogicalKeyboardKey.escape);
+        expect(ring, findsOneWidget);
+        expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse, reason: 'Back belongs to the shell');
+        await settle(tester);
+        expect(ring, findsNothing);
+      });
+
+      testWidgets('≡ on the button does what it does on the card', (tester) async {
+        await showTv(tester);
+        await press(tester, LogicalKeyboardKey.escape);
+        await press(tester, LogicalKeyboardKey.contextMenu);
+        expect(c.clips.muted, isFalse);
+        expect(soundOnBadge, findsOneWidget);
+      });
+
+      testWidgets('the Reel losing focus lets the button go', (tester) async {
+        await showTv(tester);
+        await press(tester, LogicalKeyboardKey.escape);
+        expect(ring, findsOneWidget);
+        // A page over it, the sheet or the rail takes the focus.
+        FocusManager.instance.primaryFocus!.unfocus();
+        await settle(tester);
+        expect(ring, findsNothing);
+      });
+
+      testWidgets('a Back key up whose press the card never saw goes on', (tester) async {
+        await showTv(tester);
+        // A sheet or page that closed on the press: only its key up comes.
+        expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isFalse);
+        await settle(tester);
+        expect(ring, findsNothing);
+        await ok(tester);
+        expect(watched, [false], reason: 'OK on the card still watches');
+      });
+
+      testWidgets('stray Back from the pop that showed the Reel again goes on to the shell', (tester) async {
+        final reel = await showTv(tester);
+        reel.onTabHidden();
+        await settle(tester);
+        reel.focusActiveTabIfReady();
+        await tester.pump();
+        // The player (or a page) popped: the shell shows the tab again, and on
+        // an Android TV the pop's Back key events come after it.
+        reel.onTabShown();
+        expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.escape), isFalse);
+        expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isFalse);
+        await settle(tester);
+        expect(ring, findsNothing);
+        await ok(tester);
+        expect(watched, [false], reason: 'OK on the card still watches');
+
+        // The next real Back is the card's again.
+        reel.focusActiveTabIfReady();
+        await tester.pump();
+        await press(tester, LogicalKeyboardKey.escape);
+        expect(ring, findsOneWidget);
+      });
+
+      if (!appleTv) {
+        testWidgets('Android TV: the button comes in on the key up; Back on it goes on, down and up', (tester) async {
+          await showTv(tester);
+          expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.escape), isTrue);
+          await settle(tester);
+          expect(ring, findsNothing, reason: 'not on the press');
+          expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isTrue);
+          await settle(tester);
+          expect(ring, findsOneWidget);
+
+          expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.escape), isFalse);
+          await settle(tester);
+          expect(ring, findsOneWidget, reason: 'it lets go on the key up');
+          expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isFalse);
+          await settle(tester);
+          expect(ring, findsNothing);
+        });
       }
-
-      await press(tester, LogicalKeyboardKey.arrowUp);
-      expect(ring, findsNothing);
-      expect((c.deck.id, title()), ('a', 'Harbor Lights'));
-
-      // The card has the keys again.
-      await press(tester, LogicalKeyboardKey.arrowDown);
-      expect(title(), 'Lantern Bay');
     });
-
-    testWidgets('Back on the button goes on to the shell and lets the focus go', (tester) async {
-      await showTv(tester);
-      await press(tester, LogicalKeyboardKey.escape);
-      expect(ring, findsOneWidget);
-      expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse, reason: 'Back belongs to the shell');
-      await settle(tester);
-      expect(ring, findsNothing);
-    });
-
-    testWidgets('≡ on the button does what it does on the card', (tester) async {
-      await showTv(tester);
-      await press(tester, LogicalKeyboardKey.escape);
-      await press(tester, LogicalKeyboardKey.contextMenu);
-      expect(c.clips.muted, isFalse);
-      expect(soundOnBadge, findsOneWidget);
-    });
-
-    testWidgets('the Reel losing focus lets the button go', (tester) async {
-      await showTv(tester);
-      await press(tester, LogicalKeyboardKey.escape);
-      expect(ring, findsOneWidget);
-      // A page over it, the sheet or the rail takes the focus.
-      FocusManager.instance.primaryFocus!.unfocus();
-      await settle(tester);
-      expect(ring, findsNothing);
-    });
-  });
+  }
 
   group('every visit that starts muted again shows it', () {
     testWidgets('the tab hidden and shown again: muted, "Sound on", not focused', (tester) async {

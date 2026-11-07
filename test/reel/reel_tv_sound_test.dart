@@ -516,7 +516,22 @@ void main() {
       expect(
         tester.getSemantics(find.descendant(of: soundOff, matching: find.byType(Semantics)).first),
         matchesSemantics(
-          label: t.reel.card.soundOffAnnounce,
+          label: t.reel.card.soundOn,
+          value: t.reel.card.soundOffAnnounce,
+          isLiveRegion: true,
+          isButton: true,
+          isFocusable: true,
+          hasTapAction: true,
+        ),
+      );
+      // With the sound on, the button says what it does: it mutes.
+      await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
+      await settle(tester);
+      expect(
+        tester.getSemantics(find.descendant(of: soundOnBadge, matching: find.byType(Semantics)).first),
+        matchesSemantics(
+          label: t.reel.card.mute,
+          value: t.reel.card.soundOnAnnounce,
           isLiveRegion: true,
           isButton: true,
           isFocusable: true,
