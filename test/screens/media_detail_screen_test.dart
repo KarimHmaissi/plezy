@@ -27,6 +27,7 @@ import 'package:plezy/providers/download_provider.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/providers/watch_state_store.dart';
 import 'package:plezy/screens/media_detail_screen.dart';
+import 'package:plezy/screens/video_player_screen.dart';
 import 'package:plezy/models/download_models.dart';
 import 'package:plezy/navigation/profile_navigation_scope.dart';
 import 'package:plezy/services/broken_copies.dart';
@@ -2010,6 +2011,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(observer.pushedRouteNames, contains(kVideoPlayerRouteName));
+      // Fork: plain Play is Play's default, which may move on to another
+      // copy if it fails; nothing was picked by hand.
+      expect(observer.pushedPlayers.last.defaultCopyChoice, isTrue);
+      expect(observer.pushedPlayers.last.copyChosenByHand, isFalse);
       // Watch state did refresh: the play button now targets the next episode.
       expect(find.text('S1E2'), findsOneWidget);
       // The lightweight refresh fetches the item + on-deck only — no season
@@ -2161,6 +2166,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(observer.pushedRouteNames, contains(kVideoPlayerRouteName));
+      // Fork: a version picked by hand; if it fails the player asks.
+      expect(observer.pushedPlayers.last.selectedMediaIndex, 1);
+      expect(observer.pushedPlayers.last.copyChosenByHand, isTrue);
+      expect(observer.pushedPlayers.last.defaultCopyChoice, isFalse);
       // The pick is remembered so Continue Watching / plain Play resume it.
       final saved = await savedMediaVersionPreferenceFor(movie);
       expect(saved?.index, 1);
@@ -2243,6 +2252,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(observer.pushedRouteNames, contains(kVideoPlayerRouteName));
+      expect(observer.pushedPlayers.last.metadata.serverId, 'server_2');
+      expect(observer.pushedPlayers.last.copyChosenByHand, isTrue, reason: 'a failure of the pick asks');
       expect(
         await savedMediaVersionPreferenceFor(movie),
         isNull,
@@ -3640,10 +3651,18 @@ class _RecordingNavigatorObserver extends NavigatorObserver {
   final bool popVideoPlayerImmediately;
   final pushedRouteNames = <String?>[];
 
+  /// The players pushed, as their routes build them: what each launch asked
+  /// the player for.
+  final pushedPlayers = <VideoPlayerScreen>[];
+
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPush(route, previousRoute);
     pushedRouteNames.add(route.settings.name);
+    if (route is PageRouteBuilder && route.settings.name == kVideoPlayerRouteName) {
+      final page = route.pageBuilder(navigator!.context, kAlwaysCompleteAnimation, kAlwaysCompleteAnimation);
+      if (page is VideoPlayerScreen) pushedPlayers.add(page);
+    }
     if (popVideoPlayerImmediately && route.settings.name == kVideoPlayerRouteName) {
       scheduleMicrotask(() => navigator?.pop());
     }

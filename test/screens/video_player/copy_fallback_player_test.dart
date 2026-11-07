@@ -109,6 +109,7 @@ void main() {
     required bool opens,
     bool firstFrame = true,
     bool matchesDisplay = false,
+    bool copyChosenByHand = false,
   }) async {
     final a = _CopyServer('server-a', 'Server A', copy: onA);
     final b = _CopyServer('server-b', 'Server B', copy: onB);
@@ -143,9 +144,11 @@ void main() {
           home: VideoPlayerScreen(
             key: key,
             metadata: onA,
-            // Play's default: the highest-bitrate version, the 4K.
+            // Play's default: the highest-bitrate version, the 4K (or, with
+            // copyChosenByHand, the 4K picked from the copy picker).
             selectedMediaIndex: 1,
             selectedQualityPreset: TranscodeQualityPreset.original,
+            copyChosenByHand: copyChosenByHand,
           ),
         ),
       ),
@@ -292,6 +295,111 @@ void main() {
       },
     );
   });
+
+  // The viewer picked Server A's 4K from the copy picker: a failure of it
+  // is theirs to answer, not the player's. The dialog asks, the picker it
+  // offers marks the 4K, and a pick from it that fails asks again.
+  testWidgets('a copy picked by hand that fails asks instead of moving on, and so does the next pick', (tester) async {
+    await withMockPlayerChannels(
+      methodChannelName: 'com.plezy/mpv_player',
+      eventChannelName: 'com.plezy/mpv_player/events',
+      testBody: () async {
+        final (:state, :player, :a, :b) = await pumpPlayer(
+          tester,
+          opens: true,
+          firstFrame: false,
+          copyChosenByHand: true,
+        );
+        bool busyDialogShown() => find.text(t.messages.serverBusyTitle).evaluate().isNotEmpty;
+
+        player.emitError(const PlayerError('Stream unavailable', cause: PlayerError.serverHttp503));
+        await pumpUntil(
+          tester,
+          () => busyDialogShown() || player.openedUris.isNotEmpty,
+          describe: () => '${player.openedUris}',
+        );
+
+        expect(player.openedUris, isEmpty, reason: 'no copy the viewer did not pick is opened');
+        expect([...a.picks, ...b.picks], isEmpty);
+        expect(find.text(t.messages.serverBusyTitle), findsOneWidget);
+        expect(find.text(t.copies.chooseAnother), findsOneWidget);
+        expect(
+          BrokenCopies.instance.isBroken('server-a|101|a4k'),
+          isTrue,
+          reason: "still remembered, so Play's default passes it by",
+        );
+
+        await tester.tap(find.text(t.copies.chooseAnother));
+        await pumpUntil(tester, () => find.text(t.copies.pickerTitle).evaluate().isNotEmpty);
+        expect(find.textContaining('Server A • ${t.copies.didNotPlayMark}'), findsOneWidget);
+
+        await tester.tap(find.textContaining(RegExp(r'^1080p.*Server B')));
+        await pumpUntil(tester, () => player.openedUris.isNotEmpty, describe: () => '${player.openedUris}');
+        expect(player.openedUris.single, 'https://example.invalid/server-b/202');
+        expect(b.picks, ['b1080']);
+        expect(player.openedStarts.single, const Duration(minutes: 10));
+
+        // That pick fails before its first frame too.
+        player.emitError(const PlayerError('Stream unavailable', cause: PlayerError.serverHttp503));
+        await pumpUntil(
+          tester,
+          () => busyDialogShown() || player.openedUris.length > 1,
+          describe: () => '${player.openedUris}',
+        );
+        expect(player.openedUris, hasLength(1), reason: 'the next pick is the viewer\'s too');
+        expect(find.text(t.copies.chooseAnother), findsOneWidget);
+        expect(state.debugCurrentMetadataForTesting.globalKey, onB.globalKey);
+
+        await tester.tap(find.text(t.common.close));
+        await tester.pump(const Duration(seconds: 5));
+      },
+    );
+  });
+
+  // The Version & Quality switch in the player is the viewer's own change:
+  // a failure of it keeps upstream's Retry, which goes back to the file that
+  // was playing, instead of the copy fallback opening another server's copy.
+  testWidgets('a version switched to in the player that fails is not swapped for another copy', (tester) async {
+    await withMockPlayerChannels(
+      methodChannelName: 'com.plezy/mpv_player',
+      eventChannelName: 'com.plezy/mpv_player/events',
+      testBody: () async {
+        final (:state, :player, :a, :b) = await pumpPlayer(tester, opens: true);
+
+        // Server A's 4K fails; Server B's 4K opens and plays.
+        player.emitError(const PlayerError('Stream unavailable', cause: PlayerError.serverHttp503));
+        await pumpUntil(tester, () => player.openedUris.isNotEmpty, describe: () => '${player.openedUris}');
+        expect(b.picks, ['b4k']);
+
+        // 25 minutes in, the viewer switches to Server B's 1080p, which
+        // never gets to a first frame.
+        player.setPosition(const Duration(minutes: 25));
+        player.firstFrame = false;
+        unawaited(state.debugSwitchPlaybackSourceForTesting(newMediaIndex: 1));
+        await pumpUntil(tester, () => player.openedUris.length > 1, describe: () => '${player.openedUris}');
+        expect(b.picks, ['b4k', 'b1080']);
+
+        player.emitError(const PlayerError('Decoder failed'));
+        await pumpUntil(
+          tester,
+          () => find.text(t.common.retry).evaluate().isNotEmpty || player.openedUris.length > 2,
+          describe: () => '${player.openedUris}',
+        );
+        expect(player.openedUris, hasLength(2), reason: 'no copy the viewer did not pick is opened');
+        expect(a.picks, isEmpty);
+        expect(find.text(t.copies.chooseAnother), findsOneWidget);
+
+        // Retry goes back to the 4K, from where the viewer was.
+        player.firstFrame = true;
+        await tester.tap(find.text(t.common.retry));
+        await pumpUntil(tester, () => player.openedUris.length > 2, describe: () => '${player.openedUris}');
+        expect(b.picks, ['b4k', 'b1080', 'b4k']);
+        expect(player.openedStarts.last, const Duration(minutes: 25));
+
+        await tester.pump(const Duration(seconds: 5));
+      },
+    );
+  });
 }
 
 class _CopyServer with PlaybackReportRecorder implements MediaServerClient {
@@ -363,7 +471,8 @@ class _CopyPlayer extends FakeSyncPlayer {
 
   /// Whether an open gets as far as its first frame; when false the load
   /// starts and then hangs, as a stream the server keeps refusing does.
-  final bool firstFrame;
+  /// A test may change it between opens.
+  bool firstFrame;
 
   /// Android mpv with display matching on: every open waits, paused, for its
   /// first frame before the reload that started it lets go of the player.

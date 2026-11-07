@@ -243,10 +243,17 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
     _toastController.show(Symbols.swap_horiz_rounded, text, duration: const Duration(seconds: 4));
   }
 
+  /// Whether the viewer picked the file now opening themselves.
+  bool get _currentOpenChosenByHand => _currentOpenRequest?.chosenByHand ?? widget.copyChosenByHand;
+
   /// A failed open, before its first frame, that another copy may fix. Takes
   /// the failure over and returns true when there are attempts left; the
   /// caller's own handling runs otherwise. The dead open is stopped here, but
   /// the launch is not marked failed: the next copy continues it.
+  ///
+  /// A file the viewer picked by hand is remembered as failed but not swapped
+  /// for one they did not pick: the caller's dialog or failure view asks
+  /// instead, with "Choose another copy" (the copies are looked up already).
   bool _tryCopyFallback({
     required CopyFallbackReason reason,
     required PlaybackFailureAction action,
@@ -257,6 +264,11 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
     final run = _copyFallbackRunForCurrent();
     run.markFailed(_currentCopySource(), reason);
     run.lastFailure = (action: action, cause: cause, message: message);
+    if (_currentOpenChosenByHand) {
+      appLogger.w('[CopyFallback] a copy picked by hand failed, reason=${reason.name}: asking, not moving on');
+      _startCopyLookup(run);
+      return false;
+    }
     if (run.attempts >= maxCopyFallbackAttempts) {
       appLogger.w('[CopyFallback] gave up after ${run.attempts} attempt(s) reason=${reason.name}');
       return false;
@@ -349,7 +361,13 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
   /// Open [source] in place of the failed file, keeping where the viewer
   /// would have started, their audio and subtitle choices (by language, since
   /// another file's streams have other ids) and the quality preset.
-  Future<MediaReloadOutcome> _openCopyInPlace(_CopyFallbackRun run, CopySource source, {required String reason}) {
+  /// [chosenByHand]: the viewer picked [source] (see [_tryCopyFallback]).
+  Future<MediaReloadOutcome> _openCopyInPlace(
+    _CopyFallbackRun run,
+    CopySource source, {
+    required String reason,
+    bool chosenByHand = false,
+  }) {
     final version = source.version;
     _fatalHttpStatuses.clear();
     return _reloadMediaInPlace(
@@ -365,6 +383,7 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
       preservedSecondarySubtitleTrack: _sessionSecondarySubtitlePreference ?? _preferredSecondarySubtitleTrack,
       showErrorUi: false,
       reason: reason,
+      chosenByHand: chosenByHand,
     );
   }
 
@@ -405,12 +424,11 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
     );
     if (picked == null || !mounted || _shuttingDown) return false;
     _dismissPlaybackFailure();
-    run.attempts = maxCopyFallbackAttempts;
     run.markTried(picked);
     appLogger.i(
       '[CopyFallback] chosen by hand: ${copySourceQualityLabel(picked) ?? '?'}@s${run.serverIndex(picked.copy.serverId)}',
     );
-    final outcome = await _openCopyInPlace(run, picked, reason: 'copy chosen after failure');
+    final outcome = await _openCopyInPlace(run, picked, reason: 'copy chosen after failure', chosenByHand: true);
     if (!mounted) return true;
     if (outcome == MediaReloadOutcome.failed || outcome == MediaReloadOutcome.rejected) {
       if (outcome == MediaReloadOutcome.failed) run.markFailed(picked, CopyFallbackReason.openFailed);
@@ -422,7 +440,7 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
   /// The settings sheet's "Choose another copy" while a file plays: the
   /// copy picker, the file on screen marked and first; the pick opens in
   /// place from the current position, keeping the viewer's audio and
-  /// subtitle choices.
+  /// subtitle choices. A pick that fails asks rather than moving on.
   Future<void> _chooseCopyWhilePlaying() async {
     if (!mounted || _shuttingDown || !_offersCopyChoice) return;
     final playing = _currentCopySource();
@@ -448,6 +466,7 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
       preservedSubtitleTrack: _sessionSubtitlePreference ?? _preferredSubtitleTrack,
       preservedSecondarySubtitleTrack: _sessionSecondarySubtitlePreference ?? _preferredSecondarySubtitleTrack,
       reason: 'copy chosen from the menu',
+      chosenByHand: true,
     );
   }
 

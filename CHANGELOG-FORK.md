@@ -120,8 +120,17 @@ Details of each are in the dated entries below.
 - Only when every copy fails does the "Stream unavailable" / "File
   unavailable" dialog appear, now with **Choose another copy** beside
   Close (Close keeps the focus). The failure view gets the same button.
-- Not for live TV, downloads, Watch Together rooms, other backends, or
-  after the film has started playing.
+- Not for live TV, downloads, Watch Together rooms, other backends, a
+  copy picked by hand, or after the film has started playing.
+- **A copy you picked yourself is not swapped for another.** When the
+  file you chose fails (from the ▾ list, "Play Version...", the player's
+  Choose another copy or its Version & Quality switch), the dialog or
+  failure view asks, with **Choose another copy**, instead of trying other
+  copies by itself; the file is still remembered and marked as failed.
+  Retry after a failed Version & Quality switch goes back to what was
+  playing, as before. Plain Play and a remembered pick still move on by
+  themselves, and the server's own switch away from a missing file is
+  unchanged.
 - Each try logs one `[CopyFallback]` line (reason, quality and server
   number; no names, addresses or tokens).
 - **Copies that failed are remembered** (`BrokenCopies`) for 24 hours, on
@@ -143,8 +152,9 @@ Details of each are in the dated entries below.
   that failed recently say "Didn't play recently". The long-press menu's
   "Play Version..." opens the same list. In the player, the settings sheet
   has **Choose another copy** (switches in place from the current
-  position), and the failure dialog and failure view offer it too. The
-  Explore page's copy list marks copies that failed recently.
+  position), and the failure dialog and failure view offer it too (a film
+  that failed part-way goes on from where it stopped). The Explore page's
+  copy list marks copies that failed recently.
 
 ## 2026-11-05
 

@@ -377,6 +377,7 @@ class _PlaybackOpenRequest {
     required this.qualityPreset,
     required this.audioStreamId,
     required this.resumePosition,
+    this.chosenByHand = false,
   });
 
   final MediaItem metadata;
@@ -385,6 +386,11 @@ class _PlaybackOpenRequest {
   final TranscodeQualityPreset qualityPreset;
   final int? audioStreamId;
   final Duration? resumePosition;
+
+  /// Fork: the viewer picked this file or rendition themselves (a version or
+  /// copy picker, a source switch in the player), so a failure of it asks
+  /// rather than moving on to a copy they did not pick.
+  final bool chosenByHand;
 
   /// Same item and source selection; where it resumes from is incidental.
   bool sameSourceAs(_PlaybackOpenRequest other) =>
@@ -401,6 +407,7 @@ class _PlaybackOpenRequest {
     qualityPreset: qualityPreset,
     audioStreamId: audioStreamId,
     resumePosition: position,
+    chosenByHand: chosenByHand,
   );
 }
 
@@ -499,6 +506,12 @@ class VideoPlayerScreen extends StatefulWidget {
   /// downloaded or shared by a room), so a copy that failed to play recently
   /// may be skipped for a working one before it is opened.
   final bool defaultCopyChoice;
+
+  /// Fork: the viewer picked this file for this launch ("Play Version", the
+  /// copy picker). If it fails to open, the failure dialog or view asks
+  /// ("Choose another copy") instead of the player moving on by itself to a
+  /// copy they did not pick.
+  final bool copyChosenByHand;
   final bool Function()? isLaunchCurrent;
   final PlaybackLaunchObserver? launchObserver;
 
@@ -534,6 +547,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.initialPosition,
     this.strictMediaSelection = false,
     this.defaultCopyChoice = false,
+    this.copyChosenByHand = false,
     this.isLaunchCurrent,
     this.launchObserver,
   });

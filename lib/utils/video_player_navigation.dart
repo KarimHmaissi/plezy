@@ -419,10 +419,13 @@ Future<bool?> navigateToVideoPlayer(
   }
   if (!launchCurrent()) return null;
   final preferredVersion = savedVersion;
+  // Fork: a file the caller picked ("Play Version", the copy picker). If it
+  // fails, the player asks instead of moving on to a copy nobody picked.
+  final copyChosenByHand = selectedMediaIndex != null || selectedMediaSourceId != null;
   // Fork: with no choice made or remembered, the highest-bitrate version
   // that has not failed to play recently.
   final defaultCopyChoice =
-      selectedMediaIndex == null &&
+      !copyChosenByHand &&
       downloadedMediaIndex == null &&
       roomVersion == null &&
       preferredVersion == null &&
@@ -564,6 +567,7 @@ Future<bool?> navigateToVideoPlayer(
         initialPosition: initialPosition,
         strictMediaSelection: strictMediaSelection,
         defaultCopyChoice: defaultCopyChoice,
+        copyChosenByHand: copyChosenByHand,
         isLaunchCurrent: isLaunchCurrent,
         launchObserver: launchObserver,
       ),

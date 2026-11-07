@@ -157,6 +157,7 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
       qualityPreset: _selectedQualityPreset,
       audioStreamId: _selectedAudioStreamId,
       resumePosition: widget.initialPosition,
+      chosenByHand: widget.copyChosenByHand,
     );
 
     // Capture providers before async gaps

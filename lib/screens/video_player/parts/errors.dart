@@ -230,6 +230,7 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
       // retried from; one after it raises its own through _onPlayerError.
       showErrorUi: false,
       reason: 'retry after playback failure',
+      chosenByHand: request.chosenByHand,
     );
     if (outcome == MediaReloadOutcome.failed && mounted && _playbackFailureMessage == null) {
       _presentPlaybackFailure(t.messages.playbackFailed);
