@@ -3304,6 +3304,33 @@ void main() {
       c.dispose();
     });
 
+    test('a preload still waiting on its clip when the card changes waits for the new first frame', () async {
+      final servers = _RecordingServers(gated: '3');
+      final c = make(
+        servers: servers,
+        decks: [
+          _Deck('a', [_card('1'), _card('2'), _card('3'), _card('4')]),
+        ],
+      );
+      await c.start();
+      await frame();
+      // Card 3's extras are still on their way: its preload (two ahead) waits.
+      expect(c.clips.preloaded, {ClipPreloadRank.next: clip('2')});
+      await c.step(1);
+      expect(engine.calls, contains('open ${clip('2')}'));
+      servers.gate.complete();
+      await pumpEventQueue();
+      expect(
+        engine.calls.where((x) => x.startsWith('preload ${clip('3')}')),
+        isEmpty,
+        reason: "card 2's clip is opening: nothing else goes to the core before its first frame",
+      );
+      await frame();
+      expect(engine.calls, contains('preload ${clip('3')}'), reason: 'now the next card, preloaded as next');
+      expect(c.clips.preloaded[ClipPreloadRank.next], clip('3'));
+      c.dispose();
+    });
+
     test('the card two ahead goes to disk with its cache key; an opening two ahead never does (V2-10)', () async {
       final c = make(
         decks: [

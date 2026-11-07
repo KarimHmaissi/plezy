@@ -2332,10 +2332,18 @@ class ReelController extends ChangeNotifier {
   /// queue has resolved it, as the rank its place says when the task runs
   /// (the window may have moved on), unless its server is slow
   /// ([ClipSource.preloadable]) or it is an AI card, which empties the rank.
+  /// A card that came on screen while this waited on [c]'s clip (a step, or
+  /// a window planned while a still was up) opens first: the preload waits
+  /// for its first frame ([ReelPrefetcher.whenLifted]).
   Future<void> _preloadNear(ReelCardData c) async {
     final cleared = _cleared;
     await _prefetch.done(ReelPrefetcher.keyOf(c.id, ReelPrefetchStage.resolve));
     if (cleared != _cleared || !_mayPreload || !_resolved.contains(c.id)) return;
+    if (_prefetch.held) {
+      appLogger.d('[ReelPreload] ${c.id}: waits for the card on screen to open');
+      await _prefetch.whenLifted();
+      if (cleared != _cleared || !_mayPreload) return;
+    }
     final rank = _nearRank(c);
     if (rank == null) return;
     await clips.preload(_clip[c.id]?.source, rank: rank);
@@ -2408,6 +2416,9 @@ class ReelController extends ChangeNotifier {
     } catch (e) {
       appLogger.d('Reel: deck head lookup failed (${e.runtimeType})');
     }
+    // A card that came on screen meanwhile opens first (V2-09: neighbour
+    // preloads start after its first frame).
+    await _prefetch.whenLifted(heads: true);
     // The deck order, the head or the Reel may have moved on meanwhile.
     final rank = _headRank(c);
     if (cleared != _cleared || rank == null || !_mayPreload) return;

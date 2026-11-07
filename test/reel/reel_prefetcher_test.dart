@@ -211,6 +211,62 @@ void main() {
       q.schedule(1, [task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload)]);
       expect(started, ['h1/preload']);
     });
+
+    group('whenLifted: a preload already running waits for the card on screen', () {
+      test('no hold: at once, for the near ranks and the heads', () {
+        fakeAsync((async) {
+          var near = false, head = false;
+          q.whenLifted().then((_) => near = true);
+          q.whenLifted(heads: true).then((_) => head = true);
+          async.flushMicrotasks();
+          expect(near, isTrue);
+          expect(head, isTrue);
+        });
+      });
+
+      test('held: the near ranks go on the first frame, never before', () {
+        fakeAsync((async) {
+          q.hold();
+          var near = false;
+          q.whenLifted().then((_) => near = true);
+          async.elapse(const Duration(seconds: 1));
+          expect(near, isFalse);
+          q.release();
+          async.flushMicrotasks();
+          expect(near, isTrue);
+        });
+      });
+
+      test('the hold cap lets the near ranks go, but the heads only on a release', () {
+        fakeAsync((async) {
+          final capped = ReelPrefetcher(holdCap: const Duration(seconds: 4));
+          capped.hold();
+          var near = false, head = false;
+          capped.whenLifted().then((_) => near = true);
+          capped.whenLifted(heads: true).then((_) => head = true);
+          async.elapse(const Duration(seconds: 5));
+          expect(near, isTrue);
+          expect(head, isFalse, reason: 'no first frame yet: a head never goes on the cap');
+          capped.release();
+          async.flushMicrotasks();
+          expect(head, isTrue);
+          capped.dispose();
+        });
+      });
+
+      test('a dispose lets every waiter go', () {
+        fakeAsync((async) {
+          final other = ReelPrefetcher()..hold();
+          var near = false, head = false;
+          other.whenLifted().then((_) => near = true);
+          other.whenLifted(heads: true).then((_) => head = true);
+          other.dispose();
+          async.flushMicrotasks();
+          expect(near, isTrue);
+          expect(head, isTrue);
+        });
+      });
+    });
   });
 
   test('clear drops everything queued; nothing starts after it', () async {

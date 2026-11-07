@@ -155,6 +155,7 @@ class ReelPrefetcher {
     _holdTimer = null;
     if (!_held) return;
     _held = false;
+    _wake(_liftWaiters);
     _pump();
   }
 
@@ -170,7 +171,33 @@ class ReelPrefetcher {
     if (!_held && _framed) return;
     _held = false;
     _framed = true;
+    _wake(_liftWaiters);
+    _wake(_framedWaiters);
     _pump();
+  }
+
+  /// Completes once the lookahead may go on: at once when it isn't [held],
+  /// else on [release] or [holdCap]. With [heads], on [release] only (the
+  /// deck heads' rule). A task that started before a new card's clip began
+  /// opening (it was waiting on its card's clip, say) waits here before it
+  /// hands the clip core anything, so the open on screen never shares it
+  /// with a preload (V2-09).
+  Future<void> whenLifted({bool heads = false}) {
+    if (_disposed || (heads ? _framed : !_held)) return Future.value();
+    final waiter = Completer<void>();
+    (heads ? _framedWaiters : _liftWaiters).add(waiter);
+    return waiter.future;
+  }
+
+  final List<Completer<void>> _liftWaiters = [];
+  final List<Completer<void>> _framedWaiters = [];
+
+  static void _wake(List<Completer<void>> waiters) {
+    final all = [...waiters];
+    waiters.clear();
+    for (final w in all) {
+      if (!w.isCompleted) w.complete();
+    }
   }
 
   /// Queued tasks, in the order they would run (for the debug overlay and
@@ -241,6 +268,8 @@ class ReelPrefetcher {
     _disposed = true;
     _holdTimer?.cancel();
     _holdTimer = null;
+    _wake(_liftWaiters);
+    _wake(_framedWaiters);
     clear();
   }
 
