@@ -200,6 +200,59 @@ void main() {
       expect(await whatsNextSeed(library: library, brain: brain, now: now), isNull);
     });
 
+    test('a rewatch of a show seen through long ago never seeds it; finishing one after earlier plays does', () async {
+      final library = _Library(
+        shows: {
+          'comfort': (seen: finished(daysAgo(1)), kids: false),
+          'imported': (seen: finished(daysAgo(1)), kids: false),
+          'harbor': (seen: finished(daysAgo(3)), kids: false),
+        },
+      );
+      final longAgo = [for (var d = 1; d <= 10; d++) DateTime(2025, 1, d)];
+      final brain = _Brain(
+        watched: [
+          // All 10 episodes seen last year, two of them again this week.
+          TitleProfile(
+            id: 'comfort',
+            kind: TitleKind.show,
+            title: 'Title comfort',
+            serverId: 's1',
+            ratingKey: 'comfort',
+            inLibrary: true,
+            watches: [...longAgo, daysAgo(2), daysAgo(1)],
+            episodesWatched: 10,
+            episodesRewatched: 2,
+          ),
+          // Logged as seen through (an undated import), two seen again.
+          TitleProfile(
+            id: 'imported',
+            kind: TitleKind.show,
+            title: 'Title imported',
+            serverId: 's1',
+            ratingKey: 'imported',
+            inLibrary: true,
+            watches: [daysAgo(2), daysAgo(1)],
+            bulkPlays: 10,
+            episodesWatched: 10,
+            episodesRewatched: 2,
+          ),
+          // Eight episodes last year, the last two this week: finished now.
+          TitleProfile(
+            id: 'harbor',
+            kind: TitleKind.show,
+            title: 'Title harbor',
+            serverId: 's1',
+            ratingKey: 'harbor',
+            inLibrary: true,
+            watches: [...longAgo.take(8), daysAgo(4), daysAgo(3)],
+            episodesWatched: 10,
+          ),
+        ],
+      );
+      final seed = await whatsNextSeed(library: library, brain: brain, now: now);
+      expect(seed?.id, 'harbor', reason: 'the two rewatches are newer, but neither was a first watch');
+    });
+
     test('whatsNextList: the seed and the unseen titles like it, nothing resting, the show itself left out', () async {
       final library = _Library(shows: {'harbor': (seen: finished(daysAgo(1)), kids: false)});
       final brain = _Brain(

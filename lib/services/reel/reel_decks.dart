@@ -593,8 +593,10 @@ const int whatsNextLooked = 12;
 /// The show "What's next after" is for (D22): the newest show they finished
 /// or caught up on, by its merged seen state ([SeenKind.finished]), while
 /// they were watching it: at least [whatsNextActivePlays] real plays within
-/// [within], the newest within it. On the servers, never a Kids library's.
-/// Facts only (the brain's watched shows and the index); null when none.
+/// [within], the newest within it, and at least one of them a first watch
+/// of an episode ([firstWatchesSince]), so a rewatch of a show finished
+/// long ago never seeds it. On the servers, never a Kids library's. Facts
+/// only (the brain's watched shows and the index); null when none.
 Future<ReelCardData?> whatsNextSeed({
   required ReelLibrary library,
   HistoryBrain? brain,
@@ -606,7 +608,7 @@ Future<ReelCardData?> whatsNextSeed({
   final recent = [
     for (final p in await b.watchedProfiles())
       if (!p.isMovie && p.inLibrary && p.serverId != null && p.ratingKey != null)
-        if (p.watches.where((w) => w.isAfter(since)).length >= whatsNextActivePlays) p,
+        if (p.watches.where((w) => w.isAfter(since)).length >= whatsNextActivePlays && firstWatchesSince(p, since)) p,
   ]..sort((a, b) => b.lastWatched!.compareTo(a.lastWatched!));
   if (recent.isEmpty) return null;
   final cards = await library.cards([
@@ -624,6 +626,16 @@ Future<ReelCardData?> whatsNextSeed({
     }
   }
   return null;
+}
+
+/// Whether some episode of show [p] was watched for the first time after
+/// [since]: fewer plays (dated and undated) before [since] than distinct
+/// episodes watched means not every episode had been seen by then. A
+/// rewatch of a show seen through long ago has at least one play before
+/// [since] for each episode, so it is never one.
+bool firstWatchesSince(TitleProfile p, DateTime since) {
+  final before = p.watches.where((w) => !w.isAfter(since)).length + p.bulkPlays;
+  return before < p.episodesWatched;
 }
 
 /// The seed ([whatsNextSeed]) and the unseen titles like it
