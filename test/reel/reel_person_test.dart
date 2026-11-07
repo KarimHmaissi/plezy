@@ -430,6 +430,45 @@ void main() {
       expect((tool!['input_schema'] as Map)['required'], ['cards']);
     });
 
+    test(
+      "offline (V2-15) the deck shows the day's person in code order with no model call; online the build orders it",
+      () async {
+        var calls = 0, gathers = 0;
+        var offline = true;
+        final library = _Library(directed: {'x1': 'Ada Marlow', 'x2': 'Ada Marlow'});
+        final forYou = ForYouDeck(
+          pool: pool(
+            library: library,
+            model: (_, _, _) async {
+              calls++;
+              return answer(['p2', 'p1']);
+            },
+          ),
+          library: library,
+          candidates: () async => [_candidate('fresh')],
+          facts: () async => '',
+          person: () async {
+            gathers++;
+            return _pick('Ada Marlow', ['x1', 'x2', 'x3']);
+          },
+          offline: () => offline,
+        );
+        final deck = PersonDeck(forYou: forYou, library: library);
+        expect((await deck.load()).map((c) => c.id), ['x1', 'x2', 'x3'], reason: 'the local gather, in code order');
+        await forYou.building;
+        expect(deck.name, 'Directed by Ada Marlow');
+        expect((calls, gathers), (0, 1), reason: 'offline: gathered on this device, no model call');
+        expect((await pool().cachedPerson())?.ai, isFalse);
+
+        offline = false;
+        await deck.load();
+        await forYou.building;
+        expect((calls, gathers), (1, 1), reason: "back online the build orders the day's person; no second gather");
+        expect((await deck.load()).map((c) => c.id), ['x2', 'x1'], reason: "the build's order");
+        expect(deck.name, 'Directed by Ada Marlow');
+      },
+    );
+
     test('an answer with no person array keeps code order; an ordered day is not asked again', () async {
       final users = <String>[];
       List<String>? order;

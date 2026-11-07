@@ -255,6 +255,48 @@ void main() {
       expect((tool!['input_schema'] as Map)['required'], ['cards']);
     });
 
+    test(
+      'offline (V2-15) the deck starts no build and gathers no arrivals; back online the build judges the week',
+      () async {
+        var calls = 0, gathers = 0;
+        var offline = true;
+        final forYou = ForYouDeck(
+          pool: pool(
+            model: (_, _, _) async {
+              calls++;
+              return {
+                'cards': [
+                  {'id': 'c1', 'cluster': 'harbor drama'},
+                ],
+                'new_this_week': ['n2'],
+              };
+            },
+          ),
+          library: _Library(),
+          candidates: () async => [_candidate('fresh')],
+          facts: () async => '',
+          arrivals: () async {
+            gathers++;
+            return arrivals();
+          },
+          offline: () => offline,
+        );
+        final deck = NewThisWeekDeck(forYou: forYou, library: _Library());
+        expect(await deck.load(), isEmpty, reason: 'no list for this week yet');
+        await forYou.building;
+        expect(deck.intro, isNull);
+        expect((calls, gathers), (0, 0), reason: 'offline: no model call, no week gathered');
+        expect(await pool().weekDue(), isTrue, reason: 'the week waits for the next build online');
+
+        offline = false;
+        expect(await deck.load(), isEmpty, reason: 'the build starts and lands after this load');
+        await forYou.building;
+        expect((calls, gathers), (1, 1));
+        expect((await deck.load()).map((c) => c.id), ['n2']);
+        expect(deck.intro?.line, '3 films, 1 show arrived. 1 worth a look.');
+      },
+    );
+
     test('the week is judged once: later days build without it, and the next Friday asks again', () async {
       var gathers = 0;
       final users = <String>[];
