@@ -241,6 +241,7 @@ class ExoPlayerPlugin :
       "open" -> handleOpen(call, result)
       "preloadClip" -> handlePreloadClip(call, result)
       "clearPreloads" -> handleClearPreloads(call, result)
+      "setLeadInPolicy" -> handleSetLeadInPolicy(call, result)
       "play" -> handlePlay(result)
       "pause" -> handlePause(result)
       "stop" -> handleStop(result)
@@ -397,8 +398,21 @@ class ExoPlayerPlugin :
     val origin = call.argument<String>("origin")
     // V2-10: a Plex clip's disk cache key (never carries the token); absent for AnimeThemes.
     val cacheKey = call.argument<String>("cacheKey")
+    // V2-23: the clip's learned start (absent: unknown, never "from 0") and whether it may be
+    // measured (a Plex extra with a cache key, and the policy on).
+    val startMs = call.argument<Number>("startMs")?.toLong()
+    val measure = call.argument<Boolean>("measure")
     runOnMain {
-      playerCore?.preloadClip(uri, rank, origin, cacheKey)
+      playerCore?.preloadClip(uri, rank, origin, cacheKey, startMs, measure)
+      result.success(null)
+    }
+  }
+
+  private fun handleSetLeadInPolicy(call: MethodCall, result: MethodChannel.Result) {
+    val enabled = call.argument<Boolean>("enabled") ?: false
+    val measureOnly = call.argument<Boolean>("measureOnly") ?: false
+    runOnMain {
+      playerCore?.setLeadInPolicy(enabled, measureOnly)
       result.success(null)
     }
   }
@@ -458,6 +472,13 @@ class ExoPlayerPlugin :
     call.argument<String>("cacheKey")?.let { key ->
       playerCore?.takeIf { it.clipMode }?.rememberClipCacheKey(uri, key)
     }
+    // V2-23: what Dart knows of this clip's lead-in (clip mode only).
+    playerCore?.takeIf { it.clipMode }?.rememberClipLeadIn(
+      uri,
+      call.argument<Number>("clipStartMs")?.toLong(),
+      call.argument<Boolean>("measureLeadIn"),
+      call.argument<String>("origin")
+    )
 
     val request = MediaOpenRequest(
       mediaGeneration = ++mediaGeneration,
@@ -932,6 +953,8 @@ class ExoPlayerPlugin :
 
   private fun handleSeek(call: MethodCall, result: MethodChannel.Result) {
     val positionMs = call.argument<Number>("positionMs")?.toLong()
+    // V2-23: the clip core's exact seek (a learned start on a clip opened before it was known).
+    val exact = call.argument<Boolean>("exact") ?: false
 
     if (positionMs == null) {
       result.error("INVALID_ARGS", "Missing 'positionMs'", null)
@@ -943,7 +966,7 @@ class ExoPlayerPlugin :
         val positionSeconds = positionMs / 1000.0
         mpvCore?.command(arrayOf("seek", positionSeconds.toString(), "absolute"))
       } else {
-        playerCore?.seekTo(positionMs)
+        playerCore?.seekTo(positionMs, exact)
       }
       result.success(null)
     } ?: result.success(null)
