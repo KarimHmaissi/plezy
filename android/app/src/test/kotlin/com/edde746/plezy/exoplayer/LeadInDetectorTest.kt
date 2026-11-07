@@ -265,6 +265,19 @@ class LeadInDetectorTest {
   }
 
   @Test
+  fun aReadErrorCountsAsATryButACancelNeverDoes() {
+    val failing = LeadInQueue({ it.run() }, { it.run() }, { 0 }) { j, _ -> LeadInOutcome(j, abortReason = "error:IOException") }
+    assertTrue(failing.request(job("file:///a", ClipPreloadRank.AHEAD)))
+    assertTrue(failing.request(job("file:///a", ClipPreloadRank.AHEAD)))
+    assertFalse("a clip that can't be read is read at most twice a session", failing.request(job("file:///a", ClipPreloadRank.AHEAD)))
+
+    val cancelled = LeadInQueue({ it.run() }, { it.run() }, { 0 }) { j, _ -> LeadInOutcome(j, abortReason = "opened") }
+    repeat(3) { assertTrue("a cancel is not the clip's fault", cancelled.request(job("file:///a", ClipPreloadRank.AHEAD))) }
+    assertTrue(LeadInQueue.countsAsTry("io"))
+    assertFalse(LeadInQueue.countsAsTry("leftWindow"))
+  }
+
+  @Test
   fun skipReasonsAreAnswers() {
     for (reason in listOf("hdr", "10bit", "dv", "encrypted", "nosw", "codec")) {
       val outcomes = ArrayList<LeadInOutcome>()

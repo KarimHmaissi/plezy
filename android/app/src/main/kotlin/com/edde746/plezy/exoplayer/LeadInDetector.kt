@@ -236,7 +236,7 @@ internal class LeadInQueue(
     synchronized(lock) {
       if (outcome.definite) {
         answered += job.key
-      } else if (outcome.abortReason in COUNTED_ABORTS || outcome.decision?.unknown == true) {
+      } else if (countsAsTry(outcome.abortReason) || outcome.decision?.unknown == true) {
         attempts[job.key] = (attempts[job.key] ?: 0) + 1
       }
       running = null
@@ -322,6 +322,16 @@ internal class LeadInQueue(
 
     /** Aborts that count as a try (the clip itself was the problem), unlike a cancel. */
     private val COUNTED_ABORTS = setOf("budget", "decoder", "format")
+
+    /**
+     * Whether an abort counts against [MAX_ATTEMPTS]: the clip's own failures, a read error
+     * (`error:<class>`) or a timed-out read (`io`) included, so a clip that can't be read isn't
+     * read again on every preload (design §3.4 rule 7). A cancel ([cancel], [cancelAll]) never
+     * counts: the runner reports it by its cancel reason.
+     */
+    @VisibleForTesting
+    internal fun countsAsTry(reason: String?): Boolean =
+      reason != null && (reason in COUNTED_ABORTS || reason == "io" || reason.startsWith("error:"))
   }
 }
 
@@ -369,7 +379,7 @@ internal object LeadInRunner {
       val info = scan.info
       val d = scan.decision
       job.log(
-        "detect id=$id codec=${source.codecName} sw=true ${info.width}x${info.height} " +
+        "detect id=$id sdk=${android.os.Build.VERSION.SDK_INT} codec=${source.codecName} sw=true ${info.width}x${info.height} " +
           "range=${if (source.fullRange) "full" else "limited"} fps=${"%.3f".format(info.fps)} dur=${info.durationUs / 1000} audio=${info.audio}"
       )
       val classOf = d.classes.toMap()
