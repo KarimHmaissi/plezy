@@ -31,6 +31,7 @@ IconData reelDeckIcon(String id) => switch (id) {
   'person' => Symbols.person_rounded,
   'anime-openings' => Symbols.music_note_rounded,
   'most-watched' => Symbols.trending_up_rounded,
+  'whats-next' => Symbols.skip_next_rounded,
   _ => Symbols.chat_bubble_rounded,
 };
 

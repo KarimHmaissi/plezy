@@ -4558,6 +4558,9 @@ class Translations$reel$en {
 	/// en: 'From the Reel'
 	String get homeRow => 'From the Reel';
 
+	/// en: 'You finished ${title}. Sample what's next in the Reel.'
+	String whatsNextHome({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.';
+
 	late final Translations$reel$settings$en settings = Translations$reel$settings$en.internal(_root);
 	late final Translations$reel$decks$en decks = Translations$reel$decks$en.internal(_root);
 }
@@ -8758,6 +8761,9 @@ class Translations$reel$deckNames$en {
 
 	/// en: '#$n film this week'
 	String filmThisWeek({required Object n}) => '#${n} film this week';
+
+	/// en: 'What's next after ${title}'
+	String whatsNext({required Object title}) => 'What\'s next after ${title}';
 }
 
 // Path: reel.newThisWeek
@@ -11985,6 +11991,7 @@ extension on Translations {
 			'reel.deckNames.starring' => ({required Object name}) => 'Starring ${name}',
 			'reel.deckNames.showThisWeek' => ({required Object n}) => '#${n} show this week',
 			'reel.deckNames.filmThisWeek' => ({required Object n}) => '#${n} film this week',
+			'reel.deckNames.whatsNext' => ({required Object title}) => 'What\'s next after ${title}',
 			'reel.newThisWeek.films' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} film', other: '${n} films', ), 
 			'reel.newThisWeek.shows' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} show', other: '${n} shows', ), 
 			'reel.newThisWeek.worth' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, zero: 'None worth a look yet.', one: '${n} worth a look.', other: '${n} worth a look.', ), 
@@ -11996,6 +12003,7 @@ extension on Translations {
 			'reel.deckIntro.hintTv' => 'OK or ↓ first card  ·  → next deck',
 			'reel.deckIntro.swipe' => 'Or swipe up for the first card',
 			'reel.homeRow' => 'From the Reel',
+			'reel.whatsNextHome' => ({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.',
 			'reel.settings.title' => 'Reel',
 			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
 			'reel.settings.sheetEntry' => 'Reel settings',
@@ -12373,10 +12381,10 @@ extension on Translations {
 			'liveTv.recordingCancelled' => 'Recording canceled',
 			'liveTv.recordingRuleDeleted' => 'Recording rule deleted',
 			'liveTv.processRecordingRules' => 'Re-evaluate rules',
-			'liveTv.recordingInProgress' => 'Recording now',
-			'liveTv.recordingsCount' => ({required Object count}) => '${count} scheduled',
 			_ => null,
 		} ?? switch (path) {
+			'liveTv.recordingInProgress' => 'Recording now',
+			'liveTv.recordingsCount' => ({required Object count}) => '${count} scheduled',
 			'liveTv.editRule' => 'Edit rule',
 			'liveTv.editRuleAction' => 'Edit',
 			'liveTv.recordingRuleUpdated' => 'Recording rule updated',
@@ -12887,10 +12895,10 @@ extension on Translations {
 			'performanceOverlay.dropped' => 'Dropped',
 			'performanceOverlay.dvRpus' => 'DV RPUs',
 			'performanceOverlay.dvRpuAverage' => 'DV RPU Avg',
-			'performanceOverlay.dvSampleAverage' => 'DV Sample Avg',
-			'performanceOverlay.maxLuma' => 'Max Luma',
 			_ => null,
 		} ?? switch (path) {
+			'performanceOverlay.dvSampleAverage' => 'DV Sample Avg',
+			'performanceOverlay.maxLuma' => 'Max Luma',
 			'performanceOverlay.minLuma' => 'Min Luma',
 			'performanceOverlay.maxCll' => 'MaxCLL',
 			'performanceOverlay.maxFall' => 'MaxFALL',

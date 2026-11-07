@@ -37,7 +37,7 @@ enum ReelAction {
 }
 
 /// What one daily [ReelStore.sweep] deleted: old pool rows (`pool:`,
-/// `again:`, `week:` and `person:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
+/// `again:`, `week:`, `person:` and `next:`), `deck:` and `cursor:` rows, expired `src:` rows, old `meta:`
 /// rows, and old events.
 typedef ReelSweep = ({int pools, int days, int sources, int metas, int events});
 
@@ -150,7 +150,7 @@ class ReelStore {
   /// fallback when a read fails; the daily [sweep] deletes older ones.
   static const Duration metadataKept = Duration(days: 30);
 
-  /// Day-scoped cache rows (`pool:<day>`, `again:<day>`, `deck:…:<day>`,
+  /// Day-scoped cache rows (`pool:<day>`, `again:<day>`, `next:<day>`, `deck:…:<day>`,
   /// `cursor:…:<day>`) are read for today and the 2 days before at most
   /// (ReelPool.cachedPool); the daily [sweep] deletes older ones, except
   /// `pool:` rows (see [poolsKept]).
@@ -313,9 +313,9 @@ class ReelStore {
   Future<ReelSweep?>? _sweeping;
 
   /// The daily sweep, at most once per day on this device: `pool:` rows
-  /// older than [poolsKept] days, `again:` rows older than [daysKept] days,
-  /// `week:` rows whose week began more than [weeksKept] days ago,
-  /// `person:` rows older than [personsKept] days,
+  /// older than [poolsKept] days, `again:` and `next:` rows older than
+  /// [daysKept] days, `week:` rows whose week began more than [weeksKept]
+  /// days ago, `person:` rows older than [personsKept] days,
   /// `deck:` and `cursor:` rows not written for [daysKept] days, `src:` rows
   /// past [sourceTtl], `head:` rows not written for [daysKept] days,
   /// `meta:` rows not written for [metadataKept], and old
@@ -342,7 +342,8 @@ class ReelStore {
         await olderThan('pool:', poolsKept) +
         await olderThan('again:', daysKept) +
         await olderThan('week:', weeksKept) +
-        await olderThan('person:', personsKept);
+        await olderThan('person:', personsKept) +
+        await olderThan('next:', daysKept);
     final dayRowsBefore = nowMs - const Duration(days: daysKept).inMilliseconds;
     final days =
         await (db.delete(db.reelCache)..where(

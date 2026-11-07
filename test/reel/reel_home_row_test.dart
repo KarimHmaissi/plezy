@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/database/fork_database.dart';
+import 'package:plezy/media/media_backend.dart';
+import 'package:plezy/media/media_item.dart';
+import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/services/catalog/home_pins.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/reel/reel_home_row.dart';
@@ -20,7 +23,8 @@ class _Device {
   late final HomePinsController pins;
   late final ReelStore reel;
 
-  Future<bool> seat({required bool onTv}) => ReelHomeRow.seat(onTv: onTv, store: store, pins: pins, reel: reel);
+  Future<bool> seat({required bool onTv, Future<bool> Function()? whatsNext}) =>
+      ReelHomeRow.seat(onTv: onTv, store: store, pins: pins, reel: reel, whatsNext: whatsNext);
 
   /// Catch-up from [other]: everything it has that is newer than here.
   Future<Set<String>> catchUpFrom(_Device other) async {
@@ -136,5 +140,40 @@ void main() {
     final results = await Future.wait([tv.seat(onTv: true), tv.seat(onTv: true), tv.seat(onTv: true)]);
     expect(results.where((added) => added), hasLength(1));
     expect((await tv.homeIds()).where((id) => id == HomeRowIds.reelPicks), hasLength(1));
+  });
+
+  group("D22: the What's next after card", () {
+    test('a show just finished seats the row on the TV with no Save; nothing to show seats nothing', () async {
+      await tv.pins.ensureLoaded();
+      expect(await tv.seat(onTv: true, whatsNext: () async => false), isFalse);
+      expect(await tv.homeIds(), isNot(contains(HomeRowIds.reelPicks)));
+      expect(await tv.seat(onTv: true, whatsNext: () async => true), isTrue);
+      expect((await tv.homeIds()).first, HomeRowIds.reelPicks);
+      expect(await phone.seat(onTv: false, whatsNext: () async => true), isFalse, reason: 'the TV seats it');
+    });
+
+    test("the row's key changes with the card, so Home reloads it", () async {
+      await tv.reel.savePick(pick('a'));
+      final plain = await ReelHomeRow.freshKey(reel: tv.reel);
+      final withCard = await ReelHomeRow.freshKey(reel: tv.reel, whatsNext: () async => 'server-a:rk9');
+      expect(withCard, startsWith('next:server-a:rk9,'));
+      expect(withCard, endsWith(plain));
+      expect(await ReelHomeRow.freshKey(reel: tv.reel, whatsNext: () async => throw StateError('x')), plain);
+    });
+
+    test('the card names the deck it opens; any other item opens none', () {
+      final show = MediaItem(
+        id: 'rk9',
+        backend: MediaBackend.plex,
+        kind: MediaKind.show,
+        title: 'Harbor Lights',
+        serverId: 'server-a',
+      );
+      final card = ReelHomeRow.entryItem(show, deck: 'whats-next');
+      expect(ReelHomeRow.entryDeck(card), 'whats-next');
+      expect(card.id, 'rk9', reason: "its menu is the show's");
+      expect(card.serverId, 'server-a');
+      expect(ReelHomeRow.entryDeck(show), isNull);
+    });
   });
 }
