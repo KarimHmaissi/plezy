@@ -372,19 +372,54 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     if (!mounted || !_homePins.contains(HomeRowIds.reelPicks)) return;
     final String key;
     try {
-      key = await ReelHomeRow.freshKey();
+      key = await ReelHomeRow.freshKey(whatsNext: _whatsNextKey);
     } catch (_) {
       return;
     }
     if (key != _reelRowKey) _reloadReelRow();
   }
 
+  /// Fork: the show the Reel row's "What's next after" card is for, as a
+  /// key (null: no card), for [ReelHomeRow.freshKey].
+  static Future<String?> _whatsNextKey() async {
+    final show = await ReelApp.whatsNextForHome();
+    return show == null ? null : '${show.serverId}:${show.ratingKey}';
+  }
+
+  /// Fork: whether the Reel row has a "What's next after" card to show,
+  /// for [ReelHomeRow.seat].
+  static Future<bool> _hasWhatsNext() async => await ReelApp.whatsNextForHome() != null;
+
   /// Data changed from elsewhere (a phone's edit applied here, a catch-up,
   /// a new mirror snapshot). On the TV a synced Save seats the Reel row.
   void _onCustomisationChanged() {
     if (!mounted) return;
-    if (PlatformDetector.isTV()) unawaited(ReelHomeRow.seat(onTv: true));
+    if (PlatformDetector.isTV()) unawaited(ReelHomeRow.seat(onTv: true, whatsNext: _hasWhatsNext));
     unawaited(_recheckReelRow());
+  }
+
+  /// The brain's last sync, as last seen ([_onBrainStatus]).
+  DateTime? _brainSyncSeen;
+
+  /// Fork: the history brain synced (a show may have just been finished):
+  /// the TV seats the Reel row for its "What's next after" card, and the
+  /// row reloads when the card changed.
+  void _onBrainStatus() {
+    final sync = HistoryBrain.instance.status.value.lastSync;
+    if (!mounted || sync == _brainSyncSeen) return;
+    _brainSyncSeen = sync;
+    if (PlatformDetector.isTV()) unawaited(ReelHomeRow.seat(onTv: true, whatsNext: _hasWhatsNext));
+    unawaited(_recheckReelRow());
+  }
+
+  /// Fork: OK on the Reel row's "What's next after" card opens its deck in
+  /// the Reel; every other card does what it always does.
+  bool _openReelEntry(MediaItem item) {
+    final deck = ReelHomeRow.entryDeck(item);
+    if (deck == null || !ReelScreen.enabled) return false;
+    appLogger.i('[ReelNext] Home card opens deck=$deck');
+    ReelScreen.open(context, deck: deck);
+    return true;
   }
 
   void _onHomePinsChanged() {
@@ -397,7 +432,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     final sources = _catalogSources;
     if (sources == null) return null;
     final multiServer = context.read<MultiServerProvider?>();
-    return HomeRowResolver(sources: sources, clientFor: (id) => multiServer?.getClientForServer(id));
+    return HomeRowResolver(
+      sources: sources,
+      clientFor: (id) => multiServer?.getClientForServer(id),
+      whatsNext: ReelApp.whatsNextForHome,
+    );
   }
 
   /// Fetch the added rows Home doesn't have loaded, or all of them on
@@ -432,7 +471,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           _rowsLoading.add(row.id);
           if (!_fetchedRows.containsKey(row.id)) setLoadState(row.id, HomeRowLoadState.loading);
           try {
-            if (row.id == HomeRowIds.reelPicks) _reelRowKey = await ReelHomeRow.freshKey();
+            if (row.id == HomeRowIds.reelPicks) _reelRowKey = await ReelHomeRow.freshKey(whatsNext: _whatsNextKey);
             final hub = await resolver.fetch(row);
             if (!mounted || !identical(_homePins, pins)) return;
             final state = homeRowFetchState(hub);
@@ -688,9 +727,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     AiHistory.replaced.addListener(_onAiRowReplaced);
     ReelStore.picksChanged.addListener(_onReelPicksChanged);
     Customisation.changed.addListener(_onCustomisationChanged);
+    _brainSyncSeen = HistoryBrain.instance.status.value.lastSync;
+    HistoryBrain.instance.status.addListener(_onBrainStatus);
     // The TV seats the Reel row for picks saved on the phone while it was
-    // off, and re-checks the seated flag once (see ReelHomeRow).
-    if (PlatformDetector.isTV()) unawaited(ReelHomeRow.seat(onTv: true));
+    // off, or for a show just finished, and re-checks the seated flag once
+    // (see ReelHomeRow).
+    if (PlatformDetector.isTV()) unawaited(ReelHomeRow.seat(onTv: true, whatsNext: _hasWhatsNext));
     homeRowLoadStates.addListener(_onRowLoadStates);
     _revealTimer = Timer(_revealWait, () {
       if (mounted) setState(() => _revealAll = true);
@@ -902,6 +944,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     AiHistory.replaced.removeListener(_onAiRowReplaced);
     ReelStore.picksChanged.removeListener(_onReelPicksChanged);
     Customisation.changed.removeListener(_onCustomisationChanged);
+    HistoryBrain.instance.status.removeListener(_onBrainStatus);
     homeRowLoadStates.removeListener(_onRowLoadStates);
     _revealTimer?.cancel();
     _rowRetryTimer?.cancel();
@@ -1455,6 +1498,14 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                             ? _discover.refreshContinueWatching
                             : null,
                         loadMoreItems: hub.id == 'continue_watching' ? _discover.loadAllContinueWatching : null,
+                        // Fork: the Reel row's "What's next after" card opens
+                        // its deck; the row's other cards open as ever.
+                        onItemTap: hub.items.any((item) => ReelHomeRow.entryDeck(item) != null)
+                            ? (item) {
+                                if (_openReelEntry(item)) return;
+                                unawaited(navigateToMediaItem(context, item, onRefresh: _discover.updateItem));
+                              }
+                            : null,
                         onVerticalNavigation: (isUp) => _handleVerticalNavigation(i, isUp),
                         onNavigateUp: i == 0 ? _focusTopBoundary : null,
                         onNavigateToSidebar: _navigateToSidebar,
@@ -1556,6 +1607,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       onExpandedChanged: (expanded) => _tvRowsExpanded.value = expanded,
       rowMenuEntriesForHub: _rowMenuEntriesFor,
       showTimeLeftForHub: (hub) => hub.id == 'comfort_carryon_continue',
+      onActivateItem: (hub, item) => _openReelEntry(item),
     );
   }
 

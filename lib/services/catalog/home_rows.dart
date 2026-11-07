@@ -10,6 +10,8 @@ import '../../providers/catalog_sources_provider.dart';
 import '../../utils/app_logger.dart';
 import '../ai/ai_history.dart';
 import '../comfort/comfort_shows_controller.dart';
+import '../reel/reel_decks.dart' show WhatsNextDeck;
+import '../reel/reel_home_row.dart';
 import '../reel/reel_store.dart';
 import 'catalog_source.dart';
 import 'home_pins.dart';
@@ -162,6 +164,7 @@ class HomeRowResolver {
     required this.sources,
     required this.clientFor,
     this.reel,
+    this.whatsNext,
     this.pickFetchTimeout = defaultPickFetchTimeout,
   });
 
@@ -170,6 +173,11 @@ class HomeRowResolver {
 
   /// The Reel's picks; [ReelStore.instance] when null.
   final ReelStore? reel;
+
+  /// Fork: the server copy of the show they just finished, when the Reel
+  /// row leads with its "What's next after" card (D22,
+  /// [ReelHomeRow.entryItem]); null or answering null: no card.
+  final Future<({String serverId, String ratingKey})?> Function()? whatsNext;
 
   /// How long one Reel pick's server may take before the row goes on
   /// without it.
@@ -249,7 +257,9 @@ class HomeRowResolver {
       case HomeRowIds.reelPicks:
         // Fork: the Reel's fresh Saves, newest first, from the copy saved.
         // Fetched together, each with a time limit, so one slow server
-        // never holds the row back.
+        // never holds the row back. A "What's next after" card leads when
+        // they just finished a show: the show's one read, the same way.
+        final entry = _whatsNextEntry();
         final found = await Future.wait([
           for (final pick in await (reel ?? ReelStore.instance).freshPicks())
             () async {
@@ -263,8 +273,16 @@ class HomeRowResolver {
               }
             }(),
         ]);
-        items = [...found.nonNulls];
-        appLogger.i('[ReelSave] Home row: ${items.length} saved titles found');
+        final next = await entry;
+        items = [
+          ?next,
+          for (final item in found.nonNulls)
+            if (next == null || item.id != next.id || item.serverId != next.serverId) item,
+        ];
+        appLogger.i(
+          '[ReelSave] Home row: ${items.length - (next == null ? 0 : 1)} saved titles found, '
+          "what's-next card ${next == null ? 'none' : 'shown'}",
+        );
       default:
         return null;
     }
@@ -277,6 +295,24 @@ class HomeRowResolver {
       items: items,
       size: items.length,
     );
+  }
+
+  /// The Reel row's "What's next after" card, or null (no show finished
+  /// lately, its server not connected, or its read failed or was slow).
+  Future<MediaItem?> _whatsNextEntry() async {
+    final find = whatsNext;
+    if (find == null) return null;
+    try {
+      final show = await find();
+      if (show == null) return null;
+      final client = clientFor(ServerId(show.serverId));
+      if (client == null) return null;
+      final item = await client.fetchItem(show.ratingKey).timeout(pickFetchTimeout);
+      return item == null ? null : ReelHomeRow.entryItem(item, deck: WhatsNextDeck.deckId);
+    } catch (e) {
+      appLogger.d("Home: Reel what's-next card unavailable", error: e);
+      return null;
+    }
   }
 
   /// One provider hub by id. Some providers (Plex Discover) can only fetch

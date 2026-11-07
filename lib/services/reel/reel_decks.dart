@@ -147,6 +147,7 @@ class ForYouDeck extends ReelDeck {
     required this.candidates,
     required this.facts,
     this.again,
+    this.next,
     Listenable? sharedChanges,
     Listenable? clears,
   }) {
@@ -164,9 +165,15 @@ class ForYouDeck extends ReelDeck {
   /// The shows they started and left ([anotherGoCandidates]): the same
   /// daily build orders them for [AnotherGoDeck]. Null: no such deck.
   final Future<List<PoolCandidate>> Function()? again;
+
+  /// The show they just finished and the titles like it
+  /// ([whatsNextList]): the same daily build orders them for
+  /// [WhatsNextDeck]. Null: no such deck.
+  final Future<WhatsNextList?> Function()? next;
   Future<void>? _building;
   ({String day, Future<List<PoolCandidate>> list})? _candidates;
   ({String day, Future<List<PoolCandidate>> list})? _again;
+  ({String day, Future<WhatsNextList?> list})? _next;
 
   /// The shared pool as last seen (its day, build and clear), so only a new
   /// one fires [rebuilt].
@@ -361,6 +368,23 @@ class ForYouDeck extends ReelDeck {
     return list;
   }
 
+  /// [next], gathered once a day: the build orders it. A failed gather is
+  /// none and isn't kept.
+  Future<WhatsNextList?> todaysNext() {
+    final gather = next;
+    if (gather == null) return Future.value();
+    final day = pool.today();
+    final have = _next;
+    if (have != null && have.day == day) return have.list;
+    final list = gather().catchError((Object e) {
+      appLogger.d("Reel: what's-next gather failed", error: e);
+      if (_next?.day == day) _next = null;
+      return null;
+    });
+    _next = (day: day, list: list);
+    return list;
+  }
+
   /// Starts today's build when it is due (the first Reel open of the day,
   /// on whichever of its decks it opens).
   Future<void> buildIfDue() async {
@@ -377,7 +401,7 @@ class ForYouDeck extends ReelDeck {
       if (have == null || have.day != pool.today()) {
         if (!await pool.shouldBuild()) return;
       }
-      await (_todaysCandidates(), todaysAgain()).wait;
+      await (_todaysCandidates(), todaysAgain(), todaysNext()).wait;
     } catch (e) {
       appLogger.d('Reel: For You gather failed', error: e);
     }
@@ -412,7 +436,12 @@ class ForYouDeck extends ReelDeck {
   /// once the TV's shared pool is stale); nothing schedules it.
   Future<void> _buildToday() async {
     try {
-      final built = await pool.build(await _todaysCandidates(), facts: await facts(), again: await todaysAgain());
+      final built = await pool.build(
+        await _todaysCandidates(),
+        facts: await facts(),
+        again: await todaysAgain(),
+        next: await todaysNext(),
+      );
       if (built != null) _rebuilt.bump();
     } catch (e) {
       appLogger.w('Reel: For You build failed', error: e);
@@ -544,6 +573,133 @@ class AnotherGoDeck extends ReelDeck {
   /// A show in no Kids library, sampled or paused by its merged seen state.
   static bool fits(TitleFacts f) =>
       f.isShow && !f.inKidsLibrary && (f.seen.kind == SeenKind.sampled || f.seen.kind == SeenKind.paused);
+}
+
+/// How recently a show must have been finished (or caught up on) to seed
+/// "What's next after" (D22): its newest real play, at most this long ago.
+const Duration whatsNextWithin = Duration(days: 14);
+
+/// The Home card for "What's next after" shows this long after the show's
+/// newest play, like a Save on Home ([ReelPick.fresh]).
+const Duration whatsNextHomeFor = Duration(days: 3);
+
+/// An active show: at least this many real plays within [whatsNextWithin],
+/// so one episode seen again on a show finished long ago never seeds it.
+const int whatsNextActivePlays = 2;
+
+/// The newest shows with recent plays read for a seed.
+const int whatsNextLooked = 12;
+
+/// The show "What's next after" is for (D22): the newest show they finished
+/// or caught up on, by its merged seen state ([SeenKind.finished]), while
+/// they were watching it: at least [whatsNextActivePlays] real plays within
+/// [within], the newest within it. On the servers, never a Kids library's.
+/// Facts only (the brain's watched shows and the index); null when none.
+Future<ReelCardData?> whatsNextSeed({
+  required ReelLibrary library,
+  HistoryBrain? brain,
+  DateTime? now,
+  Duration within = whatsNextWithin,
+}) async {
+  final b = brain ?? HistoryBrain.instance;
+  final since = (now ?? DateTime.now()).subtract(within);
+  final recent = [
+    for (final p in await b.watchedProfiles())
+      if (!p.isMovie && p.inLibrary && p.serverId != null && p.ratingKey != null)
+        if (p.watches.where((w) => w.isAfter(since)).length >= whatsNextActivePlays) p,
+  ]..sort((a, b) => b.lastWatched!.compareTo(a.lastWatched!));
+  if (recent.isEmpty) return null;
+  final cards = await library.cards([
+    for (final p in recent.take(whatsNextLooked)) DeckEntry(serverId: p.serverId, ratingKey: p.ratingKey, isShow: true),
+  ]);
+  for (final c in cards) {
+    final seen = c.facts.seen;
+    final last = seen.last;
+    if (c.title.isShow &&
+        seen.kind == SeenKind.finished &&
+        !c.facts.inKidsLibrary &&
+        last != null &&
+        last.isAfter(since)) {
+      return c;
+    }
+  }
+  return null;
+}
+
+/// The seed ([whatsNextSeed]) and the unseen titles like it
+/// ([moreLikeCandidates]: on the servers, not Kids-only, unseen, not
+/// resting, the show itself left out), for the daily build to order; null
+/// when there is no seed or nothing like it.
+Future<WhatsNextList?> whatsNextList({
+  required ReelLibrary library,
+  required ReelStore store,
+  HistoryBrain? brain,
+  DateTime? now,
+}) async {
+  final seed = await whatsNextSeed(library: library, brain: brain, now: now);
+  if (seed == null) return null;
+  final candidates = await moreLikeCandidates(seed, library: library, store: store, brain: brain);
+  appLogger.i('[ReelNext] seed ${seed.id} (${seed.facts.seen.line()}): ${candidates.length} titles like it');
+  return candidates.isEmpty ? null : (seed: seed, candidates: candidates);
+}
+
+/// What's next after (a finished show; D22, build plan §3 and §7): unseen
+/// titles like the show they just finished or caught up on ([seed]).
+/// Ordered by the daily build's optional `whats_next` array (the For You
+/// call; no call of its own, D3), when a build ordered this show; else in
+/// code order: [candidates] by similarity, kept to what the public rates
+/// ([ForYouDeck.worthShowing]). It follows For You's day and fresh builds.
+/// Opened from its Home card (the "From the Reel" row) and
+/// `plezy://reel?deck=whats-next`.
+class WhatsNextDeck extends ReelDeck {
+  WhatsNextDeck({required this.seed, required this.forYou, required this.library, required this.candidates});
+
+  static const String deckId = 'whats-next';
+
+  /// The show they finished.
+  final ReelCardData seed;
+  final ForYouDeck forYou;
+  final ReelLibrary library;
+
+  /// The titles like [seed], for code order.
+  final Future<List<PoolCandidate>> Function() candidates;
+
+  @override
+  String get id => deckId;
+  @override
+  String get name => t.reel.deckNames.whatsNext(title: seed.title.title);
+  @override
+  bool get keepsSeen => false;
+  @override
+  bool get daily => true;
+  @override
+  Listenable get rebuilt => forYou.rebuilt;
+
+  @override
+  Future<List<ReelCardData>> load() async {
+    final ordered = await forYou.pool.cachedNext(seed.id);
+    // The first Reel open of the day may land here: it starts today's build
+    // (which orders this deck too) without waiting for it.
+    try {
+      await forYou.buildIfDue();
+    } catch (e) {
+      appLogger.d('Reel: build check failed', error: e);
+    }
+    if (ordered != null && ordered.isNotEmpty) {
+      final cards = await library.cards(ordered);
+      appLogger.i('[ReelNext] deck for ${seed.id}: ${cards.length} cards in the build\'s order');
+      return [
+        for (final c in cards)
+          if (c.id != seed.id) c,
+      ];
+    }
+    final code = ForYouDeck.worthShowing(await library.cards([for (final c in await candidates()) c.entry]));
+    appLogger.i('[ReelNext] deck for ${seed.id}: ${code.length} cards in code order (no build order yet)');
+    return [
+      for (final c in code)
+        if (c.id != seed.id) c,
+    ];
+  }
 }
 
 /// The shows [AnotherGoDeck] offers, in code order: paused before sampled,

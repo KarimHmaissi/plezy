@@ -74,7 +74,7 @@ abstract final class ReelApp {
     final shared = _shared(ReelStore.instance);
     final base = await _decks(context, library: shared.library, forYou: shared.forYou);
     return [
-      for (final d in [...base, ...await _answerDecks(shared.library)]) (id: d.id, name: d.name),
+      for (final d in [...base, ...await _laterDecks(shared.library, shared.forYou)]) (id: d.id, name: d.name),
     ];
   }
 
@@ -97,6 +97,7 @@ abstract final class ReelApp {
       candidates: () => forYouCandidates(library: library, store: store),
       facts: () => forYouFacts(store: store, pool: pool),
       again: () => anotherGoCandidates(library: library, store: store),
+      next: () => whatsNextList(library: library, store: store),
       sharedChanges: Customisation.changed,
       clears: ReelPool.clears,
     );
@@ -164,6 +165,74 @@ abstract final class ReelApp {
   static Future<List<ReelDeck>> _answerDecks(ReelLibrary library) async => [
     for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
   ];
+
+  /// The decks the Reel adds once its first card has shown (V2-04): What's
+  /// next after (when they just finished a show), then the saved answers.
+  static Future<List<ReelDeck>> _laterDecks(ReelLibrary library, ForYouDeck forYou) async => [
+    ?await _whatsNextDeck(library, forYou),
+    ...await _answerDecks(library),
+  ];
+
+  /// What's next after (the show they just finished, D22), or null when
+  /// they finished none lately ([whatsNextSeed]).
+  static Future<WhatsNextDeck?> _whatsNextDeck(ReelLibrary library, ForYouDeck forYou) async {
+    final ReelCardData seed;
+    try {
+      final found = await _finishedShow(library);
+      if (found == null) return null;
+      seed = found;
+    } catch (e) {
+      appLogger.d("Reel: what's-next seed unavailable", error: e);
+      return null;
+    }
+    return WhatsNextDeck(
+      seed: seed,
+      forYou: forYou,
+      library: library,
+      candidates: () => moreLikeCandidates(seed, library: library, store: forYou.pool.store),
+    );
+  }
+
+  /// [whatsNextSeed], read again only once the brain has synced since or
+  /// the day has changed: Home asks on every return, and the Reel on each
+  /// open.
+  static ({String key, Future<ReelCardData?> seed})? _seedMemo;
+
+  static Future<ReelCardData?> _finishedShow(ReelLibrary library) {
+    final now = DateTime.now();
+    final key = '${ReelStore.dayStamp(now)}|${HistoryBrain.instance.status.value.lastSync?.millisecondsSinceEpoch}';
+    final have = _seedMemo;
+    if (have != null && have.key == key) return have.seed;
+    final seed = whatsNextSeed(library: library, now: now);
+    _seedMemo = (key: key, seed: seed);
+    // A failed read isn't kept.
+    unawaited(
+      seed.then<void>(
+        (_) {},
+        onError: (Object _) {
+          if (identical(_seedMemo?.seed, seed)) _seedMemo = null;
+        },
+      ),
+    );
+    return seed;
+  }
+
+  /// Home's "From the Reel" row (D22, build plan §7): the server copy of the
+  /// show they finished within [whatsNextHomeFor], for its "What's next
+  /// after" card; null with none, or with the Reel turned off.
+  static Future<({String serverId, String ratingKey})?> whatsNextForHome() async {
+    if (!ReelScreen.enabled) return null;
+    final ReelCardData? seed;
+    try {
+      seed = await _finishedShow(_shared(ReelStore.instance).library);
+    } catch (e) {
+      appLogger.d("Home: what's-next seed unavailable", error: e);
+      return null;
+    }
+    final last = seed?.facts.seen.last;
+    if (seed == null || last == null || DateTime.now().difference(last) >= whatsNextHomeFor) return null;
+    return (serverId: seed.best.serverId, ratingKey: seed.best.ratingKey);
+  }
 
   static Future<ReelController> controller(BuildContext context) async {
     final multi = context.read<MultiServerProvider>();
@@ -248,7 +317,7 @@ abstract final class ReelApp {
       // index only), and the saved answers join after the first card.
       warmClipCore: PlatformDetector.isTV(),
       headCard: PlatformDetector.isTV() ? (entry) async => (await library.cards([entry])).firstOrNull : null,
-      moreDecks: () => _answerDecks(library),
+      moreDecks: () => _laterDecks(library, forYou),
       // Each deck carries on where it was left today, on both devices
       // (V2-14).
       keepCursor: true,
@@ -297,6 +366,7 @@ abstract final class ReelApp {
         skip: skip,
       ),
       deckFor: (id) async {
+        if (id == WhatsNextDeck.deckId) return _whatsNextDeck(library, forYou);
         if (!id.startsWith('ai:')) return null;
         final entry = await AiHistory.get(id.substring(3));
         return entry == null || entry.items.isEmpty ? null : AiAnswerDeck(entry: entry, library: library);

@@ -1813,9 +1813,11 @@
       "animeOpenings": "Anime openings",
       "mostWatched": "Most Watched",
       "showThisWeek": "#$n show this week",
-      "filmThisWeek": "#$n film this week"
+      "filmThisWeek": "#$n film this week",
+      "whatsNext": "What's next after ${title}"
     },
     "homeRow": "From the Reel",
+    "whatsNextHome": "You finished ${title}. Sample what's next in the Reel.",
     "settings": {
       "title": "Reel",
       "subtitle": "Sound, clip ends and the Reel tab",

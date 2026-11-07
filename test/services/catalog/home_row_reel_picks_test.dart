@@ -8,6 +8,8 @@ import 'package:plezy/providers/catalog_sources_provider.dart';
 import 'package:plezy/services/catalog/home_pins.dart';
 import 'package:plezy/services/catalog/home_rows.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
+import 'package:plezy/services/reel/reel_decks.dart' show WhatsNextDeck;
+import 'package:plezy/services/reel/reel_home_row.dart';
 import 'package:plezy/services/reel/reel_store.dart';
 
 /// A server that has some titles and fails on others.
@@ -23,6 +25,26 @@ class _Server implements MediaServerClient {
     asked.add(id);
     if (failing.contains(id)) throw Exception('server error');
     return MediaItem(id: id, backend: MediaBackend.plex, kind: MediaKind.movie, title: 'Title $id', serverId: server);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A server whose titles read as shows, failing on [failing].
+class _ShowServer implements MediaServerClient {
+  _ShowServer(this.server, this.make, {this.failing = const {}});
+
+  final String server;
+  final MediaItem Function(String id) make;
+  final Set<String> failing;
+  final asked = <String>[];
+
+  @override
+  Future<MediaItem?> fetchItem(String id) async {
+    asked.add(id);
+    if (failing.contains(id)) throw Exception('server error');
+    return make(id);
   }
 
   @override
@@ -82,6 +104,69 @@ void main() {
 
     expect(hub?.items.map((i) => i.id), ['1']);
     expect(a.asked, ['2', '1']);
+  });
+
+  group("D22: the What's next after card", () {
+    /// A show server: the finished show reads as a show.
+    MediaItem show(String id) => MediaItem(
+      id: id,
+      backend: MediaBackend.plex,
+      kind: MediaKind.show,
+      title: 'Harbor Lights',
+      thumbPath: '/thumb/$id',
+      artPath: '/art/$id',
+      serverId: 's1',
+    );
+
+    test('leads the row, opens the deck, and the finished show is never repeated as a Save', () async {
+      final a = _ShowServer('s1', show);
+      await save('1', 's1', 'Lantern Bay', const Duration(minutes: 3));
+      await save('9', 's1', 'Harbor Lights', const Duration(minutes: 2));
+
+      final hub = await HomeRowResolver(
+        sources: sources,
+        clientFor: (id) => id == 's1' ? a : null,
+        whatsNext: () async => (serverId: 's1', ratingKey: '9'),
+      ).fetch(row);
+
+      expect(hub?.items.map((i) => i.id), ['9', '1']);
+      final card = hub!.items.first;
+      expect(ReelHomeRow.entryDeck(card), WhatsNextDeck.deckId);
+      expect(card.title, "What's next after Harbor Lights");
+      expect(card.summary, "You finished Harbor Lights. Sample what's next in the Reel.");
+      expect(card.thumbPath, '/thumb/9');
+      expect(card.artPath, '/art/9');
+      expect(card.kind, MediaKind.show);
+      expect(ReelHomeRow.entryDeck(hub.items.last), isNull, reason: 'a Save opens as ever');
+    });
+
+    test('no finished show, its server not connected, or its read failing: no card, the Saves still show', () async {
+      await save('1', 's1', 'Lantern Bay', const Duration(minutes: 3));
+      final a = _ShowServer('s1', show, failing: {'9'});
+
+      Future<List<String>?> ids(Future<({String serverId, String ratingKey})?> Function() whatsNext) async =>
+          (await HomeRowResolver(
+            sources: sources,
+            clientFor: (id) => id == 's1' ? a : null,
+            whatsNext: whatsNext,
+          ).fetch(row))?.items.map((i) => i.id).toList();
+
+      expect(await ids(() async => null), ['1']);
+      expect(await ids(() async => (serverId: 's2', ratingKey: '9')), ['1']);
+      expect(await ids(() async => (serverId: 's1', ratingKey: '9')), ['1']);
+      expect(await ids(() async => throw StateError('brain closed')), ['1']);
+    });
+
+    test('a card with no Saves is the whole row', () async {
+      final a = _ShowServer('s1', show);
+      final hub = await HomeRowResolver(
+        sources: sources,
+        clientFor: (_) => a,
+        whatsNext: () async => (serverId: 's1', ratingKey: '9'),
+      ).fetch(row);
+      expect(hub?.items.map((i) => i.id), ['9']);
+      expect(a.asked, ['9']);
+    });
   });
 
   test('no Saves: an empty row, no server read', () async {

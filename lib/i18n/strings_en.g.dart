@@ -4555,6 +4555,9 @@ class Translations$reel$en {
 	/// en: 'From the Reel'
 	String get homeRow => 'From the Reel';
 
+	/// en: 'You finished ${title}. Sample what's next in the Reel.'
+	String whatsNextHome({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.';
+
 	late final Translations$reel$settings$en settings = Translations$reel$settings$en.internal(_root);
 	late final Translations$reel$decks$en decks = Translations$reel$decks$en.internal(_root);
 }
@@ -8731,6 +8734,9 @@ class Translations$reel$deckNames$en {
 
 	/// en: '#$n film this week'
 	String filmThisWeek({required Object n}) => '#${n} film this week';
+
+	/// en: 'What's next after ${title}'
+	String whatsNext({required Object title}) => 'What\'s next after ${title}';
 }
 
 // Path: reel.settings
@@ -11876,7 +11882,9 @@ extension on Translations {
 			'reel.deckNames.mostWatched' => 'Most Watched',
 			'reel.deckNames.showThisWeek' => ({required Object n}) => '#${n} show this week',
 			'reel.deckNames.filmThisWeek' => ({required Object n}) => '#${n} film this week',
+			'reel.deckNames.whatsNext' => ({required Object title}) => 'What\'s next after ${title}',
 			'reel.homeRow' => 'From the Reel',
+			'reel.whatsNextHome' => ({required Object title}) => 'You finished ${title}. Sample what\'s next in the Reel.',
 			'reel.settings.title' => 'Reel',
 			'reel.settings.subtitle' => 'Sound, clip ends and the Reel tab',
 			'reel.settings.sheetEntry' => 'Reel settings',
@@ -12272,10 +12280,10 @@ extension on Translations {
 			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
 			'liveTv.recordSettings.keepUpTo' => 'Episodes to keep',
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
-			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
-			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
 			_ => null,
 		} ?? switch (path) {
+			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
+			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
@@ -12786,10 +12794,10 @@ extension on Translations {
 			'performanceOverlay.decoderQualcommHw' => 'Qualcomm HW',
 			'performanceOverlay.decoderMediatekHw' => 'MediaTek HW',
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
-			'performanceOverlay.decoderSoftware' => 'Software',
-			'performanceOverlay.decoderHardware' => 'Hardware',
 			_ => null,
 		} ?? switch (path) {
+			'performanceOverlay.decoderSoftware' => 'Software',
+			'performanceOverlay.decoderHardware' => 'Hardware',
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'performanceOverlay.signal' => 'Signal',
