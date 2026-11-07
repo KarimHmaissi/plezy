@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../models/companion_remote/remote_command.dart';
 import '../media/media_item.dart';
@@ -14,8 +16,9 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
-import '../providers/offline_mode_provider.dart';
 import '../screens/media_detail_screen.dart';
+import '../screens/reel/reel_card_view.dart';
+import '../screens/reel/reel_screen.dart' show ReelScreen;
 import '../utils/app_logger.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/platform_detector.dart';
@@ -33,19 +36,25 @@ import 'catalog/trakt_lists_catalog_source.dart';
 import 'companion_remote/phone_mode.dart';
 import 'customisation/customisation_store.dart';
 import 'deep_links/deep_link_launcher.dart' show deepLinkServerWait, waitForServers;
+import 'device_performance.dart';
 import 'library_index/library_index.dart';
 import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
+import 'playback_coordinator.dart';
 import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
 import 'reel/reel_controller.dart';
+import 'reel/reel_data_budget.dart';
 import 'reel/reel_decks.dart';
 import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
+import 'reel/reel_art.dart';
 import 'reel/reel_metadata.dart';
-import 'reel/reel_playback_profile.dart';
+import 'reel/reel_playback_profile.dart' hide ReelScreen;
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
+import 'reel/reel_tmdb.dart';
+import 'reel/reel_warmer.dart';
 import 'reel_playback_watcher.dart';
 import 'reel_servers_plex.dart';
 import 'settings_service.dart';
@@ -62,12 +71,36 @@ abstract final class ReelApp {
   /// The decks the Reel offers here, in the app's own order, by id and name
   /// (the Decks screen, V2-52). Builds the deck objects without loading any.
   static Future<List<({String id, String name})>> deckList(BuildContext context) async {
-    final store = ReelStore.instance;
-    final library = _library();
+    final shared = _shared(ReelStore.instance);
+    final base = await _decks(context, library: shared.library, forYou: shared.forYou);
     return [
-      for (final d in await _decks(context, library: library, store: store, pool: _pool(store, library)))
-        (id: d.id, name: d.name),
+      for (final d in [...base, ...await _answerDecks(shared.library)]) (id: d.id, name: d.name),
     ];
+  }
+
+  static ({ReelLibrary library, ReelPool pool, ForYouDeck forYou})? _sharedFor;
+
+  /// The library, the day's pool and For You, one set per app run (V2-14):
+  /// the warm start before the Reel opens and every Reel session share
+  /// them, so a session opened while the warm start gathers or builds joins
+  /// that gather and that build (one Sonnet call a day) rather than
+  /// starting its own. A new set only if this device stops or starts
+  /// building the pool.
+  static ({ReelLibrary library, ReelPool pool, ForYouDeck forYou}) _shared(ReelStore store) {
+    final have = _sharedFor;
+    if (have != null && have.pool.host == !PhoneMode.isHandheld) return have;
+    final library = _library();
+    final pool = _pool(store, library);
+    final forYou = ForYouDeck(
+      pool: pool,
+      library: library,
+      candidates: () => forYouCandidates(library: library, store: store),
+      facts: () => forYouFacts(store: store, pool: pool),
+      again: () => anotherGoCandidates(library: library, store: store),
+      sharedChanges: Customisation.changed,
+      clears: ReelPool.clears,
+    );
+    return _sharedFor = (library: library, pool: pool, forYou: forYou);
   }
 
   static ReelLibrary _library() =>
@@ -79,14 +112,14 @@ abstract final class ReelApp {
       ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
 
   /// The decks in the app's own order: For You, Fits tonight, Give it
-  /// another go, Anime openings, Most Watched (with Trakt) and the saved
-  /// answers. The controller applies the user's order and hidden decks
-  /// ([ReelController.shownDecks]). For You is always first.
+  /// another go, Anime openings and Most Watched (with Trakt); the saved
+  /// answers follow ([_answerDecks]). The controller applies the user's
+  /// order and hidden decks ([ReelController.shownDecks]). For You is
+  /// always first.
   static Future<List<ReelDeck>> _decks(
     BuildContext context, {
     required ReelLibrary library,
-    required ReelStore store,
-    required ReelPool pool,
+    required ForYouDeck forYou,
   }) async {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
@@ -110,15 +143,6 @@ abstract final class ReelApp {
       }
     }
 
-    final forYou = ForYouDeck(
-      pool: pool,
-      library: library,
-      candidates: () => forYouCandidates(library: library, store: store),
-      facts: () => forYouFacts(store: store, pool: pool),
-      again: () => anotherGoCandidates(library: library, store: store),
-      sharedChanges: Customisation.changed,
-      clears: ReelPool.clears,
-    );
     return <ReelDeck>[
       forYou,
       FitsTonightDeck(forYou: forYou),
@@ -132,23 +156,37 @@ abstract final class ReelApp {
           films: () => chart(HomeRowIds.traktLists('chart:watched:movies')),
           shows: () => chart(HomeRowIds.traktLists('chart:watched:shows')),
         ),
-      for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
     ];
   }
+
+  /// The saved answers as decks (newest first). The Reel adds them once its
+  /// first card has shown (V2-04), so reading them never holds up its open.
+  static Future<List<ReelDeck>> _answerDecks(ReelLibrary library) async => [
+    for (final entry in await _answers()) AiAnswerDeck(entry: entry, library: library),
+  ];
 
   static Future<ReelController> controller(BuildContext context) async {
     final multi = context.read<MultiServerProvider>();
     final catalog = context.read<CatalogSourcesProvider?>();
     final remote = context.read<CompanionRemoteProvider?>();
-    final link = context.read<OfflineModeProvider?>();
     final servers = multi.serverManager;
     final store = ReelStore.instance;
-    final library = _library();
-    final resolver = resolverFor(servers, store, serversChanged: multi, profile: ReelPlaybackWatcher.instance);
-    final pool = _pool(store, library);
+    // A Reel session is starting: the warm start's steps still to come are
+    // dropped (V2-14).
+    _warmer?.yieldNow();
+    final shared = _shared(store);
+    final library = shared.library;
+    final pool = shared.pool;
+    final forYou = shared.forYou;
+    final resolver = resolverFor(
+      servers,
+      store,
+      serversChanged: multi,
+      profile: ReelPlaybackWatcher.instance,
+      tmdb: _tmdbRung(ReelPlaybackWatcher.instance),
+    );
     final media = _AppReelMedia(servers, store);
-    final decks = await _decks(context, library: library, store: store, pool: pool);
-    final forYou = decks.first as ForYouDeck;
+    final decks = await _decks(context, library: library, forYou: forYou);
 
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;
@@ -205,6 +243,15 @@ abstract final class ReelApp {
       // The phone's feed plays each card in its own page; the TV keeps the
       // native clip core.
       externalClips: !PlatformDetector.isTV(),
+      // TV cold open (V2-04): the clip core comes up alongside the deck, the
+      // card the Reel was left on opens at once (matched from the local
+      // index only), and the saved answers join after the first card.
+      warmClipCore: PlatformDetector.isTV(),
+      headCard: PlatformDetector.isTV() ? (entry) async => (await library.cards([entry])).firstOrNull : null,
+      moreDecks: () => _answerDecks(library),
+      // Each deck carries on where it was left today, on both devices
+      // (V2-14).
+      keepCursor: true,
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
       // While the Reel plays, the brain's indexer rests and its ONNX session
@@ -216,6 +263,7 @@ abstract final class ReelApp {
       // device's daily build hears them.
       onActive: (on) {
         active = on;
+        _warmer?.reelActive(on);
         if (on) {
           unawaited(_yieldAfter(forYou, stillActive: () => active));
         } else {
@@ -228,13 +276,12 @@ abstract final class ReelApp {
       itemWithNext: media.itemWithNext,
       // The Reel's settings page applies to the Reel that is playing.
       settingsChanged: SettingsService.instanceOrNull?.listenableOfAll(SettingsService.reelChoicePrefs),
-      // The Reel on mobile data (V2-53): the pref, and the app's one
-      // connectivity reading.
+      // The Reel on mobile data (V2-53): the pref. The link itself is the
+      // playback profile's (the resolver's ReelPlaybackWatcher), the one
+      // reading the data budget and the clip's file both follow.
       cellular: () =>
           SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
           SettingsService.reelCellular.resolvedDefault,
-      metered: () => link?.isCellularOnly ?? false,
-      linkChanged: link,
       onOpen: (item) async {
         if (!navigatorContext.mounted) return;
         await Navigator.of(navigatorContext).push(mediaDetailRoute(metadata: item));
@@ -265,7 +312,8 @@ abstract final class ReelApp {
   static const Duration sweepDelay = Duration(seconds: 30);
 
   /// The Reel's cache housekeeping ([ReelStore.sweep]), at most once a day.
-  /// It runs here until the warm start before the tab opens (V2-14) exists.
+  /// On the TV the warm start before the Reel opens (V2-14) runs it too;
+  /// whichever comes first that day does it.
   static void _sweepLater(ReelStore store) => Timer(sweepDelay, () async {
     try {
       final s = await store.sweep();
@@ -278,6 +326,44 @@ abstract final class ReelApp {
       appLogger.w('[ReelCache] daily sweep failed', error: e);
     }
   });
+
+  static ReelWarmer? _warmer;
+
+  /// The Home the warm start decodes art through: the latest one armed
+  /// from, so a Home built again (a profile switch) replaces the one gone.
+  static BuildContext? _warmContext;
+
+  /// TV, from the app's post-startup idle point (Home's background start,
+  /// after the library index): arms the warm start before the Reel opens
+  /// (V2-14), once per app run, while the Reel is turned on. It never runs
+  /// while a video plays, in the background or with the Reel open, and
+  /// reads no server but for the first card's art.
+  static void warmBeforeOpen(BuildContext context) {
+    if (!PlatformDetector.isTV() || !ReelScreen.enabled) return;
+    _warmContext = context;
+    if (_warmer != null) return;
+    final servers = context.read<MultiServerProvider>().serverManager;
+    final store = ReelStore.instance;
+    final media = _AppReelMedia(servers, store);
+    _warmer = ReelWarmer(
+      store: store,
+      forYou: _shared(store).forYou,
+      playing: () => PlaybackCoordinator.instance.hasVideoSession,
+      foreground: () => WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      cachedItem: media.cachedItem,
+      // Decoded as the TV's card view builds it, through the latest Home's
+      // context (the same screen size); with no Home mounted it isn't, and
+      // the done line says art=failed.
+      precacheArt: (card, item, {required clip}) async {
+        final home = _warmContext;
+        if (home == null || !home.mounted) throw StateError('Home is not mounted');
+        await ReelCardView.precacheArt(home, card, item, clip: clip);
+      },
+      // Not while a memory trim has the Reel's art budget cut.
+      artAllowed: () => ReelArt.budgetBytes() >= DevicePerformance.reelImageBudgetBytes(),
+    )..arm();
+    appLogger.i('[ReelWarmer] armed');
+  }
 
   /// Settings' "Rebuild today's For You" ([ReelPool.clearToday]), with the
   /// same host rule as the Reel's own pool. Returns whether this device does
@@ -303,16 +389,50 @@ abstract final class ReelApp {
   }
 
   /// Sends the current card to a connected phone at once (it just opened
-  /// On TV mode).
-  static VoidCallback? republish;
+  /// On TV mode), from the session the screen holds. A session build that
+  /// ran past the screen's 30 s build limit can land after a second build was
+  /// started; whichever the screen discards is disposed, so it is skipped
+  /// here, and the one kept is forced however the builds finished.
+  static void republish() {
+    _publishers.removeWhere((p) => p.controller.isDisposed);
+    for (final p in [..._publishers]) {
+      p.force();
+    }
+  }
+
+  /// One On TV publisher per session build still alive, oldest first.
+  static final List<({ReelController controller, VoidCallback force})> _publishers = [];
+
+  /// Tests: forgets every publisher.
+  @visibleForTesting
+  static void debugResetPublishers() => _publishers.clear();
 
   /// Host side of On TV mode: a `reelState` on every card, deck or play
   /// state change while a phone is connected.
-  static void _publish(ReelController c, CompanionRemoteProvider remote) {
+  static void _publish(ReelController c, CompanionRemoteProvider remote) => publishState(
+    c,
+    connected: () => remote.isHost && remote.isConnected,
+    send: (state) => remote.sendCommand(RemoteCommandType.reelState, data: state),
+  );
+
+  /// [_publish] over plain hooks (the run-time seam for tests): [send]
+  /// gets [ReelController.remoteState] on every change while [connected],
+  /// never twice the same unless [republish] forces it, and nothing once
+  /// [c] is disposed.
+  @visibleForTesting
+  static void publishState(
+    ReelController c, {
+    required bool Function() connected,
+    required void Function(Map<String, Object?> state) send,
+  }) {
     String? last;
     var disposed = false;
     void publish({bool force = false}) {
-      if (disposed || !remote.isHost || !remote.isConnected) {
+      if (disposed || c.isDisposed) {
+        disposed = true;
+        return;
+      }
+      if (!connected()) {
         last = null;
         return;
       }
@@ -326,13 +446,15 @@ abstract final class ReelApp {
       final key = jsonEncode(state);
       if (!force && key == last) return;
       last = key;
-      remote.sendCommand(RemoteCommandType.reelState, data: state);
+      send(state);
     }
 
     c.addListener(publish);
     c.clips.phase.addListener(publish);
     c.cardChanged.addListener(publish);
-    republish = () => publish(force: true);
+    _publishers
+      ..removeWhere((p) => p.controller.isDisposed)
+      ..add((controller: c, force: () => publish(force: true)));
   }
 
   /// The clip resolver over the app's servers (also the measure-day probe).
@@ -346,6 +468,7 @@ abstract final class ReelApp {
     ReelStore store, {
     Listenable? serversChanged,
     ValueListenable<ReelPlaybackProfile>? profile,
+    ReelTmdbRung? tmdb,
   }) {
     final plex = PlexReelServers(servers);
     return ClipResolver(
@@ -353,11 +476,46 @@ abstract final class ReelApp {
       store: store,
       aniList: _aniList,
       profile: profile,
+      tmdb: tmdb,
       waitForServer: serversChanged == null
           ? null
           : (id) => waitForServers(serversChanged, () => plex.connected(id), timeout: deepLinkServerWait),
     );
   }
+
+  /// The TMDB trailer rung (plan V2-63, D16): Android phones only (the
+  /// feed plays it in a WebView; the TV has none, so its clip-less titles
+  /// stay AI cards with a premise). It runs while [tmdbRungMayRun] says so.
+  /// The TMDB key is the one in Settings ▸ AI; with none set the rung is
+  /// skipped.
+  static ReelTmdbRung? _tmdbRung(ValueListenable<ReelPlaybackProfile> profile) {
+    if (PlatformDetector.isTV() || !Platform.isAndroid) return null;
+    final client = TmdbVideosClient();
+    unawaited(client.prime());
+    return ReelTmdbRung(
+      fetch: client.fetch,
+      on: () => tmdbRungMayRun(
+        mayHaveKey: client.mayHaveKey,
+        profile: profile.value,
+        cellular:
+            SettingsService.instanceOrNull?.read(SettingsService.reelCellular) ??
+            SettingsService.reelCellular.resolvedDefault,
+      ),
+      language: () => LocaleSettings.currentLocale.languageCode,
+    );
+  }
+
+  /// Whether the TMDB rung may run now: a key may be set, and the data
+  /// budget is full (Wi-Fi, or mobile data on Normal; Data saver and Stills
+  /// only turn it off, V2-53). The link is the playback [profile]'s, the one
+  /// source the controller's data budget and the clip picks read too, so the
+  /// rung never disagrees with them while the network changes.
+  @visibleForTesting
+  static bool tmdbRungMayRun({
+    required bool mayHaveKey,
+    required ReelPlaybackProfile profile,
+    required ReelCellular cellular,
+  }) => mayHaveKey && ReelDataBudget.of(cellular, metered: profile.link == ReelLink.cellular) == ReelDataBudget.full;
 
   /// The cards' metadata and art over the app's servers, for the run-time
   /// seam test (V2-62).
@@ -503,6 +661,10 @@ class _AppReelMedia implements ReelMedia {
     final r = await c.fetchItemWithOnDeck(ratingKey).timeout(const Duration(seconds: 15));
     return (item: r.item, next: r.onDeckEpisode);
   }
+
+  /// The item from the caches alone (the warm start, V2-14): Plex only.
+  Future<MediaItem?> cachedItem(String serverId, String ratingKey) async =>
+      _plex.serves(serverId) ? _metadata.cachedItem(serverId, ratingKey) : null;
 
   @override
   String? imageUrl(String serverId, String? path, {required int width}) {

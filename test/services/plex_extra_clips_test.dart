@@ -47,14 +47,60 @@ void main() {
     expect(extras.map((e) => e.ratingKey), ['78']);
   });
 
+  test('the raw rows keep every Media attribute for the extras-shape probe (V2-20)', () async {
+    final client = testPlexClient(
+      handler: (request) async {
+        expect(request.url.path, '/library/metadata/5/extras');
+        return jsonResponse({
+          'MediaContainer': {
+            'Metadata': [
+              {
+                'ratingKey': '78',
+                'title': 'Harbor Lights Trailer',
+                'subtype': 'trailer',
+                'Media': [
+                  {
+                    'videoResolution': '1080',
+                    'bitrate': 5000,
+                    'audioChannels': 2,
+                    'Part': [
+                      {'key': '/services/iva/assets/78/video.mp4?bitrate=5000'},
+                    ],
+                  },
+                  {
+                    'videoResolution': '720',
+                    'bitrate': 2000,
+                    'Part': [
+                      {'key': '/services/iva/assets/78/video.mp4?bitrate=2000'},
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        });
+      },
+    );
+    addTearDown(client.close);
+    final rows = await client.fetchExtraRows('5');
+    expect(rows, hasLength(1));
+    final media = (rows.single as Map)['Media'] as List;
+    expect(media.map((m) => (m as Map)['videoResolution']), ['1080', '720']);
+    expect((media.first as Map)['audioChannels'], 2);
+    // The clip ladder still reads its lean row from the same response.
+    expect((await client.fetchExtraClips('5')).single.partKey, '/services/iva/assets/78/video.mp4?bitrate=5000');
+  });
+
   for (final status in [401, 503]) {
     test('a $status throws instead of reading as no extras', () async {
       final client = testPlexClient(handler: (request) async => jsonResponse({'error': 'no'}, status: status));
       addTearDown(client.close);
-      await expectLater(
-        client.fetchExtraClips('5'),
-        throwsA(isA<MediaServerHttpException>().having((e) => e.statusCode, 'statusCode', status)),
-      );
+      for (final read in [client.fetchExtraClips, client.fetchExtraRows]) {
+        await expectLater(
+          read('5'),
+          throwsA(isA<MediaServerHttpException>().having((e) => e.statusCode, 'statusCode', status)),
+        );
+      }
     });
   }
 }

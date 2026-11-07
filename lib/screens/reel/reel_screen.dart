@@ -34,6 +34,7 @@ import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../settings/reel_settings_screen.dart';
 import '../../services/reel/feed_players.dart';
+import '../../services/reel/feed_youtube_webview.dart';
 import '../video_player/wakelock_controller.dart';
 import 'reel_card_view.dart';
 import 'reel_debug_overlay.dart';
@@ -207,8 +208,13 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   bool _ownPage = false;
 
   /// How the next visit's sound starts, settled in [_visit] and taken by
-  /// the controller in [_start] before its first card plays (a late build
-  /// and Retry included).
+  /// the controller in [_start] before its first card plays. It is kept
+  /// while the build runs, so a build that lands after the screen gave up
+  /// on it ([ReelScreen.createLimit]), or the one Retry makes, still starts
+  /// the way the visit settled. [_release] keeps it too: a build that lands
+  /// while the app is away still starts the session, and the resume that
+  /// follows finds it playing and settles no sound of its own. The next
+  /// visit settles it afresh ([_visit]).
   bool? _visitMuted;
 
   /// TV: bumped each time the viewer turns the sound on, for the badge's
@@ -226,8 +232,11 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
   /// hold the screen on only while a card really plays. A clip plays as
   /// often as the clip-end pref says, then holds (V2-47).
   late final ReelFeedPlayers _players = ReelFeedPlayers(
+    // A TMDB trailer plays in YouTube's player page (V2-63), the rest in
+    // native players.
     create: (uri) =>
         ReelScreen.debugFeedVideo?.call(uri) ??
+        youTubeFeedVideoFor(uri) ??
         PluginFeedVideo(uri, mixWithOthers: ReelSound.mixWithOthers(_startSoundPref)),
     plays: () => ReelController.clipEndPref().plays,
     keepAwake: _awake.setEnabled,
@@ -540,9 +549,12 @@ class ReelScreenState extends State<ReelScreen> with WidgetsBindingObserver, Tab
     // Under the intro the session is ready but waits; a requested deck is
     // kept for when it ends.
     if (!mounted || !_shown || widget.offline || _intro) return;
-    final visitMuted = _visitMuted;
-    _visitMuted = null;
-    if (visitMuted != null) await c.setMuted(visitMuted, remember: false);
+    final muted = _visitMuted;
+    if (muted != null) {
+      _visitMuted = null;
+      appLogger.d('[ReelLife] the visit starts ${muted ? 'muted' : 'with sound'}');
+      await c.setMuted(muted, remember: false);
+    }
     if (!mounted || !_shown) return;
     final deck = _pendingDeck, card = _pendingCard;
     _pendingDeck = null;

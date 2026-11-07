@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../i18n/strings.g.dart';
+import '../../services/reel/reel_clip_cache.dart';
 import '../../services/reel/reel_developer.dart';
 import '../../services/settings_service.dart';
 import '../../utils/platform_detector.dart';
 import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_page.dart';
 import '../../widgets/settings_section.dart';
+import 'reel_clip_cache_tile.dart';
 import 'reel_decks_screen.dart';
 import 'reel_for_you_tiles.dart';
 import 'settings_utils.dart';
@@ -22,15 +24,26 @@ import 'settings_utils.dart';
 /// screen ([ReelDecksScreen]). For You's note and today's rebuild (V2-51,
 /// synced) sit in their own group ([ReelForYouTiles]). The hidden developer
 /// setting (V2-62) shows last, only in a debug build or while debug logging
-/// is on.
+/// is on; on the TV it also holds the clip loudness switch (V2-19). The TV
+/// has a Clear Reel cache row for its clip core's disk cache (V2-10); the
+/// phone's feed plays on its own players and never writes that cache.
 class ReelSettingsScreen extends StatelessWidget {
-  const ReelSettingsScreen({super.key, this.tv, @visibleForTesting this.debugBuild = kDebugMode});
+  const ReelSettingsScreen({
+    super.key,
+    this.tv,
+    @visibleForTesting this.debugBuild = kDebugMode,
+    @visibleForTesting this.clipCache,
+  });
 
   /// The TV layout (OK button, no mobile data row). Defaults to this device.
   final bool? tv;
 
   /// A debug build: the developer setting always shows.
   final bool debugBuild;
+
+  /// The clip disk cache the Clear row works on; [ReelClipCache.instance]
+  /// by default.
+  final ReelClipCache? clipCache;
 
   @override
   Widget build(BuildContext context) {
@@ -78,6 +91,11 @@ class ReelSettingsScreen extends StatelessWidget {
             ),
           ],
         ),
+        if (isTv && (clipCache ?? ReelClipCache.instance).supported)
+          SettingsGroup(
+            title: s.storage,
+            children: [ReelClipCacheTile(cache: clipCache)],
+          ),
         if (ReelDeveloper.visible(debugBuild: debugBuild))
           SettingsGroup(
             title: s.developer,
@@ -88,6 +106,15 @@ class ReelSettingsScreen extends StatelessWidget {
                 title: s.developerTools,
                 subtitle: s.developerToolsDescription,
               ),
+              // The TV's clip core only: the phone feed plays on its own
+              // players (V2-19, D9: off until a listening A/B).
+              if (isTv)
+                SettingSwitchTile(
+                  pref: SettingsService.reelClipNormalization,
+                  icon: Symbols.graphic_eq_rounded,
+                  title: s.clipNormalization,
+                  subtitle: s.clipNormalizationDescription,
+                ),
             ],
           ),
         const SizedBox(height: 24),

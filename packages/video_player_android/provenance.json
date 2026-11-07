@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/flutter/packages/tree/main/packages/video_player/video_player_android",
+    "packageVersion": "2.12.2",
+    "source": "pub.dev",
+    "archiveSha256": "d27054dea34d748a44f06d433a57005d2aac69944485b0abbaed3303dbcfa3f1"
+  },
+  "generator": {
+    "package": "pigeon",
+    "version": "27.3.2",
+    "command": "dart run pigeon --input pigeons/messages.dart"
+  },
+  "plezyDeltas": [
+    "per-player media3 buffer durations: CreationOptions min/max/playback/rebuffer, AndroidBufferedVideoPlayerOptions, PlezyLoadControl",
+    "plugin media3 compiled against the app's media3Version (1.11.0) instead of 1.9.2",
+    "the published example app and AUTHORS list are not vendored",
+    "tests: new buffer-duration cases, CreationOptions constructor calls, one close_sinks ignore, RTSP test host example.com"
+  ],
+  "refreshContract": [
+    "Every change is marked PLEZY DELTA and listed in README.md (Plezy fork); reapply them all on the new upstream version.",
+    "Regenerate messages.g.dart and Messages.kt with the Pigeon version the new upstream outputs name; never hand-edit beyond the generator's own output.",
+    "Keep exoplayerVersion equal to android/app/build.gradle.kts media3Version.",
+    "Run flutter test here, flutter test test/reel/feed_buffer_test.dart at the root, and ./gradlew :video_player_android:testDebugUnitTest (Java 21) before landing."
+  ]
+}

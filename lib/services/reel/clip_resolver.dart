@@ -7,8 +7,11 @@ import 'package:http/http.dart' as http;
 import '../../utils/app_logger.dart';
 import 'clip_filter.dart';
 import 'clip_player.dart';
+import 'feed_youtube.dart' show ReelYouTube;
+import 'reel_clip_cache.dart';
 import 'reel_playback_profile.dart';
 import 'reel_store.dart';
+import 'reel_tmdb.dart';
 
 /// The only server calls the Reel may make: per-title extras and a clip URL.
 /// Implemented outside the Reel (`reel_servers_plex.dart`) so no Reel file
@@ -155,12 +158,39 @@ class ClipCandidate implements ReelRendition {
   }
 }
 
+/// What a clip is, for its chip. The views name it in the app's language
+/// when they draw it; the cache stores the kind, never the words.
+enum ClipKind {
+  trailer,
+  teaser,
+  opening;
+
+  /// The kind a cached row written before the kind was stored says in its
+  /// English label ("Trailer", "Teaser", "Opening 1"), with the opening's
+  /// number; null when the label says neither.
+  static (ClipKind, int?)? fromLegacyLabel(Object? label) {
+    if (label is! String) return null;
+    final l = label.trim();
+    if (RegExp(r'^teaser$', caseSensitive: false).hasMatch(l)) return (ClipKind.teaser, null);
+    if (RegExp(r'^trailer$', caseSensitive: false).hasMatch(l)) return (ClipKind.trailer, null);
+    final op = RegExp(r'^opening(?:\s+(\d+))?$', caseSensitive: false).firstMatch(l);
+    if (op != null) return (ClipKind.opening, int.tryParse(op.group(1) ?? ''));
+    return null;
+  }
+
+  /// The kind of a Plex extra by its title: a teaser says so, anything else
+  /// the ladder picks is a trailer.
+  static ClipKind ofExtraTitle(String title) =>
+      RegExp(r'teaser', caseSensitive: false).hasMatch(title) ? ClipKind.teaser : ClipKind.trailer;
+}
+
 /// A resolved rung: where the clip is and what it is.
 class ResolvedClip {
   const ResolvedClip({
     required this.source,
     required this.assetId,
-    required this.label,
+    required this.kind,
+    this.number,
     this.serverId,
     this.height,
     this.candidates = const [],
@@ -168,11 +198,15 @@ class ResolvedClip {
 
   final ClipSource source;
 
-  /// `plex:<extra ratingKey>` or `at:<video id>`, for Spoiled me.
+  /// `plex:<extra ratingKey>`, `at:<video id>` or `yt:<YouTube id>`, for
+  /// Spoiled me.
   final String assetId;
 
-  /// "Trailer", "Teaser", "Opening 1".
-  final String label;
+  /// Trailer, teaser or opening; the views name it ("Opening 1").
+  final ClipKind kind;
+
+  /// An opening's number (1 for OP1); null for a trailer or teaser.
+  final int? number;
 
   /// Plex rungs: the server the clip streams from (never preloaded off a
   /// server marked slow).
@@ -218,25 +252,40 @@ typedef AniListLookup = Future<int?> Function(ReelTitle title);
 /// An id missing from the map has no record; a throw means no answer.
 typedef AnimeThemesFetch = Future<Map<int, Map<String, dynamic>>> Function(List<int> anilistIds);
 
-/// One ladder run: the hit, whether every rung answered for sure, and the
-/// servers that weren't connected.
+/// How the TMDB rung (V2-63) answered a title.
+enum _TmdbAnswer {
+  /// Not asked: there is no rung here (the TV), it is off for now (Data
+  /// saver, Stills only), there is no TMDB key, or an earlier rung couldn't
+  /// answer.
+  notAsked,
+
+  /// Asked, and it has no trailer to play.
+  none,
+
+  /// Asked, and it couldn't answer (a timeout, a 401, a 429, a 5xx).
+  unknown,
+}
+
+/// One ladder run: the hit, whether every rung before TMDB answered for
+/// sure, the servers that weren't connected, and how TMDB answered.
 class _Run {
-  _Run(this.hit, {required this.sure, required this.offline});
+  _Run(this.hit, {required this.sure, required this.offline, this.tmdb = _TmdbAnswer.notAsked});
 
   final (ResolvedClip, Map<String, Object?>)? hit;
   final bool sure;
   final Set<String> offline;
+  final _TmdbAnswer tmdb;
 
   ClipAnswer get answer => hit != null
       ? ClipAnswer.found
-      : sure
+      : sure && tmdb != _TmdbAnswer.unknown
       ? ClipAnswer.none
       : ClipAnswer.unknown;
 }
 
 /// The clip ladder (spec §5), cheapest for the guest servers first:
 /// anime → AnimeThemes OP1, else a Plex extra (Teaser / plain trailer), else
-/// an AI card. Caches the asset identity per title for 30 days
+/// (the phone only, [tmdb]) a TMDB YouTube trailer, else an AI card. Caches the asset identity per title for 30 days
 /// (`src:<groupKey>`), never a resolved CDN URL. A miss is cached only when
 /// every rung answered for sure; a rung that couldn't answer leaves the
 /// title unknown, which lasts for the session only. Plex servers get one
@@ -254,7 +303,23 @@ class ClipResolver {
     this.waitForServer,
     this.firstTry = const Duration(seconds: 5),
     this.profile,
+    this.tmdb,
   }) : _animeThemes = animeThemes ?? AnimeThemesClient().fetch;
+
+  /// The TMDB trailer rung (plan V2-63): the phone only. Null on the TV,
+  /// which has no WebView, so its clip-less titles stay AI cards.
+  final ReelTmdbRung? tmdb;
+
+  /// Whether the TMDB rung may run now (never throws).
+  bool get tmdbOn {
+    final rung = tmdb;
+    if (rung == null) return false;
+    try {
+      return rung.on();
+    } catch (_) {
+      return false;
+    }
+  }
 
   final ReelServers servers;
   final ReelStore store;
@@ -324,7 +389,21 @@ class ClipResolver {
     var keep = false;
     final entry = cached == null ? null : _entry(cached);
     if (entry != null) {
-      if (entry['miss'] == true) return const ClipLookup.none();
+      if (entry['miss'] == true) {
+        // The servers (and AnimeThemes) said no. TMDB wasn't asked when the
+        // row was written (no rung then, or it was off): ask it alone now,
+        // with no server read.
+        if (entry['tm'] != true && tmdbOn) return _tmdbOnly(t, key, banned, exclude);
+        return const ClipLookup.none();
+      }
+      if (entry['k'] == 'yt') {
+        // A YouTube trailer this device can't play now (Data saver, Stills
+        // only): an AI card for the session; the row is kept.
+        if (!tmdbOn) return const ClipLookup.unknown();
+        // It failed or was marked as a spoiler: the servers said no when it
+        // was found, so only TMDB is asked again.
+        if (_assets(entry).any(banned.contains)) return _tmdbOnly(t, key, banned, exclude);
+      }
       final assets = _assets(entry);
       if (assets.isNotEmpty && !assets.any(banned.contains)) {
         var hit = _fromCache(entry);
@@ -349,15 +428,145 @@ class ClipResolver {
       return ClipLookup.found(hit.$1);
     }
     if (run.sure && !keep) {
-      if (exclude.isEmpty) await store.cache(key, missRow);
-      return const ClipLookup.none();
+      // The servers' answer is kept even while TMDB's is unknown, so the
+      // next lookup asks TMDB alone and no server again.
+      if (exclude.isEmpty) await store.cache(key, run.tmdb == _TmdbAnswer.none ? missRowWithTmdb : missRow);
+      if (run.tmdb != _TmdbAnswer.unknown) return const ClipLookup.none();
     }
     appLogger.d('Reel: clip answer unknown for now; not cached');
     return const ClipLookup.unknown();
   }
 
-  /// A definitive miss in the current [sourceFormat].
+  /// A neighbouring deck's head (plans V2-09 and D15): its clip from what
+  /// needs no Plex server, or null. Never reads extras, never waits for a
+  /// server, and never caches a miss:
+  /// - a cached opening (AnimeThemes) is used as is;
+  /// - a cached YouTube trailer (V2-63) never is: it plays in a WebView, not
+  ///   on the clip core, so there is nothing to preload;
+  /// - a cached Plex clip only when [onDisk] says its bytes are already on
+  ///   this device (the TV clip core's disk cache, V2-10);
+  /// - an anime show with no cached row asks AnimeThemes for its openings
+  ///   (a deck's batch in flight is waited for), and an opening found is
+  ///   cached as the ladder caches it.
+  ///
+  /// [exclude] as for [lookup].
+  Future<ResolvedClip?> lookupWithoutServers(
+    ReelTitle t, {
+    Set<String> exclude = const {},
+    Future<bool> Function(ResolvedClip clip)? onDisk,
+  }) async {
+    final banned = {...await store.spoiledAssets(t.titleId), ...exclude};
+    final key = 'src:${t.groupKey}';
+    final cached = await store.cached(key, ttl: ReelStore.sourceTtl);
+    final entry = cached == null ? null : _entry(cached);
+    if (entry != null) {
+      if (entry['miss'] == true) return null;
+      final assets = _assets(entry);
+      if (assets.isEmpty || assets.any(banned.contains)) return null;
+      final hit = _fromCache(entry);
+      if (hit == null) return null;
+      if (hit.source.origin == ClipOrigin.animeTheme) return hit;
+      if (hit.source.origin == ClipOrigin.youtube) return null;
+      return onDisk != null && await onDisk(hit) ? hit : null;
+    }
+    if (!(t.anime && t.isShow)) return null;
+    final (ops, _) = await _openings(t);
+    final candidates = [for (final op in ops) ClipCandidate.opening(op)];
+    if (candidates.any((c) => banned.contains(c.assetId))) return null;
+    final clip = _opening1(1, candidates);
+    if (clip == null) return null;
+    if (exclude.isEmpty) await store.cache(key, jsonEncode(_openingRow(clip, candidates)));
+    return clip;
+  }
+
+  /// A definitive miss in the current [sourceFormat] from the servers and
+  /// AnimeThemes, with TMDB not asked.
   static const String missRow = '{"v":$sourceFormat,"miss":true}';
+
+  /// A definitive miss that TMDB answered too (V2-63).
+  static const String missRowWithTmdb = '{"v":$sourceFormat,"miss":true,"tm":true}';
+
+  /// The TMDB rung alone, for a title whose other rungs already said no: a
+  /// trailer is cached as found, a sure no as a miss TMDB answered, and an
+  /// unknown leaves the row as it was. With assets [exclude]d (a trailer
+  /// that just failed), a no is not cached: the trailer may play next time.
+  Future<ClipLookup> _tmdbOnly(ReelTitle t, String key, Set<String> banned, Set<String> exclude) async {
+    final (answer, hit) = await _tmdbRung(t, banned);
+    if (hit != null) {
+      await store.cache(key, jsonEncode(hit.$2));
+      return ClipLookup.found(hit.$1);
+    }
+    switch (answer) {
+      case _TmdbAnswer.none:
+        if (exclude.isEmpty) await store.cache(key, missRowWithTmdb);
+        return const ClipLookup.none();
+      case _TmdbAnswer.notAsked:
+        // No key, or the rung went off meanwhile: the servers' no stands.
+        return const ClipLookup.none();
+      case _TmdbAnswer.unknown:
+        return const ClipLookup.unknown();
+    }
+  }
+
+  /// The TMDB lane's key.
+  static const String _tmdbLane = ':tmdb';
+
+  /// TMDB's trailer for [t] (V2-21 rules: official YouTube, a Trailer before
+  /// a Teaser, the app's language first, the earliest), skipping [banned]
+  /// ones and keys that aren't YouTube ids. A title with no TMDB id has none.
+  Future<(_TmdbAnswer, (ResolvedClip, Map<String, Object?>)?)> _tmdbRung(ReelTitle t, Set<String> banned) async {
+    final rung = tmdb;
+    if (rung == null || !tmdbOn) return (_TmdbAnswer.notAsked, null);
+    final id = t.tmdbId;
+    if (id == null) {
+      appLogger.i('[ReelTmdb] no TMDB id: none');
+      return (_TmdbAnswer.none, null);
+    }
+    final String language;
+    final List<dynamic>? results;
+    try {
+      language = rung.language();
+      results = await _inLane(_tmdbLane, () => rung.fetch(id: id, show: t.isShow, language: language));
+    } catch (e) {
+      appLogger.i('[ReelTmdb] videos unknown (${e is TmdbUnavailable ? e.reason : e.runtimeType})');
+      return (_TmdbAnswer.unknown, null);
+    }
+    if (results == null) {
+      appLogger.d('[ReelTmdb] no TMDB key: rung skipped');
+      return (_TmdbAnswer.notAsked, null);
+    }
+    final usable = [
+      for (final r in results)
+        if (r is Map && r['key'] is String && ReelYouTube.videoId.hasMatch((r['key'] as String).trim()))
+          if (!banned.contains('yt:${(r['key'] as String).trim()}')) r,
+    ];
+    final pick = ClipFilter.tmdbTrailer(usable, language: language, show: t.isShow);
+    if (pick == null) {
+      appLogger.i('[ReelTmdb] ${results.length} videos, no trailer to play: none');
+      return (_TmdbAnswer.none, null);
+    }
+    final kind = pick.typeRank == 1 ? ClipKind.teaser : ClipKind.trailer;
+    final clip = _youTube(pick.key, kind);
+    appLogger.i('[ReelTmdb] ${results.length} videos, picked a ${kind.name}');
+    return (_TmdbAnswer.none, (clip, _youTubeRow(clip, pick.key)));
+  }
+
+  /// The `src:` row for a TMDB YouTube trailer.
+  static Map<String, Object?> _youTubeRow(ResolvedClip clip, String id) => {
+    'v': sourceFormat,
+    'k': 'yt',
+    'a': clip.assetId,
+    ..._kindRow(clip),
+    'yk': id,
+  };
+
+  /// A YouTube trailer as the phone feed plays it: never preloaded with the
+  /// cards around it (only the card on screen opens a player page).
+  static ResolvedClip _youTube(String id, ClipKind kind) => ResolvedClip(
+    source: ClipSource(uri: ReelYouTube.watchUri(id), origin: ClipOrigin.youtube, preloadable: false),
+    assetId: 'yt:$id',
+    kind: kind,
+  );
 
   /// Asks AnimeThemes about a deck's anime shows when the deck loads (plan
   /// V2-12): each show is mapped to its AniList id locally (Fribb), then the
@@ -467,7 +676,7 @@ class ClipResolver {
       if (candidates.isEmpty) return false;
       final banned = await store.spoiledAssets(t.titleId);
       if (candidates.any((c) => banned.contains(c.assetId))) return false;
-      final clip = _opening1('Opening 1', candidates);
+      final clip = _opening1(1, candidates);
       if (clip == null) return false;
       await store.cache('src:${t.groupKey}', jsonEncode(_openingRow(clip, candidates)));
       return true;
@@ -481,13 +690,34 @@ class ClipResolver {
   static Map<String, Object?> _openingRow(ResolvedClip clip, List<ClipCandidate> candidates) => {
     'v': sourceFormat,
     'k': 'at',
-    'l': clip.label,
+    ..._kindRow(clip),
     'c': [for (final c in candidates) c.toJson()],
   };
 
+  /// A row's clip kind: `lk` (the [ClipKind] name) and, for an opening,
+  /// `ln` (its number). Rows written before carry an English `l` instead,
+  /// still read by [_kindOf].
+  static Map<String, Object?> _kindRow(ResolvedClip clip) => {'lk': clip.kind.name, 'ln': ?clip.number};
+
+  /// The kind and number a cached row says: `lk`/`ln`, else the older
+  /// English `l`, else [fallback] (an AnimeThemes row is OP1).
+  static (ClipKind, int?) _kindOf(Map<String, dynamic> j, (ClipKind, int?) fallback) {
+    final lk = j['lk'];
+    if (lk is String) {
+      final kind = ClipKind.values.where((k) => k.name == lk).firstOrNull;
+      if (kind != null) {
+        final n = j['ln'];
+        return (kind, n is int ? n : fallback.$2);
+      }
+    }
+    final legacy = ClipKind.fromLegacyLabel(j['l']);
+    if (legacy != null) return (legacy.$1, legacy.$2 ?? fallback.$2);
+    return fallback;
+  }
+
   /// A cached row in the current [sourceFormat]; anything else (an older
   /// format, a forgotten or unreadable row) is not cached.
-  Map<String, dynamic>? _entry(String raw) {
+  static Map<String, dynamic>? _entry(String raw) {
     try {
       final j = jsonDecode(raw);
       return j is Map<String, dynamic> && j['v'] == sourceFormat ? j : null;
@@ -497,34 +727,62 @@ class ClipResolver {
   }
 
   /// Every asset a cached row can play.
-  List<String> _assets(Map<String, dynamic> j) => switch (j['k']) {
+  static List<String> _assets(Map<String, dynamic> j) => switch (j['k']) {
     'at' => [
       for (final c in (j['c'] is List ? j['c'] as List : const []))
         if (c is Map && c['a'] is String) c['a'] as String,
     ],
-    'plex' => [if (j['a'] case final String a) a],
+    'plex' || 'yt' => [if (j['a'] case final String a) a],
     _ => const [],
   };
+
+  /// What the cached `src:` rows alone say about [titles]' clips, by group
+  /// key: [ClipAnswer.found] for a row with a clip, [ClipAnswer.none] for a
+  /// cached miss. A title with no usable row (none, expired, or an older
+  /// format) is left out. Reads no server and resolves nothing (the warm
+  /// start before the Reel opens, V2-14).
+  static Future<Map<String, ClipAnswer>> cachedAnswers(ReelStore store, Iterable<ReelTitle> titles) async {
+    final rows = await store.cachedMany({for (final t in titles) 'src:${t.groupKey}'}, ttl: ReelStore.sourceTtl);
+    return {
+      for (final MapEntry(:key, :value) in rows.entries)
+        if (_entry(value) case final e?)
+          if (e['miss'] == true)
+            key.substring(4): ClipAnswer.none
+          else if (_assets(e).isNotEmpty)
+            key.substring(4): ClipAnswer.found,
+    };
+  }
 
   /// The group keys of [titles] whose cached answer is a miss (an AI card):
   /// cached `src:` rows in the current [sourceFormat] only, so nothing is
   /// resolved and no server is asked. A title with no row, or an older
   /// format's row, is left out (assumed to have a clip until it is resolved
-  /// on demand).
+  /// on demand), and so is a miss TMDB hasn't answered while the TMDB rung
+  /// is on (it may have a trailer).
   Future<Set<String>> knownMisses(Iterable<ReelTitle> titles) async {
     final keys = {for (final t in titles) 'src:${t.groupKey}'};
     final rows = await store.cachedMany(keys, ttl: ReelStore.sourceTtl);
+    final askTmdb = tmdbOn;
     return {
       for (final MapEntry(:key, :value) in rows.entries)
-        if (_entry(value)?['miss'] == true) key.substring(4),
+        if (_entry(value) case final e? when e['miss'] == true && (e['tm'] == true || !askTmdb)) key.substring(4),
     };
   }
 
   ResolvedClip? _fromCache(Map<String, dynamic> j) {
     try {
       return switch (j['k']) {
-        'at' => _opening1(j['l'] as String? ?? 'Opening', _candidates(j['c'])),
-        'plex' => _plex(j['sv'] as String, j['pk'] as String, j['a'] as String, j['l'] as String? ?? 'Trailer'),
+        'at' => _opening1(_kindOf(j, (ClipKind.opening, 1)).$2 ?? 1, _candidates(j['c'])),
+        'plex' => _plex(
+          j['sv'] as String,
+          j['pk'] as String,
+          j['a'] as String,
+          _kindOf(j, (ClipKind.trailer, null)).$1,
+        ),
+        'yt' when ReelYouTube.videoId.hasMatch(j['yk'] as String) && j['a'] == 'yt:${j['yk']}' => _youTube(
+          j['yk'] as String,
+          _kindOf(j, (ClipKind.trailer, null)).$1,
+        ),
         _ => null,
       };
     } catch (_) {
@@ -545,15 +803,16 @@ class ClipResolver {
     return out;
   }
 
-  /// An AnimeThemes clip as [playback] plays it from [candidates]; null for
-  /// none.
-  ResolvedClip? _opening1(String label, List<ClipCandidate> candidates) {
+  /// Opening [number] of an AnimeThemes show as [playback] plays it from
+  /// [candidates]; null for none.
+  ResolvedClip? _opening1(int number, List<ClipCandidate> candidates) {
     final pick = playback.pick(candidates);
     if (pick == null) return null;
     return ResolvedClip(
       source: ClipSource(uri: pick.uri, origin: ClipOrigin.animeTheme),
       assetId: pick.assetId,
-      label: label,
+      kind: ClipKind.opening,
+      number: number,
       height: pick.height,
       candidates: candidates,
     );
@@ -568,20 +827,26 @@ class ClipResolver {
     return ResolvedClip(
       source: ClipSource(uri: pick.uri, origin: clip.source.origin, preloadable: clip.source.preloadable),
       assetId: pick.assetId,
-      label: clip.label,
+      kind: clip.kind,
+      number: clip.number,
       serverId: clip.serverId,
       height: pick.height,
       candidates: clip.candidates,
     );
   }
 
-  ResolvedClip? _plex(String serverId, String partKey, String asset, String label) {
+  ResolvedClip? _plex(String serverId, String partKey, String asset, ClipKind kind) {
     final url = servers.clipUrl(serverId, partKey);
     if (url == null) return null;
     return ResolvedClip(
-      source: ClipSource(uri: url, origin: ClipOrigin.plexExtra, preloadable: !_slowServers.contains(serverId)),
+      source: ClipSource(
+        uri: url,
+        origin: ClipOrigin.plexExtra,
+        preloadable: !_slowServers.contains(serverId),
+        cacheKey: ReelClipCache.keyFor(serverId, partKey),
+      ),
       assetId: asset,
-      label: label,
+      kind: kind,
       serverId: serverId,
     );
   }
@@ -619,7 +884,7 @@ class ClipResolver {
       sure &= opSure;
       final candidates = [for (final op in ops) ClipCandidate.opening(op)];
       // A banned file bans the opening: its other files are the same clip.
-      final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1('Opening 1', candidates);
+      final clip = candidates.any((c) => banned.contains(c.assetId)) ? null : _opening1(1, candidates);
       if (clip != null) {
         return _Run((clip, _openingRow(clip, candidates)), sure: sure, offline: offline);
       }
@@ -656,8 +921,7 @@ class ClipResolver {
       ];
       final pick = t.isShow ? ClipFilter.showTrailer(usable, showTitle: t.title) : ClipFilter.filmTrailer(usable);
       if (pick == null) continue;
-      final label = RegExp(r'teaser', caseSensitive: false).hasMatch(pick.title) ? 'Teaser' : 'Trailer';
-      final clip = _plex(c.serverId, pick.partKey, 'plex:${pick.ratingKey}', label);
+      final clip = _plex(c.serverId, pick.partKey, 'plex:${pick.ratingKey}', ClipKind.ofExtraTitle(pick.title));
       if (clip == null) {
         // The server dropped between the read and the URL.
         sure = false;
@@ -665,12 +929,19 @@ class ClipResolver {
         continue;
       }
       return _Run(
-        (clip, {'v': sourceFormat, 'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, 'l': label}),
+        (
+          clip,
+          {'v': sourceFormat, 'k': 'plex', 'sv': c.serverId, 'pk': pick.partKey, 'a': clip.assetId, ..._kindRow(clip)},
+        ),
         sure: sure,
         offline: offline,
       );
     }
-    return _Run(null, sure: sure, offline: offline);
+    // TMDB last, and only once every rung before it said no for sure: a
+    // server that couldn't answer may still hold the title's own trailer.
+    if (!sure) return _Run(null, sure: sure, offline: offline);
+    final (tm, hit) = await _tmdbRung(t, banned);
+    return _Run(hit, sure: sure, offline: offline, tmdb: tm);
   }
 
   /// Every file of AnimeThemes OP1 for [t], and whether the answer is

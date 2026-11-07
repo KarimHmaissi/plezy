@@ -1907,6 +1907,19 @@ class PlexClient
         [];
   }
 
+  /// Fork (Reel): a title's extras as the server lists them, every `Media`
+  /// attribute kept: the rows [fetchExtraClips] reads, and what the
+  /// measure-day extras-shape probe counts (plan V2-20). One request, no
+  /// cache fallback. A 401 or 5xx throws: a failed read, not "no extras".
+  Future<List<Object?>> fetchExtraRows(String ratingKey, {Duration timeout = const Duration(seconds: 30)}) async {
+    final response = await _http.get('/library/metadata/$ratingKey/extras', timeout: timeout);
+    // A 401 or 5xx is a failed read, not "no extras": the Reel must not
+    // cache it as a miss.
+    throwIfHttpError(response);
+    final rows = _getMediaContainer(response)?['Metadata'];
+    return rows is List ? rows : const [];
+  }
+
   /// Fork (Reel): a title's extras as lean clip rows for the Reel's ladder.
   /// One request, no cache fallback (a stale part key is useless), and a
   /// caller-chosen [timeout] because some servers' extras calls hang.
@@ -1914,12 +1927,7 @@ class PlexClient
     String ratingKey, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    final response = await _http.get('/library/metadata/$ratingKey/extras', timeout: timeout);
-    // A 401 or 5xx is a failed read, not "no extras": the Reel must not
-    // cache it as a miss.
-    throwIfHttpError(response);
-    final rows = _getMediaContainer(response)?['Metadata'];
-    if (rows is! List) return const [];
+    final rows = await fetchExtraRows(ratingKey, timeout: timeout);
     return [
       for (var i = 0; i < rows.length; i++)
         if (rows[i] is Map<String, dynamic>) ?PlexExtraClip.fromJson(rows[i] as Map<String, dynamic>, i),

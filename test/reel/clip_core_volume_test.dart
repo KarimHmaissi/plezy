@@ -19,6 +19,12 @@ class _Plugin {
   /// from there).
   final opened = <double>[];
 
+  /// Every level the core took, in order.
+  final levels = <double>[];
+
+  /// The core's volume at each `preloadClip`.
+  final preloaded = <double>[];
+
   Future<Object?> handle(MethodCall call) async {
     final args = call.arguments is Map ? call.arguments as Map : const {};
     switch (call.method) {
@@ -27,7 +33,13 @@ class _Plugin {
         core = true;
         return true;
       case 'setVolume':
-        if (core) volume = (args['volume'] as num).toDouble() / 100;
+        if (core) {
+          volume = (args['volume'] as num).toDouble() / 100;
+          levels.add(volume);
+        }
+        return null;
+      case 'preloadClip':
+        preloaded.add(volume);
         return null;
       case 'open':
         opened.add(volume);
@@ -44,6 +56,8 @@ class _Plugin {
 
 const _a = ClipSource(uri: 'https://s1.example/a.mp4', origin: ClipOrigin.plexExtra);
 const _b = ClipSource(uri: 'https://s1.example/b.mp4', origin: ClipOrigin.plexExtra);
+const _c = ClipSource(uri: 'https://s1.example/c.mp4', origin: ClipOrigin.plexExtra, cacheKey: 'clip-c');
+const _d = ClipSource(uri: 'https://s1.example/d.mp4', origin: ClipOrigin.animeTheme);
 
 /// The TV's clip core is built afresh on every visit (a launch, the tab
 /// shown, the Shield woken, Back from Watch, a retry). Its first clip must
@@ -134,6 +148,52 @@ void main() {
       expect(plugin.core, isFalse, reason: 'no core yet: the plugin dropped it');
       await engine.preload(_b.uri);
       expect(plugin.volume, 0.4);
+    });
+  });
+
+  group('Wave B core paths keep a muted TV start silent', () {
+    test('a core warmed with no media (V2-04) comes up silent, and its first clip opens silent', () async {
+      await withClips(muted: true, (clips) async {
+        expect(await clips.warm(), isNotNull);
+        expect(plugin.core, isTrue);
+        expect(plugin.volume, 0.0, reason: 'a warm core is never at ExoPlayer\'s full default');
+
+        await clips.play(_a, first: true);
+        expect(plugin.opened, [0.0]);
+        expect(plugin.volume, 0.0);
+      });
+    });
+
+    test('preloads at every rank (V2-09, the disk one ahead V2-10) never raise a muted core', () async {
+      await withClips(muted: true, (clips) async {
+        await clips.preload(_b);
+        await clips.preload(_c, rank: ClipPreloadRank.ahead);
+        await clips.preload(_d, rank: ClipPreloadRank.deckNext);
+        expect(plugin.preloaded, [0.0, 0.0, 0.0]);
+
+        await clips.play(_b, first: true);
+        await clips.play(_c);
+        expect(plugin.opened, [0.0, 0.0]);
+        expect(plugin.levels.where((v) => v > 0), isEmpty, reason: 'muted: no step ever goes up');
+      });
+    });
+
+    test('sound turned on over a warm core rises over the one unmute ramp, never straight to full', () async {
+      await withClips(muted: true, (clips) async {
+        await clips.warm();
+        await clips.play(_a, first: true);
+        plugin.levels.clear();
+
+        await clips.setMuted(false);
+        await Future<void>.delayed(ClipPlayer.unmuteRamp + const Duration(milliseconds: 150));
+
+        expect(plugin.levels, isNotEmpty);
+        expect(plugin.levels.first, lessThanOrEqualTo(1 / 6 + 1e-9), reason: 'the first step is a sixth of the way');
+        for (var i = 1; i < plugin.levels.length; i++) {
+          expect(plugin.levels[i], greaterThanOrEqualTo(plugin.levels[i - 1]));
+        }
+        expect(plugin.levels.last, closeTo(1.0, 1e-9));
+      });
     });
   });
 }

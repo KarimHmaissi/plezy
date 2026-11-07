@@ -7,19 +7,27 @@ import '../../mpv/player/platform/player_android.dart';
 import '../../mpv/player/player.dart';
 import '../../screens/video_player/wakelock_controller.dart';
 import '../../utils/app_logger.dart';
+import 'reel_developer.dart';
 import 'reel_perf.dart';
 import 'reel_volume.dart';
 
 /// Where a clip comes from. Clips never carry request headers: the Plex
 /// token rides in the PMS URL only, so nothing Plex reaches AnimeThemes.
-enum ClipOrigin { plexExtra, animeTheme }
+/// [youtube] is the phone's TMDB trailer rung (V2-63): a YouTube video played
+/// in the IFrame player, never opened by a native player.
+enum ClipOrigin { plexExtra, animeTheme, youtube }
 
 class ClipSource {
-  const ClipSource({required this.uri, required this.origin, this.length, this.preloadable = true});
+  const ClipSource({required this.uri, required this.origin, this.length, this.preloadable = true, this.cacheKey});
 
   final String uri;
   final ClipOrigin origin;
   final Duration? length;
+
+  /// A Plex clip's disk cache key ([ReelClipCache.keyFor], plan V2-10): the
+  /// TV clip core keeps its bytes on disk under it. Null for AnimeThemes
+  /// (D1: never written to disk).
+  final String? cacheKey;
 
   /// Whether the next card may preload this clip. False for a clip on a
   /// server marked slow this session (spec §8: never preloaded off a slow
@@ -33,14 +41,46 @@ class ClipSource {
   int get hashCode => uri.hashCode;
 }
 
+/// What a preloaded clip is to the card on screen (plan V2-09). The TV's
+/// clip core holds at most one clip per rank: the next card in the direction
+/// of travel keeps its first 3 s, the card behind 1 s, and the head of each
+/// neighbouring deck (the card → or ← lands on) 2 s, all in memory.
+enum ClipPreloadRank {
+  next,
+  previous,
+  deckNext,
+  deckPrevious,
+
+  /// The card two ahead (V2-10): a Plex clip's first 5 s written to the
+  /// disk cache, never held in memory. Holds nothing for a clip without a
+  /// cache key.
+  ahead;
+
+  /// A neighbouring deck's head (plan D15: AnimeThemes, or a clip on disk).
+  bool get deckHead => this == deckNext || this == deckPrevious;
+}
+
 /// The few things the Reel asks of a native player. The app's [Player]
 /// carries every watch-state side effect only through the video player
 /// screen, which the Reel never opens; this interface keeps it that way.
 abstract interface class ClipEngine {
   Player get player;
-  Future<void> open(String uri);
-  Future<void> preload(String uri);
-  Future<void> clearPreloads();
+
+  /// Initializes the core with no media (V2-04): the first [open] then
+  /// skips that step. Allocates no decoder; only an open does.
+  Future<void> warm();
+
+  /// Opens [uri]; [cacheKey] (a Plex clip's, V2-10) has the core read and
+  /// write its bytes through the disk cache.
+  Future<void> open(String uri, {String? cacheKey});
+
+  /// Buffers [uri]'s first seconds as [rank], in place of what that rank
+  /// held (V2-09); with [cacheKey], the card two ahead and a deck head go to
+  /// disk instead of memory (V2-10).
+  Future<void> preload(String uri, {ClipPreloadRank rank = ClipPreloadRank.next, ClipOrigin? origin, String? cacheKey});
+
+  /// Drops [rank]'s preload, or every one when null.
+  Future<void> clearPreloads({ClipPreloadRank? rank});
   Future<void> play();
   Future<void> pause();
   Future<void> seek(Duration position);
@@ -73,6 +113,10 @@ abstract interface class ClipEngine {
   /// playing elsewhere pauses, and a call or another app pauses the clip.
   Future<bool> requestAudioFocus();
   Future<void> abandonAudioFocus();
+
+  /// Loudness normalisation on this core's audio session (V2-19, D9). A
+  /// fresh core starts with it off.
+  Future<void> setNormalization(bool on);
   Future<void> dispose();
 }
 
@@ -99,13 +143,24 @@ class ExoClipEngine implements ClipEngine {
   Player get player => _p;
 
   @override
-  Future<void> open(String uri) => _p.open(Media(uri), play: true);
+  Future<void> warm() => _p.warmClip();
 
   @override
-  Future<void> preload(String uri) => _p.preloadClip(uri);
+  Future<void> open(String uri, {String? cacheKey}) {
+    if (cacheKey != null) _p.rememberClipCacheKey(uri, cacheKey);
+    return _p.open(Media(uri), play: true);
+  }
 
   @override
-  Future<void> clearPreloads() => _p.clearPreloads();
+  Future<void> preload(
+    String uri, {
+    ClipPreloadRank rank = ClipPreloadRank.next,
+    ClipOrigin? origin,
+    String? cacheKey,
+  }) => _p.preloadClip(uri, rank: rank.name, origin: origin?.name, cacheKey: cacheKey);
+
+  @override
+  Future<void> clearPreloads({ClipPreloadRank? rank}) => _p.clearPreloads(rank: rank?.name);
 
   @override
   Future<void> play() => _p.play();
@@ -161,6 +216,13 @@ class ExoClipEngine implements ClipEngine {
   @override
   Future<void> abandonAudioFocus() => _p.abandonAudioFocus();
 
+  /// ExoPlayerCore's `AudioNormalizationEffect` (DynamicsProcessing on the
+  /// session). The clip core already decodes to PCM with tunneling off, the
+  /// effect's two preconditions. Set before the core initializes, it rides
+  /// in on the initialize call.
+  @override
+  Future<void> setNormalization(bool on) => _p.setAudioNormalization(on);
+
   @override
   Future<void> dispose() {
     _volume.removeListener(_onVolume);
@@ -208,9 +270,13 @@ class ClipProgress {
 class ClipPlayer {
   /// [wakelock] defaults to the platform's for the real core, and to none
   /// for an injected test engine. [muted] is the saved mute (`reel_muted`).
+  /// [normalize] says whether the core should normalise loudness; it
+  /// defaults to the hidden developer switch ([ReelDeveloper.normalization],
+  /// off by default, D9).
   ClipPlayer({
     ClipEngine Function()? engine,
     int? Function()? plays,
+    bool Function()? normalize,
     ReelPerf? perf,
     WakelockController? wakelock,
     this._muted = false,
@@ -218,6 +284,7 @@ class ClipPlayer {
     this.callLimit = defaultCallLimit,
   }) : _create = engine ?? ExoClipEngine.new,
        _plays = plays ?? _twice,
+       _normalize = normalize ?? _developerNormalization,
        _perf = perf ?? ReelPerf.instance,
        _wakelock = wakelock ?? (engine == null ? WakelockController() : null) {
     phase.addListener(_syncWakelock);
@@ -234,8 +301,9 @@ class ClipPlayer {
   /// Later cards rise from at most [dipLevel] over this.
   static const Duration fadeIn = Duration(milliseconds: 300);
 
-  /// Sound turned on rises from silence over this, never straight to full.
-  /// (Kept short and on its own: the loudness work of V2-19 may retune it.)
+  /// Sound turned on rises from silence over this, never straight to full
+  /// (V2-19): no step is louder than a sixth of the way. Kept on its own so
+  /// the listening check can retune it apart from [fadeIn].
   static const Duration unmuteRamp = Duration(milliseconds: 300);
   static const double dipLevel = 30;
 
@@ -248,6 +316,8 @@ class ClipPlayer {
   static const Duration externalPauseGrace = Duration(milliseconds: 250);
 
   static int? _twice() => 2;
+
+  static bool _developerNormalization() => ReelDeveloper.normalization();
 
   /// The longest a clip's open may take. The core's open returns once the
   /// clip is handed to the player (buffering comes after), so an open still
@@ -283,6 +353,13 @@ class ClipPlayer {
   /// loops it for good. Asked at each end, so a change to the clip-end pref
   /// applies to the clip already playing.
   final int? Function() _plays;
+
+  /// Whether the core should normalise loudness (V2-19), asked whenever a
+  /// core is built, at every card and on [syncNormalization].
+  final bool Function() _normalize;
+
+  /// What this session's core was last told: a fresh core starts off.
+  bool _normalized = false;
 
   /// Keeps the screen on while a clip opens or plays (null in tests).
   final WakelockController? _wakelock;
@@ -326,13 +403,17 @@ class ClipPlayer {
   Stopwatch? _ttff;
   bool _openPreloaded = false;
 
+  /// The rank the clip opening came from, for its `[ReelTTFF]` line.
+  ClipPreloadRank? _openRank;
+
   /// The press that asked for the next card ([markKey]), until a clip
   /// opens for it; then the open's, until its first frame.
   ({Stopwatch watch, String trigger})? _key;
   ({Stopwatch watch, String trigger})? _openKey;
 
-  /// The clip last handed to the core's preload, until it is used or cleared.
-  String? _preloaded;
+  /// The clip each rank of the core's preload holds (V2-09), until it is
+  /// played or cleared.
+  final Map<ClipPreloadRank, String> _preloaded = {};
 
   final ValueNotifier<ClipPhase> phase = ValueNotifier(ClipPhase.idle);
 
@@ -351,6 +432,9 @@ class ClipPlayer {
   Duration _length = Duration.zero;
 
   ClipEngine? get engine => _engine;
+
+  /// The clips the core holds preloaded, by rank.
+  Map<ClipPreloadRank, String> get preloaded => Map.unmodifiable(_preloaded);
   ClipSource? get current => _current;
   bool get muted => _muted;
 
@@ -366,11 +450,21 @@ class ClipPlayer {
     if (existing != null) return existing;
     final e = _create();
     _engine = e;
+    _normalized = false;
+    final normalize = _normalize();
+    appLogger.i('[ReelSound] clip core normalization=${normalize ? 'on' : 'off'}');
+    if (normalize) _applyNormalization(e, true);
     _subs
       ..add(e.completed.listen((done) => done ? _onCompleted() : null))
       ..add(e.firstFrame.listen((_) => _onFirstFrame()))
       ..add(
         e.errors.listen((err) {
+          // No clip open yet (a warm core's init failing): not a clip's
+          // failure, so no card reads it as one. [warm] lets the core go.
+          if (_current == null) {
+            appLogger.w('Reel: clip core error with no clip open: ${err.message}');
+            return;
+          }
           appLogger.w('Reel: clip error: ${err.message}');
           phase.value = ClipPhase.failed;
         }),
@@ -389,6 +483,34 @@ class ClipPlayer {
     return e;
   }
 
+  /// Builds the core and initializes it with no media (the TV's cold open,
+  /// V2-04), alongside the deck load, so the first [play] doesn't wait for
+  /// the core. Allocates no decoder: only an open hands the core a clip. A
+  /// core already built is left as it is.
+  ///
+  /// Bounded by [callLimit]. A warm that runs out or throws lets the core
+  /// go (the next [play] builds a fresh one), unless a [play] has started
+  /// on it meanwhile: that open's own [openLimit] decides then. Returns how
+  /// long the warm took, or null when nothing was warmed.
+  Future<Duration?> warm() async {
+    if (_engine != null) return null;
+    final e = _ensure();
+    final opens = _opens;
+    final sw = Stopwatch()..start();
+    try {
+      await e.warm().timeout(callLimit);
+    } on TimeoutException {
+      appLogger.w('Reel: clip core warm timed out after ${callLimit.inMilliseconds}ms');
+      if (_opens == opens) _abandon(e);
+      return null;
+    } catch (err) {
+      appLogger.w('Reel: clip core warm failed', error: err);
+      if (_opens == opens) _abandon(e);
+      return null;
+    }
+    return sw.elapsed;
+  }
+
   /// TV: a D-pad press that asks for another card ([trigger] `step` or
   /// `deck`), timed from the key handler. The next [play] takes it, and that
   /// clip's first frame logs `[ReelTTFF] key=… open=… preloaded=…`. A held
@@ -404,10 +526,15 @@ class ClipPlayer {
   /// over [fadeIn].
   Future<void> play(ClipSource source, {bool first = false}) async {
     final e = _ensure();
+    syncNormalization();
     final open = ++_opens;
-    _openPreloaded = _preloaded == source.uri;
+    // The core takes the clip out of its rank as it opens it; the other
+    // ranks keep theirs.
+    final rank = _preloaded.entries.where((e) => e.value == source.uri).firstOrNull?.key;
+    if (rank != null) _preloaded.remove(rank);
+    _openPreloaded = rank != null;
+    _openRank = rank;
     _perf.markResolved(preloaded: _openPreloaded, origin: source.origin.name);
-    _preloaded = null;
     final key = _key;
     _key = null;
     _openKey = key != null && key.watch.elapsed < staleKey ? key : null;
@@ -432,7 +559,7 @@ class ClipPlayer {
       unawaited(_fadeTo(0, outgoingFade));
     }
     try {
-      await e.open(source.uri).timeout(openLimit);
+      await e.open(source.uri, cacheKey: source.cacheKey).timeout(openLimit);
     } on TimeoutException {
       if (open != _opens || !identical(_engine, e)) return;
       appLogger.w('Reel: clip open timed out after ${openLimit.inMilliseconds}ms; the clip core is let go');
@@ -459,21 +586,32 @@ class ClipPlayer {
     unawaited(_fadeTo(100, first ? firstFadeIn : fadeIn));
   }
 
-  /// Buffers the next card's opening seconds on the same core.
-  Future<void> preload(ClipSource? next) async {
+  /// Buffers [source]'s opening seconds on the same core as [rank] (the
+  /// next card by default), in place of what that rank held. Null, or a
+  /// clip that may not be preloaded ([ClipSource.preloadable]), empties the
+  /// rank. A clip the rank already holds is left as it is.
+  Future<void> preload(ClipSource? source, {ClipPreloadRank rank = ClipPreloadRank.next}) async {
+    if (source == null || !source.preloadable) return clearPreload(rank);
+    // The card two ahead is a disk preload of a Plex clip only (V2-10, D1).
+    if (rank == ClipPreloadRank.ahead && source.cacheKey == null) return clearPreload(rank);
+    if (_preloaded[rank] == source.uri) return;
     final e = _ensure();
-    if (next == null || !next.preloadable) {
-      _preloaded = null;
-      await _bounded(e.clearPreloads(), 'clearPreloads');
-      return;
-    }
-    _preloaded = next.uri;
-    await _bounded(e.preload(next.uri), 'preload');
+    // A clip held at another rank moves to this one (the core does the same).
+    _preloaded.removeWhere((_, uri) => uri == source.uri);
+    _preloaded[rank] = source.uri;
+    await _bounded(e.preload(source.uri, rank: rank, origin: source.origin, cacheKey: source.cacheKey), 'preload');
   }
 
-  /// Memory pressure: drop the buffered next card without building a core.
+  /// Empties [rank]'s preload; nothing to do when it holds nothing.
+  Future<void> clearPreload(ClipPreloadRank rank) async {
+    final e = _engine;
+    if (_preloaded.remove(rank) == null || e == null) return;
+    await _bounded(e.clearPreloads(rank: rank), 'clearPreloads');
+  }
+
+  /// Memory pressure: drop every preload without building a core.
   Future<void> dropPreload() async {
-    _preloaded = null;
+    _preloaded.clear();
     await _bounded(_engine?.clearPreloads(), 'clearPreloads');
   }
 
@@ -523,10 +661,11 @@ class ClipPlayer {
   }
 
   /// Mute goes to silence at once; unmute rises from silence over
-  /// [unmuteRamp] rather than jumping to full. Every step is scaled by
-  /// [ReelVolume] in the core ([ExoClipEngine.setVolume]), so the rise ends
-  /// at the viewer's Reel level. Unmuting a clip that already has its sound
-  /// changes nothing.
+  /// [unmuteRamp] rather than jumping to full (V2-19: no step is louder than
+  /// a sixth of the way). Every step is scaled by [ReelVolume] in the core
+  /// ([ExoClipEngine.setVolume]), so the rise ends at the viewer's Reel
+  /// level. Unmuting a clip that already has its sound changes nothing; a
+  /// clip still opening takes its own ramp once the open lands.
   Future<void> setMuted(bool muted) async {
     if (!muted && !_muted) return;
     _muted = muted;
@@ -538,6 +677,28 @@ class ClipPlayer {
     unawaited(_fadeTo(100, unmuteRamp));
     // A muted session takes no focus, so the first unmute does.
     if (_wantPlaying) _takeFocus();
+  }
+
+  /// Applies the normalisation switch to the core in use, when it changed
+  /// (the listening A/B flips it while a clip plays, D9). Without a core,
+  /// the next core reads it as it is built.
+  void syncNormalization() {
+    final e = _engine;
+    if (e == null) return;
+    final on = _normalize();
+    if (on == _normalized) return;
+    appLogger.i('[ReelSound] clip core normalization=${on ? 'on' : 'off'} (changed)');
+    _applyNormalization(e, on);
+  }
+
+  void _applyNormalization(ClipEngine e, bool on) {
+    _normalized = on;
+    unawaited(
+      _bounded(
+        e.setNormalization(on),
+        'setNormalization',
+      ).catchError((Object err) => appLogger.w('Reel: setting the clip normalization failed', error: err)),
+    );
   }
 
   /// Hide the native surface while a card is dragged (it can't slide).
@@ -559,7 +720,7 @@ class ClipPlayer {
     _ended = false;
     _engine = null;
     _current = null;
-    _preloaded = null;
+    _preloaded.clear();
     _key = null;
     _openKey = null;
     _ttff = null;
@@ -609,7 +770,7 @@ class ClipPlayer {
     _enginePlaying = false;
     _engineBuffering = false;
     _engine = null;
-    _preloaded = null;
+    _preloaded.clear();
     _openKey = null;
     _ttff = null;
     _level = 0;
@@ -635,6 +796,7 @@ class ClipPlayer {
       final keyMs = key == null ? 'none' : '${key.watch.elapsedMilliseconds}ms';
       appLogger.i(
         '[ReelTTFF] key=$keyMs open=${sw.elapsedMilliseconds}ms preloaded=$_openPreloaded'
+        ' rank=${_openRank?.name ?? 'none'}'
         '${key == null ? '' : ' trigger=${key.trigger}'} origin=${_current?.origin.name}',
       );
       _ttff = null;
@@ -660,7 +822,8 @@ class ClipPlayer {
   /// lines (forwarded only while the player's debug log is on).
   void _onLog(PlayerLog log) {
     if (log.prefix == 'clip' && log.text.startsWith('Open clip: preloaded=')) {
-      _perf.markPreloaded(log.text.endsWith('true'));
+      // `Open clip: preloaded=true rank=next held=[…]` (V2-09).
+      _perf.markPreloaded(log.text.startsWith('Open clip: preloaded=true'));
     } else if (log.prefix == 'decoder-hang' && log.text.startsWith('Decoder initialized')) {
       _perf.markDecoder();
     }

@@ -13,6 +13,7 @@ import '../../providers/theme_provider.dart';
 import '../../services/device_performance.dart';
 import '../../services/reel/clip_player.dart';
 import '../../services/reel/feed_players.dart';
+import '../../services/reel/feed_youtube.dart';
 import '../../services/reel/reel_art.dart';
 import '../../services/reel/reel_controller.dart';
 import '../../services/reel/reel_data_budget.dart';
@@ -552,6 +553,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
     final card = _c.current.card;
     if (card == null || _c.isSaved(card.id)) return;
     ForkMotion.success();
+    // Nothing is drawn over a YouTube player (V2-63): its card shows the
+    // filled bookmark only.
+    if (_c.current.clip?.source.origin == ClipOrigin.youtube) {
+      unawaited(_c.save(silent: true));
+      return;
+    }
     setState(() {
       _burst = true;
       _bursts++;
@@ -618,7 +625,7 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         builder: (context, _) => _TopBar(
           hidden: _immersive,
           deckName: _c.deck.name,
-          muted: widget.players.muted,
+          muted: widget.players.soundOff,
           onDecks: widget.onDecks,
           onMute: () => unawaited(_toggleMute()),
           onRemote: widget.onRemote,
@@ -629,8 +636,16 @@ class _ReelFeedViewState extends State<ReelFeedView> {
   );
 
   /// The mute button (V2-22): the players go silent (or rise) at once, and
-  /// the controller records an unmute and keeps the choice.
-  Future<void> _toggleMute() => _setMuted(!widget.players.muted);
+  /// the controller records an unmute and keeps the choice. On a YouTube
+  /// card still silent this visit (V2-63) it gives that card sound (and
+  /// lifts a mute): the button sits in the top bar, outside the player.
+  Future<void> _toggleMute() async {
+    if (widget.players.quiet) {
+      await widget.players.unquiet();
+      return _setMuted(false);
+    }
+    return _setMuted(!widget.players.muted);
+  }
 
   Future<void> _setMuted(bool muted, {bool remember = true}) async {
     await widget.players.setMuted(muted);
@@ -692,7 +707,11 @@ class _ReelFeedViewState extends State<ReelFeedView> {
         break;
     }
     final card = slot.card!;
-    final layout = _layout ?? ReelFeedLayout.phone;
+    // A YouTube card (V2-63) never has the info over its player: on the
+    // layouts that overlay it, the info goes below the picture instead.
+    final embed = slot.clip?.source.origin == ClipOrigin.youtube;
+    final pageLayout = _layout ?? ReelFeedLayout.phone;
+    final layout = embed && pageLayout.overlays ? ReelFeedLayout.stacked : pageLayout;
     // Built once per page build and handed through, so a player change
     // redraws the picture and not the title and buttons.
     final info = AnimatedOpacity(
@@ -733,11 +752,11 @@ class _ReelFeedViewState extends State<ReelFeedView> {
                   _toggleControls,
             }
           : null,
-      child: _gestures(slot, card, info, layout),
+      child: _gestures(slot, card, info, layout, embed: embed),
     );
   }
 
-  Widget _gestures(ReelSlot slot, ReelCardData card, Widget info, ReelFeedLayout layout) {
+  Widget _gestures(ReelSlot slot, ReelCardData card, Widget info, ReelFeedLayout layout, {bool embed = false}) {
     // Sideways anywhere on the page hides or shows the controls (not with a
     // screen reader on). Tap, double-tap and long-press live on the picture
     // only, so the buttons answer at once instead of waiting out the
@@ -767,9 +786,12 @@ class _ReelFeedViewState extends State<ReelFeedView> {
               slot: slot,
               video: video,
               decode: _stillDecode(video?.aspectRatio ?? _stillAspect),
-              paused: state.paused,
-              held: held,
+              // Nothing over a YouTube player (V2-63): a tap still pauses
+              // and replays it.
+              paused: state.paused && !embed,
+              held: held && !embed,
               onReplay: _replay,
+              minHeight: embed ? ReelYouTube.minSide : 0,
             ),
           );
           Widget tappable(Widget child) => GestureDetector(
@@ -812,8 +834,9 @@ class _ReelFeedViewState extends State<ReelFeedView> {
                     AnimatedPadding(
                       duration: glide,
                       curve: Curves.easeOutCubic,
-                      // Clear of the top bar while it shows.
-                      padding: EdgeInsets.only(top: _immersive ? 0 : _barSpace(context)),
+                      // Clear of the top bar while it shows; a YouTube
+                      // player clears its scrim too (V2-63).
+                      padding: EdgeInsets.only(top: _immersive ? 0 : _barSpace(context) + (embed ? _barScrimTail : 0)),
                       child: AnimatedAlign(
                         duration: glide,
                         curve: Curves.easeOutCubic,
@@ -856,6 +879,13 @@ Size reelStillFrame(Size page, double aspect) {
   return Size(width, height);
 }
 
+/// [aspect], narrowed so a frame [width] wide is at least [minHeight] tall.
+@visibleForTesting
+double reelMinHeightAspect(double aspect, double width, double minHeight) {
+  if (minHeight <= 0 || !width.isFinite || width <= 0) return aspect;
+  return width / aspect >= minHeight ? aspect : width / minHeight;
+}
+
 /// The size a card's still is decoded at (plan V2-05): its frame at [aspect]
 /// (the clip's own shape once known, else 16:9) in the area [layout] gives
 /// the picture in a [page]: the whole page, or its picture share beside the
@@ -871,6 +901,10 @@ Size reelStillDecode(Size page, ReelFeedLayout layout, double aspect, {bool imme
 
 /// The height the top bar takes: the status bar, then one row of buttons.
 double _barSpace(BuildContext context) => MediaQuery.paddingOf(context).top + 56;
+
+/// How far the top bar's scrim reaches below [_barSpace] ([_TopBar]: 4
+/// above its 48 dp row and 20 below).
+const double _barScrimTail = 16;
 
 /// The picture and the info side by side or one above the other, for the
 /// layouts where the info doesn't sit over the picture (V2-30). In the
@@ -1007,7 +1041,7 @@ class _Backdrop extends StatelessWidget {
         if (item != null)
           _ClipShowing(
             video: video,
-            builder: (context, showing) => _ArtFade(
+            builder: (context, showing, _) => _ArtFade(
               key: ValueKey(('reel-ambient-art', slot.card!.id)),
               out: showing,
               child: OptimizedMediaImage(
@@ -1051,6 +1085,7 @@ class _Picture extends StatelessWidget {
     required this.paused,
     required this.held,
     required this.onReplay,
+    this.minHeight = 0,
   });
 
   final ReelSlot slot;
@@ -1062,10 +1097,22 @@ class _Picture extends StatelessWidget {
   final bool held;
   final VoidCallback onReplay;
 
+  /// The frame is never shorter than this (a YouTube player's 200 dp
+  /// minimum, V2-63): its shape widens instead, and the player letterboxes
+  /// inside it.
+  final double minHeight;
+
   @override
   Widget build(BuildContext context) {
+    if (minHeight <= 0) return _frame(context, video?.aspectRatio ?? _stillAspect);
+    return LayoutBuilder(
+      builder: (context, box) =>
+          _frame(context, reelMinHeightAspect(video?.aspectRatio ?? _stillAspect, box.maxWidth, minHeight)),
+    );
+  }
+
+  Widget _frame(BuildContext context, double aspect) {
     final v = video;
-    final aspect = v?.aspectRatio ?? _stillAspect;
     final item = slot.item;
     final slow = Theme.of(context).extension<MonoTokens>()?.slow ?? const Duration(milliseconds: 300);
     return TweenAnimationBuilder<double>(
@@ -1076,7 +1123,7 @@ class _Picture extends StatelessWidget {
       builder: (context, aspect, child) => AspectRatio(aspectRatio: aspect, child: child),
       child: _ClipShowing(
         video: v,
-        builder: (context, showing) => Stack(
+        builder: (context, showing, drawn) => Stack(
           fit: StackFit.expand,
           children: [
             if (item != null)
@@ -1098,8 +1145,13 @@ class _Picture extends StatelessWidget {
                   errorWidget: (_, _, _) => const ColoredBox(color: Colors.black26),
                 ),
               ),
+            // A native clip comes in with its first frame. A YouTube page
+            // (V2-63) is drawn from when it has loaded: it is see-through
+            // until the player draws, so the art shows behind it (never in
+            // front), and the player is on screen before it is asked to
+            // play (RMF: no automatic playback until it is visible).
             AnimatedOpacity(
-              opacity: showing ? 1 : 0,
+              opacity: drawn ? 1 : 0,
               duration: _motion(context, const Duration(milliseconds: 160)),
               child: v == null ? const SizedBox.shrink() : v.view(),
             ),
@@ -1143,23 +1195,29 @@ class _Picture extends StatelessWidget {
 }
 
 /// Whether [video]'s picture is up (V2-67): open, its first frame ready, and
-/// not broken. It follows the player itself, so a clip that breaks mid-play
+/// not broken; and whether its view is drawn at all (the same for a native
+/// clip; a YouTube page from when it has loaded, V2-63). It follows the player itself, so a clip that breaks mid-play
 /// gives the art back, and it rebuilds only when that answer changes, not at
 /// every position report. A pause or a held last frame keeps the picture up.
 class _ClipShowing extends StatefulWidget {
   const _ClipShowing({required this.video, required this.builder});
 
   final FeedVideo? video;
-  final Widget Function(BuildContext context, bool showing) builder;
+  final Widget Function(BuildContext context, bool showing, bool drawn) builder;
 
   @override
   State<_ClipShowing> createState() => _ClipShowingState();
 }
 
 class _ClipShowingState extends State<_ClipShowing> {
-  late bool _showing = _of(widget.video);
+  late ({bool showing, bool drawn}) _state = _of(widget.video);
 
-  static bool _of(FeedVideo? v) => v != null && v.ready && !v.failed;
+  /// A YouTube player's picture is up once something plays in it (V2-63);
+  /// until then the art stays up, behind its see-through page.
+  static ({bool showing, bool drawn}) _of(FeedVideo? v) {
+    final drawn = v != null && v.ready && !v.failed;
+    return (showing: drawn && (v is! EmbedFeedVideo || v.pictureUp), drawn: drawn);
+  }
 
   @override
   void initState() {
@@ -1173,7 +1231,7 @@ class _ClipShowingState extends State<_ClipShowing> {
     if (!identical(old.video, widget.video)) {
       old.video?.removeListener(_onVideo);
       widget.video?.addListener(_onVideo);
-      _showing = _of(widget.video);
+      _state = _of(widget.video);
     }
   }
 
@@ -1184,12 +1242,12 @@ class _ClipShowingState extends State<_ClipShowing> {
   }
 
   void _onVideo() {
-    final showing = _of(widget.video);
-    if (showing != _showing) setState(() => _showing = showing);
+    final state = _of(widget.video);
+    if (state != _state) setState(() => _state = state);
   }
 
   @override
-  Widget build(BuildContext context) => widget.builder(context, _showing);
+  Widget build(BuildContext context) => widget.builder(context, _state.showing, _state.drawn);
 }
 
 /// The card's art fading out once its clip is up (V2-67), on the app's slow
@@ -1357,7 +1415,7 @@ class _Info extends StatelessWidget {
                   icon: clip.source.origin == ClipOrigin.animeTheme
                       ? Symbols.music_note_rounded
                       : Symbols.movie_rounded,
-                  label: clip.label,
+                  label: ReelCardView.clipLabel(clip),
                 ),
               if (card.chip case final chip?) StatChip(label: chip),
               if (badge != null) StatChip(icon: Symbols.check_rounded, label: badge),
@@ -1401,10 +1459,10 @@ class _Info extends StatelessWidget {
           ),
         ),
       ),
-      if (clip?.source.origin == ClipOrigin.animeTheme) ...[
+      if (clip?.source.origin case ClipOrigin.animeTheme || ClipOrigin.youtube) ...[
         const SizedBox(height: 4),
         Text(
-          t.reel.card.themeCredit,
+          clip!.source.origin == ClipOrigin.youtube ? t.reel.card.youtubeCredit : t.reel.card.themeCredit,
           style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
       ],

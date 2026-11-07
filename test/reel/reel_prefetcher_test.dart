@@ -157,6 +157,118 @@ void main() {
     });
   });
 
+  group('native preload and deck heads (V2-09, V2-11 Wave B)', () {
+    test("a card's preload stage goes after its art, in its rank's own lane", () async {
+      q.schedule(1, [
+        task('c3', 0),
+        task('c4', 1, stage: ReelPrefetchStage.preload, lane: ReelPrefetcher.preloadLaneOf('next')),
+        task('c2', -1, stage: ReelPrefetchStage.preload, lane: ReelPrefetcher.preloadLaneOf('previous')),
+        task('c4', 1, stage: ReelPrefetchStage.art, lane: ReelPrefetcher.artLaneOf('Server A')),
+      ]);
+      expect(started, ['c3/resolve', 'c4/art', 'c4/preload', 'c2/preload']);
+    });
+
+    test('deck heads queue after +2', () {
+      q.hold();
+      q.schedule(1, [
+        task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload),
+        task('c5', 2),
+        task('c4', 1),
+      ]);
+      expect([for (final t in q.queued) t.cardId], ['c4', 'c5', 'h1']);
+    });
+
+    test('deck heads wait for the first frame; the hold cap lets only the deck on screen go', () {
+      fakeAsync((async) {
+        final capped = ReelPrefetcher(holdCap: const Duration(seconds: 4));
+        capped
+          ..hold()
+          ..schedule(1, [
+            task('c3', 0),
+            task('c4', 1, lane: 'Server B'),
+            task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload, lane: 'Server C'),
+          ]);
+        expect(capped.headsHeld, isTrue);
+        async.elapse(const Duration(seconds: 5));
+        expect(started, ['c3/resolve', 'c4/resolve'], reason: 'no first frame yet: the head waits');
+        capped.release();
+        async.flushMicrotasks();
+        expect(started, ['c3/resolve', 'c4/resolve', 'h1/preload']);
+        expect(capped.headsHeld, isFalse);
+        capped.dispose();
+      });
+    });
+
+    test('a release lets the heads go even after the cap lifted the hold', () async {
+      q.hold();
+      q.schedule(1, [task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload)]);
+      expect(started, isEmpty);
+      q.release();
+      expect(started, ['h1/preload']);
+    });
+
+    test('with no hold (the phone, or a card that showed a still) heads run in turn', () async {
+      q.schedule(1, [task('h1', ReelPrefetcher.deckHead, stage: ReelPrefetchStage.preload)]);
+      expect(started, ['h1/preload']);
+    });
+
+    group('whenLifted: a preload already running waits for the card on screen', () {
+      test('no hold: at once, for the near ranks and the heads', () {
+        fakeAsync((async) {
+          var near = false, head = false;
+          q.whenLifted().then((_) => near = true);
+          q.whenLifted(heads: true).then((_) => head = true);
+          async.flushMicrotasks();
+          expect(near, isTrue);
+          expect(head, isTrue);
+        });
+      });
+
+      test('held: the near ranks go on the first frame, never before', () {
+        fakeAsync((async) {
+          q.hold();
+          var near = false;
+          q.whenLifted().then((_) => near = true);
+          async.elapse(const Duration(seconds: 1));
+          expect(near, isFalse);
+          q.release();
+          async.flushMicrotasks();
+          expect(near, isTrue);
+        });
+      });
+
+      test('the hold cap lets the near ranks go, but the heads only on a release', () {
+        fakeAsync((async) {
+          final capped = ReelPrefetcher(holdCap: const Duration(seconds: 4));
+          capped.hold();
+          var near = false, head = false;
+          capped.whenLifted().then((_) => near = true);
+          capped.whenLifted(heads: true).then((_) => head = true);
+          async.elapse(const Duration(seconds: 5));
+          expect(near, isTrue);
+          expect(head, isFalse, reason: 'no first frame yet: a head never goes on the cap');
+          capped.release();
+          async.flushMicrotasks();
+          expect(head, isTrue);
+          capped.dispose();
+        });
+      });
+
+      test('a dispose lets every waiter go', () {
+        fakeAsync((async) {
+          final other = ReelPrefetcher()..hold();
+          var near = false, head = false;
+          other.whenLifted().then((_) => near = true);
+          other.whenLifted(heads: true).then((_) => head = true);
+          other.dispose();
+          async.flushMicrotasks();
+          expect(near, isTrue);
+          expect(head, isTrue);
+        });
+      });
+    });
+  });
+
   test('clear drops everything queued; nothing starts after it', () async {
     q.schedule(1, window());
     final queued = q.done('c4/metadata');
