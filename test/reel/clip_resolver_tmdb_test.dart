@@ -130,6 +130,16 @@ void main() {
     expect(tmdbCalls, hasLength(1));
   });
 
+  test('a cached YouTube trailer is never a neighbouring deck head: it has nothing to preload (V2-09)', () async {
+    await make().lookup(show);
+    expect((await row())?['k'], 'yt');
+    servers.calls.clear();
+    tmdbCalls.clear();
+    expect(await make().lookupWithoutServers(show, onDisk: (_) async => true), isNull);
+    expect(servers.calls, isEmpty);
+    expect(tmdbCalls, isEmpty);
+  });
+
   test('a server trailer comes first: TMDB is not asked', () async {
     servers.extrasByKey['a:5'] = [
       const PlexExtraClip(ratingKey: '9', title: 'Trailer', partKey: '/p/9.mp4', subtype: 'trailer'),
