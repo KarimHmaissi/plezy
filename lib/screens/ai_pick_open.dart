@@ -6,6 +6,7 @@ import '../media/ids.dart';
 import '../media/media_item.dart';
 import '../media/media_item_merge.dart';
 import '../providers/multi_server_provider.dart';
+import '../services/broken_copies.dart';
 import '../utils/app_logger.dart';
 import '../utils/external_ids.dart';
 import '../utils/media_navigation_helper.dart';
@@ -34,14 +35,17 @@ Future<void> openAiPick(BuildContext context, MediaItem item) async {
       appLogger.d('AI: copy lookup for a pick failed', error: e);
     }
   }
+  await BrokenCopies.instance.ensureLoaded();
   if (!context.mounted) return;
-  // The highest-bitrate copy on a reachable server; no question asked.
+  // The highest-bitrate copy on a reachable server that has not failed to
+  // play recently; no question asked.
   MediaItem? target = bestLibraryCopy(
     copies,
     isAvailable: (copy) {
       final id = serverIdOrNull(copy.serverId);
       return id != null && multi.isServerOnline(id);
     },
+    isBroken: BrokenCopies.instance.isCopyBroken,
   );
   final pickServer = serverIdOrNull(item.serverId);
   if (target == null && pickServer != null && multi.getClientForServer(pickServer) != null) target = item;

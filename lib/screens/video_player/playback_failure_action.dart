@@ -1,3 +1,4 @@
+import '../../media/copy_fallback.dart';
 import '../../mpv/models.dart';
 
 /// Highest fallback level the live-TV ladder will climb before giving up.
@@ -90,3 +91,51 @@ PlaybackFailureAction resolvePlaybackFailureAction({
 
   return PlaybackFailureAction.fatal;
 }
+
+/// Fork: the copy-fallback reason for a failed on-demand open, or null when
+/// another copy would not help.
+///
+/// Only failures of the file itself qualify: 503 for the whole open window,
+/// 404, 410, a stall before the first frame, a decoder or output that would
+/// not start for this file, or any other failed open. A refusal of this
+/// account (403), the server's bandwidth limit (500, which has its own
+/// dialog), a dead audio output and a player core that never started are not
+/// about the file, so they keep their own handling.
+CopyFallbackReason? copyFallbackReasonFor({
+  required PlaybackFailureAction action,
+  required String? cause,
+  required Set<int> httpStatuses,
+}) {
+  switch (action) {
+    case PlaybackFailureAction.serverBusyDialog:
+      return CopyFallbackReason.http503;
+    case PlaybackFailureAction.mediaUnreadableDialog:
+      return CopyFallbackReason.http404;
+    case PlaybackFailureAction.fatal:
+      if (cause == PlayerError.audioOutputFailed || cause == PlayerError.playerInitFailed) return null;
+      if (cause == PlayerError.openTimedOut) return CopyFallbackReason.timedOut;
+      if (cause == PlayerError.streamInitFailed) return CopyFallbackReason.streamInit;
+      if (httpStatuses.contains(410)) return CopyFallbackReason.http410;
+      return CopyFallbackReason.openFailed;
+    case PlaybackFailureAction.playbackNotAllowedDialog:
+    case PlaybackFailureAction.serverLimitDialog:
+    case PlaybackFailureAction.ignore:
+    case PlaybackFailureAction.liveRetry:
+    case PlaybackFailureAction.liveInterrupted:
+      return null;
+  }
+}
+
+/// Fork: whether a failed open may move on to another copy by itself: an
+/// on-demand Plex stream (not a download), before its first frame, outside a
+/// Watch Together room (the room picks the file for everyone) and outside a
+/// launch that asked for one exact file.
+bool copyFallbackApplies({
+  required bool isLive,
+  required bool isPlexBacked,
+  required bool isLocalPlayback,
+  required bool firstFrameRendered,
+  required bool inWatchTogetherRoom,
+  required bool strictMediaSelection,
+}) =>
+    !isLive && isPlexBacked && !isLocalPlayback && !firstFrameRendered && !inWatchTogetherRoom && !strictMediaSelection;

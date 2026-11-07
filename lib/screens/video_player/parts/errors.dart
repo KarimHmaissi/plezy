@@ -36,6 +36,23 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
       liveRetryFailed: _live.retryFailed,
     );
 
+    // Fork: a file that would not open before its first frame moves on to
+    // the title's next copy instead of stopping here.
+    final copyFallbackReason = copyFallbackReasonFor(
+      action: action,
+      cause: err.cause,
+      httpStatuses: _fatalHttpStatuses,
+    );
+    if (copyFallbackReason != null &&
+        _tryCopyFallback(
+          reason: copyFallbackReason,
+          action: action,
+          cause: err.cause,
+          message: _fatalPlaybackMessage(err),
+        )) {
+      return;
+    }
+
     switch (action) {
       // Every dialog is unrecoverable until the server side changes, so each
       // replaces the snackbar rather than joining it.
@@ -61,20 +78,7 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
         showGlobalErrorSnackBar(t.messages.liveStreamInterrupted);
       case PlaybackFailureAction.fatal:
         _latchFatalPlaybackError(action, cause: err.cause);
-        // A failed core start carries only diagnostic text; _lastLogError is
-        // raw mpv/ffmpeg output, so neither is fit to show bare — use the
-        // localized copy, with the redacted diagnostic as its detail. A timed
-        // out open raised nothing itself, but the last error line mpv logged
-        // on the way to the stall (a chain that failed, a stream that never
-        // produced) is the only diagnosis there is, so it rides along too.
-        final lastLogError = _lastLogError;
-        final message = switch (err.cause) {
-          PlayerError.playerInitFailed => t.messages.playbackFailed,
-          PlayerError.openTimedOut =>
-            lastLogError == null ? t.messages.playbackFailed : t.messages.playbackFailedDetail(error: lastLogError),
-          PlayerError.audioOutputFailed => t.messages.audioOutputFailed,
-          _ => t.messages.playbackFailedDetail(error: _redactPlayerError(lastLogError ?? err.message)),
-        };
+        final message = _fatalPlaybackMessage(err);
         // Live TV has no in-place reload to retry through: its own start
         // flow leaves the route on failure, so a dead live session does too.
         if (widget.isLive) {
@@ -84,6 +88,24 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
         }
         _presentPlaybackFailure(message);
     }
+  }
+
+  /// What the failure view says for a fatal [err]. A failed core start
+  /// carries only diagnostic text; _lastLogError is raw mpv/ffmpeg output, so
+  /// neither is fit to show bare — use the localized copy, with the redacted
+  /// diagnostic as its detail. A timed out open raised nothing itself, but the
+  /// last error line mpv logged on the way to the stall (a chain that failed,
+  /// a stream that never produced) is the only diagnosis there is, so it
+  /// rides along too.
+  String _fatalPlaybackMessage(PlayerError err) {
+    final lastLogError = _lastLogError;
+    return switch (err.cause) {
+      PlayerError.playerInitFailed => t.messages.playbackFailed,
+      PlayerError.openTimedOut =>
+        lastLogError == null ? t.messages.playbackFailed : t.messages.playbackFailedDetail(error: lastLogError),
+      PlayerError.audioOutputFailed => t.messages.audioOutputFailed,
+      _ => t.messages.playbackFailedDetail(error: _redactPlayerError(lastLogError ?? err.message)),
+    };
   }
 
   /// A terminal player error: the attempt is no longer current, progress
@@ -208,6 +230,7 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
       // retried from; one after it raises its own through _onPlayerError.
       showErrorUi: false,
       reason: 'retry after playback failure',
+      chosenByHand: request.chosenByHand,
     );
     if (outcome == MediaReloadOutcome.failed && mounted && _playbackFailureMessage == null) {
       _presentPlaybackFailure(t.messages.playbackFailed);
@@ -216,7 +239,11 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
 
   void _onPlayerLog(PlayerLog log) {
     final status = PlayerError.httpStatusFromLog(log.text);
-    if (status != null && fatalPlaybackHttpStatuses.contains(status)) _fatalHttpStatuses.add(status);
+    // Fork: 410 latches too, only so the copy fallback can name it; the
+    // failure policy ignores it.
+    if (status != null && (fatalPlaybackHttpStatuses.contains(status) || status == 410)) {
+      _fatalHttpStatuses.add(status);
+    }
     // An open the server answers with 503 never fails on its own: ffmpeg's
     // reconnect loop retries 503 forever and mpv just reports buffering
     // (#1830). Bound it. Live TV stays out — its ladder owns retries there.
@@ -225,6 +252,8 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
     // the primary media is itself stuck.
     if (status == 503 && !widget.isLive && !_firstFrame.rendered && !_hasFatalPlaybackError) {
       _http503Watchdog.onOpenPhase503();
+      // Fork: look for the title's other copies while the watchdog waits.
+      _primeCopyFallback();
     }
     if (log.level == PlayerLogLevel.error || log.level == PlayerLogLevel.fatal) {
       appLogger.e('[Player LOG ERROR] [${log.prefix}] ${log.text}');
@@ -286,9 +315,12 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
     if (mounted) unawaited(_handleBackButton());
   }
 
+  /// The HTTP 404 modal. Fork: it also offers "Choose another copy".
   Future<void> _showMediaUnreadableDialog() async {
     if (!mounted) return;
-    await showMediaUnreadableDialog(context);
+    final choose = await showMediaUnreadableDialog(context, offerChooseCopy: _offersCopyChoice);
+    if (!mounted) return;
+    if (choose && await _chooseAnotherCopy()) return;
     if (mounted) unawaited(_handleBackButton());
   }
 
@@ -298,7 +330,10 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
     // that recovers mid-dialog cannot start playing under it. Best-effort —
     // the route is left on dialog close either way.
     unawaited(player?.pause().catchError((_) {}));
-    await showServerBusyDialog(context);
+    // Fork: it also offers "Choose another copy".
+    final choose = await showServerBusyDialog(context, offerChooseCopy: _offersCopyChoice);
+    if (!mounted) return;
+    if (choose && await _chooseAnotherCopy()) return;
     if (mounted) unawaited(_handleBackButton());
   }
 

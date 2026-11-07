@@ -17,6 +17,7 @@ import '../mpv/player/platform/player_android.dart';
 import '../mpv/player/player_native.dart';
 
 import '../services/scrub_preview_source.dart';
+import '../media/copy_fallback.dart';
 import '../media/media_backend.dart';
 import '../media/media_display_criteria.dart';
 import '../media/media_server_user_profile.dart';
@@ -73,7 +74,9 @@ import '../services/media_control_router.dart';
 import '../services/player_sync_offsets.dart';
 import '../services/preferred_audio_device.dart';
 import '../services/scoped_player_prefs.dart';
+import '../services/broken_copies.dart';
 import '../services/settings_service.dart';
+import '../services/title_copy_lookup.dart';
 import '../services/sleep_timer_service.dart';
 import '../services/subtitle_preference.dart';
 import '../services/track_manager.dart';
@@ -86,6 +89,7 @@ import '../services/shader_service.dart';
 import '../providers/shader_provider.dart';
 import '../providers/account_preferences_controller.dart';
 import '../utils/app_logger.dart';
+import '../utils/copy_picker.dart';
 import '../utils/dialogs.dart';
 import '../utils/log_redaction_manager.dart';
 import '../utils/immersive_mode_guard.dart';
@@ -138,6 +142,7 @@ import '../watch_together/services/player_adapter.dart';
 import '../utils/error_message_utils.dart';
 
 part 'video_player/parts/companion_remote.dart';
+part 'video_player/parts/copy_fallback.dart';
 part 'video_player/parts/display_matching.dart';
 part 'video_player/parts/episode_navigation.dart';
 part 'video_player/parts/episode_queue.dart';
@@ -372,6 +377,7 @@ class _PlaybackOpenRequest {
     required this.qualityPreset,
     required this.audioStreamId,
     required this.resumePosition,
+    this.chosenByHand = false,
   });
 
   final MediaItem metadata;
@@ -380,6 +386,11 @@ class _PlaybackOpenRequest {
   final TranscodeQualityPreset qualityPreset;
   final int? audioStreamId;
   final Duration? resumePosition;
+
+  /// Fork: the viewer picked this file or rendition themselves (a version or
+  /// copy picker, a source switch in the player), so a failure of it asks
+  /// rather than moving on to a copy they did not pick.
+  final bool chosenByHand;
 
   /// Same item and source selection; where it resumes from is incidental.
   bool sameSourceAs(_PlaybackOpenRequest other) =>
@@ -396,6 +407,7 @@ class _PlaybackOpenRequest {
     qualityPreset: qualityPreset,
     audioStreamId: audioStreamId,
     resumePosition: position,
+    chosenByHand: chosenByHand,
   );
 }
 
@@ -489,6 +501,17 @@ class VideoPlayerScreen extends StatefulWidget {
   final WatchCopy? watchTogetherCopy;
   final Duration? initialPosition;
   final bool strictMediaSelection;
+
+  /// Fork: the version is Play's own default (nothing picked, remembered,
+  /// downloaded or shared by a room), so a copy that failed to play recently
+  /// may be skipped for a working one before it is opened.
+  final bool defaultCopyChoice;
+
+  /// Fork: the viewer picked this file for this launch ("Play Version", the
+  /// copy picker). If it fails to open, the failure dialog or view asks
+  /// ("Choose another copy") instead of the player moving on by itself to a
+  /// copy they did not pick.
+  final bool copyChosenByHand;
   final bool Function()? isLaunchCurrent;
   final PlaybackLaunchObserver? launchObserver;
 
@@ -523,6 +546,8 @@ class VideoPlayerScreen extends StatefulWidget {
     this.watchTogetherCopy,
     this.initialPosition,
     this.strictMediaSelection = false,
+    this.defaultCopyChoice = false,
+    this.copyChosenByHand = false,
     this.isLaunchCurrent,
     this.launchObserver,
   });
@@ -1080,6 +1105,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// the commit leaves the previous session — and everything derived from
   /// it — untouched, so there is nothing to roll back.
   void _commitPlaybackSession(PlaybackSession session) {
+    // Fork: before the session replaces the request's view of the version.
+    _noteServerVersionSwitch(session);
     _playbackSession = session;
     _effectiveSelectedMediaIndex = session.mediaIndex;
     _requestedMediaSourceId = session.mediaSourceId;
@@ -1272,6 +1299,14 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   @visibleForTesting
   void debugCompleteVideoForTesting() => _onVideoCompleted(true);
+
+  /// The item the player has (or is opening) now.
+  @visibleForTesting
+  MediaItem get debugCurrentMetadataForTesting => _currentMetadata;
+
+  /// The in-player notice on screen, if any.
+  @visibleForTesting
+  String? get debugToastTextForTesting => _toastController.current?.text;
 
   @visibleForTesting
   bool get debugPlayNextPromptVisibleForTesting => _episode.showPlayNextDialog;
@@ -2754,6 +2789,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// disarmed on first frame, on every new-open reset, and in [dispose].
   late final OpenHttp503Watchdog _http503Watchdog = OpenHttp503Watchdog(onPersistent: _onOpenHttp503Persistent);
 
+  /// Fork: the walk through the title's other copies after this launch's
+  /// open failed before its first frame; see `parts/copy_fallback.dart`.
+  _CopyFallbackRun? _copyFallback;
+
   // OS Media Controls Integration
 
   /// Navigate to a specific queue item (called from QueueSheet)
@@ -3103,7 +3142,11 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
           builder: (sheetContext) {
             final playbackFailure = _playbackFailureMessage;
             if (playbackFailure != null) {
-              return _buildPlaybackFailure(playbackFailure, onRetry: _playbackFailureRetry!);
+              return _buildPlaybackFailure(
+                playbackFailure,
+                onRetry: _playbackFailureRetry!,
+                onChooseCopy: _offersCopyChoice && player != null ? () => unawaited(_chooseAnotherCopy()) : null,
+              );
             }
             if (_isPlayerInitialized && player != null) return _buildVideoPlayer(sheetContext);
             final initializationError = _playerInitializationError;

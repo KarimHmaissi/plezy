@@ -106,6 +106,7 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     // This request is proven: a later in-place switch that fails restores it.
     _workingOpenRequest = _currentOpenRequest;
     _http503Watchdog.disarm();
+    _onCopyFallbackFirstFrame();
     unawaited(Sentry.addBreadcrumb(Breadcrumb(message: 'First frame ready', category: 'player')));
     final progressTracker = _progressTracker;
     if (progressTracker != null && currentPlayer.state.isActive) {

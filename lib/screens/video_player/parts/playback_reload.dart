@@ -228,6 +228,10 @@ extension _VideoPlayerReloadMethods on VideoPlayerScreenState {
         preferredSubtitleTrackOverride: preferredSubtitleTrackForReload,
         transitionLease: transitionLease,
         reason: 'source switch',
+        // Fork: the viewer's own change. If it fails, the failure is shown
+        // (Retry goes back to what was playing) rather than the copy
+        // fallback opening a copy they did not pick.
+        chosenByHand: true,
       );
       if (outcome == MediaReloadOutcome.opened) {
         rememberSourceAudioPreference();
@@ -362,6 +366,11 @@ extension _VideoPlayerReloadMethods on VideoPlayerScreenState {
   /// happened: only [MediaReloadOutcome.failed] means the previous session
   /// is still on screen with its (possibly dead) stream; user feedback for
   /// failures is shown here unless [showErrorUi] is false.
+  ///
+  /// Fork: [chosenByHand] marks a file the viewer picked themselves (see
+  /// [_PlaybackOpenRequest.chosenByHand]); null keeps the current open's
+  /// mark when the same item reopens (a recovery, a resume) and clears it
+  /// for another item.
   Future<MediaReloadOutcome> _reloadMediaInPlace({
     required MediaItem metadata,
     int? selectedMediaIndex,
@@ -380,6 +389,7 @@ extension _VideoPlayerReloadMethods on VideoPlayerScreenState {
     bool showErrorUi = true,
     PlaybackTransitionLease? transitionLease,
     String reason = 'media reload',
+    bool? chosenByHand,
   }) async {
     if (_shuttingDown) return MediaReloadOutcome.superseded;
     if (widget.isLive) {
@@ -514,6 +524,7 @@ extension _VideoPlayerReloadMethods on VideoPlayerScreenState {
         qualityPreset: targetQualityPreset,
         audioStreamId: targetAudioStreamId,
         resumePosition: resumePosition,
+        chosenByHand: chosenByHand ?? (!isItemChange && (previousOpenRequest?.chosenByHand ?? false)),
       );
       final preservesRequestedSubtitleSource =
           !isItemChange &&

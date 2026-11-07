@@ -588,6 +588,10 @@ class PlexVideoControls extends StatefulWidget {
   final int boxFitMode;
   final double videoZoomScale;
   final VoidCallback? onTogglePIPMode;
+
+  /// Fork: opens the copy picker (every file of the title on every online
+  /// server) from the settings sheet; null hides the entry.
+  final VoidCallback? onChooseCopy;
   final VoidCallback? onCycleBoxFitMode;
   final ValueChanged<double>? onVideoZoomChanged;
   final VoidCallback? onZoomIn;
@@ -731,6 +735,7 @@ class PlexVideoControls extends StatefulWidget {
     this.boxFitMode = 0,
     this.videoZoomScale = 1.0,
     this.onTogglePIPMode,
+    this.onChooseCopy,
     this.onCycleBoxFitMode,
     this.onVideoZoomChanged,
     this.onZoomIn,

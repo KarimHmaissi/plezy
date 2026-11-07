@@ -105,6 +105,57 @@ Details of each are in the dated entries below.
 
 ## 2026-11-06
 
+### A copy that won't open no longer stops playback (branch `fix/plex-direct-play-503`)
+- When a Plex film or episode fails **before its first frame** (the server
+  answers 503 for the whole 20 s open window, 404 or 410, the open stalls,
+  the decoder won't start, or the server hands over nothing), Plezy now
+  **tries the title's next copy** instead of showing the error: the same
+  quality on another server or library first, then the next lower
+  quality, then the rest. At most 3 extra tries, from the same position,
+  with the same audio and subtitle languages and quality preset. A notice
+  says what it's doing ("That copy wouldn't play — trying the 1080p copy
+  on Server B").
+- The server's own quiet switch away from a version its file check marks
+  missing now counts as one of those tries and shows the same notice.
+- Only when every copy fails does the "Stream unavailable" / "File
+  unavailable" dialog appear, now with **Choose another copy** beside
+  Close (Close keeps the focus). The failure view gets the same button.
+- Not for live TV, downloads, Watch Together rooms, other backends, a
+  copy picked by hand, or after the film has started playing.
+- **A copy you picked yourself is not swapped for another.** When the
+  file you chose fails (from the ▾ list, "Play Version...", the player's
+  Choose another copy or its Version & Quality switch), the dialog or
+  failure view asks, with **Choose another copy**, instead of trying other
+  copies by itself; the file is still remembered and marked as failed.
+  Retry after a failed Version & Quality switch goes back to what was
+  playing, as before. Plain Play and a remembered pick still move on by
+  themselves, and the server's own switch away from a missing file is
+  unchanged.
+- Each try logs one `[CopyFallback]` line (reason, quality and server
+  number; no names, addresses or tokens).
+- **Copies that failed are remembered** (`BrokenCopies`) for 24 hours, on
+  this device and in memory alike (the Shield keeps Plezy running for
+  days, so the app run is no bound), keyed by server, item and version id
+  only. Play's default (`bestVersionIndex`), Explore and AI
+  picks (`bestLibraryCopy`) pass over them while another copy is left, and
+  when Play's default lands on one anyway the player opens the best other
+  copy straight away ("That copy didn't play recently — opening the 4K
+  copy on Server B"). A version picked or remembered by hand is still
+  opened as asked. A copy that plays is forgotten at once.
+- **Every copy is one press away on the remote.** On a film or episode
+  page, the small ▾ segment right of Play (D-pad right from Play, then OK)
+  now shows whenever more than one server is online, not only for titles
+  with two versions, and opens **Choose a copy**: every version of every
+  copy on every online server and library, each row saying quality and
+  bitrate, HDR or Dolby Vision, size, library and server. Play's default is
+  marked and listed first (so OK there is the same as Play), and copies
+  that failed recently say "Didn't play recently". The long-press menu's
+  "Play Version..." opens the same list. In the player, the settings sheet
+  has **Choose another copy** (switches in place from the current
+  position), and the failure dialog and failure view offer it too (a film
+  that failed part-way goes on from where it stopped). The Explore page's
+  copy list marks copies that failed recently.
+
 ### The Reel v1: a feed of trailers and anime openings (Android)
 - New **Reel** tab (Android only): one title per card, trailers from the
   servers' own extras and first openings from AnimeThemes. No episode

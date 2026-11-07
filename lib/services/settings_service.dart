@@ -1259,6 +1259,16 @@ class SettingsService extends BaseSharedPreferencesService {
     encode: json.encode,
     decode: (raw) => (raw as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int)),
   );
+
+  /// Fork: files that failed to open recently (copy key → epoch ms of the
+  /// failure). Written by BrokenCopies, which skips entries older than its
+  /// TTL; device-local, like [localLastPlayedAt].
+  static final brokenCopies = JsonPref<Map<String, int>>(
+    'broken_copies',
+    defaultValue: const {},
+    encode: json.encode,
+    decode: (raw) => (raw as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int)),
+  );
   static final customShaderPresets = JsonPref<List<Map<String, dynamic>>>(
     'custom_shader_presets',
     defaultValue: const [],
@@ -1830,6 +1840,7 @@ class SettingsService extends BaseSharedPreferencesService {
     customDownloadPathType,
     mediaVersionPreferences,
     localLastPlayedAt,
+    brokenCopies,
     customDownloadPath,
     mpvConfigText,
     mpvPresets,

@@ -187,6 +187,7 @@ extension _PlexVideoControlsTrackMethods on _PlexVideoControlsState {
       onToggleFullscreen: _toggleFullscreen,
       onToggleAlwaysOnTop: onToggleAlwaysOnTop,
       onSwitchVersion: versionQuality.canSwitch ? (i) => _switchVersionAndQuality(newMediaIndex: i) : null,
+      onChooseCopy: versionQuality.canSwitch ? widget.onChooseCopy : null,
       onSwitchQualityPreset: versionQuality.canSwitch ? (p) => _switchVersionAndQuality(newPreset: p) : null,
       onSwitchAudioStreamId: versionQuality.canSwitch ? (id) => _switchVersionAndQuality(newAudioStreamId: id) : null,
       onSwitchSubtitle: canSwitchSourceSubtitles

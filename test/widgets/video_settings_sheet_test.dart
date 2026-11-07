@@ -552,6 +552,50 @@ void main() {
       expect(find.text(t.mediaMenu.fileInfo), findsNothing);
     });
   });
+
+  // Fork: the player's way to another copy of the title, on every server.
+  testWidgets('"Choose another copy" closes the sheet and opens the copy picker', (tester) async {
+    var chosen = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: const [testMonoTokensAnimated]),
+        home: OverlaySheetHost(
+          child: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => unawaited(
+                  OverlaySheetController.of(context).show<void>(
+                    builder: (_) => SizedBox(
+                      height: 2000,
+                      child: VideoSettingsSheet(
+                        player: _FakeSettingsPlayer(),
+                        supportsHdrControl: false,
+                        trackControlsState: TrackControlsState(canControl: true, onChooseCopy: () => chosen++),
+                      ),
+                    ),
+                  ),
+                ),
+                child: const Text('Open settings'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open settings'));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.text(t.copies.chooseAnother), 300, scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text(t.copies.chooseAnother));
+    await tester.pumpAndSettle();
+    expect(chosen, 1);
+    expect(find.byType(VideoSettingsSheet), findsNothing, reason: 'the picker opens over the player, not the sheet');
+  });
+
+  testWidgets('no copy entry without a way to switch', (tester) async {
+    await _pumpSheet(tester, canControl: true, height: 2000);
+    expect(find.text(t.copies.chooseAnother), findsNothing);
+  });
 }
 
 /// The tick marking the selected option in one of the sheet's picker views.

@@ -399,6 +399,41 @@ void main() {
     await tester.pumpAndSettle();
     await expectLater(result, completes);
   });
+
+  // Fork: the 404 and 503 modals can offer the copy picker.
+  for (final (name, show, title) in [
+    ('server-busy', showServerBusyDialog, t.messages.serverBusyTitle),
+    ('media-unreadable', showMediaUnreadableDialog, t.messages.mediaUnreadableTitle),
+  ]) {
+    testWidgets('$name dialog offers "Choose another copy" only when asked, with Close keeping the focus', (
+      tester,
+    ) async {
+      final hostContext = await _pumpHost(tester);
+
+      final plain = show(hostContext);
+      await tester.pumpAndSettle();
+      expect(find.text(title), findsOneWidget);
+      expect(find.text(t.copies.chooseAnother), findsNothing);
+      await tester.tap(find.text(t.common.close));
+      await tester.pumpAndSettle();
+      await expectLater(plain, completion(isFalse));
+
+      final offered = show(hostContext, offerChooseCopy: true);
+      await tester.pumpAndSettle();
+      expect(find.text(t.copies.chooseAnother), findsOneWidget);
+      // A remote's OK on the dialog's first focus must not change anything.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      await expectLater(offered, completion(isFalse));
+
+      final chosen = show(hostContext, offerChooseCopy: true);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(t.copies.chooseAnother));
+      await tester.pumpAndSettle();
+      await expectLater(chosen, completion(isTrue));
+      expect(find.byType(AlertDialog), findsNothing);
+    });
+  }
 }
 
 Future<BuildContext> _pumpHost(WidgetTester tester) async {

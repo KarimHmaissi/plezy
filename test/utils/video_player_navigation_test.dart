@@ -21,6 +21,7 @@ import 'package:plezy/services/downloaded_video_source.dart';
 import 'package:plezy/services/offline_watch_sync_service.dart';
 import 'package:plezy/services/playback_initialization_types.dart';
 import 'package:plezy/services/saf_storage_service.dart';
+import 'package:plezy/services/broken_copies.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/utils/video_player_navigation.dart';
 import 'package:openwatchparty/openwatchparty.dart' as owp;
@@ -384,6 +385,51 @@ void main() {
       expect(externalLaunches, ['https://server/stream/0']);
       expect(client.resolvedMediaIndexes, [0]);
     });
+
+    // Fork: Play's default skips a version that failed to play recently.
+    for (final fourKBroken in [false, true]) {
+      testWidgets(
+        fourKBroken
+            ? 'plain Play passes over a 4K that failed to play recently'
+            : 'plain Play opens the highest-bitrate version',
+        (tester) async {
+          BrokenCopies.instance.resetForTesting();
+          addTearDown(BrokenCopies.instance.resetForTesting);
+          final film = testMediaItem(
+            id: 'movie-2',
+            backend: MediaBackend.plex,
+            kind: MediaKind.movie,
+            serverId: 'srv',
+            mediaVersions: const [
+              MediaVersion(id: 'v0', height: 1080, bitrate: 9000),
+              MediaVersion(id: 'v1', height: 2160, bitrate: 60000),
+            ],
+          );
+          if (fourKBroken) await BrokenCopies.instance.markBroken('srv|movie-2|v1');
+          final servers = testMultiServer(clients: [client]);
+          final downloads = _CompletedDownloads(downloadedRow);
+          final offlineWatch = _OfflineWatchSync();
+          addTearDown(downloads.dispose);
+          addTearDown(offlineWatch.dispose);
+          await tester.pumpWidget(
+            MultiProvider(
+              providers: [
+                ChangeNotifierProvider<MultiServerProvider>.value(value: servers.provider),
+                ChangeNotifierProvider<DownloadProvider>.value(value: downloads),
+                ChangeNotifierProvider<OfflineWatchSyncService>.value(value: offlineWatch),
+              ],
+              child: const MaterialApp(home: Scaffold(body: Text('Detail'))),
+            ),
+          );
+          unawaited(
+            navigateToVideoPlayer(tester.element(find.text('Detail')), metadata: film, resolveWatchState: false),
+          );
+          await pumpUntil(tester, () => externalLaunches.isNotEmpty, describe: () => 'no external player launch');
+
+          expect(client.resolvedMediaIndexes, [if (fourKBroken) 0 else 1]);
+        },
+      );
+    }
   });
 
   group('the Watch Together room version (#2536)', () {

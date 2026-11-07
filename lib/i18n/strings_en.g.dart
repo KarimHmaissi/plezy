@@ -108,6 +108,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$remoteAi$en remoteAi = Translations$remoteAi$en.internal(_root);
 	late final Translations$aiComposer$en aiComposer = Translations$aiComposer$en.internal(_root);
 	late final Translations$googleCast$en googleCast = Translations$googleCast$en.internal(_root);
+	late final Translations$copies$en copies = Translations$copies$en.internal(_root);
 }
 
 // Path: app
@@ -7540,6 +7541,42 @@ class Translations$googleCast$en {
 	String loadFailed({required Object name}) => '${name} couldn\'t play this title';
 }
 
+// Path: copies
+class Translations$copies$en {
+	Translations$copies$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'That copy wouldn't play — trying the ${quality} copy on ${location}'
+	String trying({required Object quality, required Object location}) => 'That copy wouldn\'t play — trying the ${quality} copy on ${location}';
+
+	/// en: 'That copy wouldn't play — trying another copy on ${location}'
+	String tryingAnother({required Object location}) => 'That copy wouldn\'t play — trying another copy on ${location}';
+
+	/// en: 'Choose another copy'
+	String get chooseAnother => 'Choose another copy';
+
+	/// en: 'Choose a copy'
+	String get pickerTitle => 'Choose a copy';
+
+	/// en: 'Didn't play recently'
+	String get didNotPlayMark => 'Didn\'t play recently';
+
+	/// en: 'That copy didn't play recently — opening the ${quality} copy on ${location}'
+	String skippingRemembered({required Object quality, required Object location}) => 'That copy didn\'t play recently — opening the ${quality} copy on ${location}';
+
+	/// en: 'That copy didn't play recently — opening another copy on ${location}'
+	String skippingRememberedAnother({required Object location}) => 'That copy didn\'t play recently — opening another copy on ${location}';
+
+	/// en: 'Default'
+	String get defaultMark => 'Default';
+
+	/// en: 'Playing now'
+	String get playingMark => 'Playing now';
+}
+
 // Path: appIcon.names
 class Translations$appIcon$names$en {
 	Translations$appIcon$names$en.internal(this._root);
@@ -13308,6 +13345,15 @@ extension on Translations {
 			'googleCast.notPlex' => 'Only titles from Plex servers can be cast',
 			'googleCast.noStream' => 'The Plex server couldn\'t prepare this title for Cast',
 			'googleCast.loadFailed' => ({required Object name}) => '${name} couldn\'t play this title',
+			'copies.trying' => ({required Object quality, required Object location}) => 'That copy wouldn\'t play — trying the ${quality} copy on ${location}',
+			'copies.tryingAnother' => ({required Object location}) => 'That copy wouldn\'t play — trying another copy on ${location}',
+			'copies.chooseAnother' => 'Choose another copy',
+			'copies.pickerTitle' => 'Choose a copy',
+			'copies.didNotPlayMark' => 'Didn\'t play recently',
+			'copies.skippingRemembered' => ({required Object quality, required Object location}) => 'That copy didn\'t play recently — opening the ${quality} copy on ${location}',
+			'copies.skippingRememberedAnother' => ({required Object location}) => 'That copy didn\'t play recently — opening another copy on ${location}',
+			'copies.defaultMark' => 'Default',
+			'copies.playingMark' => 'Playing now',
 			_ => null,
 		};
 	}
