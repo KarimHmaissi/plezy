@@ -17,6 +17,7 @@ import 'package:plezy/services/ai/facts/title_facts.dart';
 import 'package:plezy/services/customisation/customisation_store.dart';
 import 'package:plezy/services/customisation/mirror_store.dart';
 import 'package:plezy/services/memory_trim_policy.dart';
+import 'package:plezy/services/offline_mode_source.dart';
 import 'package:plezy/services/reel/clip_filter.dart';
 import 'package:plezy/services/reel/clip_player.dart';
 import 'package:plezy/services/reel/clip_resolver.dart';
@@ -35,6 +36,21 @@ import 'package:plezy/utils/app_logger.dart';
 import '../test_helpers/prefs.dart';
 import '../test_helpers/reel_link.dart';
 import 'clip_player_test.dart' show FakeClipEngine;
+
+/// The app's offline mode (no server it can reach), set by the test.
+class _OfflineMode extends ChangeNotifier implements OfflineModeSource {
+  _OfflineMode(this._offline);
+
+  bool _offline;
+
+  @override
+  bool get isOffline => _offline;
+
+  set isOffline(bool v) {
+    _offline = v;
+    notifyListeners();
+  }
+}
 
 /// The clip core's disk cache (V2-10), holding the clips of [keys].
 class _DiskCache extends ReelClipCache {
@@ -404,6 +420,8 @@ void main() {
     Listenable? linkChanged,
     bool Function()? normalize,
     ReelClipCache? clipCache,
+    OfflineModeSource? offlineMode,
+    ReelCachedItem? cachedItem,
   }) => ReelController(
     decks:
         decks ??
@@ -444,6 +462,8 @@ void main() {
     cellular: cellular,
     clock: clock,
     clipCache: clipCache ?? _DiskCache(const {}),
+    offlineMode: offlineMode,
+    cachedItem: cachedItem,
     onOpen: (item) async => opened?.add(item),
     deckFor: (id) async {
       built.add(id);
@@ -2363,6 +2383,227 @@ void main() {
       await c.start();
       await pumpEventQueue();
       expect(servers.reads, reads);
+      c.dispose();
+    });
+  });
+
+  group('offline (V2-15)', () {
+    String diskKey(String asset) => ReelClipCache.keyFor('s1', '/services/iva/assets/$asset/video.mp4')!;
+    String offlineUri(String asset) => 'https://reel-offline.invalid/services/iva/assets/$asset/video.mp4';
+    List<ReelDeck> deckOf3() => [
+      _Deck('a', [_card('1'), _card('2'), _card('3')]),
+    ];
+
+    /// Online once, so each card's clip answer is cached as the app would
+    /// have it: the `src:` rows, by group key.
+    Future<Map<String, String?>> resolvedOnline() async {
+      final online = make(servers: _FlakyServers(), decks: deckOf3(), externalClips: true);
+      await online.start();
+      await online.step(1);
+      await online.step(1);
+      await pumpEventQueue();
+      online.dispose();
+      return {
+        for (final g in ['g1', 'g2', 'g3']) g: await store.cached('src:$g'),
+      };
+    }
+
+    List<String?> said(ReelController c) {
+      final out = <String?>[];
+      c.toast.addListener(() {
+        if (c.toast.value != null) out.add(c.toast.value);
+      });
+      return out;
+    }
+
+    test('TV: only clips already on disk play; the rest are stills, shown, never skipped', () async {
+      final rows = await resolvedOnline();
+      expect(rows.values, everyElement(contains('plex:a')));
+      final servers = _FlakyServers()..offline.add('s1');
+      final disk = _DiskCache({diskKey('a1'), diskKey('a3')});
+      final c = make(servers: servers, clipCache: disk, decks: deckOf3(), offlineMode: _OfflineMode(true));
+      final toasts = said(c);
+      await c.start();
+      expect(c.offline.value, isTrue);
+      expect(c.current.card?.id, 't1');
+      expect(c.current.clip?.source.uri, offlineUri('a1'), reason: 'no address or token: read from disk by its key');
+      expect(engine.cacheKeys['open ${offlineUri('a1')}'], diskKey('a1'));
+
+      await c.step(1);
+      expect(c.current.card?.id, 't2', reason: 'a still, not an AI card skipped over');
+      expect(c.current.clip, isNull);
+      await c.step(1);
+      expect(c.current.card?.id, 't3');
+      expect(c.current.clip?.source.uri, offlineUri('a3'));
+      await pumpEventQueue();
+
+      expect(servers.reads, 0, reason: 'no server asked');
+      for (final g in rows.keys) {
+        expect(await store.cached('src:$g'), rows[g], reason: 'no miss or new row written');
+      }
+      expect(toasts, [ReelController.offlineNotice(tv: true)], reason: 'said once');
+      c.dispose();
+    });
+
+    test('TV: two stills in a row are both shown (the 1-in-6 AI-card rule is not for stills offline)', () async {
+      await resolvedOnline();
+      final c = make(
+        servers: _FlakyServers()..offline.add('s1'),
+        clipCache: _DiskCache({diskKey('a3')}),
+        decks: deckOf3(),
+        offlineMode: _OfflineMode(true),
+      );
+      await c.start();
+      expect(c.current.card?.id, 't1');
+      expect(c.current.clip, isNull);
+      await c.step(1);
+      expect(c.current.card?.id, 't2');
+      expect(c.current.clip, isNull);
+      await c.step(1);
+      expect(c.current.card?.id, 't3');
+      expect(c.current.clip?.source.uri, offlineUri('a3'));
+      c.dispose();
+    });
+
+    test('TV: a clip with no cached row, or a cached opening, is a still, and nothing is asked', () async {
+      var themeAsks = 0;
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(
+        servers: servers,
+        decks: deckOf3(),
+        offlineMode: _OfflineMode(true),
+        animeThemes: (_) async {
+          themeAsks++;
+          return const {};
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.clip, isNull);
+      expect(servers.reads, 0);
+      expect(themeAsks, 0);
+      expect(await store.cached('src:g1'), isNull, reason: 'unknown offline, never a cached miss');
+      c.dispose();
+    });
+
+    test("phone: every card is a still (the feed can't read the disk cache), and none is held back", () async {
+      await resolvedOnline();
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(
+        servers: servers,
+        externalClips: true,
+        clipCache: _DiskCache({diskKey('a1'), diskKey('a2'), diskKey('a3')}),
+        decks: [
+          _ArrangedDeck('a', [_card('1'), _card('2'), _card('3')]),
+        ],
+        offlineMode: _OfflineMode(true),
+      );
+      final toasts = said(c);
+      await c.start();
+      await pumpEventQueue();
+      expect(c.current.clip, isNull);
+      expect(c.slotAt(1).clip, isNull);
+      expect(c.cards?.length, 3, reason: 'stills offline are not AI cards with no room');
+      expect(servers.reads, 0);
+      expect(toasts, [ReelController.offlineNotice(tv: false)]);
+      c.dispose();
+    });
+
+    test('offline, a card reads its art and text from the caches alone', () async {
+      final media = _RecordingMedia();
+      final cachedReads = <String>[];
+      final c = make(
+        media: media,
+        externalClips: true,
+        offlineMode: _OfflineMode(true),
+        cachedItem: (serverId, ratingKey) async {
+          cachedReads.add(ratingKey);
+          return null;
+        },
+      );
+      await c.start();
+      await pumpEventQueue();
+      expect(media.reads, isEmpty, reason: 'no server read that cannot answer');
+      expect(cachedReads, contains('1'));
+      c.dispose();
+    });
+
+    test(
+      'going offline mid-session drops the answers; back online the clips come back and it says so again next time',
+      () async {
+        final mode = _OfflineMode(false);
+        final servers = _FlakyServers();
+        final disk = _DiskCache({diskKey('a1')});
+        final c = make(servers: servers, clipCache: disk, decks: deckOf3(), offlineMode: mode);
+        final toasts = said(c);
+        final heard = <bool>[];
+        c.offline.addListener(() => heard.add(c.offline.value));
+        await c.start();
+        expect(c.current.clip?.source.uri, 'https://s1.example/services/iva/assets/a1/video.mp4');
+
+        servers.offline.add('s1');
+        mode.isOffline = true;
+        expect(heard, [true]);
+        expect(toasts, [ReelController.offlineNotice(tv: true)]);
+        // The screen starts the visit afresh (ReelScreen._onOffline).
+        await c.suspend();
+        await c.start();
+        expect(c.current.clip?.source.uri, offlineUri('a1'));
+        final reads = servers.reads;
+        await c.step(1);
+        expect(c.current.clip, isNull);
+        expect(servers.reads, reads);
+
+        servers.offline.clear();
+        mode.isOffline = false;
+        expect(heard, [true, false]);
+        await c.suspend();
+        await c.start();
+        expect(c.current.clip?.source.uri, 'https://s1.example/services/iva/assets/a2/video.mp4');
+        expect(toasts, hasLength(1), reason: 'back online says nothing');
+
+        c.toast.value = null; // the notice's 3 s are up
+        mode.isOffline = true;
+        expect(toasts, hasLength(2), reason: 'a new offline spell says it once more');
+        await c.start();
+        expect(toasts, hasLength(2));
+        c.dispose();
+      },
+    );
+
+    test('no network at all (the profile link) is offline too', () async {
+      final servers = _FlakyServers();
+      final profile = ValueNotifier(const ReelPlaybackProfile(screen: ReelScreen.tv, maxHeight: 1080));
+      final c = make(servers: servers, decks: deckOf3(), profile: profile);
+      expect(c.offline.value, isFalse);
+      profile.value = const ReelPlaybackProfile(screen: ReelScreen.tv, maxHeight: 1080, link: ReelLink.offline);
+      expect(c.offline.value, isTrue);
+      await c.start();
+      await pumpEventQueue();
+      expect(servers.reads, 0);
+      expect(c.current.clip, isNull);
+      c.dispose();
+    });
+
+    test('TV: a clip from disk that stops offline is a still; its row stays and nothing is asked again', () async {
+      final rows = await resolvedOnline();
+      final servers = _FlakyServers()..offline.add('s1');
+      final c = make(
+        servers: servers,
+        clipCache: _DiskCache({diskKey('a1')}),
+        decks: deckOf3(),
+        offlineMode: _OfflineMode(true),
+      );
+      await c.start();
+      expect(c.current.clip?.assetId, 'plex:a1');
+      engine.errorCtl.add(const PlayerError('network gone past the cached bytes'));
+      await pumpEventQueue();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(c.current.clip, isNull);
+      expect(c.current.card?.id, 't1');
+      expect(await store.cached('src:g1'), rows['g1'], reason: 'not forgotten offline');
+      expect(servers.reads, 0);
+      expect(engine.calls.where((x) => x.startsWith('open ')), hasLength(1), reason: 'no second clip looked for');
       c.dispose();
     });
   });

@@ -729,10 +729,12 @@ class _ReelFeedViewState extends State<ReelFeedView> with SingleTickerProviderSt
       case ReelSlotKind.loading:
         return const ReelCurtain();
       case ReelSlotKind.failed:
+        // Offline (V2-15) a deck that couldn't load says why.
+        final offline = _c.offline.value;
         return ReelMessage(
           icon: Symbols.cloud_off_rounded,
-          title: t.reel.card.failedTitle(deck: _c.deck.name),
-          body: t.reel.card.failedBodyPhone,
+          title: offline ? t.reel.status.offlineTitle : t.reel.card.failedTitle(deck: _c.deck.name),
+          body: offline ? t.reel.status.offlineBody : t.reel.card.failedBodyPhone,
           action: FilledButton.tonalIcon(
             onPressed: () => unawaited(_c.retryDeck()),
             icon: const Icon(Symbols.refresh_rounded),

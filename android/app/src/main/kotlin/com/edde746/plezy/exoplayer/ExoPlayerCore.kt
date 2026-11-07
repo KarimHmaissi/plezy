@@ -4662,11 +4662,17 @@ class ExoPlayerCore(private val activity: Activity) :
   /**
    * V2-10: a clip that fails to load or parse may have failed on its cached bytes (a file
    * replaced on the server, a stale redirect, a short write); drop them, so Dart's one
-   * re-resolve (V2-56) reads it afresh.
+   * re-resolve (V2-56) reads it afresh. A failed or timed-out connection keeps them (V2-15,
+   * [ClipCachePolicy.evictsAfter]).
    */
   private fun evictClipCacheOnError(error: PlaybackException) {
     val key = currentMediaUri?.let(::clipCacheKeyFor) ?: return
-    if (error.errorCode !in PlaybackException.ERROR_CODE_IO_UNSPECIFIED until PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) return
+    if (!ClipCachePolicy.evictsAfter(error.errorCode)) {
+      if (ClipCachePolicy.isIoOrParsing(error.errorCode)) {
+        emitLog("info", "ReelCache", "keep key=${ClipCachePolicy.logId(key)} after network error ${error.errorCode}")
+      }
+      return
+    }
     ClipDiskCache.evict(key)
     emitLog("info", "ReelCache", "evict key=${ClipCachePolicy.logId(key)} after error ${error.errorCode}")
   }

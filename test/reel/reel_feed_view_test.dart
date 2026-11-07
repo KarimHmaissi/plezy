@@ -272,6 +272,9 @@ void main() {
   late ValueNotifier<int> restored;
   late ValueNotifier<int> link, settingsChanged;
   late bool onCellular;
+
+  /// No network at all (V2-15).
+  late bool noNetwork;
   late ReelCellular cellular;
   late _Deck first;
   late _Servers servers;
@@ -298,6 +301,7 @@ void main() {
     link = ValueNotifier(0);
     settingsChanged = ValueNotifier(0);
     onCellular = false;
+    noNetwork = false;
     cellular = ReelCellular.dataSaver;
     c = ReelController(
       decks: [
@@ -309,7 +313,7 @@ void main() {
         store: store,
         aniList: (_) async => null,
         animeThemes: (_) async => const {},
-        profile: FakeLinkProfile(() => onCellular, link),
+        profile: FakeLinkProfile(() => onCellular, link, () => noNetwork),
       ),
       clips: ClipPlayer(engine: FakeClipEngine.new),
       store: store,
@@ -1444,6 +1448,30 @@ void main() {
     });
     await tester.pump();
     expect(find.text('Title 1'), findsOneWidget);
+  });
+
+  testWidgets("offline (V2-15), a deck that couldn't load says the servers are out of reach", (tester) async {
+    noNetwork = true;
+    link.value++;
+    first.fails = true;
+    await pump(tester);
+    expect(c.offline.value, isTrue);
+    expect(c.current.kind, ReelSlotKind.failed);
+    expect(find.text("You're offline"), findsOneWidget);
+    expect(find.text("Couldn't load Deck a"), findsNothing);
+    expect(find.text('Try again'), findsOneWidget);
+  });
+
+  testWidgets('offline (V2-15), the feed shows each card as a still', (tester) async {
+    noNetwork = true;
+    link.value++;
+    await pump(tester);
+    expect(c.current.kind, ReelSlotKind.card);
+    expect(c.current.clip, isNull, reason: 'the feed has nothing on disk to play');
+    expect(c.slotAt(1).clip, isNull);
+    expect(find.text('Title 1'), findsOneWidget);
+    // The still's entrance runs out.
+    await tester.pump(const Duration(seconds: 1));
   });
 
   group('metadata landing late (V2-26)', () {

@@ -1761,7 +1761,9 @@
     "toast": {
       "savedOnTv": "On the TV tonight",
       "savedForLater": "Saved, on the TV next time you connect",
-      "notConnected": "Couldn't save: not connected to the TV"
+      "notConnected": "Couldn't save: not connected to the TV",
+      "offlineTv": "You're offline. Clips saved on this TV still play; other cards show their pictures.",
+      "offlinePhone": "You're offline. The Reel shows pictures until you're back online."
     },
     "moreLike": {
       "finding": "Finding more like this…",
@@ -1779,7 +1781,7 @@
     },
     "status": {
       "offlineTitle": "You're offline",
-      "offlineBody": "The Reel plays from your servers. It picks up again once you are back online.",
+      "offlineBody": "This deck needs your servers. Try again once you're back online.",
       "openFailedTitle": "The Reel didn't open",
       "openFailedBodyTv": "Press OK to try again.",
       "openFailedBodyPhone": "Something went wrong getting it ready.",

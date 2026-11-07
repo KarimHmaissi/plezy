@@ -479,6 +479,51 @@ class ClipResolver {
     return clip;
   }
 
+  /// Offline (plan V2-15): [t]'s clip from this device alone, or null for a
+  /// still. Reads the cached `src:` row and nothing else: never a server,
+  /// AnimeThemes or TMDB, never a wait for a server, and it writes nothing
+  /// (no miss, no new row). Only a Plex clip whose bytes [onDisk] says are
+  /// already on disk plays (the TV clip core's disk cache, V2-10, D1); an
+  /// opening (AnimeThemes stays in memory), a YouTube trailer or a cached
+  /// miss has none. While its server isn't connected the clip opens at
+  /// [offlineUri]: the core reads it from disk by its cache key, and no
+  /// address or token is needed for that.
+  ///
+  /// [exclude] as for [lookup].
+  Future<ResolvedClip?> lookupOnDisk(
+    ReelTitle t, {
+    Set<String> exclude = const {},
+    required Future<bool> Function(ResolvedClip clip) onDisk,
+  }) async {
+    final banned = {...await store.spoiledAssets(t.titleId), ...exclude};
+    final cached = await store.cached('src:${t.groupKey}', ttl: ReelStore.sourceTtl);
+    final entry = cached == null ? null : _entry(cached);
+    if (entry == null || entry['miss'] == true || entry['k'] != 'plex') return null;
+    final assets = _assets(entry);
+    if (assets.isEmpty || assets.any(banned.contains)) return null;
+    final ResolvedClip? hit;
+    try {
+      hit = _plex(
+        entry['sv'] as String,
+        entry['pk'] as String,
+        entry['a'] as String,
+        _kindOf(entry, (ClipKind.trailer, null)).$1,
+        offline: true,
+      );
+    } catch (_) {
+      return null;
+    }
+    if (hit == null || hit.source.cacheKey == null) return null;
+    return await onDisk(hit) ? hit : null;
+  }
+
+  /// Where a clip on disk opens while its server isn't connected (V2-15): a
+  /// host that never resolves (RFC 2606 `.invalid`), with the part path the
+  /// clip's cache key names. The clip core reads its bytes from disk by that
+  /// key; a span that was never cached fails at once as a network error,
+  /// which neither waits nor drops the bytes already there.
+  static String offlineUri(String partKey) => 'https://reel-offline.invalid$partKey';
+
   /// A definitive miss in the current [sourceFormat] from the servers and
   /// AnimeThemes, with TMDB not asked.
   static const String missRow = '{"v":$sourceFormat,"miss":true}';
@@ -835,8 +880,10 @@ class ClipResolver {
     );
   }
 
-  ResolvedClip? _plex(String serverId, String partKey, String asset, ClipKind kind) {
-    final url = servers.clipUrl(serverId, partKey);
+  /// [offline] (V2-15): a server that isn't connected opens the clip at
+  /// [offlineUri], from disk only.
+  ResolvedClip? _plex(String serverId, String partKey, String asset, ClipKind kind, {bool offline = false}) {
+    final url = servers.clipUrl(serverId, partKey) ?? (offline ? offlineUri(partKey) : null);
     if (url == null) return null;
     return ResolvedClip(
       source: ClipSource(

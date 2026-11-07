@@ -16,6 +16,7 @@ import '../models/catalog/catalog_item.dart';
 import '../providers/catalog_sources_provider.dart';
 import '../providers/companion_remote_provider.dart';
 import '../providers/multi_server_provider.dart';
+import '../providers/offline_mode_provider.dart';
 import '../screens/media_detail_screen.dart';
 import '../screens/reel/reel_card_view.dart';
 import '../screens/reel/reel_screen.dart' show ReelScreen;
@@ -40,6 +41,7 @@ import 'device_performance.dart';
 import 'library_index/library_index.dart';
 import 'memory_trim_policy.dart';
 import 'multi_server_manager.dart';
+import 'offline_mode_source.dart';
 import 'playback_coordinator.dart';
 import 'reel/clip_player.dart';
 import 'reel/clip_resolver.dart';
@@ -97,11 +99,22 @@ abstract final class ReelApp {
       candidates: () => forYouCandidates(library: library, store: store),
       facts: () => forYouFacts(store: store, pool: pool),
       again: () => anotherGoCandidates(library: library, store: store),
+      offline: offlineNow,
       sharedChanges: Customisation.changed,
       clears: ReelPool.clears,
     );
     return _sharedFor = (library: library, pool: pool, forYou: forYou);
   }
+
+  /// The app's offline mode (no server it can reach), taken from the Reel's
+  /// latest session or warm start.
+  static OfflineModeSource? _offlineMode;
+
+  /// Whether the Reel runs offline now (plan V2-15): the app's offline mode,
+  /// or no network at all (the playback profile's link). For You's build and
+  /// the session read the same two sources.
+  static bool offlineNow() =>
+      (_offlineMode?.isOffline ?? false) || ReelPlaybackWatcher.instance.value.link == ReelLink.offline;
 
   static ReelLibrary _library() =>
       ReelLibrary(database: () => LibraryIndex.instance.database, facts: IndexTitleFactsSource.app());
@@ -171,6 +184,7 @@ abstract final class ReelApp {
     final remote = context.read<CompanionRemoteProvider?>();
     final servers = multi.serverManager;
     final store = ReelStore.instance;
+    final offlineMode = _offlineMode = context.read<OfflineModeProvider?>();
     // A Reel session is starting: the warm start's steps still to come are
     // dropped (V2-14).
     _warmer?.yieldNow();
@@ -252,6 +266,10 @@ abstract final class ReelApp {
       // Each deck carries on where it was left today, on both devices
       // (V2-14).
       keepCursor: true,
+      // Offline (V2-15): the app's offline mode, with the profile's link;
+      // the cards' art and text then come from the caches alone.
+      offlineMode: offlineMode,
+      cachedItem: media.cachedItem,
       // The degrade ladder resets only when the app's caches are restored.
       memoryRestored: MemoryTrimPolicy.instance.restores,
       // While the Reel plays, the brain's indexer rests and its ONNX session
@@ -341,6 +359,7 @@ abstract final class ReelApp {
   static void warmBeforeOpen(BuildContext context) {
     if (!PlatformDetector.isTV() || !ReelScreen.enabled) return;
     _warmContext = context;
+    _offlineMode ??= context.read<OfflineModeProvider?>();
     if (_warmer != null) return;
     final servers = context.read<MultiServerProvider>().serverManager;
     final store = ReelStore.instance;
