@@ -6,6 +6,7 @@ import '../../brain/history_brain.dart';
 import '../../brain/history_profiles.dart';
 import '../../library_index/index_database.dart';
 import '../../library_index/library_index.dart';
+import '../../reel/reel_ledger.dart';
 import '../ai_watch_state.dart';
 import 'title_facts.dart';
 
@@ -19,17 +20,22 @@ typedef ProfileLookup = TitleProfile? Function(TitleId id);
 /// audience score is carried unlabelled ([TitleFacts.audience], a bare ★).
 /// Labelled IMDb/RT/TMDB scores come from a title's rating list
 /// ([TitleFacts.withRatings]) until the IMDb dataset job fills them here.
+///
+/// The pick ledger ([ledger], V2-44) adds what surfaces did with each
+/// title lately ([TitleFacts.ledger]): facts for the model, never a weight.
 class IndexTitleFactsSource implements TitleFactsSource {
   IndexTitleFactsSource({
     required this.database,
     Future<ProfileLookup?> Function()? profiles,
     DateTime Function()? clock,
+    this.ledger,
   }) : _profiles = profiles ?? (() async => null),
        _clock = clock ?? DateTime.now;
 
-  /// The app's index and brain.
+  /// The app's index, brain and pick ledger (the Reel's, V2-44).
   factory IndexTitleFactsSource.app() => IndexTitleFactsSource(
     database: () => LibraryIndex.instance.database,
+    ledger: ReelLedger.instance,
     profiles: () async {
       try {
         final store = await HistoryBrain.instance.store;
@@ -42,6 +48,13 @@ class IndexTitleFactsSource implements TitleFactsSource {
   );
 
   final Future<IndexDatabase> Function() database;
+
+  /// Where [TitleFacts.ledger] comes from; none when null.
+  final PickLedger? ledger;
+
+  /// A ledger read that takes longer than this is let go: the facts load
+  /// without it.
+  static const Duration ledgerTimeout = Duration(seconds: 2);
   final Future<ProfileLookup?> Function() _profiles;
   final DateTime Function() _clock;
 
@@ -59,9 +72,11 @@ class IndexTitleFactsSource implements TitleFactsSource {
   Future<Map<TitleId, TitleFacts>> load(Iterable<TitleRef> refs) async {
     final wanted = {for (final r in refs) r.groupKey: r};
     if (wanted.isEmpty) return const {};
+    final now = _clock();
+    // The ledger is read alongside the index (it never throws).
+    final ledgerRead = _ledger(wanted.values.map((r) => r.id).toList(), now);
     final db = await database();
     final ProfileLookup? profile = await _profiles();
-    final now = _clock();
 
     final copies = <String, List<IndexedTitle>>{};
     final keys = wanted.keys.toList();
@@ -80,6 +95,7 @@ class IndexTitleFactsSource implements TitleFactsSource {
       }
     }
 
+    final picks = await ledgerRead;
     final out = <TitleId, TitleFacts>{};
     for (final MapEntry(key: group, value: ref) in wanted.entries) {
       final rows = copies[group];
@@ -97,13 +113,32 @@ class IndexTitleFactsSource implements TitleFactsSource {
       } catch (e) {
         appLogger.d('Facts: brain profile unreadable', error: e);
       }
-      final facts = factsOf(ref, rows, profile: p, now: now);
+      var facts = factsOf(ref, rows, profile: p, now: now);
+      if (picks[ref.id] case final l?) {
+        // A film now stopped partway was started: as on Ask's title lines
+        // (AiTools), it no longer reads "not played yet".
+        final filmStarted = facts.seen.kind == SeenKind.inProgress && facts.seen.eps == null;
+        facts = facts.copyWith(ledger: l.seenAt(facts.seen.last, inProgress: filmStarted));
+      }
       out[ref.id] = facts;
       for (final t in rows) {
         _byCopy[t.id] = facts;
       }
     }
     return out;
+  }
+
+  /// The ledger's summaries for [ids]; none when there is no ledger or it
+  /// fails or runs out of time.
+  Future<Map<TitleId, LedgerSummary>> _ledger(Iterable<TitleId> ids, DateTime now) async {
+    final l = ledger;
+    if (l == null) return const {};
+    try {
+      return await l.summaries(ids, now: now).timeout(ledgerTimeout);
+    } catch (e) {
+      appLogger.d('Facts: pick ledger unavailable, facts without it', error: e);
+      return const {};
+    }
   }
 
   /// The facts for [ref] from all its index [copies] and its brain
