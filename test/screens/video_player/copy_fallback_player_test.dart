@@ -109,6 +109,7 @@ void main() {
     required bool opens,
     bool firstFrame = true,
     bool matchesDisplay = false,
+    bool defaultCopyChoice = false,
     bool copyChosenByHand = false,
   }) async {
     final a = _CopyServer('server-a', 'Server A', copy: onA);
@@ -148,6 +149,7 @@ void main() {
             // copyChosenByHand, the 4K picked from the copy picker).
             selectedMediaIndex: 1,
             selectedQualityPreset: TranscodeQualityPreset.original,
+            defaultCopyChoice: defaultCopyChoice,
             copyChosenByHand: copyChosenByHand,
           ),
         ),
@@ -295,6 +297,49 @@ void main() {
       },
     );
   });
+
+  // Play's default landing on a file that failed to play recently opens the
+  // best other copy straight away; the same file picked by hand is opened as
+  // asked, and forgotten as broken once it plays.
+  for (final byHand in [false, true]) {
+    testWidgets(
+      byHand
+          ? 'a copy picked by hand that failed recently is opened as asked'
+          : "Play's default that failed recently gives way to the other server's copy",
+      (tester) async {
+        await withMockPlayerChannels(
+          methodChannelName: 'com.plezy/mpv_player',
+          eventChannelName: 'com.plezy/mpv_player/events',
+          testBody: () async {
+            await BrokenCopies.instance.markBroken('server-a|101|a4k');
+            final (:state, :player, :a, :b) = await pumpPlayer(
+              tester,
+              opens: true,
+              defaultCopyChoice: !byHand,
+              copyChosenByHand: byHand,
+            );
+
+            unawaited(state.debugStartPlaybackForTesting());
+            await pumpUntil(tester, () => player.openedUris.isNotEmpty, describe: () => '${player.openedUris}');
+
+            if (byHand) {
+              expect(player.openedUris.single, 'https://example.invalid/server-a/101');
+              expect(b.picks, isEmpty);
+              expect(BrokenCopies.instance.isBroken('server-a|101|a4k'), isFalse, reason: 'it played');
+            } else {
+              expect(player.openedUris.single, 'https://example.invalid/server-b/202');
+              expect(b.picks, ['b4k']);
+              expect(a.picks, isEmpty);
+              expect(state.debugToastTextForTesting, t.copies.skippingRemembered(quality: '4K', location: 'Server B'));
+              expect(BrokenCopies.instance.isBroken('server-a|101|a4k'), isTrue);
+            }
+
+            await tester.pump(const Duration(seconds: 5));
+          },
+        );
+      },
+    );
+  }
 
   // The viewer picked Server A's 4K from the copy picker: a failure of it
   // is theirs to answer, not the player's. The dialog asks, the picker it
