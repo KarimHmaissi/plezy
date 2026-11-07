@@ -13,8 +13,9 @@ class _CopyFallbackRun {
   /// Height of the version the viewer asked for: "the same quality" first.
   final int? referenceHeight;
 
-  /// Where the viewer's open would have started, carried to every copy:
-  /// another server keeps its own watch state for its copy.
+  /// Where the viewer's open would have started (or, after a failure
+  /// mid-film, where it stopped), carried to every copy: another server
+  /// keeps its own watch state for its copy.
   final Duration? resumePosition;
 
   /// [CopySource.key]s already opened or failed in this run.
@@ -136,11 +137,16 @@ extension _VideoPlayerCopyFallbackMethods on VideoPlayerScreenState {
     if (run != null && run.itemKeys.contains(_currentMetadata.globalKey)) return run;
     final requested = _requestedCopySource();
     final viewOffsetMs = _currentMetadata.viewOffsetMs ?? 0;
+    // A film that had played and then failed ("Choose another copy" on its
+    // failure view) goes on from the playhead, as Retry does, not from where
+    // its open started.
+    final playhead = _firstFrame.rendered ? player?.state.position : null;
     final created = _CopyFallbackRun(
       origin: _currentMetadata,
       referenceHeight: requested.height,
-      resumePosition:
-          _currentOpenRequest?.resumePosition ?? Duration(milliseconds: viewOffsetMs > 0 ? viewOffsetMs : 0),
+      resumePosition: playhead != null && playhead > Duration.zero
+          ? playhead
+          : _currentOpenRequest?.resumePosition ?? Duration(milliseconds: viewOffsetMs > 0 ? viewOffsetMs : 0),
     );
     created.itemKeys.add(_currentMetadata.globalKey);
     created.serverIndex(_currentMetadata.serverId);

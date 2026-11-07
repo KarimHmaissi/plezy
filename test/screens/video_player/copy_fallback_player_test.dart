@@ -258,6 +258,40 @@ void main() {
       },
     );
   });
+
+  // A film that failed after it had played goes on from where it stopped on
+  // the copy picked from the failure view, as Retry does, not from where
+  // its open started.
+  testWidgets('another copy picked after a failure mid-film resumes at the playhead', (tester) async {
+    await withMockPlayerChannels(
+      methodChannelName: 'com.plezy/mpv_player',
+      eventChannelName: 'com.plezy/mpv_player/events',
+      testBody: () async {
+        final (:state, :player, :a, :b) = await pumpPlayer(tester, opens: true);
+
+        // Server A's 4K fails; Server B's opens 10 minutes in and plays.
+        player.emitError(const PlayerError('Stream unavailable', cause: PlayerError.serverHttp503));
+        await pumpUntil(tester, () => player.openedUris.isNotEmpty, describe: () => '${player.openedUris}');
+        expect(player.openedStarts.single, const Duration(minutes: 10));
+
+        // 40 minutes in, the stream dies.
+        player.setPosition(const Duration(minutes: 40));
+        player.emitError(const PlayerError('Decoder failed'));
+        await pumpUntil(tester, () => find.text(t.copies.chooseAnother).evaluate().isNotEmpty);
+
+        await tester.tap(find.text(t.copies.chooseAnother));
+        await pumpUntil(tester, () => find.text(t.copies.pickerTitle).evaluate().isNotEmpty);
+        await tester.tap(find.textContaining(RegExp(r'^1080p.*Server A')));
+        await pumpUntil(tester, () => player.openedUris.length > 1, describe: () => '${player.openedUris}');
+
+        expect(player.openedUris.last, 'https://example.invalid/server-a/101');
+        expect(a.picks, ['a1080']);
+        expect(player.openedStarts.last, const Duration(minutes: 40), reason: 'where the film stopped');
+
+        await tester.pump(const Duration(seconds: 5));
+      },
+    );
+  });
 }
 
 class _CopyServer with PlaybackReportRecorder implements MediaServerClient {
