@@ -26,8 +26,9 @@ import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 
 /// Settings ▸ AI: the Anthropic API key and the TMDB key (each pasted in or
-/// sent from another device, checked, stored encrypted on this device) and
-/// which models the helper uses.
+/// sent from another device, checked, stored encrypted on this device), and
+/// which models the helper uses. For You's note and rebuild live on the
+/// Reel's settings page (ReelForYouTiles).
 class AiSettingsScreen extends StatefulWidget {
   const AiSettingsScreen({super.key});
 

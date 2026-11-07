@@ -34,6 +34,7 @@ import com.edde746.plezy.cast.GoogleCastChannel
 import com.edde746.plezy.deeplink.DeepLinkPlugin
 import com.edde746.plezy.exoplayer.ExoPlayerPlugin
 import com.edde746.plezy.exoplayer.PlaybackCapabilitiesChannel
+import com.edde746.plezy.exoplayer.ReelClipCacheChannel
 import com.edde746.plezy.mpv.MpvAudioPlayerPlugin
 import com.edde746.plezy.mpv.MpvPlayerPlugin
 import com.edde746.plezy.shared.AssistiveTechnologyMonitor
@@ -143,6 +144,7 @@ class PlezyActivity : FlutterActivity() {
   private val appIconChannel = AppIconChannel(this)
   private val voiceInputChannel = VoiceInputChannel(this)
   private val playbackCapabilitiesChannel = PlaybackCapabilitiesChannel(this)
+  private val reelClipCacheChannel by lazy { ReelClipCacheChannel(applicationContext) }
   private val exitDiagnosticsRequested = AtomicBoolean(false)
   private val lowMemoryKillsRequested = AtomicBoolean(false)
 
@@ -687,6 +689,7 @@ class PlezyActivity : FlutterActivity() {
     externalPlayerChannel.dispose()
     voiceInputChannel.dispose()
     playbackCapabilitiesChannel.dispose()
+    reelClipCacheChannel.dispose()
     googleCastChannel.dispose()
     systemBarsInsetsHost?.setOnApplyWindowInsetsListener(null)
     systemBarsInsetsHost = null
@@ -962,6 +965,8 @@ class PlezyActivity : FlutterActivity() {
         "getDeviceName" -> result.success(getDeviceName())
         "getPerformanceSignals" -> result.success(getPerformanceSignals())
         "getVideoDecodeCapabilities" -> result.success(MediaCodecQuery.hardwareVideoDecodeSupport())
+        // Fork: the Reel's "Muted if other audio is playing" (V2-22).
+        "isMusicActive" -> result.success((getSystemService(Context.AUDIO_SERVICE) as AudioManager).isMusicActive)
         "getBackgroundWorkSignals" -> result.success(
           BackgroundWorkClassifier.toMap(BackgroundWorkDiagnostics.read(this))
         )
@@ -1082,6 +1087,7 @@ class PlezyActivity : FlutterActivity() {
     appIconChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     voiceInputChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
     playbackCapabilitiesChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
+    reelClipCacheChannel.attach(flutterEngine.dartExecutor.binaryMessenger)
 
     // Splash screen theme: persist user's chosen theme for next launch (API 31+)
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, THEME_CHANNEL).setMethodCallHandler { call, result ->

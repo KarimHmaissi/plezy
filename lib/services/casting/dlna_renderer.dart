@@ -34,7 +34,7 @@ class DlnaRenderer {
 /// Finds video renderers on the LAN with SSDP: an M-SEARCH for
 /// `MediaRenderer:1`, then each answer's device description and its
 /// ConnectionManager sink list. Renderers that list no video type
-/// (speakers, HEOS) are left out.
+/// (speakers, AV receivers) are left out.
 class DlnaDiscovery {
   static const _searchTarget = 'urn:schemas-upnp-org:device:MediaRenderer:1';
   static const _avTransport = 'urn:schemas-upnp-org:service:AVTransport:1';

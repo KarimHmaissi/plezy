@@ -428,6 +428,9 @@ class MpvPlayerCore private constructor(
   private var overlayLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
 
   @Volatile private var disposing: Boolean = false
+
+  /** Reel V2-23: this core is counted in the lead-in detector's main-playback gate. */
+  @Volatile private var countedInPlaybackGate = false
   private var nativeDisposalComplete: CountDownLatch? = null
 
   @Volatile private var pendingSurface: Surface? = null
@@ -1224,6 +1227,11 @@ class MpvPlayerCore private constructor(
             }
           }
 
+          // Reel V2-23: a live MPV player stops the Reel's lead-in detector.
+          if (!countedInPlaybackGate) {
+            countedInPlaybackGate = true
+            com.edde746.plezy.exoplayer.MainPlaybackGate.up()
+          }
           // Public readiness last: the collectors and the observation above
           // are what a caller acting on isInitialized depends on.
           isInitialized = true
@@ -3217,6 +3225,10 @@ class MpvPlayerCore private constructor(
     disposing = true
     check(Looper.myLooper() == Looper.getMainLooper())
     PlayerDebugLog.d(TAG) { "Disposing" }
+    if (countedInPlaybackGate) {
+      countedInPlaybackGate = false
+      com.edde746.plezy.exoplayer.MainPlaybackGate.down()
+    }
     synchronized(pendingDisposalCallbacks) { disposalSettled = false }
 
     val disposalComplete = CountDownLatch(1)

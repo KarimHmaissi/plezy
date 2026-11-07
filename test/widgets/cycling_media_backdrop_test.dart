@@ -444,4 +444,80 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  // The Reel's clip cards show their art for a few hundred ms before the clip
+  // covers it (plan V2-05): a full-screen backdrop decode there churns the
+  // image cache Home's artwork shares.
+  Future<ResizeImage> decodedAt(WidgetTester tester, ImageType imageType) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    tester.view.display.size = const Size(1920, 1080);
+    addTearDown(tester.view.reset);
+    addTearDown(tester.view.display.reset);
+    final built = <ImageProvider>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CyclingMediaBackdrop(
+          mediaKey: 'harbor-lights',
+          imagePaths: [first.path],
+          client: null,
+          localArtworkPathResolver: (path) => path,
+          allowNetwork: false,
+          width: 1920,
+          height: 1080,
+          fallbackColor: Colors.black,
+          imageType: imageType,
+          onImageProvider: built.add,
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+    expect(built, isNotEmpty);
+    expect(pathForProvider(built.last), first.path);
+    await tester.pumpWidget(const SizedBox.shrink());
+    return built.last as ResizeImage;
+  }
+
+  testWidgets('a thumb backdrop decodes at the thumbnail cap, not the full-screen one', (tester) async {
+    final full = await decodedAt(tester, ImageType.art);
+    expect((full.width, full.height), (1920, 1080));
+    final light = await decodedAt(tester, ImageType.thumb);
+    expect((light.width, light.height), (960, 540));
+  });
+
+  testWidgets('TV spotlight light art builds its backdrop as a thumb and reports it', (tester) async {
+    final item = JellyfinMediaItem(
+      id: 'harbor-lights',
+      kind: MediaKind.movie,
+      artPath: first.path,
+      backdropPaths: [first.path],
+      serverId: 'server-a',
+    );
+    final built = <ImageProvider>[];
+    Widget spotlight({required bool lightArt}) => MaterialApp(
+      home: TvSpotlightBackground(
+        item: item,
+        client: null,
+        showInfo: false,
+        allowNetwork: false,
+        localArtworkPathResolver: (path) => path,
+        lightArt: lightArt,
+        onArtProvider: built.add,
+      ),
+    );
+
+    await tester.pumpWidget(spotlight(lightArt: false));
+    expect(tester.widget<CyclingMediaBackdrop>(find.byType(CyclingMediaBackdrop)).imageType, ImageType.art);
+
+    await tester.pumpWidget(spotlight(lightArt: true));
+    expect(tester.widget<CyclingMediaBackdrop>(find.byType(CyclingMediaBackdrop)).imageType, ImageType.thumb);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+    await tester.pump();
+    expect(built, isNotEmpty);
+    expect(pathForProvider(built.last), first.path);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

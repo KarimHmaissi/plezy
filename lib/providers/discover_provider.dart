@@ -12,6 +12,8 @@ import '../mixins/disposable_change_notifier_mixin.dart';
 import '../mixins/event_aware.dart';
 import '../services/settings_service.dart';
 import '../services/data_aggregation_service.dart';
+import '../services/reel_shelf_saves.dart';
+import '../services/reel/reel_store.dart';
 import '../services/system_shelf_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/coalesced_load_coordinator.dart';
@@ -108,13 +110,15 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     this.libraryEventCooldown = const Duration(minutes: 2),
     Future<void> Function(String profileId, List<MediaItem>)? syncSystemShelf,
     Future<void> Function(String profileId, List<MediaServerClient> clients)? syncServerSources,
+    ReelShelfSaves? reelShelfSaves,
     // A private field cannot be a named initializing formal callers can pass.
     // ignore: prefer_initializing_formals
   }) : _watchStateStore = watchStateStore,
        _now = now ?? DateTime.now,
        _isRefreshBlocked = isRefreshBlocked ?? _neverBlocked,
        _syncSystemShelfOverride = syncSystemShelf,
-       _syncServerSourcesOverride = syncServerSources {
+       _syncServerSourcesOverride = syncServerSources,
+       _reelShelfSaves = reelShelfSaves ?? ReelShelfSaves() {
     _loadCoordinator = CoalescedLoadCoordinator<String>(onFull: _loadOnce, onDelta: _loadDeltaOnce);
     _libraryEventPacer = RefreshPacer(
       debounce: libraryEventDebounce,
@@ -130,6 +134,8 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     _hiddenLibraries.addListener(_onHiddenLibrariesChanged);
     _lastSeenLibraryOrderKeys = _libraryOrderKeys();
     _libraries.addListener(_onLibrariesChanged);
+    // Fork (V2-42): a Reel Save or unsave re-publishes Play Next.
+    ReelStore.picksChanged.addListener(_onReelPicksChanged);
     // The usual on-screen filter (see [_watchStateEventIsFiltered]), except
     // that a watched event carrying the series' next episode always gets
     // through: it is what puts a show with no row yet (started from its page,
@@ -293,6 +299,14 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   Future<void>? _systemShelfSyncFuture;
   List<MediaItem>? _pendingSystemShelfItems;
+
+  /// The Continue Watching rows last handed to the launcher shelf. Null
+  /// until a real pass has published, so a Save before then never
+  /// publishes an empty Continue Watching over the launcher's rows.
+  List<MediaItem>? _lastSystemShelfItems;
+
+  /// Fork (V2-42): the Reel's fresh Saves, resolved once per Save.
+  final ReelShelfSaves _reelShelfSaves;
 
   List<MediaItem> get onDeck => _onDeck;
 
@@ -1274,7 +1288,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     if (isDisposed) return;
     final owner = profileId;
     if (owner == null) return;
-    _pendingSystemShelfItems = List<MediaItem>.unmodifiable(onDeck);
+    _pendingSystemShelfItems = _lastSystemShelfItems = List<MediaItem>.unmodifiable(onDeck);
     if (_systemShelfSyncFuture != null) {
       await _systemShelfSyncFuture;
       return;
@@ -1329,6 +1343,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
             _clientForShelfItem,
             hideSpoilers: settings.read(SettingsService.hideSpoilers),
             episodePosterMode: settings.read(SettingsService.episodePosterMode),
+            saves: () => _reelShelfSaves.load(_multiServer.getClientForServer),
           );
         } catch (e) {
           appLogger.w('Failed to sync system shelf', error: e);
@@ -1337,6 +1352,15 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     } finally {
       if (!isDisposed) _systemShelfSyncFuture = null;
     }
+  }
+
+  /// Fork (V2-42): Play Next carries the Reel's Saves after Continue
+  /// Watching, so a Save or unsave re-publishes it with the rows last sent.
+  void _onReelPicksChanged() {
+    final onDeck = _lastSystemShelfItems;
+    if (isDisposed || onDeck == null) return;
+    appLogger.i('[ReelShelf] Saves changed: re-publishing Play Next');
+    unawaited(_syncSystemShelf(onDeck));
   }
 
   MediaServerClient _clientForShelfItem(ServerId serverId) {
@@ -1353,6 +1377,7 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
     _multiServer.removeOnlineServersListener(syncToOnlineServers);
     _hiddenLibraries.removeListener(_onHiddenLibrariesChanged);
     _libraries.removeListener(_onLibrariesChanged);
+    ReelStore.picksChanged.removeListener(_onReelPicksChanged);
     _watchStateSubscription?.cancel();
     _watchStateSubscription = null;
     _deletionSubscription?.cancel();

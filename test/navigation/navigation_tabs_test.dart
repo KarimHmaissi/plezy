@@ -75,6 +75,12 @@ void main() {
       expect(ids.indexOf(NavigationTabId.history), ids.indexOf(NavigationTabId.search) - 1);
     });
 
+    test('V2-60: the Reel keeps its tab offline (it says so itself)', () {
+      final offline = NavigationTab.getVisibleTabs(isOffline: true, hasReel: true);
+      expect(offline.map((tab) => tab.id), contains(NavigationTabId.reel));
+      expect(NavigationTab.getVisibleTabs(isOffline: true).map((tab) => tab.id), isNot(contains(NavigationTabId.reel)));
+    });
+
     test('Explore is online-only', () {
       final offline = NavigationTab.getVisibleTabs(isOffline: true, hasExplore: true);
       expect(offline.map((tab) => tab.id), isNot(contains(NavigationTabId.explore)));

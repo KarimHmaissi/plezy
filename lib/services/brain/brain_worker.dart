@@ -60,6 +60,10 @@ class BrainWorker {
   /// Profiles changed on another connection: re-read vectors and flags.
   void reload() => _port.send(('reload', const <String, Object?>{}, null));
 
+  /// Fork: release the ONNX session (about 66 MB) when nothing is using it;
+  /// the next embed reopens it. Returns whether it was released.
+  Future<bool> unload() async => await _call('unload') == true;
+
   Future<List<BrainHit>> searchText(
     String text, {
     int limit = 20,
@@ -94,6 +98,17 @@ class BrainWorker {
     }
 
     var paused = false;
+    // Requests holding the embedder; unload waits for none.
+    var using = 0;
+    Future<T> withEmbedder<T>(Future<T> Function(OnnxEmbedder e) run) async {
+      using++;
+      try {
+        return await run(await embedderNow());
+      } finally {
+        using--;
+      }
+    }
+
     final port = ReceivePort();
     ready.send(port.sendPort);
 
@@ -105,31 +120,36 @@ class BrainWorker {
           final Object? result = switch (op) {
             'pause' => paused = args['on'] as bool,
             'reload' => _run(store.reload),
-            'warm' => await () async {
-              final e = await embedderNow();
+            'warm' => await withEmbedder((e) async {
               await e.embed(['warm up'], query: true);
               // Loads the vector cache (an unknown id finds nothing).
               store.similar(e.modelId, '', limit: 1);
               return null;
+            }),
+            'unload' => await () async {
+              final loaded = embedder;
+              if (loaded == null || using > 0) return false;
+              embedder = null;
+              await (await loaded).close();
+              return true;
             }(),
             'close' => _run(store.close),
-            'index' => await () async {
+            'index' => await withEmbedder((e) async {
               final r = await BrainIndexer(
                 store: store,
-                embedder: await embedderNow(),
+                embedder: e,
                 batchSize: args['batchSize'] as int,
                 duty: args['duty'] as double,
                 shouldPause: () => paused,
               ).run();
-              return {
+              return <String, Object?>{
                 'embedded': r.embedded,
                 'remaining': r.remaining,
                 'took': r.took.inMicroseconds,
                 'stopped': r.stopped,
               };
-            }(),
-            'searchText' => await () async {
-              final e = await embedderNow();
+            }),
+            'searchText' => await withEmbedder((e) async {
               final query = (await e.embed([args['text'] as String], query: true)).single;
               return [
                 for (final h in store.search(
@@ -142,7 +162,7 @@ class BrainWorker {
                 ))
                   (h.id, h.score),
               ];
-            }(),
+            }),
             'similar' => [
               for (final h in store.similar(
                 TransformerEmbedderIds.bgeSmall,
