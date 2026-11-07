@@ -52,6 +52,7 @@ import 'reel/reel_home_row.dart';
 import 'reel/reel_library.dart';
 import 'reel/reel_art.dart';
 import 'reel/reel_metadata.dart';
+import 'reel/reel_person.dart';
 import 'reel/reel_playback_profile.dart' hide ReelScreen;
 import 'reel/reel_pool.dart';
 import 'reel/reel_store.dart';
@@ -100,6 +101,8 @@ abstract final class ReelApp {
       facts: () => forYouFacts(store: store, pool: pool),
       again: () => anotherGoCandidates(library: library, store: store),
       offline: offlineNow,
+      arrivals: () => newThisWeekArrivals(library: library, store: store),
+      person: () => personPick(library: library, store: store, pool: pool),
       sharedChanges: Customisation.changed,
       clears: ReelPool.clears,
     );
@@ -125,10 +128,10 @@ abstract final class ReelApp {
       ReelPool(store: store, library: library, model: _sonnet, host: !PhoneMode.isHandheld);
 
   /// The decks in the app's own order: For You, Fits tonight, Give it
-  /// another go, Anime openings and Most Watched (with Trakt); the saved
-  /// answers follow ([_answerDecks]). The controller applies the user's
-  /// order and hidden decks ([ReelController.shownDecks]). For You is
-  /// always first.
+  /// another go, New this week, the Person deck, Anime openings and Most
+  /// Watched (with Trakt); the saved answers follow ([_answerDecks]). The controller
+  /// applies the user's order and hidden decks
+  /// ([ReelController.shownDecks]). For You is always first.
   static Future<List<ReelDeck>> _decks(
     BuildContext context, {
     required ReelLibrary library,
@@ -160,6 +163,8 @@ abstract final class ReelApp {
       forYou,
       FitsTonightDeck(forYou: forYou),
       AnotherGoDeck(forYou: forYou, library: library),
+      NewThisWeekDeck(forYou: forYou, library: library),
+      PersonDeck(forYou: forYou, library: library),
       animeOpeningsDeck(library: library, database: () => LibraryIndex.instance.database),
       // The raw charts come from Explore's Trakt Lists source; without Trakt
       // the deck would only ever be empty, so it isn't offered.
@@ -201,6 +206,11 @@ abstract final class ReelApp {
     );
     final media = _AppReelMedia(servers, store);
     final decks = await _decks(context, library: library, forYou: forYou);
+    // The Person deck names today's person before its first load, without
+    // holding up the open.
+    for (final d in decks.whereType<PersonDeck>()) {
+      unawaited(d.peek());
+    }
 
     // Captured now: the Reel may outlive this build context's frame.
     final navigatorContext = context;

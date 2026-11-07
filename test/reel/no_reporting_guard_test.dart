@@ -48,6 +48,7 @@ const _benignExits = {
   // A server's client for card art (`tryGetMediaClientWithFallback`): the
   // image helper builds a URL from it and calls nothing on the server.
   'lib/screens/reel/reel_card_view.dart → lib/utils/provider_extensions.dart',
+  'lib/screens/reel/reel_deck_intro_view.dart → lib/utils/provider_extensions.dart',
   'lib/screens/reel/reel_decide_view.dart → lib/utils/provider_extensions.dart',
   'lib/screens/reel/reel_feed_view.dart → lib/utils/provider_extensions.dart',
   'lib/screens/reel/reel_remote_view.dart → lib/utils/provider_extensions.dart',
@@ -68,6 +69,9 @@ const _benignExits = {
   'lib/services/reel/reel_decks.dart → lib/services/ai/ai_suggestions.dart',
   'lib/services/reel/reel_decks.dart → lib/services/ai/facts/title_facts.dart',
   'lib/services/reel/reel_decks.dart → lib/services/brain/history_brain.dart',
+  // The Person deck (D22): the brain's watched titles, read only, to find
+  // the people they watch most.
+  'lib/services/reel/reel_person.dart → lib/services/brain/history_brain.dart',
   'lib/services/reel/reel_library.dart → lib/services/ai/facts/index_title_facts_source.dart',
   'lib/services/reel/reel_library.dart → lib/services/ai/facts/title_facts.dart',
   // A month's name for the daily build's "last watched" facts.

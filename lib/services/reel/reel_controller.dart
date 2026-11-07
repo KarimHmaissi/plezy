@@ -71,10 +71,20 @@ typedef ReelHeadCard = Future<ReelCardData?> Function(DeckEntry entry);
 typedef ReelMoreLike = Future<List<ReelCardData>?> Function(ReelCardData seed, {required Set<String> skip});
 
 /// What a slot in a deck is: a title's card, the "Tonight's picks" decision
-/// card (V2-38), the end of the deck, an empty deck, a deck still loading,
-/// or one whose list couldn't be loaded ([failed], V2-27), which is not the
-/// same as a deck with nothing in it.
-enum ReelSlotKind { card, decide, poolEnd, empty, loading, failed }
+/// card (V2-38), the deck's intro card ([ReelDeck.intro], D22), the end of
+/// the deck, an empty deck, a deck still loading, or one whose list
+/// couldn't be loaded ([failed], V2-27), which is not the same as a deck
+/// with nothing in it.
+enum ReelSlotKind { card, decide, intro, poolEnd, empty, loading, failed }
+
+/// One of the first cards an intro card shows: the card, and its metadata
+/// when the Reel already has it (the intro never reads any of its own).
+class ReelIntroPreview {
+  const ReelIntroPreview(this.card, this.item);
+
+  final ReelCardData card;
+  final MediaItem? item;
+}
 
 /// One of Tonight's picks: a fresh Save and its metadata once read (null
 /// until then, or when it couldn't be read).
@@ -107,6 +117,8 @@ class ReelSlot {
     this.itemMissed = false,
     this.picks = const [],
     this.pick = 0,
+    this.intro,
+    this.previews = const [],
   });
 
   const ReelSlot.loading() : this._(ReelSlotKind.loading);
@@ -116,6 +128,16 @@ class ReelSlot {
 
   /// The decision card: [picks] newest first, [pick] the one OK watches.
   const ReelSlot.decide(List<ReelDecidePick> picks, int pick) : this._(ReelSlotKind.decide, picks: picks, pick: pick);
+
+  /// The deck's intro card: its line and its first cards ([previews]).
+  const ReelSlot.intro(ReelDeckIntro intro, List<ReelIntroPreview> previews)
+    : this._(ReelSlotKind.intro, intro: intro, previews: previews);
+
+  /// The intro card's line; null on any other slot.
+  final ReelDeckIntro? intro;
+
+  /// The intro card's first cards, at most [ReelController.introPreviews].
+  final List<ReelIntroPreview> previews;
 
   final ReelSlotKind kind;
 
@@ -1083,29 +1105,97 @@ class ReelController extends ChangeNotifier {
     return list != null && _onDecide.contains(deck.id) && _decideAt(deck.id, list) == index;
   }
 
-  /// The cursor as a page: the card index, counting the decision card when
-  /// it sits at or before the cursor. The phone's PageView index.
+  // ---- The deck's intro card (D22) ----
+
+  /// How many of a deck's first cards the intro card shows.
+  static const int introPreviews = 5;
+
+  /// With Next card (Lean back, V2-47) on the TV, the intro card moves on to
+  /// the first card after this long, while someone is there ([mayRollOn]).
+  static const Duration introHold = Duration(seconds: 6);
+
+  /// Decks whose cursor is on their intro card (its page 0, before card 0).
+  final Set<String> _onIntro = {};
+
+  /// Decks that have shown their intro card or one of their cards this
+  /// session: a deck opens on its intro only the first time it shows.
+  final Set<String> _introShown = {};
+  Timer? _introTimer;
+
+  /// Whether [d] (its list [list]) opens with an intro card: page 0, before
+  /// its first card. Only a deck with cards and an intro has one.
+  bool _hasIntro(ReelDeck d, List<ReelCardData> list) => list.isNotEmpty && d.intro != null;
+
+  bool get _onIntroNow {
+    final list = cards;
+    return list != null && _onIntro.contains(deck.id) && index == 0 && _hasIntro(deck, list);
+  }
+
+  /// The deck on screen shows its intro card first when it has one and
+  /// hasn't shown it or any card yet this session, with its cursor on its
+  /// first card.
+  void _enterIntro() {
+    final list = cards;
+    if (list == null || !_hasIntro(deck, list) || index != 0) return;
+    if (_introShown.contains(deck.id) || _onIntro.contains(deck.id) || _onDecide.contains(deck.id)) return;
+    _onIntro.add(deck.id);
+  }
+
+  /// The cursor of [deckId] leaves its intro (and decision) card: it was
+  /// moved onto a card.
+  void _offInserts(String deckId) {
+    _onDecide.remove(deckId);
+    _onIntro.remove(deckId);
+  }
+
+  /// [deckId]'s list starts again from its top: its intro comes up again.
+  void _restartDeck(String deckId) {
+    _cursor.remove(deckId);
+    _offInserts(deckId);
+    _introShown.remove(deckId);
+  }
+
+  /// Where the window around the card on screen is planned from: the
+  /// first card is the next one while the intro card shows.
+  int get _planAt => _onIntroNow ? -1 : index;
+
+  /// The cursor as a page: the card index, counting the intro card and the
+  /// decision card when it sits at or before the cursor. The phone's
+  /// PageView index.
   int get page {
     final list = cards;
     if (list == null) return 0;
+    if (_onIntroNow) return 0;
+    final intro = _hasIntro(deck, list) ? 1 : 0;
     final at = _decideAt(deck.id, list);
     final i = index;
-    if (at == null || i < at) return i;
-    return _onDecideNow ? at : i + 1;
+    if (at == null || i < at) return i + intro;
+    return (_onDecideNow ? at : i + 1) + intro;
   }
 
-  /// How many pages the deck has: its cards, the decision card when it is
-  /// in this deck, and the end of the deck.
+  /// How many pages the deck has: the intro card when it has one, its
+  /// cards, the decision card when it is in this deck, and the end of the
+  /// deck.
   int get slotCount {
     final list = cards;
     if (list == null || list.isEmpty) return 1;
-    return list.length + 1 + (_decideAt(deck.id, list) == null ? 0 : 1);
+    return list.length + 1 + (_decideAt(deck.id, list) == null ? 0 : 1) + (_hasIntro(deck, list) ? 1 : 0);
   }
 
   /// Moves the cursor to page [p].
   void _seek(int p) {
     final list = cards;
     if (list == null) return;
+    if (_hasIntro(deck, list)) {
+      if (p <= 0) {
+        _cursor[deck.id] = 0;
+        _onDecide.remove(deck.id);
+        _onIntro.add(deck.id);
+        return;
+      }
+      _onIntro.remove(deck.id);
+      p -= 1;
+    }
     final at = _decideAt(deck.id, list);
     if (at != null && p == at) {
       _cursor[deck.id] = at;
@@ -1121,12 +1211,20 @@ class ReelController extends ChangeNotifier {
     return ReelSlot.decide(picks, picks.isEmpty ? 0 : _pickAt.clamp(0, picks.length - 1));
   }
 
+  ReelSlot _introSlot(ReelDeckIntro intro, List<ReelCardData> list) =>
+      ReelSlot.intro(intro, [for (final c in list.take(introPreviews)) ReelIntroPreview(c, _item[c.id])]);
+
   /// The slot on page [p] (see [page]).
   ReelSlot slotAt(int p) {
     final list = cards;
     if (list == null) return _failed.contains(deck.id) ? const ReelSlot.failed() : const ReelSlot.loading();
     final coming = _stillComing(deck.id);
     if (list.isEmpty) return coming ? const ReelSlot.loading() : const ReelSlot.empty();
+    final intro = deck.intro;
+    if (intro != null) {
+      if (p <= 0) return _introSlot(intro, list);
+      p -= 1;
+    }
     var i = p;
     final at = _decideAt(deck.id, list);
     if (at != null) {
@@ -1229,8 +1327,7 @@ class ReelController extends ChangeNotifier {
     for (final d in decks) {
       if (d.daily && _cards.containsKey(d.id) && _loadedOn[d.id] != today) {
         _cards.remove(d.id);
-        _cursor.remove(d.id);
-        _onDecide.remove(d.id);
+        _restartDeck(d.id);
         _dropPartial(d.id);
       }
     }
@@ -1313,7 +1410,7 @@ class ReelController extends ChangeNotifier {
     _provisional.add(d.id);
     _loadedOn[d.id] = _today();
     _cursor[d.id] = 0;
-    _onDecide.remove(d.id);
+    _offInserts(d.id);
     _spans?.note('head', 'replay');
     appLogger.i('[ReelStart] #$no head replay deck=${d.id} ${_since(at)}ms');
     unawaited(_refreshPicks());
@@ -1661,7 +1758,7 @@ class ReelController extends ChangeNotifier {
       return;
     }
     _cursor[d.id] = at;
-    _onDecide.remove(d.id);
+    _offInserts(d.id);
     _spans?.note('cursor', '$at');
     appLogger.i('[ReelDeck] ${d.id}: carries on at card $at of ${list.length} (kept cursor)');
   }
@@ -1673,7 +1770,13 @@ class ReelController extends ChangeNotifier {
   /// apply ([keepCursor] off, the cursor moved on, or the list doesn't have
   /// the card): the list is appended after the head instead.
   bool _followHead(ReelDeck d, List<ReelCardData> kept, List<ReelCardData> loaded) {
-    if (!keepCursor || kept.length != 1 || (_cursor[d.id] ?? 0) != 0 || _onDecide.contains(d.id)) return false;
+    if (!keepCursor ||
+        kept.length != 1 ||
+        (_cursor[d.id] ?? 0) != 0 ||
+        _onDecide.contains(d.id) ||
+        _onIntro.contains(d.id)) {
+      return false;
+    }
     final head = kept.single;
     final at = loaded.indexWhere((c) => c.id == head.id);
     if (at < 0) return false;
@@ -1804,7 +1907,7 @@ class ReelController extends ChangeNotifier {
     }
     notifyListeners();
     if (identical(deck, d) && _active) {
-      if (index >= old.length && !_onDecide.contains(d.id)) {
+      if (index >= old.length && !_onDecide.contains(d.id) && !_onIntro.contains(d.id)) {
         unawaited(_show());
       } else {
         _plan(list, _generation);
@@ -1858,8 +1961,7 @@ class ReelController extends ChangeNotifier {
     final old = _cards[d.id] ?? const <ReelCardData>[];
     if (!identical(deck, d)) {
       _cards[d.id] = fresh;
-      _cursor.remove(d.id);
-      _onDecide.remove(d.id);
+      _restartDeck(d.id);
       _anchorDecide(d.id, fresh, orBefore: null);
       appLogger.i('[ReelDeck] ${d.id}: rebuilt, ${fresh.length} cards');
       notifyListeners();
@@ -1997,7 +2099,8 @@ class ReelController extends ChangeNotifier {
       if (at == null || at == index || !identical(d, deck)) return;
       // As [step]: the cursor moves first, under the generation counter.
       _cursor[deck.id] = at;
-      _onDecide.remove(deck.id);
+      _offInserts(deck.id);
+      _introShown.add(deck.id);
       final gen = ++_generation;
       await _leaveCard();
       if (gen != _generation) return;
@@ -2040,7 +2143,9 @@ class ReelController extends ChangeNotifier {
     final at = _indexOf(list, groupKey);
     if (at == null || !identical(list, cards)) return;
     _cursor[deck.id] = at;
-    _onDecide.remove(deck.id);
+    _offInserts(deck.id);
+    // Asked for this card (On TV mode, a link): it opens, not the intro.
+    _introShown.add(deck.id);
   }
 
   /// Puts the strip up for the deck now selected. It stays while the deck
@@ -2177,14 +2282,18 @@ class ReelController extends ChangeNotifier {
     if (_disposed) return;
     final gen = ++_generation;
     _direction = direction < 0 ? -1 : 1;
+    _introTimer?.cancel();
+    _introTimer = null;
     // Every card change has its own watchdog (an AI card skipped over
     // re-arms it for the card after).
     _arm();
+    _enterIntro();
     notifyListeners();
     cardChanged.value++;
     // V2-14: every card change keeps the cursor for the next load.
     _keepCursor();
     final list = cards;
+    if (list != null && _onIntroNow) return _showIntro(list, gen);
     if (list != null && _onDecideNow) return _showDecide(list, gen);
     if (list == null || index >= list.length) {
       // The end, an empty deck or one that failed to load each say so; a
@@ -2210,6 +2319,7 @@ class ReelController extends ChangeNotifier {
       return;
     }
     final c = list[index];
+    _introShown.add(deck.id);
     _toStage(ReelStage.resolve);
     // The card's own clip and art start at once; on the TV the cards around
     // it wait until its clip shows a frame (or turns out to be a still).
@@ -2282,6 +2392,34 @@ class ReelController extends ChangeNotifier {
     _settleStrip(gen);
   }
 
+  /// The deck's intro card is on screen: nothing plays (the TV's clip
+  /// pauses, as at the end of a deck), and the window is planned with the
+  /// first card as the next one (resolved, its text read and, on the TV,
+  /// preloaded), so it opens at once. With Next card on the TV it moves on
+  /// after [introHold].
+  Future<void> _showIntro(List<ReelCardData> list, int gen) async {
+    _cardShown = null;
+    _direction = 1;
+    if (_introShown.add(deck.id)) {
+      appLogger.i('[ReelIntro] ${deck.id}: intro shown, ${list.length} cards after it');
+    }
+    _settle(gen, playing: false);
+    _prefetch.release();
+    _plan(list, gen);
+    if (!externalClips) await clips.pause();
+    if (gen != _generation || !_active) return;
+    _trimPreloads(gen);
+    _settleStrip(gen);
+    if (!externalClips && clipEnd == ReelClipEnd.nextCard) {
+      _introTimer = Timer(introHold, () {
+        _introTimer = null;
+        if (_disposed || gen != _generation || !_active || !_onIntroNow || !mayRollOn) return;
+        appLogger.i('[ReelIntro] ${deck.id}: Next card moves on to the first card');
+        unawaited(step(1, skipAi: true));
+      });
+    }
+  }
+
   /// The decision card is on screen: nothing plays (the TV's clip pauses,
   /// as at the end of a deck), the picks' metadata is read, and it is
   /// seen: it stays where it is and never comes up again this session.
@@ -2339,8 +2477,9 @@ class ReelController extends ChangeNotifier {
     final tasks = <ReelPrefetchTask>[];
     final answered = <ReelCardData>[];
     final window = <String>[];
+    final from = _planAt;
     for (final offset in lean ? ReelPrefetcher.leanOffsets : ReelPrefetcher.offsets) {
-      final j = index + offset * _direction;
+      final j = from + offset * _direction;
       if (j < 0 || j >= list.length) continue;
       final c = list[j];
       window.add(c.id);
@@ -2501,7 +2640,7 @@ class ReelController extends ChangeNotifier {
     if (list == null) return null;
     final j = list.indexWhere((x) => x.id == c.id);
     if (j < 0) return null;
-    return switch ((j - index) * _direction) {
+    return switch ((j - _planAt) * _direction) {
       1 => ClipPreloadRank.next,
       -1 when _preloadRanks.contains(ClipPreloadRank.previous) => ClipPreloadRank.previous,
       2 when _preloadRanks.contains(ClipPreloadRank.ahead) => ClipPreloadRank.ahead,
@@ -3275,6 +3414,7 @@ class ReelController extends ChangeNotifier {
       'next': [for (final n in upNext) ?card(n)],
       'playing': clips.phase.value == ClipPhase.playing,
       'poolEnd': s.kind == ReelSlotKind.poolEnd,
+      if (s.intro case final intro?) 'intro': {'line': intro.line},
       if (s.kind == ReelSlotKind.decide)
         'decide': {
           'pick': s.pick,
@@ -3313,6 +3453,7 @@ class ReelController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _introTimer?.cancel();
     _setActive(false);
     _generation++;
     clips.phase.removeListener(_onPhase);
