@@ -215,6 +215,8 @@ class PlayerAndroid extends PlayerBase {
         'hasStartPosition': hasStartPosition,
         'autoPlay': play,
         'isLive': isLive,
+        // V2-10: a Plex clip's disk cache key (clip mode only; never the URL).
+        if (clipMode) 'cacheKey': ?_clipCacheKeys[media.uri],
         if (_contentFrameRate != null) 'contentFrameRate': _contentFrameRate,
         if (externalSubtitles != null && externalSubtitles.isNotEmpty)
           'externalSubtitles': externalSubtitles
@@ -244,12 +246,15 @@ class PlayerAndroid extends PlayerBase {
     }
   }
 
-  /// Clip mode: buffer the first seconds of [uri] for the next card (only
-  /// one preload is held). Initializes the core if needed.
-  Future<void> preloadClip(String uri) async {
+  /// Clip mode: buffer the first seconds of [uri] as [rank] (`next`,
+  /// `previous`, `deckNext` or `deckPrevious`; the core holds one clip per
+  /// rank, V2-09). [origin] is for the core's log line. Initializes the core
+  /// if needed.
+  Future<void> preloadClip(String uri, {String rank = 'next', String? origin, String? cacheKey}) async {
     if (disposed || !clipMode) return;
     await _ensureInitialized();
-    await invoke('preloadClip', {'uri': uri});
+    if (cacheKey != null) rememberClipCacheKey(uri, cacheKey);
+    await invoke('preloadClip', {'uri': uri, 'rank': rank, 'origin': ?origin, 'cacheKey': ?cacheKey});
   }
 
   /// Clip mode: initializes the native core with no media (the Reel's cold
@@ -261,10 +266,27 @@ class PlayerAndroid extends PlayerBase {
     await _ensureInitialized();
   }
 
-  /// Clip mode: drop any preloaded next card.
-  Future<void> clearPreloads() async {
+  /// Clip mode (V2-10): the disk cache key the next [open] of [uri] sends,
+  /// for the most recent [_clipCacheKeysKept] clips.
+  final Map<String, String> _clipCacheKeys = {};
+  static const int _clipCacheKeysKept = 16;
+
+  /// Clip mode: [open] of [uri] reads and writes the clip core's disk cache
+  /// under [cacheKey] (a Plex clip's, `ReelClipCache.keyFor`).
+  void rememberClipCacheKey(String uri, String cacheKey) {
+    if (!clipMode) return;
+    _clipCacheKeys
+      ..remove(uri)
+      ..[uri] = cacheKey;
+    while (_clipCacheKeys.length > _clipCacheKeysKept) {
+      _clipCacheKeys.remove(_clipCacheKeys.keys.first);
+    }
+  }
+
+  /// Clip mode: drop [rank]'s preload, or every one when null.
+  Future<void> clearPreloads({String? rank}) async {
     if (disposed || !clipMode || !initialized) return;
-    await invoke('clearPreloads');
+    await invoke('clearPreloads', {'rank': ?rank});
   }
 
   @override

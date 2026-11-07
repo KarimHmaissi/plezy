@@ -240,10 +240,7 @@ class ExoPlayerPlugin :
       "dispose" -> handleDispose(call, result)
       "open" -> handleOpen(call, result)
       "preloadClip" -> handlePreloadClip(call, result)
-      "clearPreloads" -> runOnMain {
-        playerCore?.clearPreloads()
-        result.success(null)
-      }
+      "clearPreloads" -> handleClearPreloads(call, result)
       "play" -> handlePlay(result)
       "pause" -> handlePause(result)
       "stop" -> handleStop(result)
@@ -391,8 +388,31 @@ class ExoPlayerPlugin :
       result.error("INVALID_ARGS", "Missing 'uri'", null)
       return
     }
+    // V2-09: which of the clip core's four preloads this is (absent: the next card).
+    val rank = ClipPreloadRank.fromWire(call.argument<String>("rank"))
+    if (rank == null) {
+      result.error("INVALID_ARGS", "Unknown preload rank", null)
+      return
+    }
+    val origin = call.argument<String>("origin")
+    // V2-10: a Plex clip's disk cache key (never carries the token); absent for AnimeThemes.
+    val cacheKey = call.argument<String>("cacheKey")
     runOnMain {
-      playerCore?.preloadClip(uri)
+      playerCore?.preloadClip(uri, rank, origin, cacheKey)
+      result.success(null)
+    }
+  }
+
+  private fun handleClearPreloads(call: MethodCall, result: MethodChannel.Result) {
+    // A rank drops that preload only; none drops every one.
+    val wire = call.argument<String>("rank")
+    val rank = wire?.let { ClipPreloadRank.fromWire(it) }
+    if (wire != null && rank == null) {
+      result.error("INVALID_ARGS", "Unknown preload rank", null)
+      return
+    }
+    runOnMain {
+      playerCore?.clearPreloads(rank)
       result.success(null)
     }
   }
@@ -432,6 +452,11 @@ class ExoPlayerPlugin :
     if (currentActivity == null) {
       result.error("NO_ACTIVITY", "Activity not available", null)
       return
+    }
+
+    // V2-10: the clip core caches a Plex clip on disk under this key (clip mode only).
+    call.argument<String>("cacheKey")?.let { key ->
+      playerCore?.takeIf { it.clipMode }?.rememberClipCacheKey(uri, key)
     }
 
     val request = MediaOpenRequest(

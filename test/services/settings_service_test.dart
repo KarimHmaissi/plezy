@@ -246,6 +246,13 @@ void main() {
       expect(portable, isNot(contains(SettingsService.reelHintSessions)));
       expect(portable, isNot(contains(SettingsService.reelImmersiveHintSeen)));
     });
+
+    test('the clip loudness switch is off and stays on the device (V2-19, D9)', () async {
+      final settings = await SettingsService.getInstance();
+
+      expect(settings.read(SettingsService.reelClipNormalization), isFalse);
+      expect(SettingsService.portablePrefs, isNot(contains(SettingsService.reelClipNormalization)));
+    });
   });
 
   group('SettingsService skip marker modes', () {

@@ -43,6 +43,10 @@ class FakeClipEngine implements ClipEngine {
   @override
   Player get player => throw UnimplementedError();
 
+  /// The disk cache key each open and preload was sent (V2-10), by
+  /// `open <uri>` / `preload <uri>`.
+  final cacheKeys = <String, String?>{};
+
   @override
   Future<void> warm() async {
     calls.add('warm');
@@ -52,16 +56,27 @@ class FakeClipEngine implements ClipEngine {
   }
 
   @override
-  Future<void> open(String uri) async {
+  Future<void> open(String uri, {String? cacheKey}) async {
     calls.add('open $uri');
+    cacheKeys['open $uri'] = cacheKey;
     await openGate?.future;
   }
 
+  /// `preload <uri>` for the next card; other ranks say theirs (V2-09).
   @override
-  Future<void> preload(String uri) async => calls.add('preload $uri');
+  Future<void> preload(
+    String uri, {
+    ClipPreloadRank rank = ClipPreloadRank.next,
+    ClipOrigin? origin,
+    String? cacheKey,
+  }) async {
+    cacheKeys['preload $uri'] = cacheKey;
+    calls.add(rank == ClipPreloadRank.next ? 'preload $uri' : 'preload $uri as ${rank.name}');
+  }
 
   @override
-  Future<void> clearPreloads() async => calls.add('clearPreloads');
+  Future<void> clearPreloads({ClipPreloadRank? rank}) async =>
+      calls.add(rank == null ? 'clearPreloads' : 'clearPreloads ${rank.name}');
 
   @override
   Future<void> play() async => calls.add('play');
@@ -121,6 +136,9 @@ class FakeClipEngine implements ClipEngine {
   Future<void> abandonAudioFocus() async => calls.add('abandonAudioFocus');
 
   @override
+  Future<void> setNormalization(bool on) async => calls.add('normalization $on');
+
+  @override
   Future<void> dispose() async {
     calls.add('dispose');
     await disposeGate?.future;
@@ -131,7 +149,7 @@ class FakeClipEngine implements ClipEngine {
 /// A core that throws on its open (it couldn't start, or refused the clip).
 class _RefusingEngine extends FakeClipEngine {
   @override
-  Future<void> open(String uri) async {
+  Future<void> open(String uri, {String? cacheKey}) async {
     calls.add('open $uri');
     throw PlatformException(code: 'open', message: 'the core could not open the clip');
   }
@@ -145,6 +163,15 @@ class _SilentEngine extends FakeClipEngine {
   Future<void> pause() async {
     calls.add('pause');
     if (hangPause) await Completer<void>().future;
+  }
+}
+
+/// A core whose normalisation call fails (no effect on the device).
+class _NoNormalizationEngine extends FakeClipEngine {
+  @override
+  Future<void> setNormalization(bool on) async {
+    calls.add('normalization $on');
+    throw PlatformException(code: 'effect', message: 'no loudness effect');
   }
 }
 
@@ -322,7 +349,8 @@ void main() {
 
     test('[ReelTTFF] times the key press to the first frame, with the open and the preload', () async {
       MemoryLogOutput.clearLogs();
-      await clips.preload(_b);
+      // Held as the card behind: an open of another clip leaves it there.
+      await clips.preload(_b, rank: ClipPreloadRank.previous);
       await clips.play(_a, first: true);
       engine.firstFrameCtl.add(null);
       clips.markKey(Stopwatch()..start());
@@ -333,9 +361,14 @@ void main() {
       expect(lines, hasLength(2));
       expect(
         lines.first,
-        matches(RegExp(r'^\[ReelTTFF\] key=\d+ms open=\d+ms preloaded=false trigger=step origin=animeTheme$')),
+        matches(
+          RegExp(r'^\[ReelTTFF\] key=\d+ms open=\d+ms preloaded=true rank=previous trigger=step origin=animeTheme$'),
+        ),
       );
-      expect(lines.last, matches(RegExp(r'^\[ReelTTFF\] key=none open=\d+ms preloaded=false origin=plexExtra$')));
+      expect(
+        lines.last,
+        matches(RegExp(r'^\[ReelTTFF\] key=none open=\d+ms preloaded=false rank=none origin=plexExtra$')),
+      );
     });
 
     test('a preloaded card says so; a press that led to no clip times nothing', () async {
@@ -352,7 +385,7 @@ void main() {
       await clips.play(_a);
       engine.firstFrameCtl.add(null);
       final lines = MemoryLogOutput.getLogs().map((e) => e.message).where((m) => m.startsWith('[ReelTTFF]')).toList();
-      expect(lines[1], contains('preloaded=true trigger=deck'));
+      expect(lines[1], contains('preloaded=true rank=next trigger=deck'));
       expect(lines[0], startsWith('[ReelTTFF] key=none'));
     });
   });
@@ -401,14 +434,228 @@ void main() {
   test('preloads the next card on the same core, or clears it', () async {
     await clips.preload(_b);
     await clips.preload(null);
-    expect(engine.calls, ['preload ${_b.uri}', 'clearPreloads']);
+    expect(engine.calls, ['preload ${_b.uri}', 'clearPreloads next']);
+    expect(clips.preloaded, isEmpty);
   });
 
   test('a clip off a server marked slow is never preloaded (V2-11)', () async {
+    await clips.preload(_a);
     await clips.preload(
       const ClipSource(uri: 'https://cdn.example/c.mp4', origin: ClipOrigin.plexExtra, preloadable: false),
     );
-    expect(engine.calls, ['clearPreloads']);
+    expect(engine.calls, ['preload ${_a.uri}', 'clearPreloads next']);
+  });
+
+  group('preload ranks (V2-09)', () {
+    const c = ClipSource(uri: 'https://v.example/c.webm', origin: ClipOrigin.animeTheme);
+
+    test('each rank holds its own clip, and the same ask twice goes to the core once', () async {
+      await clips.preload(_a);
+      await clips.preload(_b, rank: ClipPreloadRank.previous);
+      await clips.preload(c, rank: ClipPreloadRank.deckNext);
+      await clips.preload(c, rank: ClipPreloadRank.deckNext);
+      expect(engine.calls, ['preload ${_a.uri}', 'preload ${_b.uri} as previous', 'preload ${c.uri} as deckNext']);
+      expect(clips.preloaded, {
+        ClipPreloadRank.next: _a.uri,
+        ClipPreloadRank.previous: _b.uri,
+        ClipPreloadRank.deckNext: c.uri,
+      });
+    });
+
+    test('a clip asked for at another rank moves there', () async {
+      await clips.preload(c, rank: ClipPreloadRank.deckNext);
+      await clips.preload(c);
+      expect(clips.preloaded, {ClipPreloadRank.next: c.uri});
+    });
+
+    test('playing a held clip takes it out of its rank; the others stay', () async {
+      await clips.preload(_a);
+      await clips.preload(_b, rank: ClipPreloadRank.previous);
+      await clips.play(_b);
+      expect(clips.preloaded, {ClipPreloadRank.next: _a.uri});
+    });
+
+    test('clearing an empty rank asks nothing of the core', () async {
+      await clips.preload(_a);
+      engine.calls.clear();
+      await clips.clearPreload(ClipPreloadRank.previous);
+      await clips.clearPreload(ClipPreloadRank.next);
+      expect(engine.calls, ['clearPreloads next']);
+    });
+
+    test('memory pressure drops every rank at once', () async {
+      await clips.preload(_a);
+      await clips.preload(_b, rank: ClipPreloadRank.deckPrevious);
+      await clips.dropPreload();
+      expect(engine.calls.last, 'clearPreloads');
+      expect(clips.preloaded, isEmpty);
+    });
+
+    test('a release forgets every rank', () async {
+      await clips.preload(_a);
+      await clips.release();
+      expect(clips.preloaded, isEmpty);
+    });
+  });
+
+  group('disk cache (V2-10)', () {
+    const key = 'plex:server-a:/library/parts/41/1700000000/file.mp4';
+    const plex = ClipSource(
+      uri: 'https://cdn.example/p.mp4?X-Plex-Token=abc123',
+      origin: ClipOrigin.plexExtra,
+      cacheKey: key,
+    );
+
+    test('a Plex clip opens and preloads with its cache key; an opening with none', () async {
+      await clips.preload(plex);
+      await clips.preload(_b, rank: ClipPreloadRank.previous);
+      await clips.play(plex);
+      await clips.play(_b);
+      expect(engine.cacheKeys, {
+        'preload ${plex.uri}': key,
+        'preload ${_b.uri}': null,
+        'open ${plex.uri}': key,
+        'open ${_b.uri}': null,
+      });
+    });
+
+    test('the card two ahead holds a Plex clip only (D1: an opening never goes to disk)', () async {
+      await clips.preload(_b, rank: ClipPreloadRank.ahead);
+      expect(engine.calls, isEmpty, reason: 'nothing held, so nothing to clear');
+      expect(clips.preloaded, isEmpty);
+      await clips.preload(_a, rank: ClipPreloadRank.ahead);
+      expect(clips.preloaded, isEmpty, reason: 'a Plex clip without a key is not cached either');
+      await clips.preload(plex, rank: ClipPreloadRank.ahead);
+      expect(engine.calls, ['preload ${plex.uri} as ahead']);
+      expect(clips.preloaded, {ClipPreloadRank.ahead: plex.uri});
+      // Two steps later it is the next card: it moves, as the core rebuilds it in memory.
+      await clips.preload(plex);
+      expect(clips.preloaded, {ClipPreloadRank.next: plex.uri});
+      expect(engine.calls.last, 'preload ${plex.uri}');
+    });
+  });
+
+  group('unmute (V2-19)', () {
+    test('rises from silence over the ramp instead of jumping to full', () {
+      fakeAsync((async) {
+        clips = ClipPlayer(engine: () => engine, muted: true);
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        async.elapse(const Duration(seconds: 1));
+        expect(clips.level, 0);
+
+        engine.volumes.clear();
+        clips.setMuted(false);
+        async.flushMicrotasks();
+        expect(engine.volumes.where((v) => v >= 100), isEmpty, reason: 'no jump to full on the unmute');
+        async.elapse(ClipPlayer.unmuteRamp ~/ 6);
+        expect(engine.volumes.last, closeTo(100 / 6, 0.01));
+        async.elapse(ClipPlayer.unmuteRamp);
+        expect(clips.level, closeTo(100, 0.01));
+        // Every step rises, and none by more than a sixth of the way.
+        for (var i = 1; i < engine.volumes.length; i++) {
+          expect(engine.volumes[i] - engine.volumes[i - 1], inInclusiveRange(0, 100 / 6 + 0.01));
+        }
+      });
+    });
+
+    test('mute is still at once, and cuts an unmute ramp short', () {
+      fakeAsync((async) {
+        clips = ClipPlayer(engine: () => engine, muted: true);
+        clips.play(_a, first: true);
+        async.flushMicrotasks();
+        engine.firstFrameCtl.add(null);
+        clips.setMuted(false);
+        async.elapse(ClipPlayer.unmuteRamp ~/ 2);
+        expect(clips.level, inExclusiveRange(0, 100));
+        clips.setMuted(true);
+        async.flushMicrotasks();
+        expect(clips.level, 0);
+        expect(engine.volumes.last, 0);
+        async.elapse(ClipPlayer.unmuteRamp);
+        expect(engine.volumes.last, 0, reason: 'the cancelled ramp sends nothing more');
+      });
+    });
+
+    test('an unmute while a clip opens leaves the open its own ramp', () {
+      fakeAsync((async) {
+        clips = ClipPlayer(engine: () => engine, muted: true);
+        engine.openGate = Completer<void>();
+        clips.play(_a);
+        async.flushMicrotasks();
+        clips.setMuted(false);
+        async.elapse(const Duration(milliseconds: 50));
+        engine.openGate!.complete();
+        async.flushMicrotasks();
+        expect(clips.level, lessThanOrEqualTo(ClipPlayer.dipLevel));
+        async.elapse(const Duration(seconds: 1));
+        expect(clips.level, closeTo(100, 0.01));
+      });
+    });
+  });
+
+  group('loudness normalisation (V2-19, D9)', () {
+    test('off by default: a core is never asked to normalise', () async {
+      await clips.play(_a, first: true);
+      await clips.play(_b);
+      clips.syncNormalization();
+      expect(engine.calls.where((c) => c.startsWith('normalization')), isEmpty);
+    });
+
+    test('switched on, each new core is told before its first open', () async {
+      clips = ClipPlayer(engine: () => engine, normalize: () => true);
+      await clips.play(_a, first: true);
+      final told = engine.calls.indexOf('normalization true');
+      expect(told, isNonNegative);
+      expect(told, lessThan(engine.calls.indexOf('open ${_a.uri}')));
+      await clips.play(_b);
+      expect(engine.calls.where((c) => c == 'normalization true'), hasLength(1), reason: 'once per core');
+
+      await clips.release();
+      engine.calls.clear();
+      await clips.play(_a, first: true);
+      expect(engine.calls, contains('normalization true'), reason: 'a rebuilt core starts off again');
+    });
+
+    test('a flip reaches the core in use at once, and only when it changed', () async {
+      var on = false;
+      clips = ClipPlayer(engine: () => engine, normalize: () => on);
+      await clips.play(_a, first: true);
+      on = true;
+      clips.syncNormalization();
+      clips.syncNormalization();
+      on = false;
+      clips.syncNormalization();
+      expect(engine.calls.where((c) => c.startsWith('normalization')), ['normalization true', 'normalization false']);
+
+      // A flip with no core waits for the next core.
+      await clips.release();
+      on = true;
+      clips.syncNormalization();
+      expect(engine.calls.where((c) => c.startsWith('normalization')), hasLength(2));
+    });
+
+    test('the next card picks up a flip the settings listener missed', () async {
+      var on = false;
+      clips = ClipPlayer(engine: () => engine, normalize: () => on);
+      await clips.play(_a, first: true);
+      on = true;
+      await clips.play(_b);
+      final told = engine.calls.indexOf('normalization true');
+      expect(told, isNonNegative);
+      expect(told, lessThan(engine.calls.indexOf('open ${_b.uri}')));
+    });
+
+    test('a core that throws on the switch never breaks the card', () async {
+      final refusing = _NoNormalizationEngine();
+      engine = refusing;
+      clips = ClipPlayer(engine: () => refusing, normalize: () => true);
+      await clips.play(_a, first: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(refusing.calls, contains('open ${_a.uri}'));
+      expect(clips.phase.value, ClipPhase.loading);
+    });
   });
 
   test('muted stays muted across cards', () async {
@@ -707,7 +954,7 @@ void main() {
       await clips.preload(_b);
       perf.begin(ReelPerfTrigger.key);
       final playing = clips.play(_b);
-      engine.logCtl.add(log('clip', 'Open clip: preloaded=true'));
+      engine.logCtl.add(log('clip', 'Open clip: preloaded=true rank=next held=[previous] sources=2'));
       await playing;
       engine.logCtl.add(log('decoder-hang', 'Decoder initialized: c2.example.decoder (12ms)'));
       engine.firstFrameCtl.add(null);
@@ -725,6 +972,16 @@ void main() {
       await clips.preload(null);
       perf.begin(ReelPerfTrigger.key);
       await clips.play(_b, first: true);
+      engine.firstFrameCtl.add(null);
+      expect(perf.last!.preloaded, isFalse);
+    });
+
+    test("the core's own line wins: a miss it reports with its rank is a miss", () async {
+      await clips.preload(_b);
+      perf.begin(ReelPerfTrigger.key);
+      final playing = clips.play(_b, first: true);
+      engine.logCtl.add(log('clip', 'Open clip: preloaded=false rank=next held=[] sources=1'));
+      await playing;
       engine.firstFrameCtl.add(null);
       expect(perf.last!.preloaded, isFalse);
     });

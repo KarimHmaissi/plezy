@@ -55,6 +55,37 @@ void main() {
     });
   });
 
+  group('clip loudness switch (V2-19, D9)', () {
+    test('off by default, in either build', () {
+      expect(ReelDeveloper.normalization(debugBuild: false, settings: settings), isFalse);
+      expect(ReelDeveloper.normalization(debugBuild: true, settings: settings), isFalse);
+      expect(SettingsService.reelClipNormalization.defaultValue, isFalse);
+    });
+
+    test('a release build counts it only while the developer row shows', () async {
+      await settings.write(SettingsService.reelClipNormalization, true);
+      expect(ReelDeveloper.normalization(debugBuild: false, settings: settings), isFalse);
+      await settings.write(SettingsService.enableDebugLogging, true);
+      expect(ReelDeveloper.normalization(debugBuild: false, settings: settings), isTrue);
+      expect(
+        ReelDeveloper.on(debugBuild: false, settings: settings),
+        isFalse,
+        reason: 'the overlay keeps its own switch',
+      );
+      await settings.write(SettingsService.enableDebugLogging, false);
+      expect(ReelDeveloper.normalization(debugBuild: false, settings: settings), isFalse);
+    });
+
+    test('a debug build reads the switch alone', () async {
+      await settings.write(SettingsService.reelClipNormalization, true);
+      expect(ReelDeveloper.normalization(debugBuild: true, settings: settings), isTrue);
+    });
+
+    test('a playing Reel hears the switch', () {
+      expect(SettingsService.reelChoicePrefs, contains(SettingsService.reelClipNormalization));
+    });
+  });
+
   test('a debug build runs a known probe without the setting', () {
     expect(ReelDeveloper.probe('coverage', debugBuild: true, settings: settings), ReelProbeKind.coverage);
     expect(ReelDeveloper.visible(debugBuild: true, settings: settings), isTrue);
@@ -87,6 +118,7 @@ void main() {
   test('without settings nothing is on', () {
     SettingsService.resetForTesting();
     expect(ReelDeveloper.on(debugBuild: false), isFalse);
+    expect(ReelDeveloper.normalization(debugBuild: true), isFalse);
     expect(ReelDeveloper.probe('coverage', debugBuild: false), isNull);
   });
 

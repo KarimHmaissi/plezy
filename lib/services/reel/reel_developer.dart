@@ -47,6 +47,16 @@ abstract final class ReelDeveloper {
     return visible(debugBuild: debugBuild, settings: s);
   }
 
+  /// Whether the TV's clip core normalises loudness (V2-19, D9): off unless
+  /// the developer group's switch is on, and like the tools it counts only
+  /// while its row could show. Off is the shipped default until a listening
+  /// A/B on the soundbar says otherwise.
+  static bool normalization({bool debugBuild = kDebugMode, SettingsService? settings}) {
+    final s = settings ?? SettingsService.instanceOrNull;
+    if (s == null || !s.read(SettingsService.reelClipNormalization)) return false;
+    return visible(debugBuild: debugBuild, settings: s);
+  }
+
   /// The probe a link named [name] may run, or null when the link should
   /// just open the Reel: no probe, an unknown one, or the tools are off in
   /// a release build.

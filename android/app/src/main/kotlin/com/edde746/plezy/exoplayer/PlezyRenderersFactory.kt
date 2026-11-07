@@ -78,6 +78,21 @@ class PlezyRenderersFactory(context: Context) : DefaultRenderersFactory(context)
 
   var videoDiagnosticsLogger: ((String, String, String) -> Unit)? = null
 
+  /**
+   * Told about every MediaCodec the audio and video renderers create, on the playback thread
+   * (the `[ReelCore]` count: see [PlayerCoreCounts]).
+   */
+  internal var onCodecCreated: ((MediaCodecAdapter.Configuration) -> Unit)? = null
+
+  /**
+   * The adapter factory both MediaCodec renderers use: media3's own audio renderer reads it in
+   * `buildAudioRenderers`, and the video renderer below takes it from here too.
+   */
+  override fun getCodecAdapterFactory(): MediaCodecAdapter.Factory =
+    CountingCodecAdapterFactory(super.getCodecAdapterFactory()) { configuration ->
+      onCodecCreated?.invoke(configuration)
+    }
+
   override fun buildVideoRenderers(
     context: Context,
     extensionRendererMode: Int,

@@ -8834,6 +8834,27 @@ class Translations$reel$settings$en {
 	/// en: 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place'
 	String get showTabDescription => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place';
 
+	/// en: 'Storage'
+	String get storage => 'Storage';
+
+	/// en: 'Clear Reel cache'
+	String get clearCache => 'Clear Reel cache';
+
+	/// en: 'Trailers the Reel keeps on this device so they open faster'
+	String get clearCacheDescription => 'Trailers the Reel keeps on this device so they open faster';
+
+	/// en: '${used} of ${cap} on this device'
+	String clearCacheUsage({required Object used, required Object cap}) => '${used} of ${cap} on this device';
+
+	/// en: 'Remove the trailers the Reel keeps on this device? They download again the next time they play.'
+	String get clearCacheConfirm => 'Remove the trailers the Reel keeps on this device? They download again the next time they play.';
+
+	/// en: 'Reel cache cleared'
+	String get clearCacheDone => 'Reel cache cleared';
+
+	/// en: 'Couldn't clear the Reel cache'
+	String get clearCacheFailed => 'Couldn\'t clear the Reel cache';
+
 	/// en: 'Developer'
 	String get developer => 'Developer';
 
@@ -8842,6 +8863,12 @@ class Translations$reel$settings$en {
 
 	/// en: 'Timings overlay and measuring links. Shown while debug logging is on'
 	String get developerToolsDescription => 'Timings overlay and measuring links. Shown while debug logging is on';
+
+	/// en: 'Even out clip loudness'
+	String get clipNormalization => 'Even out clip loudness';
+
+	/// en: 'For a listening test. Evens out loud and quiet clips, and may pump on songs'
+	String get clipNormalizationDescription => 'For a listening test. Evens out loud and quiet clips, and may pump on songs';
 }
 
 // Path: reel.decks
@@ -11881,9 +11908,18 @@ extension on Translations {
 			'reel.settings.captionsDescription' => 'Where an anime has one, pick the opening with on-screen lyrics or subtitles',
 			'reel.settings.showTab' => 'Show the Reel tab',
 			'reel.settings.showTabDescription' => 'Off hides the Reel everywhere, Reel it included. On phones, Explore takes its place',
+			'reel.settings.storage' => 'Storage',
+			'reel.settings.clearCache' => 'Clear Reel cache',
+			'reel.settings.clearCacheDescription' => 'Trailers the Reel keeps on this device so they open faster',
+			'reel.settings.clearCacheUsage' => ({required Object used, required Object cap}) => '${used} of ${cap} on this device',
+			'reel.settings.clearCacheConfirm' => 'Remove the trailers the Reel keeps on this device? They download again the next time they play.',
+			'reel.settings.clearCacheDone' => 'Reel cache cleared',
+			'reel.settings.clearCacheFailed' => 'Couldn\'t clear the Reel cache',
 			'reel.settings.developer' => 'Developer',
 			'reel.settings.developerTools' => 'Reel debug tools',
 			'reel.settings.developerToolsDescription' => 'Timings overlay and measuring links. Shown while debug logging is on',
+			'reel.settings.clipNormalization' => 'Even out clip loudness',
+			'reel.settings.clipNormalizationDescription' => 'For a listening test. Evens out loud and quiet clips, and may pump on songs',
 			'reel.decks.title' => 'Decks',
 			'reel.decks.subtitle' => 'Their order, hidden decks and where the Reel starts',
 			'reel.decks.startOn' => 'Start on',
@@ -12238,6 +12274,8 @@ extension on Translations {
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
 			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
 			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
@@ -12247,8 +12285,6 @@ extension on Translations {
 			'collections.collection' => 'Collection',
 			'collections.empty' => 'Collection is empty',
 			'collections.deleteCollection' => 'Delete Collection',
-			_ => null,
-		} ?? switch (path) {
 			'collections.deleteConfirm' => ({required Object title}) => 'Delete "${title}"? This can\'t be undone.',
 			'collections.deleted' => 'Collection deleted',
 			'collections.deleteFailed' => 'Failed to delete collection',
@@ -12752,6 +12788,8 @@ extension on Translations {
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
 			'performanceOverlay.decoderSoftware' => 'Software',
 			'performanceOverlay.decoderHardware' => 'Hardware',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'performanceOverlay.signal' => 'Signal',
@@ -12761,8 +12799,6 @@ extension on Translations {
 			'externalPlayer.useExternalPlayer' => 'Use External Player',
 			'externalPlayer.useExternalPlayerDescription' => 'Open videos in another app',
 			'externalPlayer.selectPlayer' => 'Select Player',
-			_ => null,
-		} ?? switch (path) {
 			'externalPlayer.customPlayers' => 'Custom Players',
 			'externalPlayer.systemDefault' => 'System Default',
 			'externalPlayer.addCustomPlayer' => 'Add Custom Player',
