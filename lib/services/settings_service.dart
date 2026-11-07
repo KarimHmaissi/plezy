@@ -792,15 +792,22 @@ class SettingsService extends BaseSharedPreferencesService {
   // Data saver). The settings page (V2-46) shows them; each lane wires up
   // its own reader.
 
-  /// How a card's sound starts (D5): start muted on the TV, with sound on
-  /// the phone. The default is this device's, never stored: like every pref
-  /// here it stays on the device (an export carries only a stored choice).
-  static ReelStartSound _tvAwareReelStartSoundDefault() =>
-      PlatformDetector.isTV() ? ReelStartSound.muted : ReelStartSound.sound;
+  /// How a phone visit's sound starts (D5). Today: with sound.
   static const reelStartSound = EnumPref<ReelStartSound>(
     'reel_start_sound',
     values: ReelStartSound.values,
-    defaultValueProvider: _tvAwareReelStartSoundDefault,
+    defaultValue: ReelStartSound.sound,
+  );
+
+  /// How a TV visit's sound starts: muted, unless "With sound" is chosen on
+  /// the TV's Reel settings page. A key of its own, so the "With sound" an
+  /// older build stored on the TV (its default then, a tap away) or a
+  /// phone's choice brought in by a settings import never starts the TV
+  /// loud: only a choice made on this page does.
+  static const reelTvStartSound = EnumPref<ReelStartSound>(
+    'reel_tv_start_sound',
+    values: ReelStartSound.values,
+    defaultValue: ReelStartSound.muted,
   );
 
   /// What a clip does when it ends (D6, V2-47): twice then hold on both
@@ -854,6 +861,7 @@ class SettingsService extends BaseSharedPreferencesService {
   /// takes up without a restart: its controller listens to this group.
   static const List<Pref<Object?>> reelChoicePrefs = [
     reelStartSound,
+    reelTvStartSound,
     reelClipEnd,
     reelCellular,
     reelOkAction,
@@ -1700,6 +1708,7 @@ class SettingsService extends BaseSharedPreferencesService {
     showExploreTab,
     showReelTab,
     reelStartSound,
+    reelTvStartSound,
     reelClipEnd,
     reelCellular,
     reelOkAction,

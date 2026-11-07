@@ -134,6 +134,7 @@ void main() {
       final settings = await SettingsService.getInstance();
 
       expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.muted);
       expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
       expect(settings.read(SettingsService.reelCellular), ReelCellular.dataSaver);
       expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
@@ -145,26 +146,28 @@ void main() {
       expect(settings.read(SettingsService.showReelTab), isTrue);
     });
 
-    test('the sound pref starts muted on the TV and with sound on the phone, and the TV\'s default is never '
-        'stored, so an export never carries it to the phone', () async {
+    test('the TV\'s sound pref is its own and starts muted: a "With sound" under the phone\'s key (an older '
+        'build\'s TV page, a phone\'s settings file) is not the TV\'s', () async {
       TvDetectionService.debugSetAppleTVOverride(true);
       final settings = await SettingsService.getInstance();
-      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.muted);
-      expect(settings.prefs.containsKey(SettingsService.reelStartSound.key), isFalse);
+      await settings.write(SettingsService.reelStartSound, ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.muted);
+      expect(
+        settings.prefs.containsKey(SettingsService.reelTvStartSound.key),
+        isFalse,
+        reason: 'its default is not stored',
+      );
 
-      // Reel prefs don't sync; only an export file moves them, and it holds
-      // stored choices only.
-      final export = SettingsExportService.buildExportMap(settings.prefs);
-      expect(export.toString(), isNot(contains(SettingsService.reelStartSound.key)));
+      // A phone's settings file carries the phone's choice only.
+      final phone = SettingsExportService.buildExportMap(settings.prefs).toString();
+      expect(phone, contains(SettingsService.reelStartSound.key));
+      expect(phone, isNot(contains(SettingsService.reelTvStartSound.key)));
 
-      // The same storage read on the phone: nothing of the TV's default.
-      TvDetectionService.debugSetAppleTVOverride(false);
+      // A choice made on the TV's page is the TV's, and an export carries it.
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.sound);
       expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
-
-      // A choice made here is this device's, and is what an export carries.
-      await settings.write(SettingsService.reelStartSound, ReelStartSound.muted);
-      expect(settings.read(SettingsService.reelStartSound), ReelStartSound.muted);
-      expect(SettingsExportService.buildExportMap(settings.prefs).toString(), contains('reel_start_sound'));
+      expect(SettingsExportService.buildExportMap(settings.prefs).toString(), contains('reel_tv_start_sound'));
     });
 
     test('persist by enum name across a restart', () async {
@@ -203,6 +206,7 @@ void main() {
       final settings = await SettingsService.getInstance();
 
       await settings.write(SettingsService.reelStartSound, ReelStartSound.mutedIfOtherAudio);
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
       await settings.write(SettingsService.reelClipEnd, ReelClipEnd.loop);
       await settings.write(SettingsService.reelCellular, ReelCellular.stillsOnly);
       await settings.write(SettingsService.reelOkAction, ReelOkAction.details);
@@ -216,6 +220,7 @@ void main() {
       await settings.resetAllSettings();
 
       expect(settings.read(SettingsService.reelStartSound), ReelStartSound.sound);
+      expect(settings.read(SettingsService.reelTvStartSound), ReelStartSound.muted);
       expect(settings.read(SettingsService.reelClipEnd), ReelClipEnd.twiceThenHold);
       expect(settings.read(SettingsService.reelCellular), ReelCellular.dataSaver);
       expect(settings.read(SettingsService.reelOkAction), ReelOkAction.watch);
@@ -234,6 +239,7 @@ void main() {
         portable,
         containsAll(<Pref<Object?>>[
           SettingsService.reelStartSound,
+          SettingsService.reelTvStartSound,
           SettingsService.reelClipEnd,
           SettingsService.reelCellular,
           SettingsService.reelOkAction,

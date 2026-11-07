@@ -314,8 +314,16 @@ void main() {
       expect(c.clips.muted, isTrue);
     });
 
-    testWidgets('"With sound" on the TV: the visit has sound, unless the mute was kept', (tester) async {
+    testWidgets('a "With sound" stored before this change (the old page offered it on the TV, and a phone\'s comes '
+        'in with a settings import) still starts muted', (tester) async {
       await settings.write(SettingsService.reelStartSound, ReelStartSound.sound);
+      await showTv(tester);
+      expect(c.clips.muted, isTrue);
+      expect(soundOff, findsOneWidget);
+    });
+
+    testWidgets('"With sound" on the TV: the visit has sound, unless the mute was kept', (tester) async {
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
       final reel = await showTv(tester);
       expect(c.clips.muted, isFalse);
       expect(soundOff, findsNothing);
@@ -354,7 +362,7 @@ void main() {
     });
 
     testWidgets('back from Watch keeps a mute too', (tester) async {
-      await settings.write(SettingsService.reelStartSound, ReelStartSound.sound);
+      await settings.write(SettingsService.reelTvStartSound, ReelStartSound.sound);
       final reel = await showTv(tester);
       expect(c.clips.muted, isFalse);
       ReelScreen.remoteAction('mute');
@@ -375,6 +383,65 @@ void main() {
       await settle(tester);
       await again(tester, reel);
       expect(c.clips.muted, isFalse);
+    });
+
+    testWidgets('a quick overlay over the player (only the focus gone) leaves it the same visit', (tester) async {
+      final reel = await showTv(tester);
+      await soundOn(tester);
+      ReelScreen.remoteAction('watch');
+      await settle(tester);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await settle(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await settle(tester);
+
+      await again(tester, reel);
+      expect(c.clips.muted, isFalse);
+    });
+  });
+
+  group('the app sent away while a page the Reel opened covers it: Back is a new visit', () {
+    testWidgets('the Shield slept on the player and was woken: Back from it starts the Reel muted', (tester) async {
+      final reel = await showTv(tester);
+      await soundOn(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+      await settle(tester);
+      expect(watched, [false]);
+
+      for (final s in [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]) {
+        tester.binding.handleAppLifecycleStateChanged(s);
+      }
+      await settle(tester);
+      for (final s in [AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed]) {
+        tester.binding.handleAppLifecycleStateChanged(s);
+      }
+      await settle(tester);
+
+      await again(tester, reel);
+      expect(c.clips.muted, isTrue);
+      expect(soundOff, findsOneWidget);
+    });
+
+    testWidgets('Details left up for a long time (a screensaver over it): Back starts the Reel muted', (tester) async {
+      var now = DateTime(2026, 1, 1, 9);
+      ReelScreen.clock = () => now;
+      addTearDown(() => ReelScreen.clock = DateTime.now);
+      final reel = await showTv(tester);
+      await soundOn(tester);
+      ReelScreen.remoteAction('details');
+      await settle(tester);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await settle(tester);
+      now = now.add(ReelScreen.longAway + const Duration(minutes: 1));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await settle(tester);
+
+      await again(tester, reel);
+      expect(c.clips.muted, isTrue);
     });
 
     testWidgets('stepping between cards and decks never mutes again', (tester) async {
