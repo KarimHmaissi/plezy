@@ -43,7 +43,7 @@ abstract final class HomeRowIds {
   static String catalogHub(CatalogSourceId source, String hubId) => 'cath:${source.name}:$hubId';
 
   /// A Plex row, by title: the same row from several servers or libraries
-  /// ("Oh, The Horror!" from five movie libraries) is one row.
+  /// ("Spooky Picks" from several movie libraries) is one row.
   static String plex(String title) => 'px:${normalizeRowTitle(title)}';
 
   /// A Watchlist page shelf (`films`, `tv`, `films.Horror`, `tv.other`…) of

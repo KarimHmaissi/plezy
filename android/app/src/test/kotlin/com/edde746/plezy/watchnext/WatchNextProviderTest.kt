@@ -833,6 +833,88 @@ class WatchNextProviderTest {
 
   @Test
   @Config(sdk = [28])
+  fun savesPublishAsWatchlistAndKeepTheTypeThroughProgressUpdates() {
+    val provider = WatchNextProvider(context)
+    val playing = item("").copy(posterSourceUri = null)
+    val saved = item("").copy(
+      contentId = "plezy_server_saved",
+      title = "Harbor Lights",
+      posterSourceUri = null,
+      lastPlaybackPosition = 0,
+      lastEngagementTime = 500,
+      watchlist = true
+    )
+    assertTrue(provider.syncWatchNextPrograms("owner-a", 1, listOf(playing, saved)))
+    val ids = tvProvider.ids()
+    fun type(index: Int) = tvProvider.inserted[index].getAsInteger(TvContractCompat.WatchNextPrograms.COLUMN_WATCH_NEXT_TYPE)
+    assertEquals(TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE, type(0))
+    assertEquals(TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_WATCHLIST, type(1))
+    assertEquals(500L, tvProvider.inserted[1].getAsLong(TvContractCompat.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS))
+
+    // A progress-only pass (new engagement time) updates in place and keeps WATCHLIST.
+    assertTrue(provider.syncWatchNextPrograms("owner-a", 1, listOf(playing, saved.copy(lastEngagementTime = 400))))
+    assertEquals(ids, tvProvider.ids())
+    assertEquals(TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_WATCHLIST, type(1))
+    assertEquals(400L, tvProvider.inserted[1].getAsLong(TvContractCompat.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS))
+
+    // Started playing: no longer a save, so the row is republished as NEXT.
+    assertTrue(provider.syncWatchNextPrograms("owner-a", 1, listOf(playing, saved.copy(watchlist = false))))
+    assertTrue(tvProvider.ids().none { it in ids })
+    assertEquals(TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_NEXT, type(1))
+  }
+
+  @Test
+  @Config(sdk = [28])
+  fun pluginReadsTheWatchlistFlagAndPublishesASavedShowAsASeries() {
+    val plugin = WatchNextPlugin()
+    val binding = pluginBinding()
+    plugin.onAttachedToEngine(binding)
+    val result = RecordingResult()
+    plugin.onMethodCall(
+      MethodCall(
+        "sync",
+        mapOf(
+          "schemaVersion" to 3,
+          "ownerId" to "owner-a",
+          "generation" to 1L,
+          "items" to listOf(
+            mapOf("contentId" to "plezy_server_ep", "title" to "Show A", "type" to "episode", "lastPlaybackPosition" to 5),
+            mapOf("contentId" to "plezy_server_show", "title" to "Harbor Lights", "type" to "show", "watchlist" to true),
+            mapOf("contentId" to "plezy_server_film", "title" to "Quiet Field", "type" to "movie")
+          )
+        )
+      ),
+      result
+    )
+    awaitResult(result)
+    assertEquals(true, result.successValue)
+    val types = tvProvider.inserted.map { it.getAsInteger(TvContractCompat.WatchNextPrograms.COLUMN_TYPE) }
+    val watchNextTypes = tvProvider.inserted.map {
+      it.getAsInteger(TvContractCompat.WatchNextPrograms.COLUMN_WATCH_NEXT_TYPE)
+    }
+    assertEquals(
+      listOf(
+        TvContractCompat.WatchNextPrograms.TYPE_TV_EPISODE,
+        TvContractCompat.WatchNextPrograms.TYPE_TV_SERIES,
+        TvContractCompat.WatchNextPrograms.TYPE_MOVIE
+      ),
+      types
+    )
+    assertEquals(
+      listOf(
+        TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE,
+        TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_WATCHLIST,
+        TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_NEXT
+      ),
+      watchNextTypes
+    )
+    val executor = pluginIoExecutor(plugin)
+    plugin.onDetachedFromEngine(binding)
+    assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS))
+  }
+
+  @Test
+  @Config(sdk = [28])
   fun failedProgressAndFullCommitsRemainRetryable() {
     val provider = WatchNextProvider(context)
     val initial = item("").copy(posterSourceUri = null)

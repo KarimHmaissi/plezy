@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 
 import '../../utils/app_logger.dart';
+import '../brain/history_profiles.dart';
 import '../library_index/index_database.dart';
 import '../library_index/index_search.dart';
 import '../library_index/library_index.dart';
@@ -10,6 +11,7 @@ import '../trackers/trakt/trakt_client.dart';
 import '../trackers/trakt/trakt_constants.dart';
 import 'ai_history_tools.dart';
 import 'ai_watch_state.dart';
+import 'facts/title_facts.dart';
 
 /// One pick the model chose for the user: an index title id and why.
 typedef AiPick = ({String id, String reason});
@@ -18,7 +20,8 @@ typedef AiPick = ({String id, String reason});
 /// ratings for a shortlist). All read-only except [showPicksTool], which is
 /// how the model hands back its final picks.
 class AiTools {
-  AiTools({required this.index, this.trakt, this.history, WatchStates? watch}) : watch = watch ?? WatchStates.none;
+  AiTools({required this.index, this.trakt, this.history, WatchStates? watch, this.ledger = const {}})
+    : watch = watch ?? WatchStates.none;
 
   final LibraryIndex index;
   final TraktClient? trakt;
@@ -29,6 +32,12 @@ class AiTools {
 
   /// Fork: tools over the history brain, on hosts that have one.
   final AiHistoryTools? history;
+
+  /// Fork (V2-44): what surfaces did with titles lately (the Reel's pick
+  /// ledger), by title id, for this ask only. Each title line carries its
+  /// fact ("shown 3× in the Reel lately, not played yet"); the model
+  /// decides what it means.
+  final Map<TitleId, LedgerSummary> ledger;
 
   /// Picks from the last `show_picks` call, its intro line and row name.
   List<AiPick> picks = const [];
@@ -556,8 +565,11 @@ class AiTools {
 
   /// One compact line per title, cheap in tokens. Fork: [watch] is what the
   /// user has seen of it (the brain merged in); the row's own counts if not
-  /// given.
-  static String line(IndexedTitle t, {bool withWatched = false, WatchState? watch}) {
+  /// given. [ledger] is the title's pick-ledger summary (V2-44): its fact
+  /// follows the seen state, unless a watch since the last showing settled
+  /// it.
+  static String line(IndexedTitle t, {bool withWatched = false, WatchState? watch, LedgerSummary? ledger}) {
+    final state = watch ?? WatchState.of(t);
     final parts = <String>[
       t.id,
       '${t.title}${t.year == null ? '' : ' (${t.year})'}',
@@ -568,15 +580,29 @@ class AiTools {
       if (t.type == 'movie' && t.durationMinutes != null) '${t.durationMinutes} min',
       if (t.type == 'show' && t.episodeCount != null) '${t.episodeCount} eps',
       if (t.releaseDate != null && t.type == 'show') 'first aired ${t.releaseDate}',
-      (watch ?? WatchState.of(t)).label,
+      state.label,
+      ?ledger?.seenAt(state.lastSeen, inProgress: state.inProgress).factLine(),
       t.libraryTitle,
     ];
     return parts.where((p) => p.isNotEmpty).join(' | ');
   }
 
-  String _list(List<IndexedTitle> titles, {bool withWatched = false}) => titles.isEmpty
-      ? 'No matches.'
-      : titles.map((t) => line(t, withWatched: withWatched, watch: watch.of(t))).join('\n');
+  String _list(List<IndexedTitle> titles, {bool withWatched = false}) =>
+      titles.isEmpty ? 'No matches.' : titles.map((t) => _line(t, withWatched: withWatched)).join('\n');
+
+  /// Fork (V2-44): title lines this ask sent with a pick-ledger fact on
+  /// them, for the ask's log line.
+  int ledgerFacts = 0;
+
+  /// [line] for [t] with its seen state and pick-ledger summary.
+  String _line(IndexedTitle t, {bool withWatched = false}) {
+    final state = watch.of(t);
+    final summary = ledger.isEmpty
+        ? null
+        : ledger[LibraryRef.of(t).titleId]?.seenAt(state.lastSeen, inProgress: state.inProgress);
+    if (summary?.factLine() != null) ledgerFacts++;
+    return line(t, withWatched: withWatched, watch: state, ledger: summary);
+  }
 
   Future<String> _findTitles(Map<String, dynamic> input) async {
     final db = await index.database;
@@ -616,7 +642,7 @@ class AiTools {
       if (match == null) {
         missing.add(year == null ? w.title : '${w.title} ($year)');
       } else {
-        found.add(line(match, watch: watch.of(match)));
+        found.add(_line(match));
       }
     }
     return [
@@ -631,7 +657,7 @@ class AiTools {
     if (t == null) return 'No title with id $id.';
     final copies = await index.copiesOf(t.groupKey);
     return [
-      line(t, watch: watch.of(t)),
+      _line(t),
       if (t.originalTitle != null) 'Original title: ${t.originalTitle}',
       if (t.summary != null) 'Summary: ${t.summary}',
       if (t.cast.isNotEmpty) 'Cast: ${t.cast.replaceAll('|', ', ')}',

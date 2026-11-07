@@ -58,6 +58,7 @@ import 'add_connection_screen.dart';
 import 'account_preferences_screen.dart';
 import 'appearance_settings_screen.dart';
 import 'general_settings_screen.dart';
+import 'reel_settings_screen.dart';
 import 'keyboard_shortcuts_screen.dart';
 import 'logs_screen.dart';
 import 'playback_settings_screen.dart';
@@ -240,6 +241,15 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
 
                   SettingsGroup(
                     children: [
+                      // Fork: the Reel is Android only. Shown while the Reel
+                      // is hidden too, since its page is where it comes back.
+                      if (Platform.isAndroid)
+                        SettingNavigationTile(
+                          icon: Symbols.movie_rounded,
+                          title: t.reel.settings.title,
+                          subtitle: t.reel.settings.subtitle,
+                          destinationBuilder: (context) => const ReelSettingsScreen(),
+                        ),
                       SettingNavigationTile(
                         icon: Symbols.auto_awesome_rounded,
                         title: t.ai.settingsTitle,

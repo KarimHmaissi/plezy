@@ -114,6 +114,21 @@ void main() {
       });
     });
 
+    test('signals a restore only once RSS has settled, for the Reel ladder', () {
+      fakeAsync((async) {
+        final policy = newPolicy();
+        policy.onWatchdogTick(overThreshold: true);
+        policy.onWatchdogTick(overThreshold: true);
+        async.elapse(MemoryTrimPolicy.restoreCooldown * 2);
+        expect(policy.restores.value, 0, reason: 'still over the threshold');
+
+        policy.onWatchdogTick(overThreshold: false);
+        async.elapse(MemoryTrimPolicy.restoreCooldown);
+        expect(policy.restores.value, 1);
+        policy.dispose();
+      });
+    });
+
     test('leaves an already small cache alone', () {
       fakeAsync((async) {
         final policy = newPolicy();
@@ -227,6 +242,18 @@ void main() {
       });
     });
 
+    test('a resume after a pause signals a restore', () {
+      fakeAsync((async) {
+        final policy = newPolicy()..onBackgrounded();
+        policy.onMemoryPressure();
+        async.elapse(MemoryTrimPolicy.restoreCooldown * 2);
+        expect(policy.restores.value, 0, reason: 'the cooldown restore waits for resume');
+        policy.onResumed();
+        expect(policy.restores.value, 1);
+        policy.dispose();
+      });
+    });
+
     test('a quick return cancels the step-down', () {
       fakeAsync((async) {
         final policy = newPolicy()..onBackgrounded();
@@ -260,6 +287,32 @@ void main() {
         expect(skiaWrites, [skiaTier ~/ 2]);
         policy.dispose();
       });
+    });
+  });
+
+  group("a surface's share of the cache (the Reel's art budget)", () {
+    test('follows every halving down to the floor and comes back with the restore', () {
+      fakeAsync((async) {
+        final policy = newPolicy();
+        const share = 12 << 20;
+        expect(policy.scaledShare(share), share);
+        policy.onMemoryPressure();
+        expect(policy.scaledShare(share), share ~/ 2);
+        policy.onMemoryPressure();
+        expect(policy.scaledShare(share), share ~/ 4);
+        policy.onTrimMemory(MemoryTrimPolicy.trimMemoryComplete);
+        expect(policy.scaledShare(share), share * MemoryTrimPolicy.minImageCacheBytes ~/ imageTier);
+        policy.restoreTierSizes('test');
+        expect(policy.scaledShare(share), share);
+        policy.dispose();
+      });
+    });
+
+    test('never grows past the share when the cache is over its tier', () {
+      final policy = newPolicy();
+      cache.maximumSizeBytes = imageTier * 2;
+      expect(policy.scaledShare(12 << 20), 12 << 20);
+      policy.dispose();
     });
   });
 }

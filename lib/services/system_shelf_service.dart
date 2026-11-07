@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -24,6 +25,20 @@ abstract final class SystemShelf {
   /// `SystemShelfArtworkStore.MAX_ITEMS` in SystemShelfArtworkProvider.kt;
   /// the native side answers "Too many items" to anything longer.
   static const int maxItems = 20;
+}
+
+/// A title the viewer saved for later (a Reel Save, V2-42), offered to
+/// Android TV's Play Next row as a WATCHLIST entry after Continue Watching.
+@immutable
+class ShelfSave {
+  const ShelfSave({required this.item, required this.savedAt});
+
+  final MediaItem item;
+
+  /// When it was saved: the entry's last-engagement time, unless that would
+  /// lift it above a Continue Watching item (see
+  /// [SystemShelfService.syncFromContinueWatching]).
+  final DateTime savedAt;
 }
 
 /// Remembers when each shelf item was first published, so items without a
@@ -260,12 +275,22 @@ class SystemShelfService {
   }
 
   /// Sync Continue Watching items for the currently active [profileId].
+  ///
+  /// On Android TV, [saves] (the Reel's fresh Saves, read only once the
+  /// launcher shelf is known to be supported) fill the slots Continue
+  /// Watching leaves under [SystemShelf.maxItems], as WATCHLIST entries
+  /// (D11). A save whose show or film is already in Continue Watching is
+  /// skipped. Each one's last-engagement time is its save time, held below
+  /// every Continue Watching item: launchers sort the row by that time
+  /// alone (Arc reads it `last_engagement_time_utc_millis DESC` and ignores
+  /// the type), so a fresh Save would otherwise lead the row.
   Future<bool> syncFromContinueWatching(
     String profileId,
     List<MediaItem> continueWatchingItems,
     MediaServerClient Function(ServerId serverId) getClientForServerId, {
     bool hideSpoilers = false,
     EpisodePosterMode episodePosterMode = EpisodePosterMode.seriesPoster,
+    Future<List<ShelfSave>> Function()? saves,
   }) async {
     final channel = _channel;
     if (channel == null || _activeOwner != profileId) return false;
@@ -292,6 +317,25 @@ class SystemShelfService {
     final supported = await isSupported();
     if (!_owns(profileId, generation) || !supported) return false;
 
+    if (saves != null && !_isTvosTarget) {
+      List<ShelfSave> found;
+      try {
+        found = await saves();
+      } catch (e) {
+        appLogger.w('[ReelShelf] Play Next: saves unavailable', error: e);
+        found = const [];
+      }
+      if (!_owns(profileId, generation)) return false;
+      _appendSaves(
+        items,
+        continueWatchingItems,
+        found,
+        getClientForServerId,
+        hideSpoilers: hideSpoilers,
+        episodePosterMode: episodePosterMode,
+      );
+    }
+
     final result = await _enqueueMutation<bool>(() async {
       if (!_owns(profileId, generation)) return false;
       return await _invokeGuarded<bool>(
@@ -304,6 +348,67 @@ class SystemShelfService {
           false;
     });
     return result ?? false;
+  }
+
+  /// Appends [saves], newest first, as WATCHLIST entries after the
+  /// Continue Watching [items], within [SystemShelf.maxItems]. Skips a save
+  /// already on the row and a show with an episode in Continue Watching.
+  /// Engagement times strictly decrease from below the lowest Continue
+  /// Watching one, so every launcher that sorts by time keeps Continue
+  /// Watching first and the saves in save order.
+  void _appendSaves(
+    List<Map<String, dynamic>> items,
+    List<MediaItem> continueWatching,
+    List<ShelfSave> saves,
+    MediaServerClient Function(ServerId serverId) getClientForServerId, {
+    required bool hideSpoilers,
+    required EpisodePosterMode episodePosterMode,
+  }) {
+    final continuing = items.length;
+    final onRow = {for (final item in items) item['contentId'] as String};
+    final showsContinuing = {
+      for (final item in continueWatching)
+        if (item.kind == MediaKind.episode && item.grandparentId != null)
+          _buildContentId(serverIdOrNull(item.serverId), item.grandparentId!),
+    };
+    int? below;
+    for (final item in items) {
+      final time = item['lastEngagementTime'] as int;
+      below = below == null ? time : math.min(below, time);
+    }
+    final newestFirst = [...saves]..sort((a, b) => b.savedAt.compareTo(a.savedAt));
+    var alreadyOn = 0;
+    var overCap = 0;
+    for (final save in newestFirst) {
+      if (items.length >= SystemShelf.maxItems) {
+        overCap++;
+        continue;
+      }
+      final contentId = _buildContentId(serverIdOrNull(save.item.serverId), save.item.id);
+      if (onRow.contains(contentId) || showsContinuing.contains(contentId)) {
+        alreadyOn++;
+        continue;
+      }
+      final shelfItem = _convertToShelfItem(
+        save.item,
+        getClientForServerId,
+        hideSpoilers: hideSpoilers,
+        episodePosterMode: episodePosterMode,
+      );
+      var engagement = save.savedAt.millisecondsSinceEpoch;
+      if (below != null && engagement >= below) engagement = below - 1;
+      below = engagement;
+      shelfItem
+        ..['watchlist'] = true
+        ..['lastPlaybackPosition'] = 0
+        ..['lastEngagementTime'] = engagement;
+      onRow.add(contentId);
+      items.add(shelfItem);
+    }
+    appLogger.i(
+      '[ReelShelf] Play Next: $continuing Continue Watching + ${items.length - continuing} saves as WATCHLIST '
+      '(of ${saves.length}; $alreadyOn already on the row, $overCap over the ${SystemShelf.maxItems} cap)',
+    );
   }
 
   /// Gives every item without a `lastViewedAt` the time it was first

@@ -452,6 +452,55 @@ class MediaImageHelper {
     return ToneMappedLogoImage(bounded, target: logoToneTarget, remapMixed: logoToneRemapMixed);
   }
 
+  /// The provider a widget builds for server artwork at [thumbPath] in a
+  /// [width]×[height] logical slot: the sized transcode URL
+  /// ([getOptimizedImageUrl]), the bucketed decode bounds
+  /// ([getMemCacheDimensions]) and [serverArtworkProvider]'s cache key, all
+  /// at [artworkPixelRatio], with the URL it fetches. Null when there is no
+  /// URL to fetch (no client, empty path).
+  ///
+  /// `OptimizedMediaImage` and `CyclingMediaBackdrop` build their server art
+  /// through this, so a precache that calls it with the same slot warms
+  /// exactly the entry those widgets read.
+  static ({String url, ImageProvider provider})? serverArtworkProviderFor(
+    BuildContext context, {
+    required MediaServerClient? client,
+    required String? thumbPath,
+    required double width,
+    required double height,
+    required ImageType imageType,
+    Color? logoToneTarget,
+    bool logoToneRemapMixed = true,
+  }) {
+    final pixelRatio = artworkPixelRatio(context, imageType: imageType);
+    final imageUrl = getOptimizedImageUrl(
+      client: client,
+      thumbPath: thumbPath,
+      maxWidth: width,
+      maxHeight: height,
+      pixelRatio: pixelRatio,
+      imageType: imageType,
+    );
+    if (imageUrl.isEmpty) return null;
+    final scaledWidth = width * pixelRatio;
+    final scaledHeight = height * pixelRatio;
+    final (memWidth, memHeight) = getMemCacheDimensions(
+      displayWidth: scaledWidth.isFinite && scaledWidth > 0 ? scaledWidth.round() : 0,
+      displayHeight: scaledHeight.isFinite && scaledHeight > 0 ? scaledHeight.round() : 0,
+      imageType: imageType,
+    );
+    return (
+      url: imageUrl,
+      provider: serverArtworkProvider(
+        imageUrl: imageUrl,
+        memWidth: memWidth,
+        memHeight: memHeight,
+        logoToneTarget: logoToneTarget,
+        logoToneRemapMixed: logoToneRemapMixed,
+      ),
+    );
+  }
+
   static final _serverArtworkCacheKeys = <String, String>{};
   static const _serverArtworkCacheKeyLimit = 512;
 

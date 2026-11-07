@@ -155,6 +155,27 @@ internal object LoadControlPolicy {
   /** How much of the next card the preloader keeps in memory. */
   const val CLIP_PRELOAD_MS = 3_000L
 
+  /** V2-09: the card behind (↑, or a reversal) keeps its first second. */
+  const val CLIP_PRELOAD_PREVIOUS_MS = 1_000L
+
+  /** V2-09: a neighbouring deck's head (→ / ←) keeps its first two seconds. */
+  const val CLIP_PRELOAD_DECK_HEAD_MS = 2_000L
+
+  /**
+   * V2-10: the card two ahead keeps its first five seconds on disk only
+   * (`specifiedRangeCached`), never in memory, so it adds nothing to [CLIP_PRELOAD_TARGET_BYTES].
+   */
+  const val CLIP_PRELOAD_AHEAD_CACHED_MS = 5_000L
+
+  /**
+   * V2-09: the most every preloaded clip together may hold in memory. media3 1.11.0 gives the
+   * preload player (`PlayerId.PRELOAD`) its own entry of 144179200 bytes
+   * (`DEFAULT_TARGET_BUFFER_BYTES_FOR_PRELOAD`, put in by `DefaultLoadControl.Builder()`), and a
+   * per-player entry wins over [CLIP_TARGET_BYTES] (`getTargetBufferBytesOverwrite`, javap), so
+   * without this the preloads could hold far more than the clip itself.
+   */
+  const val CLIP_PRELOAD_TARGET_BYTES = 24 * MIB
+
   fun clipBufferDurations(): BufferDurations = BufferDurations(CLIP_MIN_BUFFER_MS, CLIP_MAX_BUFFER_MS)
 
   /** Seconds of media a budget covers at [bitrateBps], for logs. Null when unknown. */

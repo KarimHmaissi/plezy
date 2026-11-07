@@ -338,7 +338,7 @@ class AiAnswerTile extends StatelessWidget {
   final bool running;
   final VoidCallback? onTap;
 
-  /// Wide enough for a 12-word headline in four lines on a Fold cover.
+  /// Wide enough for a 12-word headline in four lines on a foldable cover screen.
   static double widthFor(double height) => (height * 1.12).clamp(150.0, 260.0);
 
   @override

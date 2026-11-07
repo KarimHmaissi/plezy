@@ -4,6 +4,7 @@ import '../ai/facts/index_title_facts_source.dart';
 import '../ai/facts/title_facts.dart';
 import '../library_index/index_database.dart';
 import 'clip_resolver.dart';
+import 'reel_premise.dart';
 
 /// One entry of a deck before it is matched to the servers: a server copy,
 /// or a title known only by its external ids (a Trakt chart entry).
@@ -18,6 +19,7 @@ class DeckEntry {
     this.chip,
     this.why,
     this.cluster,
+    this.hook,
   });
 
   final String? serverId;
@@ -34,13 +36,26 @@ class DeckEntry {
   final String? why;
   final String? cluster;
 
+  /// The daily build's premise in a line (already checked, see
+  /// [ReelPremise.checkedHook]).
+  final String? hook;
+
   String? get rowId => serverId != null && ratingKey != null ? '$serverId:$ratingKey' : null;
 }
 
 /// A card's title, matched to the library: every copy, facts, and the copy
 /// Watch plays.
 class ReelCardData {
-  const ReelCardData({required this.title, required this.facts, required this.best, this.chip, this.why, this.cluster});
+  const ReelCardData({
+    required this.title,
+    required this.facts,
+    required this.best,
+    this.chip,
+    this.why,
+    this.cluster,
+    this.hook,
+    this.resume = false,
+  });
 
   final ReelTitle title;
   final TitleFacts facts;
@@ -51,6 +66,13 @@ class ReelCardData {
   final String? chip;
   final String? why;
   final String? cluster;
+
+  /// What it is about, in a line (the daily build's, For You only).
+  final String? hook;
+
+  /// A show taken up again (Give it another go): its card reads the next
+  /// episode with its metadata, and Watch says which ("Resume E4").
+  final bool resume;
 
   String get id => title.titleId;
 }
@@ -160,6 +182,7 @@ class ReelLibrary {
           chip: e.chip,
           why: e.why,
           cluster: e.cluster,
+          hook: e.hook,
         ),
       );
     }

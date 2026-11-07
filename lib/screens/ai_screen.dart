@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show TapGestureRecognizer;
@@ -122,7 +121,7 @@ class _PendingAsk {
 
   final String request;
 
-  /// What the chip shows ("more like Severance" rather than the prompt).
+  /// What the chip shows ("more like Harbor Lights" rather than the prompt).
   final String label;
   final String? replaceId;
   final List<({String request, AiAnswer answer})> previous;
@@ -820,8 +819,9 @@ class AiScreenState extends State<AiScreen> with ManualRefreshable, FullRefresha
                 onSelected: () => showAppSnackBar(context, t.aiTab.homeFull),
               )
             : e,
-      // Fork: the answer's picks as a Reel deck (Android).
-      if (Platform.isAndroid)
+      // Fork: the answer's picks as a Reel deck (Android, unless the Reel is
+      // turned off).
+      if (ReelScreen.enabled)
         MediaMenuExtraEntry(
           icon: Symbols.movie_rounded,
           label: t.aiTab.reelIt,

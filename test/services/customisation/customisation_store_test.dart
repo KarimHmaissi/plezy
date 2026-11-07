@@ -17,11 +17,11 @@ CatalogItem _show(int id, String title) => CatalogItem(
   title: title,
 );
 
-/// The Comfort Shows list: Friends (1), Frasier (2), Seinfeld (3); earlier
-/// versions recorded Frasier as paused in its description.
+/// The Comfort Shows list: Flatmates (1), Quiet Harbour (2), Corner Diner (3); earlier
+/// versions recorded Quiet Harbour as paused in its description.
 class _FakeComfortTrakt implements TraktClient {
   int descriptionWrites = 0;
-  final String description = writePausedTraktIds('My comfort shows', {2: 'Frasier'});
+  final String description = writePausedTraktIds('My comfort shows', {2: 'Quiet Harbour'});
 
   @override
   Future<List<TraktUserList>> getMyLists() async => [
@@ -46,9 +46,9 @@ class _FakeTraktSource implements TraktCatalogSource {
 
   @override
   List<CatalogItem> showsFromListEntries(List<TraktCatalogEntry> entries) => [
-    _show(1, 'Friends'),
-    _show(2, 'Frasier'),
-    _show(3, 'Seinfeld'),
+    _show(1, 'Flatmates'),
+    _show(2, 'Quiet Harbour'),
+    _show(3, 'Corner Diner'),
   ];
 
   @override
@@ -69,13 +69,13 @@ void main() {
     await target.writeHomeLayout(
       [
         (id: 'cw', title: 'Continue Watching', sources: const <String>[]),
-        (id: 'px:oh the horror', title: 'Oh, The Horror!', sources: ['srv|/hubs/x']),
+        (id: 'px:hey spooky picks', title: 'Hey, Spooky Picks!', sources: ['srv|/hubs/x']),
         (id: 'tl:chart:boxoffice', title: 'Box Office', sources: const <String>[]),
       ],
       curated: false,
       revision: 7,
     );
-    await target.writeComfortPaused({2: 'Frasier', 3: 'Seinfeld'});
+    await target.writeComfortPaused({2: 'Quiet Harbour', 3: 'Corner Diner'});
     await target.writeSetting('future.setting', 'on');
   }
 
@@ -97,10 +97,10 @@ void main() {
     await other.importAll(data);
 
     final home = (await other.readHomeLayout())!;
-    expect([for (final r in home.rows) r.id], ['cw', 'px:oh the horror', 'tl:chart:boxoffice']);
+    expect([for (final r in home.rows) r.id], ['cw', 'px:hey spooky picks', 'tl:chart:boxoffice']);
     expect(home.rows[1].sources, ['srv|/hubs/x']);
     expect(home.curated, isFalse);
-    expect(await other.readComfortPaused(), {2: 'Frasier', 3: 'Seinfeld'});
+    expect(await other.readComfortPaused(), {2: 'Quiet Harbour', 3: 'Corner Diner'});
     expect(await other.readSetting('future.setting'), 'on');
   });
 
@@ -129,16 +129,16 @@ void main() {
     final trakt = _FakeComfortTrakt();
     final comfort = ComfortShowsController(_FakeTraktSource(trakt), store: Future.value(store));
     await comfort.load(createIfMissing: false);
-    expect([for (final s in comfort.pausedShows) s.title], ['Frasier']);
+    expect([for (final s in comfort.pausedShows) s.title], ['Quiet Harbour']);
 
-    await comfort.setPaused(_show(3, 'Seinfeld'), true);
-    expect(await store.readComfortPaused(), {2: 'Frasier', 3: 'Seinfeld'});
+    await comfort.setPaused(_show(3, 'Corner Diner'), true);
+    expect(await store.readComfortPaused(), {2: 'Quiet Harbour', 3: 'Corner Diner'});
     expect(trakt.descriptionWrites, 0, reason: 'the list description is no longer written');
 
-    // The old description still says only Frasier; the local record wins.
+    // The old description still says only Quiet Harbour; the local record wins.
     final again = ComfortShowsController(_FakeTraktSource(trakt), store: Future.value(store));
     await again.load(createIfMissing: false);
-    expect([for (final s in again.pausedShows) s.title], ['Frasier', 'Seinfeld']);
+    expect([for (final s in again.pausedShows) s.title], ['Quiet Harbour', 'Corner Diner']);
   });
 
   test('Comfort without Trakt shows the list the Trakt device last saw, pauses included', () async {
@@ -149,7 +149,7 @@ void main() {
     await cached.load();
     expect(cached.canEditList, isFalse);
     expect(cached.shows, isNotEmpty);
-    expect([for (final s in cached.pausedShows) s.title], ['Frasier']);
+    expect([for (final s in cached.pausedShows) s.title], ['Quiet Harbour']);
 
     await cached.setPaused(cached.activeShows.first, true);
     expect((await store.readComfortPaused()).length, 2);
@@ -169,12 +169,27 @@ void main() {
     expect([for (final s in cached.shows) s.title], contains('Show A'));
     await cached.removeShow(_show(7, 'Show A'));
     expect([for (final s in cached.shows) s.title], isNot(contains('Show A')));
-    expect([for (final op in sent) (op['op'], op['action'], (op['show'] as Map)['trakt'])], [
-      ('comfortList', 'add', 7),
-      ('comfortList', 'remove', 7),
-    ]);
+    expect(
+      [for (final op in sent) (op['op'], op['action'], (op['show'] as Map)['trakt'])],
+      [('comfortList', 'add', 7), ('comfortList', 'remove', 7)],
+    );
 
     ComfortShowsController.sendMirrorEdit = (_) => false;
     expect(() => cached.addShow(_show(8, 'Show B')), throwsStateError);
+  });
+
+  test('settings read by key prefix: exactly the keys that start with it', () async {
+    final db = ForkDatabase.memory();
+    addTearDown(db.close);
+    final store = LocalCustomisationStore(db);
+    await store.writeSetting('reel.pick.a', '1');
+    await store.writeSetting('reel.pick.b_2', '2');
+    await store.writeSetting('reel.picks', 'old');
+    await store.writeSetting('reel.pick', 'bare');
+    await store.writeSetting('reel.pick/', 'after');
+    await store.writeSetting('reel.veto.a', '3');
+    expect(await store.readSettingsWithPrefix('reel.pick.'), {'reel.pick.a': '1', 'reel.pick.b_2': '2'});
+    expect(await store.readSettingsWithPrefix('reel.veto.'), {'reel.veto.a': '3'});
+    expect(await store.readSettingsWithPrefix('none.'), isEmpty);
   });
 }
